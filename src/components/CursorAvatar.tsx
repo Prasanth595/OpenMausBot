@@ -155,6 +155,17 @@ const GLYPH_QUERY =
   'd="M88 76 A27 27 0 1 1 114.3 112 L114.3 132"/>' +
   '<circle fill="{{GRADIENT}}" cx="114.3" cy="170" r="13"/>'
 
+/**
+ * A speech bubble with three dots: a new reply to read. Unread is not
+ * trouble, so it never borrows the exclamation mark of a real alert.
+ */
+const GLYPH_MESSAGE =
+  '<path fill="none" stroke="{{GRADIENT}}" stroke-width="15" stroke-linejoin="round" ' +
+  'd="M72 66 H156 Q174 66 174 84 V138 Q174 156 156 156 H114 L86 184 L90 156 H72 Q54 156 54 138 V84 Q54 66 72 66 Z"/>' +
+  '<circle fill="{{GRADIENT}}" cx="86" cy="111" r="10"/>' +
+  '<circle fill="{{GRADIENT}}" cx="114.3" cy="111" r="10"/>' +
+  '<circle fill="{{GRADIENT}}" cx="142.6" cy="111" r="10"/>'
+
 export const EFFECTS: EffectsByState = {
   // Bounded by the viewBox's 15-unit margin: a piece thrown much past ~130 from centre is clipped mid-flight.
   celebrate: { confetti: { count: 16, period: 1500, life: 1300, origin: 74, spread: 54 } },
@@ -170,7 +181,7 @@ export const EFFECTS: EffectsByState = {
   receiving: { trails: { count: 2, period: 1500, radius: 120 } },
 
   alerting: { glyph: { markup: GLYPH_BANG, period: 2600, hold: 1100 } },
-  notifying: { glyph: { markup: GLYPH_BANG, period: 4200, hold: 900 } },
+  notifying: { glyph: { markup: GLYPH_MESSAGE, period: 4200, hold: 900 } },
   confused: { glyph: { markup: GLYPH_QUERY, period: 5200, hold: 1200 } },
 }
 
