@@ -930,6 +930,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         if (turn.integrations?.composio) {
           mountSelected("composio", "openmausbot_connectors", turn.integrations.composio);
         }
+        if (turn.integrations?.inkbox) mountSelected("inkbox", "inkbox", turn.integrations.inkbox);
         if (turn.integrations?.agents) {
           // OpenMausBot's own coordination tools never ask, as on Claude
           // (mcp__agents is pre-allowed): "auto" quiets only read-only tools,
@@ -959,6 +960,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           for (const name of declaredInCodexConfig) appServerArgs.push("-c", `mcp_servers.${name}.enabled=false`);
         }
         for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
+          if (name === "inkbox" && turn.integrations?.inkbox) continue;
           const mountName = mountedMcpServerName(name, declaredInCodexConfig);
           if (mountName !== name) noteRenamedMcpServer(name, mountName);
           mountSelected(name, mountName, server, "prompt");

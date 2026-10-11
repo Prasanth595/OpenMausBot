@@ -11,9 +11,9 @@ const MAX_INPUT_BYTES = 1_048_576;
 const MAX_OUTPUT_BYTES = 16_777_216;
 const MAX_PENDING = 16;
 type RpcId = string | number | null;
-export type HarnessMcpKind = "browser" | "computer" | "data";
+export type HarnessMcpKind = "browser" | "computer" | "data" | "inkbox";
 
-const NAMES: Record<HarnessMcpKind, string> = { browser: "Browser", computer: "Cloud computer", data: "Data" };
+const NAMES: Record<HarnessMcpKind, string> = { browser: "Browser", computer: "Cloud computer", data: "Data", inkbox: "Inkbox" };
 /** Server instructions sent with initialize, for a family that has them. */
 const INSTRUCTIONS: Partial<Record<HarnessMcpKind, string>> = { data: DATA_INSTRUCTIONS };
 /** What a model needs after a failed call, per tool family: the failure is
@@ -22,10 +22,11 @@ const RECOVERY: Record<HarnessMcpKind, string> = {
   browser: " This failure does not establish that all browsers are unavailable. Inspect available connections with select_computer if that tool is present. Keep the requested computer and account; do not bypass a permission refusal or human takeover, and do not repeat an uncertain action without checking its result.",
   computer: " Keep working on the assigned cloud computer only; do not bypass a person's control of it, and take a fresh screenshot before repeating an action whose result is uncertain.",
   data: " The tables already loaded are unchanged; check with data_describe or SHOW TABLES before repeating a load, and do not repeat a statement whose result is uncertain.",
+  inkbox: " Do not resend an uncertain message, call, or other action automatically. Check its recorded status first. Do not bypass a declined approval or switch identities.",
 };
 
 function parseHarnessMcpKind(value: unknown): HarnessMcpKind | null {
-  return value === "browser" || value === "computer" || value === "data" ? value : null;
+  return value === "browser" || value === "computer" || value === "data" || value === "inkbox" ? value : null;
 }
 
 function failure(id: RpcId, method: unknown, message: string, code = -32603): unknown {
@@ -64,12 +65,12 @@ export async function harnessMcpRequest(
   if (message.method === "initialize") return {
     jsonrpc: "2.0", id,
     result: {
-      protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: `openmausbot-${connection.kind}`, version: "1" },
+      protocolVersion: "2024-11-05", capabilities: { tools: {}, ...(connection.kind === "inkbox" ? { resources: {} } : {}) }, serverInfo: { name: `openmausbot-${connection.kind}`, version: "1" },
       ...(INSTRUCTIONS[connection.kind] ? { instructions: INSTRUCTIONS[connection.kind] } : {}),
     },
   };
   if (message.method === "ping") return { jsonrpc: "2.0", id, result: {} };
-  if (message.method !== "tools/list" && message.method !== "tools/call") return failure(id, message.method, "Method not found.", -32601);
+  if (message.method !== "tools/list" && message.method !== "tools/call" && !(connection.kind === "inkbox" && (message.method === "resources/read" || message.method === "resources/list"))) return failure(id, message.method, "Method not found.", -32601);
   try {
     const url = new URL(connection.url);
     if (!connection.token || url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
@@ -80,7 +81,7 @@ export async function harnessMcpRequest(
     const response = await fetch(new URL(`/api/internal/${connection.kind}/mcp`, url), {
       method: "POST", redirect: "error",
       headers: { "content-type": "application/json", authorization: `Bearer ${connection.token}` },
-      body, signal: AbortSignal.timeout(130_000),
+      body, signal: AbortSignal.timeout(connection.kind === "inkbox" ? 700_000 : 130_000),
     });
     const payload = await boundedJson(response, name) as { result?: unknown; error?: unknown };
     if (!response.ok || !payload || typeof payload !== "object" || !Object.hasOwn(payload, "result")) {
@@ -95,7 +96,9 @@ export async function harnessMcpRequest(
 }
 
 function run(kind: HarnessMcpKind): void {
-  const connection = { url: process.env.OMB_HARNESS_URL ?? "", token: process.env.OMB_MCP_TOKEN ?? "", kind };
+  // Codex shares one app-server environment across MCP mounts. Inkbox's
+  // capability must not overwrite the browser/computer capability there.
+  const connection = { url: process.env.OMB_HARNESS_URL ?? "", token: (kind === "inkbox" ? process.env.OMB_INKBOX_MCP_TOKEN : process.env.OMB_MCP_TOKEN) ?? "", kind };
   let input = Buffer.alloc(0);
   let pending = 0;
   const output = (message: unknown) => {
@@ -135,7 +138,7 @@ function run(kind: HarnessMcpKind): void {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const kind = parseHarnessMcpKind(process.argv[2]);
   if (!kind) {
-    process.stderr.write("usage: harness-mcp-proxy browser|computer|data\n");
+    process.stderr.write("usage: harness-mcp-proxy browser|computer|data|inkbox\n");
     process.exitCode = 2;
   } else run(kind);
 }

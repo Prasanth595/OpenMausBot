@@ -99,6 +99,7 @@ const RESERVED_MCP_NAMES = new Set([
   "agents",
   "composio",
   "data",
+  "inkbox",
   "browser",
   "phone",
   "dweb",

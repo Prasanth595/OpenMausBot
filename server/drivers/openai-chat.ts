@@ -862,6 +862,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                 // an OpenAI-compatible engine stops for a card, and a Chief's
                 // delegated Full access cannot help either.
                 const allowed = turn.approvalMode === "full" || !shown.ask
+                  || tools.approvalHandledByHost?.(call.function.name) === true
                   || await approval.ask(shown.title, shownPreview ?? "This tool has no arguments.", shown.grant);
                 abort.signal.throwIfAborted();
                 emit({ ...base(turn.threadId, turnId), type: "item.started", itemType: "tool", itemId: call.id,

@@ -32,6 +32,8 @@ export class ChatToolSessionError extends Error {}
 export interface ChatToolSession {
   definitions: ChatToolDefinition[];
   validate(name: string, args: unknown): void;
+  /** Only host-owned integrations may replace the native approval prompt. */
+  approvalHandledByHost?(name: string): boolean;
   /** A searched server's search_tools and describe_tool read only its
    * catalog, so they need no card; call_tool is shown as the tool it runs.
    * OpenMausBot's own agents server needs none either, as on Claude
@@ -261,7 +263,9 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   if (integrations?.agents && eligible("agents")) servers.push(["agents", integrations.agents]);
   if (integrations?.composio && eligible("composio")) servers.push(["composio", integrations.composio]);
   if (integrations?.data && eligible("data")) servers.push(["data", integrations.data]);
+  if (integrations?.inkbox && eligible("inkbox")) servers.push(["inkbox", integrations.inkbox]);
   for (const [name, server] of Object.entries(integrations?.custom ?? {})) {
+    if (name === "inkbox" && integrations?.inkbox) continue;
     if (!eligible(name)) continue;
     const remote = remoteMcpSpec(server) !== undefined;
     const stdio = mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" }, ...(remote ? { directory: { name, ...(scope ? { toolScope: scope } : {}) } } : {}) });
@@ -285,7 +289,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   const cancel = () => { void close().catch(() => {}); };
   signal.addEventListener("abort", cancel, { once: true });
   const definitions: ChatToolDefinition[] = [];
-  const registered = new Map<string, { client: ChatMcpClient; server: string; launch: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; name: string; schema: ValidateFunction; searched: boolean }>();
+  const registered = new Map<string, { client: ChatMcpClient; server: string; launch: string; builtInBrowser: boolean; agents: boolean; hostComputer: boolean; approvalHandledByHost: boolean; name: string; schema: ValidateFunction; searched: boolean }>();
   try {
     if (signal.aborted) throw aborted();
     // Start independent servers concurrently; consume results in config order
@@ -310,11 +314,12 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
       // grants last a turn, as a warm engine restarts for it (perTurn).
       const launch = createHash("sha256").update(JSON.stringify(descriptor)).digest("hex");
       return { name, client, launch, builtInBrowser: descriptor === integrations?.browser, agents: descriptor === integrations?.agents,
-        hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer", tools };
+        hostComputer: descriptor === integrations?.localComputer && integrations?.localComputer?.scope === "local-computer",
+        approvalHandledByHost: descriptor === integrations?.inkbox, tools };
     }));
     for (const mount of mounts) {
       if (mount.status === "rejected") throw mount.reason;
-      const { name: server, client, launch, builtInBrowser, agents, hostComputer, tools } = mount.value;
+      const { name: server, client, launch, builtInBrowser, agents, hostComputer, approvalHandledByHost, tools } = mount.value;
       const originalNames = new Set<string>();
       for (const tool of tools) {
         if (!object(tool) || typeof tool.name !== "string" || !tool.name.trim() || originalNames.has(tool.name)) throw new Error("MCP server advertised an invalid or duplicate tool name");
@@ -335,7 +340,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         const base = chatToolName(server, tool.name);
         let name = base;
         for (let index = 2; registered.has(name); index += 1) { const suffix = `_${index}`; name = base.slice(0, 64 - suffix.length) + suffix; }
-        registered.set(name, { client, server, launch, builtInBrowser, agents, hostComputer, name: tool.name, schema, searched: searchable.has(server) });
+        registered.set(name, { client, server, launch, builtInBrowser, agents, hostComputer, approvalHandledByHost, name: tool.name, schema, searched: searchable.has(server) });
         definitions.push({ type: "function", function: { name, description, parameters } });
         if (Buffer.byteLength(JSON.stringify(definitions)) > CATALOG_BYTES) throw new Error("MCP tool catalog exceeds the 1MB limit");
       }
@@ -369,6 +374,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
   };
   return {
     definitions, validate, view, close,
+    approvalHandledByHost: name => registered.get(name)?.approvalHandledByHost === true,
     async execute(name, args, callSignal) {
       validate(name, args);
       if (callSignal.aborted) { await close(); throw aborted(); }

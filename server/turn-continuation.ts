@@ -124,6 +124,8 @@ export interface CapContinuationDeps {
    * requester (a coordinated assignment, a delegation that reports back). */
   reportsToRequester: (threadId: string) => boolean;
   now?: () => number;
+  /** External conversations retain their own exact task/request identity. */
+  canContinue?: (threadId: string) => boolean;
 }
 
 const CONTINUE_TITLE = /^Continue: /;
@@ -141,6 +143,7 @@ export function makeCapContinuationSubscriber(deps: CapContinuationDeps): (event
   const state = new Map<string, { last: number; count: number; continued: Set<string> }>();
   return (event: RuntimeEvent) => {
     if (event.type !== "cap.exhausted" || !event.handoffPath) return;
+    if (deps.canContinue && !deps.canContinue(event.threadId)) return;
     if (deps.reportsToRequester(event.threadId)) return;
     void (async () => {
       const bot = deps.store.botByThread(event.threadId);
