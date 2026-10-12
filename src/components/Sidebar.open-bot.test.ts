@@ -93,17 +93,19 @@ describe.each([false, true])("with threads shown: %s", (shown) => {
 
   it("opens another bot behind Edit profile as its row does, and keeps the bot on screen where it is", () => {
     fixture.state = { ...initialState, bots: [left("scout"), left("atlas")], selectedId: "scout", activeView: "chat" };
-    const menu = (botId: string) => render(() => BotContextMenu({
+    // the menu's items carry the handlers its rows run
+    const editProfile = (botId: string) => (render(() => BotContextMenu({
       menu: { botId, x: 0, y: 0 }, onClose: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn(), onMoveToSection: vi.fn(), onNewFolder: vi.fn(), onNewTaskFolder: vi.fn(),
-    })).find((node) => node.props.role === "menuitem" && label(node) === "Edit Profile")!;
-    menu("atlas").props.onClick!();
+    })).find((node) => Array.isArray(node.props.items))!.props.items as { label?: string; onSelect?: () => void }[])
+      .find((item) => item.label === "Edit Profile")!;
+    editProfile("atlas").onSelect!();
     expect(actions()).toEqual([opened("atlas"), { type: "toggleSettings", open: true }]);
     fixture.dispatch.mockReset();
-    menu("scout").props.onClick!();
+    editProfile("scout").onSelect!();
     expect(actions()).toEqual([{ type: "select", id: "scout" }, { type: "toggleSettings", open: true }]);
     fixture.dispatch.mockReset();
     fixture.state = { ...fixture.state, settingsOpen: true };
-    menu("atlas").props.onClick!();
+    editProfile("atlas").onSelect!();
     expect(actions()).toEqual([opened("atlas")]);
   });
 

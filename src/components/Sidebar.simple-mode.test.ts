@@ -160,15 +160,27 @@ describe("bot-first sidebar", () => {
     expect(shown).toContain('data-sidebar-thread-row="idle-history"');
   });
 
+  const menuItems = () => {
+    let tree: ReactNode;
+    // call the menu inside a render so its hooks run and the returned tree
+    // carries its items
+    function Capture() {
+      tree = BotContextMenu({
+        menu: { botId: bot.id, x: 0, y: 0 }, onClose: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn(), onMoveToSection: vi.fn(), onNewFolder: vi.fn(), onNewTaskFolder: vi.fn(),
+      });
+      return tree;
+    }
+    renderToStaticMarkup(createElement(Capture));
+    return (tree as ReactElement<{ items: { key: string; label?: ReactNode; onSelect?: () => void }[] }>).props.items;
+  };
+
   it("only hides thread/folder creation in the bot context menu", () => {
-    const render = () => renderToStaticMarkup(createElement(BotContextMenu, {
-      menu: { botId: bot.id, x: 0, y: 0 }, onClose: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn(), onMoveToSection: vi.fn(), onNewFolder: vi.fn(), onNewTaskFolder: vi.fn(),
-    }));
-    const enabled = render();
+    fixture.showThreads = true;
+    const enabled = menuItems().map((item) => item.label);
     expect(enabled).toContain("New thread");
     expect(enabled).toContain("New folder");
     fixture.showThreads = false;
-    const disabled = render();
+    const disabled = menuItems().map((item) => item.label);
     expect(disabled).not.toContain("New thread");
     expect(disabled).not.toContain("New folder");
     expect(disabled).toContain("Edit Profile");
@@ -176,33 +188,11 @@ describe("bot-first sidebar", () => {
   });
 
   it("Edit profile opens the panel without naming a section", () => {
-    let tree: ReactNode;
-    // call the menu inside a render so its hooks run and the returned tree
-    // carries the items' handlers
-    function Capture() {
-      tree = BotContextMenu({
-        menu: { botId: bot.id, x: 0, y: 0 }, onClose: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn(), onMoveToSection: vi.fn(), onNewFolder: vi.fn(), onNewTaskFolder: vi.fn(),
-      });
-      return tree;
-    }
-    const editProfile = () => {
-      const items: ReactElement<ElementProps>[] = [];
-      const walk = (node: ReactNode) => {
-        for (const child of Children.toArray(node)) {
-          if (!isValidElement<ElementProps>(child)) continue;
-          if (child.props.role === "menuitem") items.push(child);
-          walk(child.props.children);
-        }
-      };
-      walk(tree);
-      return items.find((item) => Children.toArray(item.props.children).includes("Edit Profile"))!;
-    };
-    const render = () => renderToStaticMarkup(createElement(Capture));
+    const editProfile = () => menuItems().find((item) => item.label === "Edit Profile")!;
 
     // the panel is closed: select the bot, then a bare open (the remembered
     // section, or a collapsed rail when nothing is stored)
-    render();
-    editProfile().props.onClick!({} as MouseEvent);
+    editProfile().onSelect!();
     expect(fixture.dispatch.mock.calls).toEqual([
       [{ type: "select", id: bot.id }],
       [{ type: "toggleSettings", open: true }],
@@ -211,16 +201,14 @@ describe("bot-first sidebar", () => {
     // already open: only the retarget, never a section
     fixture.dispatch.mockClear();
     fixture.state.settingsOpen = true;
-    render();
-    editProfile().props.onClick!({} as MouseEvent);
+    editProfile().onSelect!();
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "select", id: bot.id }]]);
 
     // the remote client's menu carries the same two-step open
     vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768, ogb: { remoteClient: { active: true } } });
     fixture.dispatch.mockClear();
     fixture.state.settingsOpen = false;
-    render();
-    editProfile().props.onClick!({} as MouseEvent);
+    editProfile().onSelect!();
     expect(fixture.dispatch.mock.calls).toEqual([
       [{ type: "select", id: bot.id }],
       [{ type: "toggleSettings", open: true }],

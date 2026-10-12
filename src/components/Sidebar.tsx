@@ -71,6 +71,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { botUnreadThreadIds, folderUnreadThreadIds, markBotRead, markFolderRead } from "@/lib/folder-read";
 import { orderedThreadList, SidebarThreadRow, stampClock, threadRecency, useRelativeNow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
+import { PopoverMenu, type PopoverMenuItem } from "./popover/PopoverMenu";
 import {
   loadCollapsedSections,
   loadSectionOrder,
@@ -778,14 +779,17 @@ export function BotContextMenu({
   onNewFolder: (botId: string) => void;
   onNewTaskFolder: (botId: string) => void;
 }) {
-  const motion = useHeldMenuMotion(menu);
-  const shown = motion.value;
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const canChooseFolder = useOwnerOrAdmin();
   const remoteClient = window.ogb?.remoteClient?.active === true;
-  const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
-  const menuRef = useRef<HTMLDivElement>(null);
+  // The sheet owns its own exit; the anchor must outlive the open so the
+  // held close still has a point to sit at. The last point is enough — a
+  // reopen always carries a fresh one.
+  const [lastOpen, setLastOpen] = useState<MenuState | null>(null);
+  useEffect(() => { if (menu) setLastOpen(menu); }, [menu]);
+  const point = menu ?? lastOpen;
+  const bot = point ? state.bots.find((b) => b.id === point.botId) : undefined;
   const latestMenu = useRef(menu);
   useLayoutEffect(() => { latestMenu.current = menu; }, [menu]);
   const readInFlight = useRef(false);
@@ -809,46 +813,8 @@ export function BotContextMenu({
       setReadingBotId(null);
     }
   };
-  useLayoutEffect(() => {
-    const element = menuRef.current;
-    if (!element || !shown) return;
-    const place = () => {
-      const { width, height } = element.getBoundingClientRect();
-      element.style.top = `${Math.max(8, Math.min(shown.y, window.innerHeight - height - 8))}px`;
-      element.style.left = `${Math.max(8, Math.min(shown.x, window.innerWidth - width - 8))}px`;
-    };
-    // Menu length changes with thread settings, permissions, and locale.
-    // Measure after every render; the viewport cap handles short windows.
-    place();
-    window.addEventListener("resize", place);
-    return () => window.removeEventListener("resize", place);
-  });
-  // Focus moves in once per open and back out on close. It stays apart from
-  // the listeners below: Sidebar passes a fresh onClose every render, and
-  // re-running this with them would pull focus back to the first item.
-  useEffect(() => {
-    if (!menu) return;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    menuRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
-    return () => { if (opener?.isConnected) opener.focus(); };
-  }, [menu]);
-  useEffect(() => {
-    if (!menu) return;
-    const onDown = (e: MouseEvent) => {
-      if (!(e.target instanceof Element) || !e.target.closest("[data-bot-menu]")) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("blur", onClose);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("blur", onClose);
-    };
-  }, [menu, onClose]);
 
-  if (!motion.shown || !bot || !shown) return null;
+  if (!bot || !point) return null;
   const deleting = state.deletingBots[bot.id] === true;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
@@ -865,125 +831,95 @@ export function BotContextMenu({
     if (state.selectedId === bot.id) dispatch({ type: "select", id: bot.id });
     else openBot(dispatch, bot, showThreads);
   };
-  const item = (
-    icon: React.ReactNode,
-    label: string,
-    onClick?: () => void,
-    opts?: { danger?: boolean; disabled?: boolean; hint?: string; keepOpen?: boolean },
-  ) => (
-    <button
-      key={label}
-      type="button"
-      role="menuitem"
-      disabled={opts?.disabled}
-      onClick={() => {
-        onClick?.();
-        if (!opts?.keepOpen) onClose();
-      }}
-      title={opts?.hint}
-      className={cn(
-        "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]",
-        opts?.danger ? "text-danger" : "text-ink",
-        opts?.disabled ? "cursor-default opacity-40" : "hover:bg-raised/70",
-      )}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-  const divider = (key: string) => <div key={key} className="mx-2 my-1 border-t border-hairline/40" />;
+  const items: PopoverMenuItem[] = [];
+  if (showThreads) {
+    items.push(
+      { key: "new-task", label: t("task.newShort"), icon: <Plus size={16} />, onSelect: () => dispatch({ type: "newTask", botId: bot.id }) },
+      ...(canChooseFolder
+        ? [{ key: "new-task-folder", label: t("task.folder.new"), icon: <FolderOpen size={16} />, onSelect: () => onNewTaskFolder(bot.id) }]
+        : []),
+      { key: "new-folder", label: t("folder.new"), icon: <FolderPlus size={16} />, onSelect: () => onNewFolder(bot.id) },
+    );
+  }
+  const openProfile = () => {
+    openForSettings();
+    if (!state.settingsOpen) dispatch({ type: "toggleSettings", open: true });
+  };
+  if (remoteClient) {
+    items.push(
+      { key: "move-to-section", label: t("sidebar.bot.moveToSection"), icon: <FolderPlus size={16} />, separatorBefore: showThreads, onSelect: () => onMoveToSection(bot.id) },
+      { key: "edit-profile", label: t("sidebar.bot.editProfile"), icon: <Pencil size={16} />, onSelect: openProfile },
+      { key: "copy-conversation-id", label: t("sidebar.copyConversationId"), icon: <ClipboardCopy size={16} />, onSelect: () => { void copyText(bot.threadId); } },
+    );
+  } else {
+    items.push(
+      {
+        key: "pin",
+        label: bot.pinned ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
+        icon: bot.pinned ? <PinOff size={16} /> : <Pin size={16} />,
+        onSelect: () => dispatch({ type: "updateBot", botId: bot.id, patch: { pinned: !bot.pinned } }),
+      },
+      {
+        key: "chief",
+        label: bot.chiefOfStaff ? t("sidebar.bot.removeChief") : t("sidebar.bot.makeChief"),
+        icon: <Crown size={16} className={bot.chiefOfStaff ? "text-accent" : undefined} />,
+        disabled: !bot.chiefOfStaff && !canCoordinate,
+        title: !bot.chiefOfStaff && !canCoordinate ? t("sidebar.bot.chiefNeedsEngine") : undefined,
+        onSelect: () => dispatch({ type: "updateBot", botId: bot.id, patch: { chiefOfStaff: !bot.chiefOfStaff } }),
+      },
+      { key: "move-to-section", label: t("sidebar.bot.moveToSection"), icon: <FolderPlus size={16} />, separatorBefore: showThreads, onSelect: () => onMoveToSection(bot.id) },
+      { key: "mark-unread", label: t("sidebar.bot.markUnread"), icon: <BellDot size={16} />, onSelect: () => dispatch({ type: "markUnread", botId: bot.id }) },
+      {
+        key: "mark-all-read",
+        label: readingBotId === bot.id ? t("sidebar.bot.markingAllRead") : t("sidebar.bot.markAllRead"),
+        icon: readingBotId === bot.id ? <Loader2 size={16} className="animate-spin" /> : <CheckCheck size={16} />,
+        disabled: readingBotId !== null || botUnreadThreadIds(bot).length === 0,
+        keepOpen: true,
+        onSelect: () => { void readAll(bot); },
+      },
+      { key: "edit-profile", label: t("sidebar.bot.editProfile"), icon: <Pencil size={16} />, separatorBefore: true, onSelect: openProfile },
+      { key: "duplicate", label: t("sidebar.bot.duplicate"), icon: <Copy size={16} />, onSelect: () => dispatch({ type: "duplicateBot", botId: bot.id }) },
+      { key: "copy-conversation-id", label: t("sidebar.copyConversationId"), icon: <ClipboardCopy size={16} />, separatorBefore: true, onSelect: () => { void copyText(bot.threadId); } },
+      {
+        key: "archive",
+        label: t("sidebar.bot.archive"),
+        icon: <Archive size={16} />,
+        separatorBefore: true,
+        disabled: archiveBlocked,
+        title: archiveHint,
+        onSelect: () => onArchive(bot),
+      },
+      {
+        key: "delete",
+        label: deleting ? t("sidebar.bot.deleteChecking") : t("common.delete"),
+        icon: deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />,
+        disabled: deleting,
+        busy: deleting,
+        title: deleting ? t("sidebar.bot.deleteCheckingTitle") : undefined,
+        danger: true,
+        onSelect: () => onDelete(bot),
+      },
+    );
+  }
+  if (readError?.botId === bot.id) {
+    items.push({
+      key: "read-error",
+      label: readError.message,
+      render: <p role="alert" className="px-3.5 py-2 text-[12px] text-danger">{readError.message}</p>,
+    });
+  }
 
-  return createPortal(
-    <div
-      ref={menuRef}
-      data-bot-menu
-      data-sidebar
-      role="menu"
-      aria-label={t("sidebar.bot.actions", { name: bot.name })}
-      onKeyDown={navigateThreadMenu}
-      style={{ top: shown.y, left: shown.x }}
-      className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-[228px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
-    >
-      {showThreads && <>
-        {item(<Plus size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
-        {canChooseFolder && item(<FolderOpen size={16} className="shrink-0 text-ink-secondary" />, t("task.folder.new"), () => onNewTaskFolder(bot.id))}
-        {item(<FolderPlus size={16} className="text-ink-secondary" />, t("folder.new"), () => onNewFolder(bot.id))}
-        {divider("threads")}
-      </>}
-      {remoteClient ? [
-        item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
-          onClose();
-          onMoveToSection(bot.id);
-        }),
-        item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.editProfile"), () => {
-          openForSettings();
-          if (!state.settingsOpen) dispatch({ type: "toggleSettings", open: true });
-        }),
-        item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
-          void copyText(bot.threadId);
-        }),
-      ] : [
-        item(
-          bot.pinned ? <PinOff size={16} className="text-ink-secondary" /> : <Pin size={16} className="text-ink-secondary" />,
-          bot.pinned ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
-          () => dispatch({ type: "updateBot", botId: bot.id, patch: { pinned: !bot.pinned } }),
-        ),
-        item(
-          <Crown size={16} className={bot.chiefOfStaff ? "text-accent" : "text-ink-secondary"} />,
-          bot.chiefOfStaff ? t("sidebar.bot.removeChief") : t("sidebar.bot.makeChief"),
-          () => dispatch({ type: "updateBot", botId: bot.id, patch: { chiefOfStaff: !bot.chiefOfStaff } }),
-          {
-            disabled: !bot.chiefOfStaff && !canCoordinate,
-            hint: !bot.chiefOfStaff && !canCoordinate ? t("sidebar.bot.chiefNeedsEngine") : undefined,
-          },
-        ),
-        item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
-          onClose();
-          onMoveToSection(bot.id);
-        }),
-        item(<BellDot size={16} className="text-ink-secondary" />, t("sidebar.bot.markUnread"), () =>
-          dispatch({ type: "markUnread", botId: bot.id }),
-        ),
-        item(
-          readingBotId === bot.id ? <Loader2 size={16} className="animate-spin text-ink-secondary" /> : <CheckCheck size={16} className="text-ink-secondary" />,
-          readingBotId === bot.id ? t("sidebar.bot.markingAllRead") : t("sidebar.bot.markAllRead"),
-          () => { void readAll(bot); },
-          { disabled: readingBotId !== null || botUnreadThreadIds(bot).length === 0, keepOpen: true },
-        ),
-        divider("d1"),
-        item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.editProfile"), () => {
-          openForSettings();
-          if (!state.settingsOpen) dispatch({ type: "toggleSettings", open: true });
-        }),
-        item(<Copy size={16} className="text-ink-secondary" />, t("sidebar.bot.duplicate"), () =>
-          dispatch({ type: "duplicateBot", botId: bot.id }),
-        ),
-        divider("d2"),
-        item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
-          void copyText(bot.threadId);
-        }),
-        divider("d3"),
-        item(
-          <Archive size={16} className="text-ink-secondary" />,
-          t("sidebar.bot.archive"),
-          () => onArchive(bot),
-          {
-            disabled: archiveBlocked,
-            hint: archiveHint,
-          },
-        ),
-        <BotDeleteMenuItem
-          key="delete"
-          deleting={deleting}
-          onClick={() => {
-            onClose();
-            onDelete(bot);
-          }}
-        />,
-      ]}
-      {readError?.botId === bot.id && <p role="alert" className="px-3.5 py-2 text-[12px] text-danger">{readError.message}</p>}
-    </div>,
-    document.body,
+  return (
+    <PopoverMenu
+      items={items}
+      ariaLabel={t("sidebar.bot.actions", { name: bot.name })}
+      anchor={{ kind: "point", x: point.x, y: point.y }}
+      open={menu !== null}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      focusFirstOnOpen
+      restoreFocusOnClose
+      zIndex={40}
+    />
   );
 }
 
@@ -1024,25 +960,6 @@ export function archivedDeleteAllCopy() {
     confirmLabel: t("sidebar.archived.deleteAll"),
     tone: "danger" as const,
   };
-}
-
-export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      disabled={deleting}
-      aria-busy={deleting || undefined}
-      onClick={onClick}
-      title={deleting ? t("sidebar.bot.deleteCheckingTitle") : undefined}
-      className={cn(
-        "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger",
-        deleting ? "cursor-default opacity-40" : "hover:bg-raised/70",
-      )}
-    >
-      {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-      {deleting ? t("sidebar.bot.deleteChecking") : t("common.delete")}
-    </button>
-  );
 }
 
 // one empty list, so a bot without folders hands its rows the same array
