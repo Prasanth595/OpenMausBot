@@ -304,6 +304,27 @@ describe("PopoverMenu in a document", () => {
     expect(document.activeElement).toBe(support);
   });
 
+  it("keeps arrow navigation inside the submenu instead of jumping back to the menu", async () => {
+    await act(async () => trigger().click());
+    const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
+    support.focus();
+    await key(support, "ArrowRight");
+    await flush();
+    const subRows = [...submenu()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(document.activeElement).toBe(subRows[0]);
+    // Keys pressed inside the submenu are handled there. They bubble through
+    // the portal along the fiber tree, so the main list's handler must not
+    // treat the missing row as a miss and re-claim focus for its own list.
+    await key(subRows[0]!, "ArrowDown");
+    expect(document.activeElement).toBe(subRows[1]);
+    await key(subRows[1]!, "ArrowUp");
+    expect(document.activeElement).toBe(subRows[0]);
+    await key(subRows[0]!, "End");
+    expect(document.activeElement).toBe(subRows[subRows.length - 1]);
+    await key(subRows[subRows.length - 1]!, "ArrowDown");
+    expect(document.activeElement).toBe(subRows[0]);
+  });
+
   it("releases the parent row's active state when its submenu closes", async () => {
     await act(async () => trigger().click());
     const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;

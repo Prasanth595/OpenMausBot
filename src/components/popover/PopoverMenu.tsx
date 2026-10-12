@@ -586,7 +586,14 @@ export function PopoverMenu({
             role="group"
             data-popover-menu
             data-popover-variant={variant}
-            onKeyDown={(event) => onMenuKey(event, false, items, api.close)}
+            onKeyDown={(event) => {
+              // The submenu handles its own keys. Its events still bubble here
+              // along the fiber tree (the sheet is portaled), and this list
+              // would read the submenu row as a miss and re-claim focus for
+              // its first/last item — the arrow-key jump back this guards.
+              if (event.target instanceof Node && subRef.current?.contains(event.target)) return;
+              onMenuKey(event, false, items, api.close);
+            }}
             onPointerLeave={() => {
               // Cancel whatever the pointer left pending first: a hover-open
               // for a row the pointer only brushed past must die with the
