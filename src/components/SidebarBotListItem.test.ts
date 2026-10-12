@@ -15,7 +15,7 @@ vi.mock("@/lib/interface-mode", async (original) => ({
 }));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
-import { BotDeleteMenuItem, BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
+import { BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
 import { endCall } from "@/lib/call";
 import { configureLiveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
 
@@ -314,71 +314,47 @@ describe("archive / delete confirmation", () => {
   });
 });
 
-describe("bot deletion feedback", () => {
-  it("disables the destructive action while the bot and its computer are deleted", () => {
-    const markup = renderToStaticMarkup(createElement(BotDeleteMenuItem, {
-      deleting: true,
-      onClick: vi.fn(),
-    }));
+describe("quiet rows", () => {
+  const titleLine = /<div class="truncate text-\[11px\][^"]*">([^<]*)<\/div>/;
 
-    expect(markup).toContain("Deleting bot and owned computer…");
-    expect(markup).toContain('title="Deleting this bot and any computer it owns"');
-    expect(markup).toContain('disabled=""');
-    expect(markup).toContain('aria-busy="true"');
+  it("reduces an idle bot to its name: no title line, no Chief line, no preview", () => {
+    const markup = renderRow(bot({
+      title: "Developer",
+      chiefOfStaff: true,
+      messages: [{ id: "b1", role: "bot", kind: "text", text: "Created notes.txt with three lines.", at: 2 }] as Bot["messages"],
+    }), true);
+    expect(titleLine.test(markup)).toBe(false);
+    expect(markup).not.toContain("Chief of Staff</span>");
+    expect(markup).not.toContain("Created notes.txt with three lines.");
+    expect(markup).toContain(">Atlas<");
+    // the crown stays, beside the name, with its label for assistive tech
+    expect(markup).toContain('data-testid="chief-crown"');
+    expect(markup).toContain('aria-label="Chief of Staff"');
   });
 
-  it("offers Delete again after the check settles", () => {
-    const markup = renderToStaticMarkup(createElement(BotDeleteMenuItem, {
-      deleting: false,
-      onClick: vi.fn(),
-    }));
-
-    expect(markup).toContain(">Delete</button>");
-    expect(markup).not.toContain('disabled=""');
+  it("keeps the status line while something is happening", () => {
+    expect(renderRow(bot({ busy: true }), true)).toContain('class="sr-only">Working…');
+    expect(renderRow(bot({ activity: "waiting-on-you" }), true)).toContain("Waiting for you…");
+    expect(renderRow(bot({ waitingForTeammates: true, busy: false }), true)).toContain("Waiting on a teammate…");
   });
 
-  describe("quiet rows", () => {
-    const titleLine = /<div class="truncate text-\[11px\][^"]*">([^<]*)<\/div>/;
+  it("keeps the unread dot in the name line when the preview line is gone", () => {
+    const markup = renderRow(bot({ unread: true, messages: [{ id: "b1", role: "bot", kind: "text", text: "hello", at: 1 }] as Bot["messages"] }), true);
+    expect(markup).toContain('aria-label="Unread threads"');
+    expect(markup).not.toContain(">hello<");
+  });
 
-    it("reduces an idle bot to its name: no title line, no Chief line, no preview", () => {
-      const markup = renderRow(bot({
-        title: "Developer",
-        chiefOfStaff: true,
-        messages: [{ id: "b1", role: "bot", kind: "text", text: "Created notes.txt with three lines.", at: 2 }] as Bot["messages"],
-      }), true);
-      expect(titleLine.test(markup)).toBe(false);
+  it("puts the crown right after the name, inside the name line", () => {
+    const markup = renderRow(bot({ chiefOfStaff: true }), true);
+    expect(markup.indexOf('data-testid="chief-crown"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
+  });
+
+  it("draws the same crown as a full row", () => {
+    const quiet = renderRow(bot({ title: "Developer", chiefOfStaff: true }), true);
+    const full = renderRow(bot({ title: "Developer", chiefOfStaff: true }));
+    for (const markup of [quiet, full]) {
+      expect(markup.match(/data-testid="chief-crown"/g)).toHaveLength(1);
       expect(markup).not.toContain("Chief of Staff</span>");
-      expect(markup).not.toContain("Created notes.txt with three lines.");
-      expect(markup).toContain(">Atlas<");
-      // the crown stays, beside the name, with its label for assistive tech
-      expect(markup).toContain('data-testid="chief-crown"');
-      expect(markup).toContain('aria-label="Chief of Staff"');
-    });
-
-    it("keeps the status line while something is happening", () => {
-      expect(renderRow(bot({ busy: true }), true)).toContain('class="sr-only">Working…');
-      expect(renderRow(bot({ activity: "waiting-on-you" }), true)).toContain("Waiting for you…");
-      expect(renderRow(bot({ waitingForTeammates: true, busy: false }), true)).toContain("Waiting on a teammate…");
-    });
-
-    it("keeps the unread dot in the name line when the preview line is gone", () => {
-      const markup = renderRow(bot({ unread: true, messages: [{ id: "b1", role: "bot", kind: "text", text: "hello", at: 1 }] as Bot["messages"] }), true);
-      expect(markup).toContain('aria-label="Unread threads"');
-      expect(markup).not.toContain(">hello<");
-    });
-
-    it("puts the crown right after the name, inside the name line", () => {
-      const markup = renderRow(bot({ chiefOfStaff: true }), true);
-      expect(markup.indexOf('data-testid="chief-crown"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
-    });
-
-    it("draws the same crown as a full row", () => {
-      const quiet = renderRow(bot({ title: "Developer", chiefOfStaff: true }), true);
-      const full = renderRow(bot({ title: "Developer", chiefOfStaff: true }));
-      for (const markup of [quiet, full]) {
-        expect(markup.match(/data-testid="chief-crown"/g)).toHaveLength(1);
-        expect(markup).not.toContain("Chief of Staff</span>");
-      }
-    });
+    }
   });
 });

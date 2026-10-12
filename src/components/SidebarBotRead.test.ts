@@ -103,3 +103,21 @@ describe("bot menu bulk reads", () => {
     draw(); expect(button()).toBeUndefined();
   });
 });
+
+describe("bot menu deletion feedback", () => {
+  it("disables the destructive action while the bot and its computer are deleted", () => {
+    state = { ...state, deletingBots: { [bot.id]: true } };
+    draw();
+    const item = button("Deleting bot and owned computer…");
+    expect(item.disabled).toBe(true);
+    expect(item.getAttribute("title")).toBe("Deleting this bot and any computer it owns");
+    expect(item.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("offers Delete again after the check settles", () => {
+    draw();
+    const item = button("Delete");
+    expect(item.disabled).toBe(false);
+    expect(item.getAttribute("aria-busy")).toBeNull();
+  });
+});
