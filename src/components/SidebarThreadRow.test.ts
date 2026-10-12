@@ -8,11 +8,11 @@ type ThreadRowProps = ComponentProps<typeof SidebarThreadRow>;
 
 // The More menu lives behind component state and a portal, which a static
 // render never reaches. SidebarThreadRow uses exactly useState, useRef,
-// useEffect and (through its menu motion) useLayoutEffect; stubbing those four
-// (initial values first, state kept across a re-render, effects never run)
-// lets this suite render the row directly, click the real action button, and
-// see the menu the click opened — the same extract-and-call approach the
-// ThreadRefs tests use for onClick props.
+// useMemo, useEffect and useLayoutEffect; stubbing those (initial values
+// first, state kept across a re-render, effects never run) lets this suite
+// render the row directly, click the real action button, and read the items
+// of the menu (a PopoverMenu element) the click opened — the same
+// extract-and-call approach the ThreadRefs tests use for onClick props.
 const rowHooks = vi.hoisted(() => {
   const slots: unknown[] = [];
   let cursor = 0;
@@ -37,6 +37,7 @@ vi.mock("react", async (importOriginal) => {
     ...actual,
     useState: rowHooks.useState as unknown as typeof actual.useState,
     useRef: ((initial: unknown) => ({ current: initial })) as unknown as typeof actual.useRef,
+    useMemo: ((factory: () => unknown) => factory()) as unknown as typeof actual.useMemo,
     useEffect: (() => undefined) as unknown as typeof actual.useEffect,
     useLayoutEffect: (() => undefined) as unknown as typeof actual.useLayoutEffect,
   };
@@ -521,12 +522,8 @@ const textOf = (node: unknown): string => {
   return textOf(element.props?.children ?? element.children);
 };
 
-const buttonWithLabel = (tree: RowNode, label: string) => {
-  let found: RowNode | undefined;
-  walk(tree, (element) => {
-    if (!found && element.type === "button" && textOf(element).includes(label)) found = element;
-  });
-  return found;
+const openMenu = (tree: RowNode) => {
+  (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
 };
 
 const moreMenuButton = (tree: RowNode) => {
@@ -536,6 +533,28 @@ const moreMenuButton = (tree: RowNode) => {
   });
   return found;
 };
+
+type MenuItemNode = {
+  key: string;
+  label?: ReactNode;
+  disabled?: boolean;
+  busy?: boolean;
+  title?: string;
+  submenu?: MenuItemNode[];
+  onSelect?: () => void;
+};
+
+/** The action menu's items, as data, from the PopoverMenu the row renders
+ * once its More button opened it. */
+const menuItems = (tree: RowNode): MenuItemNode[] => {
+  let items: MenuItemNode[] = [];
+  walk(tree, (element) => {
+    const props = element.props as { items?: MenuItemNode[] } | undefined;
+    if (props && Array.isArray(props.items)) items = props.items;
+  });
+  return items;
+};
+const menuItem = (tree: RowNode, label: string) => menuItems(tree).find((candidate) => candidate.label === label);
 
 describe("Copy link", () => {
   it("writes the exact canonical link for the row's owner to the clipboard", () => {
@@ -550,17 +569,15 @@ describe("Copy link", () => {
       { task: { threadId: "monday-1", title: "Monday plan" }, ownerId: "standup", link: "openmausbot://thread/monday-1?bot=standup" },
     ];
     for (const { task, ownerId, link } of rows) {
+      // the menu only exists once the More button opened it
+      expect(menuItems(renderRow(task, ownerId))).toEqual([]);
       const closed = renderRow(task, ownerId);
-      expect(buttonWithLabel(closed, "Copy link")).toBeUndefined();
       const more = moreMenuButton(closed);
       expect(more?.props).toBeDefined();
-      const openMenu = more!.props!.onClick as (event: unknown) => void;
-      openMenu({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
-      const menu = renderRow(task, ownerId, false);
-      const copy = buttonWithLabel(menu, "Copy link");
+      openMenu(closed);
+      const copy = menuItem(renderRow(task, ownerId, false), "Copy link")!;
       expect(copy).toBeDefined();
-      expect(textOf(copy)).toContain("Copy link");
-      (copy!.props!.onClick as () => void)();
+      copy.onSelect!();
       expect(writeText).toHaveBeenCalledTimes(1);
       expect(writeText).toHaveBeenCalledWith(link);
       writeText.mockClear();
@@ -570,51 +587,43 @@ describe("Copy link", () => {
 });
 
 describe("Refresh permissions", () => {
-  const openMenu = (tree: RowNode) => {
-    (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
-  };
-
   it("is offered only when the row can refresh, and stays disabled while the thread is working", () => {
     vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
     vi.stubGlobal("document", { body: { nodeType: 1 } });
     const task = { threadId: "t1", title: "Fix the login" };
     openMenu(renderRow(task, "scout"));
-    expect(buttonWithLabel(renderRow(task, "scout", false), "Refresh permissions")).toBeUndefined();
+    expect(menuItem(renderRow(task, "scout", false), "Refresh permissions")).toBeUndefined();
 
     const onRefreshPermissions = vi.fn();
     openMenu(renderRow(task, "scout", true, { onRefreshPermissions }));
-    const offered = buttonWithLabel(renderRow(task, "scout", false, { onRefreshPermissions }), "Refresh permissions");
-    expect(offered?.props?.disabled).toBe(false);
-    expect(offered?.props?.title).toBe("Apply this bot's current approval level and saved approvals to this thread. Other threads stay as they are.");
-    (offered!.props!.onClick as () => void)();
+    const offered = menuItem(renderRow(task, "scout", false, { onRefreshPermissions }), "Refresh permissions")!;
+    expect(offered.disabled).toBe(false);
+    expect(offered.title).toBe("Apply this bot's current approval level and saved approvals to this thread. Other threads stay as they are.");
+    offered.onSelect!();
     expect(onRefreshPermissions).toHaveBeenCalledTimes(1);
 
     const working = { ...task, activity: "working" as const };
     openMenu(renderRow(working, "scout", true, { onRefreshPermissions }));
-    const busy = buttonWithLabel(renderRow(working, "scout", false, { onRefreshPermissions }), "Refresh permissions");
-    expect(busy?.props?.disabled).toBe(true);
+    const busy = menuItem(renderRow(working, "scout", false, { onRefreshPermissions }), "Refresh permissions")!;
+    expect(busy.disabled).toBe(true);
     vi.unstubAllGlobals();
   });
 });
 
 describe("Regenerate title", () => {
-  const openMenu = (tree: RowNode) => {
-    (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
-  };
-
   it("is offered next to Rename only when the caller can regenerate titles", () => {
     vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
     vi.stubGlobal("document", { body: { nodeType: 1 } });
     const task = { threadId: "t1", title: "Fix the login" };
     openMenu(renderRow(task, "scout"));
-    const plain = renderRow(task, "scout", false);
-    expect(buttonWithLabel(plain, "Rename thread")).toBeDefined();
-    expect(buttonWithLabel(plain, "Regenerate title")).toBeUndefined();
+    const plain = menuItems(renderRow(task, "scout", false));
+    expect(menuItem(renderRow(task, "scout", false), "Rename thread")).toBeDefined();
+    expect(plain.find((item) => item.label === "Regenerate title")).toBeUndefined();
 
     const onRegenerateTitle = vi.fn();
     openMenu(renderRow(task, "scout", true, { onRegenerateTitle }));
-    const offered = buttonWithLabel(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerate title");
-    expect(offered?.props?.disabled).toBe(false);
+    const offered = menuItem(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerate title")!;
+    expect(offered.disabled).toBe(false);
     vi.unstubAllGlobals();
   });
 
@@ -625,21 +634,21 @@ describe("Regenerate title", () => {
     let settle: ((ok: boolean) => void) | undefined;
     const onRegenerateTitle = vi.fn((_task: unknown, onSettled: (ok: boolean) => void) => { settle = onSettled; });
     openMenu(renderRow(task, "scout", true, { onRegenerateTitle }));
-    const idle = buttonWithLabel(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerate title")!;
-    (idle.props!.onClick as () => void)();
+    const idle = menuItem(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerate title")!;
+    idle.onSelect!();
     expect(onRegenerateTitle).toHaveBeenCalledTimes(1);
 
-    const pending = buttonWithLabel(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerating…")!;
-    expect(pending.props!.disabled).toBe(true);
-    expect(pending.props!["aria-busy"]).toBe(true);
+    const pending = menuItem(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerating…")!;
+    expect(pending.disabled).toBe(true);
+    expect(pending.busy).toBe(true);
     // a second click while it runs asks nothing more of the server
-    (pending.props!.onClick as () => void)();
+    pending.onSelect!();
     expect(onRegenerateTitle).toHaveBeenCalledTimes(1);
 
     // a failure leaves the menu open with the action ready again
     settle!(false);
-    const again = buttonWithLabel(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerate title")!;
-    expect(again.props!.disabled).toBe(false);
+    const again = menuItem(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerate title")!;
+    expect(again.disabled).toBe(false);
     vi.unstubAllGlobals();
   });
 });
@@ -660,11 +669,12 @@ describe("Thread link", () => {
     expect(textOf(other)).toBe("Link");
     expect(other?.props?.["aria-label"]).toBe("Open https://docs.example.com/plan");
     (moreMenuButton(closed)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
-    (buttonWithLabel(renderRow(task, "scout", false, { onLink }), "Remove link")!.props!.onClick as () => void)();
+    const remove = menuItem(renderRow(task, "scout", false, { onLink }), "Remove link")!;
+    remove.onSelect!();
     expect(onLink).toHaveBeenCalledWith(task, null);
     const unlinked = { threadId: "t2", title: "No link" };
     (moreMenuButton(renderRow(unlinked, "scout", true, { onLink }))!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
-    expect(buttonWithLabel(renderRow(unlinked, "scout", false, { onLink }), "Remove link")).toBeUndefined();
+    expect(menuItem(renderRow(unlinked, "scout", false, { onLink }), "Remove link")).toBeUndefined();
     vi.unstubAllGlobals();
   });
 
