@@ -118,6 +118,7 @@ function DefaultRow({
   inSubmenu,
   onItem,
   onSubmenuHover,
+  onSubmenuExit,
   onSubmenuLeave,
 }: {
   item: PopoverMenuItem;
@@ -128,6 +129,9 @@ function DefaultRow({
   inSubmenu: boolean;
   onItem: (item: PopoverMenuItem, element: HTMLElement) => void;
   onSubmenuHover?: (item: PopoverMenuItem, element: HTMLElement) => void;
+  /** The pointer left this row: a hover-open that has not fired yet dies
+   * here, so resting on the row is what opens, not passing over it. */
+  onSubmenuExit?: () => void;
   onSubmenuLeave?: () => void;
 }) {
   // Row chrome lives in the module; only the state picks stay here.
@@ -153,6 +157,9 @@ function DefaultRow({
       onPointerEnter={(event) => {
         if (item.submenu) onSubmenuHover?.(item, event.currentTarget);
         else onSubmenuLeave?.();
+      }}
+      onPointerLeave={() => {
+        if (item.submenu) onSubmenuExit?.();
       }}
       className={defaultClass}
     >
@@ -194,6 +201,7 @@ function MenuRows({
   openSubmenu,
   onItem,
   onSubmenuHover,
+  onSubmenuExit,
   onSubmenuLeave,
 }: {
   items: PopoverMenuItem[];
@@ -204,6 +212,7 @@ function MenuRows({
   openSubmenu?: string | null;
   onItem: (item: PopoverMenuItem, element: HTMLElement) => void;
   onSubmenuHover?: (item: PopoverMenuItem, element: HTMLElement) => void;
+  onSubmenuExit?: () => void;
   onSubmenuLeave?: () => void;
 }) {
   // Row stagger slots, mirroring the reference: the open shares its second
@@ -242,6 +251,7 @@ function MenuRows({
             inSubmenu={inSubmenu}
             onItem={onItem}
             onSubmenuHover={onSubmenuHover}
+            onSubmenuExit={onSubmenuExit}
             onSubmenuLeave={onSubmenuLeave}
           />
         </div>
@@ -291,27 +301,36 @@ export function PopoverMenu({
   // Keyboard/click submenu opens that arrive mid-grow park here until the
   // grow's animationend, instead of focusing (and scroll-jumping) mid-motion.
   const subFocusQueued = useRef(false);
-  const subTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const extraInsideRefs = useMemo(() => [subRef], []);
+  // Two pending actions must not share one slot: the hover-open intent is
+  // armed while the pointer rests on a parent row, the close grace while it
+  // is away from an open sheet. Keeping them apart lets a row's own leave
+  // abandon the intent without disturbing a close already in flight.
+  const subTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const subOpenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelSubTimers = useCallback(() => {
+    if (subTimer.current) clearTimeout(subTimer.current);
+    if (subOpenTimer.current) clearTimeout(subOpenTimer.current);
+    subTimer.current = null;
+    subOpenTimer.current = null;
+  }, []);
 
   const setOpen = useCallback(
     (next: boolean) => {
       if (controlledOpen === undefined) setUncontrolledOpen(next);
       if (!next) {
-        if (subTimer.current) clearTimeout(subTimer.current);
+        cancelSubTimers();
         setSubmenu(null);
         onClose?.();
       }
       onOpenChange?.(next);
     },
-    [controlledOpen, onClose, onOpenChange],
+    [controlledOpen, cancelSubTimers, onClose, onOpenChange],
   );
 
   useEffect(
-    () => () => {
-      if (subTimer.current) clearTimeout(subTimer.current);
-    },
-    [],
+    () => () => cancelSubTimers(),
+    [cancelSubTimers],
   );
 
   // Keep the submenu sheet inside the window, re-measuring when the window
@@ -360,7 +379,7 @@ export function PopoverMenu({
   }, [open, submenu, portal, items.length, subMeasured]);
 
   const openSub = useCallback((item: PopoverMenuItem, row: HTMLElement, focus = false) => {
-    if (subTimer.current) clearTimeout(subTimer.current);
+    cancelSubTimers();
     subRowRef.current = row;
     setSubPosition(null);
     setSubmenu(item.key);
@@ -372,13 +391,13 @@ export function PopoverMenu({
     } else {
       subFocusQueued.current = true;
     }
-  }, [quick]);
+  }, [quick, cancelSubTimers]);
 
   const closeSub = useCallback((focusRow = false) => {
-    if (subTimer.current) clearTimeout(subTimer.current);
+    cancelSubTimers();
     setSubmenu(null);
     if (focusRow) subRowRef.current?.focus();
-  }, []);
+  }, [cancelSubTimers]);
 
   const isPointAnchor = anchor?.kind === "point";
 
@@ -486,7 +505,7 @@ export function PopoverMenu({
         data-popover-submenu
         data-popover-variant={variant}
         {...subMotion.exitProps}
-        onPointerEnter={() => subTimer.current && clearTimeout(subTimer.current)}
+        onPointerEnter={() => cancelSubTimers()}
         onAnimationEnd={onSubAnimationEnd}
         onAnimationStart={onSubAnimationStart}
         style={
@@ -569,8 +588,11 @@ export function PopoverMenu({
             data-popover-variant={variant}
             onKeyDown={(event) => onMenuKey(event, false, items, api.close)}
             onPointerLeave={() => {
+              // Cancel whatever the pointer left pending first: a hover-open
+              // for a row the pointer only brushed past must die with the
+              // leave, or it fires behind the pointer with the menu gone.
+              cancelSubTimers();
               if (!openItem) return;
-              if (subTimer.current) clearTimeout(subTimer.current);
               subTimer.current = setTimeout(
                 () => setSubmenu((key) => (subRef.current?.matches(":hover") ? key : null)),
                 CLOSE_DELAY_MS,
@@ -588,16 +610,31 @@ export function PopoverMenu({
               variant={variant}
               renderItem={renderItem}
               inSubmenu={false}
-              openSubmenu={heldSubItem?.key}
+              openSubmenu={openItem?.key}
               onItem={(item, row) => selectItem(item, row, api.close)}
               onSubmenuHover={(item, row) => {
-                if (subTimer.current) clearTimeout(subTimer.current);
+                cancelSubTimers();
                 // Hover intent only: keyboard and click opens stay immediate.
-                subTimer.current = setTimeout(() => openSub(item, row), SUBMENU_OPEN_DELAY_MS);
+                subOpenTimer.current = setTimeout(() => {
+                  subOpenTimer.current = null;
+                  openSub(item, row);
+                }, SUBMENU_OPEN_DELAY_MS);
+              }}
+              onSubmenuExit={() => {
+                // The pointer left the parent row (onto a sibling, a gap, or
+                // out of the menu): abandon the pending open unless it fired
+                // while the pointer rested. Cancelling only the intent keeps
+                // a close grace already in flight untouched.
+                if (subOpenTimer.current) {
+                  clearTimeout(subOpenTimer.current);
+                  subOpenTimer.current = null;
+                }
               }}
               onSubmenuLeave={() => {
+                // Landing on a row without a submenu also cancels the pending
+                // hover-open of the row just left, then closes any open one.
+                cancelSubTimers();
                 if (!openItem) return;
-                if (subTimer.current) clearTimeout(subTimer.current);
                 subTimer.current = setTimeout(() => setSubmenu(null), OPEN_DELAY_MS);
               }}
             />

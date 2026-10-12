@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PopoverMenu, type PopoverMenuItem } from "./PopoverMenu";
 import { MENU_CLOSE_MS } from "../MenuMotion";
-import { SUBMENU_OPEN_DELAY_MS } from "./positioning";
+import { CLOSE_DELAY_MS, OPEN_DELAY_MS, SUBMENU_OPEN_DELAY_MS } from "./positioning";
 
 // CSS modules resolve to stable names here so open/close state mapping stays
 // assertable without reading any concrete animation values.
@@ -213,6 +213,65 @@ describe("PopoverMenu in a document", () => {
     expect(submenu()).not.toBeNull();
   });
 
+  it("does not open a submenu the pointer only brushed past on its way out", async () => {
+    await act(async () => trigger().click());
+    const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
+    await act(async () => {
+      support.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    // Out of the menu before the hover intent elapses: the leave must cancel
+    // the pending open instead of letting it fire behind the pointer.
+    await act(async () => {
+      support.dispatchEvent(new PointerEvent("pointerout", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, SUBMENU_OPEN_DELAY_MS + 50));
+    });
+    expect(submenu()).toBeNull();
+    expect(support.getAttribute("aria-expanded")).not.toBe("true");
+    expect(support.className).not.toContain("rowActive");
+  });
+
+  it("does not open a submenu when the hover leaves the row into a menu gap", async () => {
+    await act(async () => trigger().click());
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const support = rows[1]!;
+    await act(async () => {
+      support.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    // The separator band is a gap inside the menu, not another row and not
+    // outside the sheet: the row is left while the menu is not, so only the
+    // row's own leave can cancel the pending open.
+    const separator = sheet()!.querySelector<HTMLElement>('[role="separator"]')!;
+    await act(async () => {
+      support.dispatchEvent(new PointerEvent("pointerout", { bubbles: true, relatedTarget: separator }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, SUBMENU_OPEN_DELAY_MS + 50));
+    });
+    expect(submenu()).toBeNull();
+    expect(support.getAttribute("aria-expanded")).not.toBe("true");
+    expect(support.className).not.toContain("rowActive");
+  });
+
+  it("does not open a submenu the pointer brushed past onto a sibling row", async () => {
+    await act(async () => trigger().click());
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const support = rows[1]!;
+    await act(async () => {
+      support.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    await act(async () => {
+      rows[2]!.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, SUBMENU_OPEN_DELAY_MS + 50));
+    });
+    expect(submenu()).toBeNull();
+    expect(support.getAttribute("aria-expanded")).not.toBe("true");
+    expect(support.className).not.toContain("rowActive");
+  });
+
   it("skips motion entirely when quick", async () => {
     await act(async () => {
       root.render(createElement(PopoverMenu, { items, ariaLabel: "You", trigger: () => "You", quick: true }));
@@ -243,6 +302,75 @@ describe("PopoverMenu in a document", () => {
     expect(submenu()).toBeNull();
     expect(sheet()).not.toBeNull();
     expect(document.activeElement).toBe(support);
+  });
+
+  it("releases the parent row's active state when its submenu closes", async () => {
+    await act(async () => trigger().click());
+    const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
+    support.focus();
+    await key(support, "ArrowRight");
+    await flush();
+    expect(support.getAttribute("aria-expanded")).toBe("true");
+    expect(support.className).toContain("rowActive");
+    const first = submenu()!.querySelector<HTMLElement>('[role="menuitem"]')!;
+    await act(async () => {
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    // The highlight and aria-expanded are live state, not the held payload
+    // that keeps the closing sheet rendered: Escape here, a sibling hover and
+    // a whole-menu close elsewhere must all release them.
+    expect(submenu()).toBeNull();
+    expect(support.getAttribute("aria-expanded")).toBe("false");
+    expect(support.className).not.toContain("rowActive");
+  });
+
+  it("releases the parent row's active state when the pointer moves to a sibling row", async () => {
+    await act(async () => trigger().click());
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const support = rows[1]!;
+    await act(async () => {
+      support.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, SUBMENU_OPEN_DELAY_MS + 50));
+    });
+    expect(submenu()).not.toBeNull();
+    expect(support.className).toContain("rowActive");
+    await act(async () => {
+      rows[2]!.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, OPEN_DELAY_MS + 60));
+    });
+    expect(submenu()).toBeNull();
+    expect(support.getAttribute("aria-expanded")).toBe("false");
+    expect(support.className).not.toContain("rowActive");
+  });
+
+  it("releases the parent row when the pointer leaves the submenu into empty space", async () => {
+    await act(async () => trigger().click());
+    const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
+    support.focus();
+    await key(support, "ArrowRight");
+    await flush();
+    expect(submenu()).not.toBeNull();
+    // React runs enter/leave through the portal along the fiber tree, so
+    // leaving the sheet reaches the main menu's own leave timer; that timer
+    // forgives a quick return, then closes the sheet. The row state must
+    // release with it instead of latching onto the last opened submenu.
+    await act(async () => {
+      submenu()!.dispatchEvent(new PointerEvent("pointerout", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, OPEN_DELAY_MS + 20));
+    });
+    expect(submenu()).not.toBeNull();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, CLOSE_DELAY_MS));
+    });
+    expect(submenu()).toBeNull();
+    expect(support.getAttribute("aria-expanded")).toBe("false");
+    expect(support.className).not.toContain("rowActive");
   });
 
   it("scrolls a submenu taller than the window inside its own box", async () => {
