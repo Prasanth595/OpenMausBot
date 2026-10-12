@@ -12,6 +12,7 @@ import {
   type AnimationEvent as ReactAnimationEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { ChevronRight } from "lucide-react";
@@ -58,6 +59,8 @@ export interface PopoverMenuItem {
   attention?: boolean;
   attentionTone?: "danger" | "accent";
   disabled?: boolean;
+  /** Marks an in-progress row (with `disabled`): the work is under way. */
+  busy?: boolean;
   /** Draw the row in the danger tone (destructive actions). */
   danger?: boolean;
   /** Native tooltip: why a disabled row can't be picked, say. */
@@ -77,6 +80,9 @@ export interface PopoverMenuItem {
   keepOpen?: boolean;
   /** Opens beside the menu instead of acting; onSelect is not called. */
   submenu?: PopoverMenuItem[];
+  /** A raw block in place of the row chrome (an inline alert or status).
+   * Not focusable and not part of the arrow order. */
+  render?: ReactNode;
   onSelect?: () => void;
   tourId?: string;
 }
@@ -122,6 +128,9 @@ export interface PopoverMenuProps {
   restoreFocusOnClose?: boolean;
   /** The default trigger button is inert: disabled, no open. Default false. */
   triggerDisabled?: boolean;
+  /** Extra nodes (the menu's own opener button, say) that count as "inside"
+   * for dismissal, so pressing them toggles instead of reopening. */
+  extraInsideRefs?: Array<RefObject<HTMLElement | null>>;
 }
 
 // Rows the arrow keys walk: under a MenuRows wrapper, plain items and radio
@@ -132,6 +141,8 @@ const MENU_ROWS =
 const menuEnabledRows = (menu: HTMLElement | null) => (menu ? [...menu.querySelectorAll<HTMLElement>(MENU_ROWS)] : []);
 
 const SUBMENU_QUERY = MENU_ROWS;
+
+const NO_OUTSIDE_REFS: Array<RefObject<HTMLElement | null>> = [];
 
 function DefaultRow({
   item,
@@ -182,6 +193,7 @@ function DefaultRow({
       data-tour={item.tourId}
       data-menu-key={item.key}
       disabled={item.disabled}
+      aria-busy={item.busy || undefined}
       title={item.title}
       aria-haspopup={item.submenu ? "menu" : undefined}
       aria-expanded={item.submenu ? openSubmenu === item.key : undefined}
@@ -275,18 +287,20 @@ function MenuRows({
             <div role="separator" className={cn(styles.separator, roomy && styles.separatorRoomy)} />
           )}
           {item.heading && <div className={styles.heading}>{item.heading}</div>}
-          <DefaultRow
-            item={item}
-            roomy={roomy}
-            openSubmenu={openSubmenu}
-            variant={variant}
-            renderItem={renderItem}
-            inSubmenu={inSubmenu}
-            onItem={onItem}
-            onSubmenuHover={onSubmenuHover}
-            onSubmenuExit={onSubmenuExit}
-            onSubmenuLeave={onSubmenuLeave}
-          />
+          {item.render ?? (
+            <DefaultRow
+              item={item}
+              roomy={roomy}
+              openSubmenu={openSubmenu}
+              variant={variant}
+              renderItem={renderItem}
+              inSubmenu={inSubmenu}
+              onItem={onItem}
+              onSubmenuHover={onSubmenuHover}
+              onSubmenuExit={onSubmenuExit}
+              onSubmenuLeave={onSubmenuLeave}
+            />
+          )}
         </div>
       ))}
     </>
@@ -320,6 +334,7 @@ export function PopoverMenu({
   focusFirstOnOpen = false,
   restoreFocusOnClose = false,
   triggerDisabled = false,
+  extraInsideRefs: outsideRefs = NO_OUTSIDE_REFS,
 }: PopoverMenuProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
   const open = controlledOpen ?? uncontrolledOpen;
@@ -337,7 +352,7 @@ export function PopoverMenu({
   // Keyboard/click submenu opens that arrive mid-grow park here until the
   // grow's animationend, instead of focusing (and scroll-jumping) mid-motion.
   const subFocusQueued = useRef(false);
-  const extraInsideRefs = useMemo(() => [subRef], []);
+  const extraInsideRefs = useMemo(() => [subRef, ...outsideRefs], [outsideRefs]);
   // Two pending actions must not share one slot: the hover-open intent is
   // armed while the pointer rests on a parent row, the close grace while it
   // is away from an open sheet. Keeping them apart lets a row's own leave

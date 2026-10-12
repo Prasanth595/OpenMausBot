@@ -162,6 +162,25 @@ describe("PopoverMenu in a document", () => {
     expect(sheet()).not.toBeNull();
   });
 
+  it("opens a radio menu on its current choice", async () => {
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [
+            item("Take turns", { role: "menuitemradio", checked: false }),
+            item("Live", { role: "menuitemradio", checked: true }),
+          ],
+          ariaLabel: "Call mode",
+          trigger: () => "Mode",
+        }),
+      );
+    });
+    await key(trigger(), "ArrowDown");
+    await flush();
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+    expect(document.activeElement).toBe(rows[1]);
+  });
+
   it("lands focus on the first row when a context menu opens and hands it back on close", async () => {
     const opener = document.createElement("button");
     opener.textContent = "Row";

@@ -46,6 +46,17 @@ export function setMenuHeightVars(sheet: HTMLElement, height: number, upward: bo
  * reachable, so it can still say why it is unavailable). */
 export const MENU_ROW_SELECTOR = '[role="menuitem"]:not(:disabled), [role="menuitemradio"]:not(:disabled)';
 
+/** Where an open menu's focus lands: a radio menu on its current choice —
+ * the arrows move from there, so its neighbours (and their reasons) are one
+ * step away — any other menu on its first runnable row. */
+function firstFocusTarget(sheet: HTMLElement): HTMLElement | null {
+  return (
+    sheet.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]:not(:disabled)') ??
+    sheet.querySelector<HTMLElement>(MENU_ROW_SELECTOR) ??
+    sheet.querySelector<HTMLElement>("button:not(:disabled), [href], [tabindex]")
+  );
+}
+
 function leaveDelays(leave: PopoverDismissOptions["leave"]): {  enabled: boolean;
   openDelay: number;
   closeDelay: number;
@@ -312,10 +323,7 @@ export function Popover({
     focusFirst.current = false;
     const sheet = contentRef.current;
     if (!sheet) return;
-    const first =
-      sheet.querySelector<HTMLElement>(MENU_ROW_SELECTOR) ??
-      sheet.querySelector<HTMLElement>("button:not(:disabled), [href], [tabindex]");
-    (first ?? sheet).focus();
+    (firstFocusTarget(sheet) ?? sheet).focus();
   }, [open, focusFirstOnOpen, portal, position, contentRef, isMenuMotion, quick]);
 
   const focusFirstRow = useCallback(() => {
@@ -323,10 +331,7 @@ export function Popover({
     focusFirst.current = false;
     const sheet = contentRef.current;
     if (!sheet) return;
-    const first =
-      sheet.querySelector<HTMLElement>(MENU_ROW_SELECTOR) ??
-      sheet.querySelector<HTMLElement>("button:not(:disabled), [href], [tabindex]");
-    (first ?? sheet).focus({ preventScroll: true });
+    (firstFocusTarget(sheet) ?? sheet).focus({ preventScroll: true });
   }, [contentRef]);
 
   // The shell's own animations report back (row animations bubble past via
