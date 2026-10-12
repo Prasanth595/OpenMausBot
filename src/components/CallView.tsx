@@ -34,7 +34,7 @@ import { localSystemVoiceActive } from "@/lib/local-voice";
 import { useSpeech } from "@/lib/tts/useSpeech";
 import { usePushToTalk } from "@/lib/push-to-talk";
 import { BotAvatar } from "./Avatar";
-import { navigateThreadMenu } from "./BotProjects";
+import { PopoverMenu, type PopoverMenuItem } from "./popover/PopoverMenu";
 import { LiveKeySetup } from "./LiveKeySetup";
 import { liveLineHeldElsewhere } from "./LiveCallBar";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
@@ -156,10 +156,8 @@ export function CallTargetButton({
   const keyPopover = canLive && !active && media.needsKey && media.botId === targetId;
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const chevronRef = useRef<HTMLButtonElement>(null);
   const keyRef = useRef<HTMLDivElement>(null);
   const helpId = useId();
-  const menuId = useId();
   const keyId = useId();
   const elsewhereName = liveElsewhere ? state.bots.find((candidate) => candidate.id === media.botId)?.name : undefined;
   const composer = placement === "composer";
@@ -220,16 +218,18 @@ export function CallTargetButton({
     startCall(targetId);
   };
 
-  const popoverOpen = helpOpen || menuOpen || keyPopover;
+  const popoverOpen = helpOpen || keyPopover;
   useEffect(() => {
     if (!popoverOpen) return;
+    // The help sheet and the key prompt are plain absolute sheets: an outside
+    // press or Escape puts them away. The mode menu brings its own dismissal.
     const closeOnOutsideClick = (event: PointerEvent) => {
       if (event.target instanceof Node && !rootRef.current?.contains(event.target)) closePopovers();
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       closePopovers();
-      (menuOpen ? chevronRef : buttonRef).current?.focus();
+      buttonRef.current?.focus();
     };
     document.addEventListener("pointerdown", closeOnOutsideClick);
     document.addEventListener("keydown", closeOnEscape);
@@ -237,7 +237,7 @@ export function CallTargetButton({
       document.removeEventListener("pointerdown", closeOnOutsideClick);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [popoverOpen, menuOpen, closePopovers]);
+  }, [popoverOpen, closePopovers]);
 
   // Keyboard users land in the key field when the prompt opens, not when a
   // prompt that was already open is shown again.
@@ -304,45 +304,40 @@ export function CallTargetButton({
         )}
       </button>
       {canLive && (
-        <button
-          ref={chevronRef}
-          type="button"
+        <PopoverMenu
+          items={callModeItems({
+            mode,
+            // Off the Mac's own page, Take turns says where it works instead.
+            turnsUnavailable: turnsHere ? null : capabilityHelp,
+            cloudHome,
+            onChoose: (next) => {
+              // picking a mode remembers it and starts a call in it
+              setCallMode(next);
+              start(next);
+            },
+          })}
+          ariaLabel={t("call.mode.menu")}
+          triggerTitle={t("call.mode.menu")}
+          placement={composer ? "above" : "below"}
+          align="end"
+          open={menuOpen}
+          onOpenChange={(open) => {
+            if (open) {
+              // a mode is picked before a call; the key/help sheets give way
+              setHelpOpen(false);
+              dismissKeyPrompt(targetId);
+            }
+            setMenuOpen(open);
+          }}
           // a mode is picked before a call, not during one
-          disabled={active || liveElsewhere}
-          onClick={() => {
-            const opening = !menuOpen;
-            closePopovers();
-            setMenuOpen(opening);
-          }}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          aria-controls={menuOpen ? menuId : undefined}
-          aria-label={t("call.mode.menu")}
-          title={t("call.mode.menu")}
-          className={cn(
-              "grid place-content-center",
-              "bg-control w-8 hover:bg-raised-hover text-ink-secondary hover:text-ink disabled:opacity-40 transition-colors",
-              "rounded-l-lg rounded-r-3xl active:rounded-3xl transition-[color,background,border-radius]",
-              composer ? "h-8" : "h-9"
-            )}
-        >
-          <ChevronDown size={13} className={cn("transition-transform", menuOpen && "rotate-180")} />
-        </button>
-      )}
-
-      {menuOpen && (
-        <CallModeMenu
-          id={menuId}
-          mode={mode}
-          turnsUnavailable={turnsHere ? null : capabilityHelp}
-          placement={placement}
-          cloudHome={cloudHome}
-          onClose={closePopovers}
-          onChoose={(next) => {
-            // picking a mode remembers it and starts a call in it
-            setCallMode(next);
-            start(next);
-          }}
+          triggerDisabled={active || liveElsewhere}
+          triggerClassName={cn(
+            "grid place-content-center",
+            "bg-control w-8 hover:bg-raised-hover text-ink-secondary hover:text-ink disabled:opacity-40 transition-colors",
+            "rounded-l-lg rounded-r-3xl active:rounded-3xl transition-[color,background,border-radius]",
+            composer ? "h-8" : "h-9",
+          )}
+          trigger={({ open }) => <ChevronDown size={13} className={cn("transition-transform", open && "rotate-180")} />}
         />
       )}
 
@@ -423,67 +418,33 @@ export function CallTargetButton({
   );
 }
 
-/** The menu under the call button's chevron: Take turns or Live. Where this
- * page can't take turns, Take turns stays in the menu, can't be picked, and
- * says why. */
-export function CallModeMenu({ id, mode, onChoose, onClose, placement = "header", cloudHome = false, turnsUnavailable = null }: {
-  id: string;
+/** The menu under the call button's chevron: Take turns or Live, as radio
+ * items. Where this page can't take turns, Take turns stays in the menu,
+ * can't be picked, and says why (aria-disabled, not disabled, so the arrow
+ * keys still reach it and read its reason out). */
+export function callModeItems({ mode, onChoose, cloudHome = false, turnsUnavailable = null }: {
   mode: CallMode;
   /** Why this page can't take turns; null where it can. */
   turnsUnavailable?: CallCapabilityHelp | null;
-  placement?: CallButtonPlacement;
   /** On the person's Cloud: the Live hint says the key stays there. */
   cloudHome?: boolean;
   onChoose: (mode: CallMode) => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  // keyboard users land on the current mode
-  useEffect(() => {
-    ref.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
-  }, []);
-  return (
-    <div
-      ref={ref}
-      id={id}
-      role="menu"
-      aria-label={t("call.mode.menu")}
-      onKeyDown={(event) => {
-        if (event.key === "Tab") onClose();
-        else navigateThreadMenu(event);
-      }}
-      className={cn("animate-pop-in absolute right-0 z-30 w-[280px] rounded-xl border border-hairline bg-panel p-1.5 text-left shadow-2xl space-y-1", placement === "composer" ? "bottom-full mb-1.5" : "top-full mt-1.5")}
-    >
-      {CALL_MODES.map((entry) => {
-        const unavailable = entry.id === "turns" ? turnsUnavailable : null;
-        return (
-          <button
-            key={entry.id}
-            type="button"
-            role="menuitemradio"
-            aria-checked={mode === entry.id}
-            // not `disabled`: the arrow keys still reach it, so its reason is read out
-            aria-disabled={unavailable ? true : undefined}
-            onClick={() => {
-              if (!unavailable) onChoose(entry.id);
-            }}
-            className={cn(
-              "flex w-full items-start gap-2.5 rounded-lg px-2.5 py-2 text-left outline-none hover:bg-raised focus-visible:bg-raised aria-disabled:cursor-default aria-disabled:hover:bg-transparent",
-              mode === entry.id && "bg-raised/60",
-            )}
-          >
-            <span className="min-w-0 flex-1">
-              <span className={cn("block text-[13px] font-medium", unavailable ? "text-ink-tertiary" : "text-ink")}>{t(entry.label)}</span>
-              <span className="mt-0.5 block text-[11.5px] leading-[1.4] text-ink-secondary">
-                {unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome })}
-              </span>
-            </span>
-            {mode === entry.id && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
-          </button>
-        );
-      })}
-    </div>
-  );
+}): PopoverMenuItem[] {
+  return CALL_MODES.map((entry) => {
+    const unavailable = entry.id === "turns" ? turnsUnavailable : null;
+    return {
+      key: entry.id,
+      label: t(entry.label),
+      subtitle: unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome }),
+      role: "menuitemradio",
+      checked: mode === entry.id,
+      // the current mode keeps its fill: picking is a state, not a hover
+      active: mode === entry.id,
+      ariaDisabled: unavailable ? true : undefined,
+      trailing: mode === entry.id ? <Check size={14} className="shrink-0 text-accent" aria-hidden="true" /> : undefined,
+      onSelect: () => onChoose(entry.id),
+    };
+  });
 }
 
 export function CallOverlay({ bot }: { bot: Bot }) {

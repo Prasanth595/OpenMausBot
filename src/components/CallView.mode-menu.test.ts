@@ -30,7 +30,7 @@ vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: { dictation: { available: true, engine: "apple-speech", onDevice: true } }, ready: true }),
 }));
 
-import { CallModeMenu, CallTargetButton } from "./CallView";
+import { CallTargetButton, callModeItems } from "./CallView";
 import { setCallMode, type CallMode } from "@/lib/call-mode";
 import { currentCall, endCall, startCall } from "@/lib/call";
 import { configureLiveMedia, liveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
@@ -192,30 +192,20 @@ describe("the call button", () => {
 });
 
 describe("the call mode menu", () => {
-  it("opens upward from the composer and downward from the header", () => {
-    const props = { id: "m", mode: "live" as const, onChoose: vi.fn(), onClose: vi.fn() };
-    expect(renderToStaticMarkup(createElement(CallModeMenu, { ...props, placement: "composer" }))).toContain("bottom-full");
-    expect(renderToStaticMarkup(createElement(CallModeMenu, props))).toContain("top-full");
-  });
-
   it("offers both modes as radio items, the current one checked", () => {
-    const markup = renderToStaticMarkup(createElement(CallModeMenu, { id: "m", mode: "live", onChoose: vi.fn(), onClose: vi.fn() }));
-    expect(markup).toContain('role="menu"');
-    expect(markup).toContain('aria-label="Call mode"');
-    const items = markup.split('role="menuitemradio"').slice(1);
-    expect(items).toHaveLength(2);
-    expect(items[0]).toContain(">Take turns<");
-    expect(items[0]).toMatch(/^ aria-checked="false"/);
-    expect(items[1]).toContain(">Live<");
-    expect(items[1]).toMatch(/^ aria-checked="true"/);
+    const items = callModeItems({ mode: "live", onChoose: vi.fn() });
+    expect(items.map((item) => item.key)).toEqual(["turns", "live"]);
+    expect(items[0]).toMatchObject({ role: "menuitemradio", checked: false });
+    expect(items[0]!.label).toBe("Take turns");
+    expect(items[1]).toMatchObject({ role: "menuitemradio", checked: true });
+    expect(items[1]!.label).toBe("Live");
   });
 
   it("says where the OpenAI key stays: this computer, or the person's Cloud", () => {
-    const props = { id: "m", mode: "live" as const, onChoose: vi.fn(), onClose: vi.fn() };
-    expect(renderToStaticMarkup(createElement(CallModeMenu, props))).toContain("The OpenAI key stays on your computer.");
-    const cloud = renderToStaticMarkup(createElement(CallModeMenu, { ...props, cloudHome: true }));
-    expect(cloud).toContain("The OpenAI key stays on My Cloud.");
-    expect(cloud).not.toContain("stays on your computer");
+    expect(String(callModeItems({ mode: "live", onChoose: vi.fn() })[1]!.subtitle)).toContain("The OpenAI key stays on your computer.");
+    const cloud = callModeItems({ mode: "live", cloudHome: true, onChoose: vi.fn() });
+    expect(String(cloud[1]!.subtitle)).toContain("The OpenAI key stays on My Cloud.");
+    expect(String(cloud[1]!.subtitle)).not.toContain("stays on your computer");
   });
 
   // Off the Mac's own page, Take turns stays in the menu so the person sees
@@ -225,29 +215,24 @@ describe("the call mode menu", () => {
       label: "Calls where you take turns need the Mac app",
       reason: "They listen with on-device speech recognition, which only the Mac app has.",
     };
-    const markup = renderToStaticMarkup(createElement(CallModeMenu, { id: "m", mode: "live", turnsUnavailable, onChoose: vi.fn(), onClose: vi.fn() }));
-    const [turns, live] = markup.split('role="menuitemradio"').slice(1);
+    const [turns, live] = callModeItems({ mode: "live", turnsUnavailable, onChoose: vi.fn() });
     // aria-disabled, not disabled: the arrow keys still reach it and its reason
-    expect(turns).toMatch(/^ aria-checked="false" aria-disabled="true"/);
-    expect(turns).not.toContain('disabled=""');
-    expect(turns).toContain(">Take turns<");
-    expect(turns).toContain("Calls where you take turns need the Mac app. They listen with on-device speech recognition, which only the Mac app has.");
-    expect(turns).not.toContain("Listening stays on this computer");
-    expect(live).toMatch(/^ aria-checked="true"/);
-    expect(live).not.toMatch(/aria-disabled="true"|disabled=""/);
+    expect(turns).toMatchObject({ role: "menuitemradio", checked: false, ariaDisabled: true });
+    expect(turns!.disabled).toBeUndefined();
+    expect(turns!.label).toBe("Take turns");
+    expect(String(turns!.subtitle)).toContain("Calls where you take turns need the Mac app. They listen with on-device speech recognition, which only the Mac app has.");
+    expect(String(turns!.subtitle)).not.toContain("Listening stays on this computer");
+    expect(live).toMatchObject({ role: "menuitemradio", checked: true });
+    expect(live!.ariaDisabled).toBeUndefined();
     // where it can take turns, both modes can be picked
-    expect(renderToStaticMarkup(createElement(CallModeMenu, { id: "m", mode: "turns", onChoose: vi.fn(), onClose: vi.fn() }))).not.toMatch(/aria-disabled="true"|disabled=""/);
+    const here = callModeItems({ mode: "turns", onChoose: vi.fn() });
+    expect(here.some((item) => item.ariaDisabled || item.disabled)).toBe(false);
+    expect(here[0]).toMatchObject({ checked: true });
   });
 
   it("reports the chosen mode", () => {
     const onChoose = vi.fn();
-    let tree: ReactNode = null;
-    function Capture() {
-      tree = CallModeMenu({ id: "m", mode: "live", onChoose, onClose: vi.fn() });
-      return tree;
-    }
-    renderToStaticMarkup(createElement(Capture));
-    findElement(tree, (props) => props.role === "menuitemradio" && props["aria-checked"] === false)?.props.onClick?.();
+    callModeItems({ mode: "live", onChoose })[0]!.onSelect!();
     expect(onChoose).toHaveBeenCalledWith("turns");
   });
 });

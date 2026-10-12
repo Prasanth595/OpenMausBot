@@ -33,11 +33,11 @@ vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 // Record every popover menu's items; the trigger still renders so the markup
 // assertions elsewhere in this file see the same header.
-vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
-  ...await importOriginal<typeof import("./SidebarPopoverMenu")>(),
-  SidebarPopoverMenu: (props: { ariaLabel: string; items: never[]; renderTrigger: (state: { open: boolean }) => unknown }) => {
+vi.mock("./popover/PopoverMenu", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./popover/PopoverMenu")>(),
+  PopoverMenu: (props: { ariaLabel: string; items: never[]; trigger: (state: { open: boolean }) => unknown }) => {
     fixture.menus.push({ ariaLabel: props.ariaLabel, items: props.items });
-    return props.renderTrigger({ open: false });
+    return props.trigger({ open: false });
   },
 }));
 vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite }));

@@ -171,7 +171,7 @@ const press = (element: Element | null) => {
   if (!element) throw new Error("nothing to press");
   flushSync(() => (element as HTMLElement).click());
 };
-const menuItems = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
+const menuItems = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
 const text = () => container.textContent ?? "";
 
 /** Click the call button: the microphone is asked for first, then the
@@ -225,7 +225,7 @@ function expectTurnsDisabled(reason: string) {
   expect(live?.textContent).toContain("Live");
   expect(live?.hasAttribute("aria-disabled")).toBe(false);
   expect(live?.getAttribute("aria-checked")).toBe("true");
-  expect(text()).not.toContain("Choose This computer");
+  expect(turns?.textContent).not.toContain("Choose This computer");
   // The keyboard reaches Take turns too, so its reason is read out: the
   // menu opens on Live, and the arrow keys move to Take turns and back.
   expect(document.activeElement).toBe(live);
@@ -250,6 +250,8 @@ function expectTurnsDisabled(reason: string) {
 beforeEach(() => {
   // a first visit: nothing remembered in this browser or app
   vi.stubGlobal("localStorage", storage);
+  // the menus here open/close without motion, so their focus lands at once
+  document.documentElement.dataset.reducedMotion = "true";
   setCallMode("turns");
   stored.clear();
   fixture.desktop = null;
@@ -289,6 +291,7 @@ beforeEach(() => {
 afterEach(() => {
   flushSync(() => root.unmount());
   container.remove();
+  delete document.documentElement.dataset.reducedMotion;
   resetLiveMedia();
   endCall();
   setCallMode("turns");

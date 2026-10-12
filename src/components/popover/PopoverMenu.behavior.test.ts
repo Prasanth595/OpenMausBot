@@ -245,6 +245,35 @@ describe("PopoverMenu in a document", () => {
     expect(sheet()).toBeNull();
   });
 
+  it("treats extra inside refs as inside: pressing them does not dismiss", async () => {
+    const opener = document.createElement("button");
+    opener.textContent = "…";
+    document.body.appendChild(opener);
+    const onOpenChange = vi.fn();
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [item("Usage")],
+          ariaLabel: "Row actions",
+          anchor: { kind: "point", x: 20, y: 20 },
+          open: true,
+          onOpenChange,
+          extraInsideRefs: [{ current: opener }],
+        }),
+      );
+    });
+    await flush();
+    await act(async () => {
+      opener.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    await act(async () => {
+      document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+    });
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    opener.remove();
+  });
+
   it("never opens from an inert trigger", async () => {
     await act(async () => {
       root.render(createElement(PopoverMenu, { items: [item("Usage")], ariaLabel: "More", trigger: () => "More", triggerDisabled: true }));

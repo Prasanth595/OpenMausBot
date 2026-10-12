@@ -97,7 +97,7 @@ import { CompactionChip, DigestChip } from "./DigestChip";
 import { RenameTitle } from "./RenameTitle";
 import { BotActivityPicker } from "./TaskPicker";
 import { ModelPicker } from "./ModelPicker";
-import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
+import { PopoverMenu, type PopoverMenuItem } from "./popover/PopoverMenu";
 import { ShortcutHint } from "./ShortcutHint";
 import {
   copyTranscriptToClipboard,
@@ -1759,7 +1759,7 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
   const hasMessages = messages.length > 0;
   const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
-  const items: SidebarMenuItem[] = [
+  const items: PopoverMenuItem[] = [
     {
       key: "find",
       label: t("chat.find"),
@@ -1795,7 +1795,7 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
       disabled: !advanced,
       trailing: <span title={usage.detail} data-testid="usage-chip" className={cn("tabular-nums text-[12px]", usage.tone === "danger" ? "text-danger" : usage.tone === "warning" ? "text-warning" : "text-ink-secondary")}>{usage.short}</span>,
       onSelect: () => dispatch({ type: "toggleSettings", open: true, section: "usage" }),
-    } satisfies SidebarMenuItem] : []),
+    } satisfies PopoverMenuItem] : []),
     ...(remoteClient ? [] : [{
       key: "activity",
       label: "Activity",
@@ -1803,7 +1803,7 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
       active: state.activityOpen,
       separatorBefore: !usage,
       onSelect: () => dispatch({ type: "toggleActivity" }),
-    } satisfies SidebarMenuItem, {
+    } satisfies PopoverMenuItem, {
       key: "inspector",
       label: t("chat.inspector"),
       icon: <Bug size={16} />,
@@ -1812,15 +1812,16 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
       heading: usage ? undefined : advancedOnly,
       disabled: !advanced,
       onSelect: () => dispatch({ type: "toggleInspector" }),
-    } satisfies SidebarMenuItem]),
+    } satisfies PopoverMenuItem]),
   ];
   return (
-    <SidebarPopoverMenu
+    <PopoverMenu
       items={items}
       ariaLabel={t("chat.more")}
-      openOnHover
       placement="below"
-      renderTrigger={({ open }) => (
+      align="end"
+      dismiss={{ leave: true }}
+      trigger={({ open }) => (
         <span
           data-testid="chat-more"
           className={cn(
