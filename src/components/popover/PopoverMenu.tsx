@@ -15,6 +15,7 @@ import { createPortal } from "react-dom";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
 import motionStyles from "./popover-motion.module.css";
+import styles from "./popover-menu.module.css";
 import { useHeldMenuMotion } from "../MenuMotion";
 import { Popover, setMenuHeightVars } from "./Popover";
 import {
@@ -115,14 +116,10 @@ function DefaultRow({
   onSubmenuHover?: (item: PopoverMenuItem, element: HTMLElement) => void;
   onSubmenuLeave?: () => void;
 }) {
+  // Row chrome lives in the module; only the state picks stay here.
   const defaultClass =
     variant === "styled"
-      ? cn(
-          "flex items-center gap-2 disabled:opacity-60 outline-none",
-          "w-full min-h-8 rounded-md px-3 py-2 text-sm leading-5 text-start",
-          "hover:bg-raised-hover focus-within:bg-raised-hover",
-          (item.active || (item.submenu && openSubmenu === item.key)) && "bg-raised-hover",
-        )
+      ? cn(styles.row, (item.active || (item.submenu && openSubmenu === item.key)) && styles.rowActive)
       : "";
   if (renderItem) {
     return (
@@ -148,34 +145,28 @@ function DefaultRow({
       {item.icon && (
         <span
           className={cn(
-            "flex size-5 shrink-0 items-center justify-center",
-            item.active ? "text-accent" : roomy ? "text-ink" : "text-ink-secondary",
+            styles.rowIcon,
+            item.active ? styles.rowIconActive : roomy ? styles.rowIconRoomy : undefined,
           )}
         >
           {item.icon}
         </span>
       )}
       {item.subtitle || item.note ? (
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate">{item.label}</span>
-          {item.subtitle && (
-            <span className="truncate text-[12px] font-normal leading-4 text-ink-secondary">{item.subtitle}</span>
-          )}
-          {item.note && (
-            <span className="text-[11.5px] font-normal leading-snug text-ink-tertiary">{item.note}</span>
-          )}
+        <span className={styles.rowMain}>
+          <span className={styles.rowTitle}>{item.label}</span>
+          {item.subtitle && <span className={styles.rowSubtitle}>{item.subtitle}</span>}
+          {item.note && <span className={styles.rowNote}>{item.note}</span>}
         </span>
       ) : (
-        <span className="flex-1 truncate">{item.label}</span>
+        <span className={styles.rowLabel}>{item.label}</span>
       )}
-      {item.value && (
-        <span className="shrink-0 text-[14px] font-normal leading-5 tabular-nums text-ink-secondary">{item.value}</span>
-      )}
+      {item.value && <span className={styles.rowValue}>{item.value}</span>}
       {item.trailing}
       {item.attention && (
-        <span className={cn("size-2 shrink-0 rounded-full", item.attentionTone === "accent" ? "bg-accent" : "bg-danger")} />
+        <span className={cn(styles.dot, item.attentionTone === "accent" ? styles.dotAccent : styles.dotDanger)} />
       )}
-      {item.submenu && <ChevronRight size={16} aria-hidden className="shrink-0 text-ink-secondary rtl:-scale-x-100" />}
+      {item.submenu && <ChevronRight size={16} aria-hidden className={styles.chev} />}
     </button>
   );
 }
@@ -206,13 +197,9 @@ function MenuRows({
       {items.map((item) => (
         <div key={item.key}>
           {item.separatorBefore && (
-            <div role="separator" className={cn("h-px bg-hairline/50", roomy ? "mx-3 my-1.5" : "my-1.5")} />
+            <div role="separator" className={cn(styles.separator, roomy && styles.separatorRoomy)} />
           )}
-          {item.heading && (
-            <div className="px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary">
-              {item.heading}
-            </div>
-          )}
+          {item.heading && <div className={styles.heading}>{item.heading}</div>}
           <DefaultRow
             item={item}
             roomy={roomy}
@@ -407,11 +394,8 @@ export function PopoverMenu({
   const roomy = placement !== "below";
   // The look lives on the animated outer shell (see Popover): the inner
   // layer is just padding plus the overflow gate the grow reveals.
-  const subShellClass =
-    variant === "styled"
-      ? "overflow-hidden border border-hairline/50 bg-menu shadow-xl rounded-md"
-      : "overflow-hidden";
-  const submenuInnerClass = variant === "styled" ? "overflow-x-hidden p-1" : "";
+  const subShellClass = variant === "styled" ? styles.subShell : styles.subShellBare;
+  const submenuInnerClass = variant === "styled" ? styles.subInner : "";
   const subMotionClass = !subMeasured ? "" : subMotion.closing ? motionStyles.menuOut : motionStyles.menuIn;
   const subClipClass = subMeasured ? (subMotion.closing ? motionStyles.menuClipOut : motionStyles.menuClipIn) : "";
 
@@ -441,7 +425,7 @@ export function PopoverMenu({
               }
             : undefined
         }
-        className={cn(subShellClass, !portal && "absolute start-full top-0 z-50 ms-1", subMotionClass, submenuClassName)}
+        className={cn(subShellClass, !portal && styles.subInline, subMotionClass, submenuClassName)}
       >
         <div
           ref={subInnerRef}

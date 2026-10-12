@@ -1,0 +1,52 @@
+/* Popover shell chrome. Every rule here is a plain Tailwind composition:
+   `@reference` pulls in the app's stylesheet for its `@theme` tokens
+   (menu, hairline, ink, …) without emitting any of its output, so `@apply`
+   below resolves exactly the same utilities the TSX used to spell out
+   inline. Menu rows and submenus live in popover-menu.module.css; motion
+   keyframes in popover-motion.module.css. This file is only the shell. */
+@reference "../../styles.css";
+
+/* The trigger-anchored wrapper Popover renders around its trigger button. */
+.root {
+  @apply relative;
+}
+
+/* Single-layer surface for the non-menu ("pop") motion. */
+.shell {
+  @apply overflow-hidden rounded-md border border-hairline/50 bg-menu p-1 shadow-xl;
+}
+
+/* Inline (non-portal) placements for the pop shell; each carries its own
+   stacking so callers never add a stray z-index. */
+.placeAbove {
+  @apply absolute start-0 bottom-full z-40 mb-1;
+}
+
+.placeBefore {
+  @apply absolute top-0 end-full z-40 me-1;
+}
+
+.placeAfter {
+  @apply absolute top-0 start-full z-40 ms-1;
+}
+
+.placeBelow {
+  @apply absolute top-full end-0 z-40 mt-1;
+}
+
+/* Menu motion outer shell: carries the whole look so its own shadow grows
+   with the animated box instead of being clipped by it. The bare variant is
+   only the overflow gate the height animation needs. */
+.menuShell {
+  @apply overflow-hidden rounded-md border border-hairline/50 bg-menu shadow-xl;
+}
+
+.menuShellBare {
+  @apply overflow-hidden;
+}
+
+/* Menu motion inner layer: padding plus the scroll container the grow
+   reveals. */
+.menuInner {
+  @apply overflow-x-hidden p-1;
+}

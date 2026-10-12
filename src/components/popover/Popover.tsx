@@ -16,6 +16,7 @@ import { cn } from "@/lib/cn";
 import { popoverClosesOnKey, popoverClosesOnPointer } from "@/hooks/use-popover-dismiss";
 import { useMenuMotion } from "../MenuMotion";
 import motionStyles from "./popover-motion.module.css";
+import styles from "./popover.module.css";
 import {
   CLOSE_DELAY_MS,
   EDGE_MARGIN,
@@ -296,18 +297,17 @@ export function Popover({
       : motion.className;
   const clipClass =
     isMenuMotion && measured ? (motion.closing ? motionStyles.menuClipOut : motionStyles.menuClipIn) : "";
-  const surfaceClass =
-    variant === "styled" ? "overflow-hidden border border-hairline/50 bg-menu shadow-xl rounded-md p-1" : "";
+  // Static chrome lives in the module; the class strings below only pick
+  // which module class applies. (The pop surface keeps its own name so the
+  // headless/pop distinction still reads at the call site.)
+  const surfaceClass = variant === "styled" ? styles.shell : "";
   // Menu motion puts the look on the animated outer shell so its shadow is
   // the box's own (an element's own shadow is never clipped by its own
   // overflow); the inner layer is just padding plus the scroll container the
   // grow reveals. A shadow left on the inner surface would be cut off by the
   // outer overflow gate, at rest as well as mid-motion.
-  const menuShellClass =
-    variant === "styled"
-      ? "overflow-hidden border border-hairline/50 bg-menu shadow-xl rounded-md"
-      : "overflow-hidden";
-  const menuInnerClass = variant === "styled" ? "overflow-x-hidden p-1" : "";
+  const menuShellClass = variant === "styled" ? styles.menuShell : styles.menuShellBare;
+  const menuInnerClass = variant === "styled" ? styles.menuInner : "";
 
   const contentStyle: CSSProperties | undefined = portal
     ? {
@@ -336,12 +336,12 @@ export function Popover({
 
   const inlinePlacementClass =
     placement === "above"
-      ? "absolute bottom-full mb-1 start-0"
+      ? styles.placeAbove
       : placement === "before"
-        ? "absolute end-full me-1 top-0"
+        ? styles.placeBefore
         : placement === "after"
-          ? "absolute start-full ms-1 top-0"
-          : "absolute top-full mt-1 end-0";
+          ? styles.placeAfter
+          : styles.placeBelow;
 
   const sheet = motion.shown && (
     <div
@@ -364,7 +364,6 @@ export function Popover({
       className={cn(
         isMenuMotion ? menuShellClass : surfaceClass,
         !portal && inlinePlacementClass,
-        !portal && "z-40",
         motionClass,
         !isMenuMotion && className,
       )}
@@ -389,7 +388,7 @@ export function Popover({
   return (
     <div
       ref={rootRef}
-      className="relative"
+      className={styles.root}
       onPointerEnter={hoverOpen}
       onPointerLeave={hoverClose}
       onFocus={() => {

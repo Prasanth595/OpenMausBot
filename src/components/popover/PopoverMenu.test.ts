@@ -15,6 +15,48 @@ vi.mock("@/hooks/use-popover-dismiss", () => ({
 vi.mock("./popover-motion.module.css", () => ({
   default: { menuIn: "menuIn", menuOut: "menuOut" },
 }));
+// Static chrome resolves to stable names too, so assertions only check that
+// a style hook is present, never what it computes to. Split per component
+// like the modules.
+vi.mock("./popover.module.css", () => ({
+  default: {
+    root: "root",
+    shell: "shell",
+    placeAbove: "placeAbove",
+    placeBefore: "placeBefore",
+    placeAfter: "placeAfter",
+    placeBelow: "placeBelow",
+    menuShell: "menuShell",
+    menuShellBare: "menuShellBare",
+    menuInner: "menuInner",
+  },
+}));
+vi.mock("./popover-menu.module.css", () => ({
+  default: {
+    subInline: "subInline",
+    subShell: "subShell",
+    subShellBare: "subShellBare",
+    subInner: "subInner",
+    row: "row",
+    rowActive: "rowActive",
+    rowIcon: "rowIcon",
+    rowIconRoomy: "rowIconRoomy",
+    rowIconActive: "rowIconActive",
+    rowMain: "rowMain",
+    rowTitle: "rowTitle",
+    rowSubtitle: "rowSubtitle",
+    rowNote: "rowNote",
+    rowLabel: "rowLabel",
+    rowValue: "rowValue",
+    dot: "dot",
+    dotAccent: "dotAccent",
+    dotDanger: "dotDanger",
+    chev: "chev",
+    separator: "separator",
+    separatorRoomy: "separatorRoomy",
+    heading: "heading",
+  },
+}));
 
 import { PopoverMenu, type PopoverMenuItem } from "./PopoverMenu";
 
@@ -46,7 +88,7 @@ it("draws an item's second line and note under its label", () => {
   ]);
   expect(html).toMatch(/Connect your phone<\/span><span[^>]*>to your Cloud \(always on\)<\/span>/);
   expect(html).toMatch(/to this computer<\/span><span[^>]*>Your Cloud shows here once it is ready\.<\/span>/);
-  expect(html).toContain('<span class="flex-1 truncate">Settings</span>');
+  expect(html).toContain('<span class="rowLabel">Settings</span>');
 });
 
 it("draws an item's attention dot on the item itself, in its tone", () => {
@@ -56,9 +98,9 @@ it("draws an item's attention dot on the item itself, in its tone", () => {
     { key: "plain", label: "Settings", onSelect: () => {} },
   ]);
   const item = (label: string) => html.split('role="menuitem"').find((chunk) => chunk.includes(`>${label}</span>`)) ?? "";
-  expect(item("Restart to update")).toContain("rounded-full bg-accent");
-  expect(item("Update failed")).toContain("rounded-full bg-danger");
-  expect(item("Settings")).not.toMatch(/rounded-full bg-(accent|danger)/);
+  expect(item("Restart to update")).toContain("dotAccent");
+  expect(item("Update failed")).toContain("dotDanger");
+  expect(item("Settings")).not.toMatch(/dotAccent|dotDanger/);
 });
 
 it("marks a submenu parent with a chevron and popup semantics", () => {
@@ -98,7 +140,7 @@ it("lets renderItem replace the row while staying keyboard-discoverable", () => 
   );
   expect(html).toContain('class="my-row"');
   expect(html).toContain('data-menu-key="custom"');
-  expect(html).not.toContain("min-h-8");
+  expect(html).not.toContain('class="row"');
 });
 
 it("headless variant carries no surface chrome", () => {

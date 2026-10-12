@@ -14,6 +14,47 @@ import { MENU_CLOSE_MS } from "../MenuMotion";
 vi.mock("./popover-motion.module.css", () => ({
   default: { menuIn: "menuIn", menuOut: "menuOut" },
 }));
+// Same for the static chrome: assertions only check that a style hook is
+// present, never what it computes to. Split per component like the modules.
+vi.mock("./popover.module.css", () => ({
+  default: {
+    root: "root",
+    shell: "shell",
+    placeAbove: "placeAbove",
+    placeBefore: "placeBefore",
+    placeAfter: "placeAfter",
+    placeBelow: "placeBelow",
+    menuShell: "menuShell",
+    menuShellBare: "menuShellBare",
+    menuInner: "menuInner",
+  },
+}));
+vi.mock("./popover-menu.module.css", () => ({
+  default: {
+    subInline: "subInline",
+    subShell: "subShell",
+    subShellBare: "subShellBare",
+    subInner: "subInner",
+    row: "row",
+    rowActive: "rowActive",
+    rowIcon: "rowIcon",
+    rowIconRoomy: "rowIconRoomy",
+    rowIconActive: "rowIconActive",
+    rowMain: "rowMain",
+    rowTitle: "rowTitle",
+    rowSubtitle: "rowSubtitle",
+    rowNote: "rowNote",
+    rowLabel: "rowLabel",
+    rowValue: "rowValue",
+    dot: "dot",
+    dotAccent: "dotAccent",
+    dotDanger: "dotDanger",
+    chev: "chev",
+    separator: "separator",
+    separatorRoomy: "separatorRoomy",
+    heading: "heading",
+  },
+}));
 
 describe("PopoverMenu in a document", () => {
   let host: HTMLDivElement;
@@ -74,7 +115,7 @@ describe("PopoverMenu in a document", () => {
     )!;
     expect(support.getAttribute("aria-haspopup")).toBe("menu");
     expect(support.querySelector("svg")).not.toBeNull();
-    expect(menu.querySelector('[role="menuitem"]')!.className).toContain("min-h-8");
+    expect(menu.querySelector('[role="menuitem"]')!.className).toContain("row");
     // Open state maps to the container enter motion.
     expect(surface.className).toContain("menuIn");
   });

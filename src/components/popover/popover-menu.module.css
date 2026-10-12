@@ -1,0 +1,105 @@
+/* PopoverMenu chrome: submenu sheets, rows and item furniture. Every rule
+   here is a plain Tailwind composition: `@reference` pulls in the app's
+   stylesheet for its `@theme` tokens (menu, hairline, ink, …) without
+   emitting any of its output, so `@apply` below resolves exactly the same
+   utilities the TSX used to spell out inline. The outer shell layers live in
+   popover.module.css; motion keyframes in popover-motion.module.css. */
+@reference "../../styles.css";
+
+/* Non-portal submenu beside its parent row. */
+.subInline {
+  @apply absolute start-full top-0 z-50 ms-1;
+}
+
+/* Submenu layers mirror the main menu split: look outside, padding inside. */
+.subShell {
+  @apply overflow-hidden rounded-md border border-hairline/50 bg-menu shadow-xl;
+}
+
+.subShellBare {
+  @apply overflow-hidden;
+}
+
+.subInner {
+  @apply overflow-x-hidden p-1;
+}
+
+/* A menu row button. Hover, keyboard focus-within and the active/submenu-open
+   state all share one fill, so they compose as separate classes. */
+.row {
+  @apply flex min-h-8 w-full items-center gap-2 rounded-md px-3 py-2 text-start text-sm leading-5 outline-none hover:bg-raised-hover focus-within:bg-raised-hover disabled:opacity-60;
+}
+
+.rowActive {
+  @apply bg-raised-hover;
+}
+
+/* Row icon tone: the default is the quiet tone; roomy menus and the active
+   row speak up. Source order decides, so modifiers come after the base. */
+.rowIcon {
+  @apply flex size-5 shrink-0 items-center justify-center text-ink-secondary;
+}
+
+.rowIconRoomy {
+  @apply text-ink;
+}
+
+.rowIconActive {
+  @apply text-accent;
+}
+
+/* Two-line rows stack their label over a subtitle and/or note. */
+.rowMain {
+  @apply flex min-w-0 flex-1 flex-col;
+}
+
+.rowTitle {
+  @apply truncate;
+}
+
+.rowSubtitle {
+  @apply truncate text-[12px] font-normal leading-4 text-ink-secondary;
+}
+
+.rowNote {
+  @apply text-[11.5px] font-normal leading-snug text-ink-tertiary;
+}
+
+/* Single-line rows let the label take the free space itself. */
+.rowLabel {
+  @apply flex-1 truncate;
+}
+
+.rowValue {
+  @apply shrink-0 text-[14px] font-normal tabular-nums leading-5 text-ink-secondary;
+}
+
+/* Update/status dot: the base carries the shape, the tone its fill. */
+.dot {
+  @apply size-2 shrink-0 rounded-full;
+}
+
+.dotAccent {
+  @apply bg-accent;
+}
+
+.dotDanger {
+  @apply bg-danger;
+}
+
+/* Submenu chevron flips with the document direction like the menus do. */
+.chev {
+  @apply shrink-0 text-ink-secondary rtl:-scale-x-100;
+}
+
+.separator {
+  @apply my-1.5 h-px bg-hairline/50;
+}
+
+.separatorRoomy {
+  @apply mx-3;
+}
+
+.heading {
+  @apply px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary;
+}
