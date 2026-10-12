@@ -123,7 +123,13 @@ describe("the anchored menu in a document", () => {
     const support = [...menu.querySelectorAll('[role="menuitem"]')].find((node) => node.textContent?.includes("Help and support"))!;
     expect(support.getAttribute("aria-haspopup")).toBe("menu");
     expect(support.querySelector("svg")).not.toBeNull();
-    expect(menu.querySelector('[role="menuitem"]')!.className).toContain("text-[15px]");
+    const rowClass = menu.querySelector('[role="menuitem"]')!.className;
+    expect(rowClass).toContain("text-sm");
+    expect(rowClass).toContain("min-h-8");
+    expect(rowClass).toContain("rounded-md");
+    expect(rowClass).toContain("hover:bg-raised-hover");
+    expect(menu.className).toContain("rounded-md");
+    expect(menu.className).toContain("shadow-xl");
   });
 
   it("opens from the keyboard on the first item and walks the items", async () => {

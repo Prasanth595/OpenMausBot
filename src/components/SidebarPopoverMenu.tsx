@@ -151,11 +151,10 @@ function MenuRows({
               else onSubmenuLeave?.();
             }}
             className={cn(
-              "flex w-full items-center text-start disabled:opacity-60 focus-visible:outline-none",
-              roomy
-                ? "min-h-10 gap-3 rounded-lg px-3 py-2 text-[15px] font-medium leading-5 focus-visible:bg-raised/70"
-                : "gap-3 px-3.5 py-2 text-[14px] focus-visible:bg-raised/70",
-              item.active || (item.submenu && openSubmenu === item.key) ? "bg-raised text-ink" : "text-ink hover:bg-raised/70",
+              "flex items-center gap-2 disabled:opacity-60 outline-none",
+              "w-full min-h-8 rounded-md px-3 py-2 text-sm leading-5 text-start",
+              "hover:bg-raised-hover focus-within:bg-raised-hover",
+              item.active || (item.submenu && openSubmenu === item.key) && "bg-raised-hover",
             )}
           >
             {item.icon && (
@@ -356,8 +355,7 @@ export function SidebarPopoverMenu({
   const openItem = submenu ? items.find((item) => item.key === submenu) : undefined;
   const roomy = anchored;
   const sheetClass = cn(
-    "overflow-hidden border border-hairline/50 bg-menu shadow-2xl shadow-black/50",
-    roomy ? "rounded-2xl p-1.5" : "rounded-xl py-1.5",
+    "overflow-hidden border border-hairline/50 bg-menu shadow-xl rounded-md p-1",
   );
 
   const sheet = motion.shown && (
