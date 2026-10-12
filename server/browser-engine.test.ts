@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   agentBrowserFrame,
   agentBrowserIntegration,
+  agentBrowserQuery,
   browserEngineEncryptionKey,
   cachedAgentBrowserVersion,
   pendingAgentBrowserVersionProbe,
@@ -704,6 +705,81 @@ describe("what a bot gets", () => {
   });
 });
 
+
+describe("agentBrowserQuery", () => {
+  /** A real Node child stands in for the engine, as in agentBrowserFrame below. */
+  async function fakeBinary(body: string): Promise<string> {
+    const actual = await vi.importActual<typeof import("node:child_process")>("node:child_process");
+    vi.mocked(spawn).mockImplementationOnce((_binary, args, options) => {
+      expect(_binary).toBe("fixture-agent-browser");
+      return actual.spawn(process.execPath, ["-e", body, ...args ?? []], options);
+    });
+    return "fixture-agent-browser";
+  }
+
+  it("returns the engine's data for the mount's own session, asking for JSON", async () => {
+    const binaryPath = await fakeBinary('process.stdout.write(JSON.stringify({ success: true, data: { args: process.argv.slice(1), session: process.env.AGENT_BROWSER_SESSION }, error: null }))');
+    await expect(agentBrowserQuery({ binaryPath, env: { AGENT_BROWSER_SESSION: "profile-x" }, args: ["get", "box", "@e4"] }))
+      .resolves.toEqual({ ok: true, data: { args: ["get", "box", "@e4", "--json"], session: "profile-x" } });
+  });
+
+  // A script for the page goes in on the engine's input. As a command-line
+  // argument it is bounded by the longest command line Windows will start.
+  it("hands the engine its input, whole, and leaves it off the command line", async () => {
+    const script = `(() => "${"é".repeat(40_000)}")()`;
+    const binaryPath = await fakeBinary(`
+      let input = "";
+      process.stdin.setEncoding("utf8");
+      process.stdin.on("data", (chunk) => { input += chunk; });
+      process.stdin.on("end", () => process.stdout.write(JSON.stringify({ success: true, data: { args: process.argv.slice(1), length: input.length, tail: input.slice(-6) }, error: null })));
+    `);
+    await expect(agentBrowserQuery({ binaryPath, env: {}, args: ["eval", "--stdin"], stdin: script }))
+      .resolves.toEqual({ ok: true, data: { args: ["eval", "--stdin", "--json"], length: script.length, tail: 'éé")()' } });
+  });
+
+  it("still answers when the engine goes away without reading its input", async () => {
+    const binaryPath = await fakeBinary('process.stdin.destroy(); process.stdout.write(JSON.stringify({ success: false, data: null, error: "Unknown flag: --stdin" })); process.exitCode = 1');
+    await expect(agentBrowserQuery({ binaryPath, env: {}, args: ["eval", "--stdin"], stdin: "x".repeat(2_000_000) })).resolves.toEqual({ ok: false, error: "Unknown flag: --stdin" });
+  });
+
+  it("reports the engine's own refusal, such as a ref the page no longer has", async () => {
+    const binaryPath = await fakeBinary('process.stdout.write(JSON.stringify({ success: false, data: null, error: "Unknown ref: e4" })); process.exitCode = 1');
+    await expect(agentBrowserQuery({ binaryPath, env: {}, args: ["get", "box", "@e4"] })).resolves.toEqual({ ok: false, error: "Unknown ref: e4" });
+  });
+
+  // A pipe hands the answer over in pieces, cut at any byte. Decoded piece
+  // by piece, a character cut in two became two replacement characters, and
+  // a field value that read differently the second time voided an approval
+  // as "page changed".
+  it("reads a character whose bytes arrive in two pieces as that character", async () => {
+    const value = "naïve — 日本語 😀 café";
+    const binaryPath = await fakeBinary(`
+      const bytes = Buffer.from(JSON.stringify({ success: true, data: { result: ${JSON.stringify(value)} }, error: null }));
+      // One byte at a time, each in its own write: every multi-byte character is split.
+      let at = 0;
+      const next = () => { if (at >= bytes.length) return; process.stdout.write(bytes.subarray(at, at + 1), () => { at += 1; setImmediate(next); }); };
+      next();
+    `);
+    await expect(agentBrowserQuery({ binaryPath, env: {}, args: ["eval", "-b", "e30="] })).resolves.toEqual({ ok: true, data: { result: value } });
+  });
+
+  it("stops reading an answer past its size limit and calls it unreadable, never a cut-off one", async () => {
+    const binaryPath = await fakeBinary('process.stdout.write(JSON.stringify({ success: true, data: { result: "x".repeat(5_000_000) }, error: null }))');
+    await expect(agentBrowserQuery({ binaryPath, env: {}, args: ["eval", "-b", "e30="] })).resolves.toEqual({ ok: false, error: "the browser gave no readable answer" });
+  });
+
+  it("never rejects: a silent, garbled or hung engine is an answer too", async () => {
+    await expect(agentBrowserQuery({ binaryPath: await fakeBinary("process.exitCode = 0"), env: {}, args: ["get", "url"] }))
+      .resolves.toEqual({ ok: false, error: "the browser gave no readable answer" });
+    await expect(agentBrowserQuery({ binaryPath: await fakeBinary('process.stdout.write(JSON.stringify({ success: true, data: [1] }))'), env: {}, args: ["get", "url"] }))
+      .resolves.toEqual({ ok: false, error: "the browser refused the request" });
+    await expect(agentBrowserQuery({ binaryPath: await fakeBinary("setTimeout(() => {}, 5000)"), env: {}, args: ["get", "url"], timeoutMs: 150 }))
+      .resolves.toEqual({ ok: false, error: "the browser did not answer in time" });
+    vi.mocked(spawn).mockImplementationOnce(() => { throw new Error("ENOENT"); });
+    await expect(agentBrowserQuery({ binaryPath: "missing", env: {}, args: ["get", "url"] }))
+      .resolves.toEqual({ ok: false, error: "the browser engine could not start" });
+  });
+});
 
 describe("agentBrowserFrame", () => {
   /** Use a real Node child on every OS, not an unlaunchable Windows shebang.

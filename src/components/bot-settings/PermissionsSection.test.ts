@@ -7,6 +7,8 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot } from "@/state/store";
+import { setLocale } from "@/lib/i18n";
+import { locales } from "@/locales";
 
 vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => false }));
 
@@ -47,6 +49,7 @@ const dialogs = () => document.querySelectorAll('[role="alertdialog"], [role="di
 
 beforeEach(() => {
   dispatch.mockReset();
+  setLocale("en");
   vi.stubGlobal("fetch", () => new Promise(() => {}));
   host = document.createElement("div");
   document.body.append(host);
@@ -56,9 +59,19 @@ afterEach(() => {
   flushSync(() => root.unmount());
   host.remove();
   vi.unstubAllGlobals();
+  setLocale("en");
+  delete locales["fixture"];
 });
 
 describe("Full access in bot settings", () => {
+  it("uses the catalog for the browser and connected-app sending policy", () => {
+    locales["fixture"] = { "botSettings.outbound.description": "Fixture translated browser sending policy" };
+    setLocale("fixture");
+    render(base);
+    expect(host.textContent).toContain("Fixture translated browser sending policy");
+    expect(host.textContent).not.toContain("Emails, messages, posts, invites, and payments");
+  });
+
   it.each([false, true])("applies to the bot and every thread at once, with no dialog (desktop bridge: %s)", (bridge) => {
     render(base, bridge);
     choose("Full access");

@@ -38,7 +38,7 @@ Stagehand, browser-use, browserless, Lightpanda) is summarised at the end.
 ## Shape
 
 ```
-bot turn → scoped OMB MCP proxy → profile control gate → agent-browser MCP → Chrome
+bot turn → scoped OMB MCP proxy → commit gate → profile control gate → agent-browser MCP → Chrome
 owner UI ← authenticated SSE ← OMB ← loopback WebSocket frames ← agent-browser
 owner UI → authenticated POST → control gate → acknowledged native input → Chrome
 ```
@@ -115,6 +115,155 @@ capability. Native session identity and encryption keys stay in the server.
 See [the native verification recipe](../verification/browser-live.md).
 Recording's `--fps 60` is separate from live streaming and needs ffmpeg;
 recording controls are intentionally not added to the live browser chrome.
+
+### 3a. Commit hold and gate owners — implemented
+
+- `BrowserRuntime`'s gate has owner kinds. A **person** (the Browser panel)
+  pauses every bot call and the transcript captures. A **hold** pauses only
+  the bot's actions: reads and captures go on, one hold per session, and a
+  person can still take the browser while it waits. The login vault will add
+  a third kind.
+- After a person who touched the page hands the browser back, the next bot
+  tool result for that session starts with one line telling it to re-read
+  the page. A restart clears it.
+- `server/browser-commit-gate.ts` sits in the browser MCP route ahead of
+  `BrowserRuntime.agentRpc`. For a click, a check, an uncheck, a select, an
+  Enter or Space press, or text typed with a line break, the server reads
+  the target itself (`server/browser-commit-page.ts`): `get box` for the
+  bot's selector, then a fixed script that describes the element in that box
+  (in the page, in an open shadow root, or in a frame of its own origin) and
+  its form or region.
+  Rules in `shared/browser-commit.ts` decide. Only for a commitment does a
+  second fixed script read the evidence (fields, the text around the
+  element, hashes of what the approval is bound to), then `get url`. Both
+  scripts share one prelude and go to the engine on its input (`eval
+  --stdin`), never on its command line, so their length is not bounded by
+  the longest command line Windows will start. A
+  commitment waits on the card and counter that connected-app sends use;
+  the approval is bound to a digest of the address, the element's identity
+  (its path in the document and a hash of its tag and the attributes that
+  say what it does), the text around it with relative times evened out, the
+  listed fields at full length, and the page's own salted hash of every
+  control of the form or region, hidden ones and frame bodies included.
+  After two voids in a row the next card is bound to less (the address, the
+  label and the controls) and says so. A
+  reload after a commitment is held the same way, for as long as the
+  session lives; the flag is in memory, because no per-session state
+  survives a restart. The gate's header comment lists every browser tool
+  and why it can or cannot commit. User-facing behaviour is in
+  [approval levels](../approval-levels.md#sending-on-your-behalf-and-spending-money).
+- Values a card must not carry (passwords, card fields, codes, PINs, card
+  numbers by the Luhn check) are counted in the page and only their length
+  is returned. A page that shows one is not screenshotted. Hold screenshots
+  are listed in `browser-hold-shots.json` under the data directory and any
+  left listed are deleted at server start (`server/browser-commit-shots.ts`).
+- Frames: `<iframe>`, `<frame>`, `<object>` and `<embed>`. One of the
+  page's own origin is read like the page, for clicks and for the focus.
+  A call that would act inside a frame the script cannot read (Enter or
+  Space with the focus in it, a click or typed text aimed at the frame
+  element) is refused, and so is Enter or Space with the focus inside a
+  closed shadow root. The engine measures an in-frame element from the
+  frame's own corner, so a ref click is judged both as the element read in
+  that box and as the element the snapshot named. When the box is found
+  nowhere and the page has a frame recognised as a payment frame, a
+  button-like ref is money; when it matched an element the snapshot names
+  differently and it starts within a payment frame's own size, likewise.
+- Payment frames, by what a frame calls itself (title, name, id, label).
+  One that speaks of a card, a payment or a checkout is a card signal for
+  the region around it. One that calls itself a wallet or pay-later brand
+  and nothing of paying besides is that brand's frame: only a click inside
+  it is money. A word in a frame's address decides nothing, except through
+  two short lists of known addresses: processors' hosted card fields (a
+  card signal) and brands' buttons (a brand's frame). Each entry is matched
+  against the host, and the path where it has one, of the frame's address
+  as a browser parses it.
+- Enter in a form's field is judged by the form's first submit control
+  whatever its enabled state: a page can enable the button between the
+  gate's read and its key press. That read-then-press gap remains for
+  anything that is not a form's submit control.
+- The runtime's own page read around an action (`OBSERVE_PAGE_SCRIPT`,
+  "what an action changed") runs inside `agentRpc`, so it runs for every
+  call the gate sends (the typed text, the separate Enter, an approved
+  click) and for none it holds or refuses: the gate calls `agentRpc` only
+  to send. The read before the action sits in the read-then-press gap
+  (about 25 ms on agent-browser 0.37.0). After it, `agentRpc` asks the
+  route again and checks the session's gate: a call whose request closed,
+  a person at the browser, or a commit hold that began meanwhile, and the
+  action is not sent. No action reaches the engine under a hold.
+- A call the engine lost (`latchLostCall`): `agentRpc` answers the next
+  call itself (`answerInterrupted`) and does not run it. The gate asks
+  `answerInterrupted` first for every call it judges, and again when its
+  first look is refused part-way, because its own reads go through
+  `withAgentAction` and are refused while the browser is uncertain. An
+  Allow given in that state reads nothing and sends nothing. The ref table
+  is in doubt from a lost call until the next snapshot that comes back
+  (`refsStale`): the engine numbers its refs anew with every snapshot, seen
+  or not, so the gate refuses a judged call by ref until then. A snapshot's
+  table is recorded before the route is asked again, so one whose caller
+  was gone by the time it answered still updates it. Measured on 0.37.0:
+  every snapshot that succeeds carries its ref table, empty on a page with
+  nothing to name.
+- A card region is a form, or for a control with no form the nearest
+  dialog or landmark around it (the page when there is none), that holds a
+  `cc-*` autofill hint, or a card-number field beside a security-code or
+  expiry field by name, or a Luhn-valid value with a card scheme's prefix
+  or beside one of those names, or a payment frame as above. Fields in
+  open shadow roots count. Any button-like control there is money, by
+  click, Enter or Space; so is an option, a tab or a switch. A search
+  skips the send rules only: a money label on its button, or a card region
+  around it, still holds.
+- A link clicked by a ref the snapshot calls a link, that would be held for
+  the snapshot's name, is checked against the engine's own word: `get attr
+  <ref> href`. The ref table carries no addresses even with `includeUrls`,
+  and the snapshot text that does can be forged by a page. An address that
+  goes to another document, or a `#/` route, makes it a plain link.
+- Typed text with line breaks. The engine presses Enter for each line feed
+  and carriage return, and cannot always give a field the focus (a modal in
+  front, a disabled group, an inert or hidden parent): then the text and
+  the Enter go to the current focus. And what Enter does at a field can
+  change once the text is in (a button disabled until then). So text and
+  its Enter never reach the engine in one call. The gate types what lies
+  before a line break, reads the page afresh, and judges and presses the
+  Enter as a step of its own when the field has the focus; a field the read
+  says cannot take the focus gets nothing. Several lines run only into a
+  focused multi-line field that is no composer, an Enter at a time, and
+  stop at the first that is not a plain new line. A tab stays refused.
+- A link's address is read as a browser reads it (tabs and line breaks
+  dropped, leading control characters and spaces); `javascript:`, `data:`
+  and `vbscript:` are no plain links.
+- A multi-line field is the only text field of its form or region when no
+  other counts: search fields, and fields in a header, navigation, footer
+  or sidebar the field is not itself in, do not.
+- The hold is a guard with stated limits, tuned to pass ordinary browsing:
+  a plain link is never a commitment by its text; a form with a multi-line
+  field and a harmless label, a sign-in form, and "Apply" where nothing is
+  attached are not sends; on an English page a form with a multi-line field
+  and a label on neither list passes (the unknown-label rule is for pages
+  that declare another language, and labels with other letters or none);
+  Enter in a multi-line field is a new line unless
+  the field is a message composer. `server/browser-commit-ordinary.test.ts`
+  is the table of ordinary operations and the outcome each must have, run
+  through the real reader and gate. A request-level check on payments is
+  planned as separate work; until then a payment behind a neutral label on
+  a page with no card signal is not held.
+- The page script reads elements through the accessors on their prototype
+  chain, because a form control named `tagName` or `elements` shadows the
+  form's own property of that name.
+- The proxy's per-call limit for the browser is the hold window plus a
+  margin, capped by `mcp.callTimeoutMinutes` (`OMB_MCP_CALL_TIMEOUT_MS`).
+  The proxy relays with `node:http`, not `fetch`: Node's fetch drops a
+  response whose headers have not arrived in 300 seconds, which cut a
+  nine-minute hold at five. Each call has its own connection. On
+  `notifications/cancelled` the proxy closes the cancelled call's
+  connection, and the route ends the hold behind it.
+- A hold is released in a `finally`: whatever fails after the browser was
+  taken, the browser is free again, the request is forgotten, the
+  screenshot is deleted and the card is closed as unavailable.
+- Not verified on Windows: the gate's reads use `get box`, `get url`, `get
+  attr` and `eval --stdin` from the engine CLI, checked on 0.37.0. The Windows pin is
+  `0.36.0-omb.1`. Run the [commit hold recipe](../verification/browser-commit-hold.md)
+  there before a Windows release. If a read fails, the click is refused, not
+  let through.
 
 ### 4. Tool-name adapter — dropped
 

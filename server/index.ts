@@ -475,9 +475,13 @@ import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import { BrowserRuntime, browserRuntimeEnv } from "./browser-runtime.ts";
 import { BrowserLive } from "./browser-live.ts";
+import { BrowserCommitGate, browserCallTimeoutMs, cardWithoutPicture } from "./browser-commit-gate.ts";
+import { HoldShots } from "./browser-commit-shots.ts";
+import { browserPageReader } from "./browser-commit-page.ts";
 import {
   agentBrowserFrame,
   agentBrowserIntegration,
+  agentBrowserQuery,
   browserEngineEncryptionKey,
   prepareBrowserSessionState,
   clearBrowserSessionState,
@@ -513,6 +517,7 @@ import { describeTool, readBotActivity } from "./activity.ts";
 import { OutboundCounts } from "./outbound-counts.ts";
 import { OutboundRequestService } from "./outbound-requests.ts";
 import { DEFAULT_OUTBOUND_POLICY, connectorCallsIn, normalizeOutboundPolicy, outboundCallsIn } from "../shared/outbound.ts";
+import { commitRule } from "../shared/browser-commit.ts";
 import { connectorAccessDecision, describeConnectorScopes, normalizeConnectorScopes } from "../shared/connector-scopes.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
 import { listenWebhookIngress, webhookCredential, type WebhookIngress } from "./webhook-ingress.ts";
@@ -3182,6 +3187,8 @@ async function browserIntegration(botId: string, profile: string | undefined, tu
   return { profile: partitionId, session, spec, integration: {
     command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, "browser"], env: {
       ...AGENTS_NODE_FLAG, OMB_MCP_TOKEN: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+      // A browser call can wait on a commit hold; the proxy must outlast it.
+      OMB_MCP_CALL_TIMEOUT_MS: String(browserCallTimeoutMs(OUTBOUND_HOLD_MS, mcpCallTimeoutMinutes(cfg) * 60_000)),
     },
   } };
 }
@@ -8812,7 +8819,7 @@ function showWaitingOnPersonChip(threadId: string, requestId: string, asker: Bot
 /** Settle the chip for one resolved card with what actually happened to it
  * (waiting-on-person.ts), or every chip for this thread once its turn ends:
  * a card nobody answered by then closed unanswered, and its step never ran. */
-function settleWaitingOnPersonChips(threadId: string, resolved?: Extract<RuntimeEvent, { type: "request.resolved" }>) {
+function settleWaitingOnPersonChips(threadId: string, resolved?: Pick<Extract<RuntimeEvent, { type: "request.resolved" }>, "requestId" | "behavior" | "source">) {
   for (const [key, chip] of waitingOnPersonChips) {
     if (resolved ? key !== `${threadId}:${resolved.requestId}` : !key.startsWith(`${threadId}:`)) continue;
     waitingOnPersonChips.delete(key);
@@ -11052,6 +11059,7 @@ async function startTurn(
           browserCapture = async () => {
             const owner = turnResourceOwners.get(threadId);
             if (!owner || !claimTurnResource(owner, `browser:${session}`)) throw new Error("another thread is using this browser");
+            // A read: a pending commit hold pauses the bot's actions, not its picture.
             return browserRuntime.previewFrame(session, () => agentBrowserFrame(frame));
           };
         }
@@ -12214,6 +12222,63 @@ const teamMemory = new TeamMemory(join(DATA_DIR, "team-memory.json"));
 const outboundRequests = new OutboundRequestService();
 const outboundCounts = new OutboundCounts(join(DATA_DIR, "outbound-counts.json"));
 const OUTBOUND_HOLD_MS = 9 * 60_000;
+/** The screenshots open commit cards show. One left listed by a server that
+ * stopped mid-hold is deleted here, at the next start. */
+const browserHoldShots = new HoldShots(join(DATA_DIR, "browser-hold-shots.json"), ATTACHMENTS_DIR, deleteAttachment);
+browserHoldShots.sweep();
+/** Browser clicks that send or pay wait on the same cards, for the same
+ * window, and spend the same daily allowance as connected-app sends. */
+const browserCommitGate = new BrowserCommitGate({
+  runtime: browserRuntime,
+  requests: outboundRequests,
+  counts: outboundCounts,
+  holdMs: OUTBOUND_HOLD_MS,
+  policy: (botId) => {
+    const bot = store.bot(botId);
+    return bot ? bot.outbound ?? DEFAULT_OUTBOUND_POLICY : null;
+  },
+  post: ({ botId, threadId, card }) => {
+    const bot = store.bot(botId);
+    if (!bot) throw new Error("this bot no longer exists");
+    const owner = connectorThread(botId, threadId);
+    const message = store.appendMessage(threadId, {
+      role: "bot",
+      kind: "options",
+      ...(owner?.group ? { from: { botId: bot.id, name: bot.name, color: bot.color } } : {}),
+      card,
+    });
+    if (owner?.group) {
+      if (activeGroupTurnForBot(bot.id)?.threadId === threadId) store.setActivity(bot.id, "waiting-on-you");
+    } else if (store.taskByThread(bot.id, threadId)?.busy) {
+      store.setTaskActivity(bot.id, threadId, "waiting-on-you");
+    }
+    if (card.requestId) showWaitingOnPersonChip(threadId, card.requestId, bot, "approval");
+    notify(buildNotification("approval", bot, threadId, card.subtitle, { avatarUrl: bot.avatarUrl }));
+    return message.id;
+  },
+  patch: (threadId, messageId, change) => {
+    const message = store.messagesFor(threadId).find((candidate) => candidate.id === messageId);
+    if (!message?.card) return;
+    const card = change(message.card);
+    store.patchMessage(threadId, messageId, { card });
+    if (card.requestId && (card.answered || card.dismissed)) {
+      settleWaitingOnPersonChips(threadId, {
+        requestId: card.requestId,
+        behavior: card.answered === "allow" ? "allow" : "deny",
+        source: card.answered === "allow" || card.answered === "deny" ? "user" : "system",
+      });
+    }
+  },
+  resume: (botId, threadId) => {
+    if (connectorThread(botId, threadId)?.group) {
+      if (activeGroupTurnForBot(botId)?.threadId === threadId && store.bot(botId)?.activity === "waiting-on-you") store.setActivity(botId, "working");
+    } else if (store.taskByThread(botId, threadId)?.activity === "waiting-on-you") {
+      store.setTaskActivity(botId, threadId, "working");
+    }
+  },
+  log: (row) => appendDecision(DATA_DIR, row),
+  dropShot: (path) => browserHoldShots.drop(path),
+});
 
 function resolveAndSendTrust(res: ServerResponse, threadId: string, requestId: string, behavior: "allow" | "deny" | "answer"): boolean {
   const teamMemoryCard = store.messagesFor(threadId).find(
@@ -12256,7 +12321,7 @@ function resolveAndSendTrust(res: ServerResponse, threadId: string, requestId: s
       // relay that was waiting on it, so close it rather than leave an
       // approval nobody can deliver owning the composer.
       if (!outboundCard.card.answered) {
-        store.patchMessage(threadId, outboundCard.id, { card: { ...outboundCard.card, answered: "unavailable", dismissed: true } });
+        store.patchMessage(threadId, outboundCard.id, { card: { ...cardWithoutPicture(outboundCard.card), answered: "unavailable", dismissed: true } });
       }
       json(res, 200, { ok: true, outcome: "unavailable" });
       return true;
@@ -12272,6 +12337,7 @@ function resolveAndSendTrust(res: ServerResponse, threadId: string, requestId: s
       threadId, requestId, botId: outboundBot?.id, botName: outboundBot?.name,
       tool: outboundCard.card.tool, summary: outboundCard.card.subtitle,
       decision: result.state === "allowed" ? "user-approved" : "user-denied", source: "user",
+      ...(outboundCard.card.browserCommit ? { rule: commitRule(outboundCard.card.browserCommit.class) } : {}),
     });
     json(res, 200, { ok: true, outcome: result.state === "allowed" ? "allowed-once" : "rejected" });
     return true;
@@ -17279,7 +17345,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         if (body?.method !== "tools/list" && body?.method !== "tools/call") {
           return json(res, 400, { error: "unsupported browser method" });
         }
-        const result = await browserRuntime.agentRpc(browser.session, browser.spec, body.method, body.params, () => {
+        const admit = () => {
           requireActiveInternalCapability();
           const current = store.bot(bot.id);
           if (!current || current.browser === false || current.computer === "off" || !builtInBrowserEnabled(cfg) ||
@@ -17289,7 +17355,45 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           if (body.method === "tools/call" && !claimTurnResource(internalCapability, `browser:${browser.session}`)) {
             throw Object.assign(new Error("another thread is using this browser — pause browser work until that thread finishes"), { status: 409 });
           }
-        });
+        };
+        // The bot's request closed before it was answered: its engine
+        // cancelled the call or is gone, and nobody is waiting for it.
+        const abort = new AbortController();
+        res.once("close", () => { if (!res.writableEnded) abort.abort(); });
+        // The runtime asks this at each step of a call on its way to the
+        // engine. A call nobody is waiting for takes no further step: an
+        // approved click is asked for the last time after the runtime has
+        // read the page ahead of it, just before the click itself.
+        const waited = () => {
+          admit();
+          if (abort.signal.aborted) throw Object.assign(new Error("The browser call was cancelled."), { status: 499 });
+        };
+        const dispatch = (params: unknown = body.params, holdId?: string) => browserRuntime.agentRpc(browser.session, browser.spec, body.method, params, body.method === "tools/call" ? waited : admit, holdId);
+        let result: unknown;
+        if (body.method === "tools/call") {
+          // ── the commit hold ──
+          // A click or an Enter press that would send something or spend
+          // money waits for the person here, inside the request, the way an
+          // outbound connector call does. Every other call relays untouched.
+          const engine = { binaryPath: browser.spec.command, env: browser.spec.env };
+          result = await browserCommitGate.guard({
+            botId: bot.id,
+            botName: bot.name,
+            threadId: internalCapability.threadId,
+            session: browser.session,
+            params: body.params,
+            page: browserPageReader((args, stdin) => agentBrowserQuery({ ...engine, args, stdin })),
+            shot: async () => {
+              const frame = await browserRuntime.withAgentAction(browser.session, () => agentBrowserFrame(engine), "read");
+              return browserHoldShots.keep(saveImage(Buffer.from(frame.png, "base64"), "image/jpeg").path);
+            },
+            admit,
+            recover: () => browserRuntime.answerInterrupted(browser.session, browser.spec, waited),
+            active: () => internalCapabilityIsActive(internalCapability),
+            signal: abort.signal,
+            dispatch,
+          });
+        } else result = await dispatch();
         requireActiveInternalCapability();
         return json(res, 200, { result });
       }

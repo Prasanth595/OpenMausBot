@@ -221,8 +221,7 @@ function OutboundControl({ bot, onChange }: { bot: Bot; onChange: (policy: Outbo
     <div className="rounded-xl bg-card p-4">
       <div className="text-[15px] font-medium text-ink">Sending on your behalf</div>
       <div className="mt-0.5 text-[13px] text-ink-secondary">
-        Emails, messages, posts, invites, and payments through connected apps. Reading and drafting never count.
-        This applies at every approval level, including Full access.
+        {t("botSettings.outbound.description")}
       </div>
       <div className="mt-3 flex gap-1 rounded-lg bg-inset p-0.5">
         {(

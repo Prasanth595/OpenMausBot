@@ -3,6 +3,7 @@
 // which one. Only a turn-scoped capability crosses into the agent process;
 // engine commands, session names, and provider credentials (the Boat token)
 // stay in OMB.
+import { request } from "node:http";
 import { pathToFileURL } from "node:url";
 
 import { DATA_INSTRUCTIONS } from "./data/instructions.ts";
@@ -23,6 +24,17 @@ const RECOVERY: Record<HarnessMcpKind, string> = {
   computer: " Keep working on the assigned cloud computer only; do not bypass a person's control of it, and take a fresh screenshot before repeating an action whose result is uncertain.",
   data: " The tables already loaded are unchanged; check with data_describe or SHOW TABLES before repeating a load, and do not repeat a statement whose result is uncertain.",
 };
+
+/** How long one relayed call may take before the proxy gives up on it. */
+const CALL_TIMEOUT_MS = 130_000;
+
+/** A browser call can wait behind a person's answer to a commit hold
+ * (server/browser-commit-gate.ts), so the server tells this process how
+ * long that may take. Every other family keeps the short limit. */
+export function harnessCallTimeoutMs(kind: HarnessMcpKind, env: NodeJS.ProcessEnv = process.env): number {
+  const granted = kind === "browser" ? Number(env.OMB_MCP_CALL_TIMEOUT_MS) : NaN;
+  return Number.isSafeInteger(granted) && granted > CALL_TIMEOUT_MS ? granted : CALL_TIMEOUT_MS;
+}
 
 function parseHarnessMcpKind(value: unknown): HarnessMcpKind | null {
   return value === "browser" || value === "computer" || value === "data" ? value : null;
@@ -51,9 +63,60 @@ async function boundedJson(response: Response, name: string): Promise<unknown> {
   } finally { await reader.cancel().catch(() => {}); }
 }
 
+/** One browser POST to the harness, answered as its status and parsed JSON
+ * body. Only the browser's calls come this way; the other families keep
+ * fetch, exactly as they always had it.
+ *
+ * Not fetch: Node's fetch gives up on a response whose headers have not
+ * arrived within 300 seconds, whatever its signal allows, and a browser call
+ * can wait nine minutes on a person's answer. node:http has no such limit;
+ * `signal` is the only thing that ends the wait. It never follows a
+ * redirect, so the capability goes to this address and nowhere else, and
+ * each call has a connection of its own: closing it is how the server
+ * learns the call was abandoned. */
+function postJson(url: URL, token: string, body: string, signal: AbortSignal, name: string): Promise<{ ok: boolean; payload: unknown }> {
+  return new Promise((resolve, reject) => {
+    const call = request(url, {
+      method: "POST", agent: false, signal,
+      headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body), authorization: `Bearer ${token}` },
+    }, (response) => {
+      const chunks: Buffer[] = [];
+      let size = 0;
+      response.on("data", (chunk: Buffer) => {
+        size += chunk.byteLength;
+        if (size > MAX_OUTPUT_BYTES) call.destroy(new Error(`${name} response exceeded the size limit.`));
+        else chunks.push(chunk);
+      });
+      response.on("error", reject);
+      response.on("end", () => {
+        if (!size) { reject(new Error(`${name} server returned an empty response.`)); return; }
+        const status = response.statusCode ?? 0;
+        try { resolve({ ok: status >= 200 && status < 300, payload: JSON.parse(Buffer.concat(chunks).toString("utf8")) }); }
+        catch (error) { reject(error); }
+      });
+    });
+    call.on("error", reject);
+    call.end(body);
+  });
+}
+
+/** A failure of the connection itself, not an answer from the server: the
+ * state of the call is unknown. */
+function interrupted(error: unknown): boolean {
+  if (!(error instanceof Error)) return true;
+  return /fetch failed|abort|timeout|socket hang up/i.test(error.message) || typeof (error as NodeJS.ErrnoException).code === "string";
+}
+
+/** Relay one frame. `cancelled` is for a browser call only: it aborts when
+ * the engine gave up on the call (notifications/cancelled) or went away.
+ * The request to the server is then closed, so the commit hold waiting
+ * behind it ends, and nothing is answered. The computer and Data routes
+ * abort their work when a request closes, so their calls are never closed
+ * early: those families behave as they did before any of this. */
 export async function harnessMcpRequest(
   frame: unknown,
-  connection: { url: string; token: string; kind: HarnessMcpKind },
+  connection: { url: string; token: string; kind: HarnessMcpKind; timeoutMs?: number },
+  cancelled?: AbortSignal,
 ): Promise<unknown | undefined> {
   if (!frame || typeof frame !== "object" || Array.isArray(frame)) return failure(null, null, "Invalid request.", -32600);
   const message = frame as { id?: RpcId; jsonrpc?: unknown; method?: unknown; params?: unknown };
@@ -77,27 +140,39 @@ export async function harnessMcpRequest(
     }
     const body = JSON.stringify({ method: message.method, params: message.params ?? {} });
     if (Buffer.byteLength(body) > MAX_INPUT_BYTES) throw new Error(`${name} request exceeded the size limit.`);
-    const response = await fetch(new URL(`/api/internal/${connection.kind}/mcp`, url), {
-      method: "POST", redirect: "error",
-      headers: { "content-type": "application/json", authorization: `Bearer ${connection.token}` },
-      body, signal: AbortSignal.timeout(130_000),
-    });
-    const payload = await boundedJson(response, name) as { result?: unknown; error?: unknown };
+    const limit = AbortSignal.timeout(connection.timeoutMs ?? CALL_TIMEOUT_MS);
+    const target = new URL(`/api/internal/${connection.kind}/mcp`, url);
+    let response: { ok: boolean; payload: unknown };
+    if (connection.kind === "browser") {
+      response = await postJson(target, connection.token, body, cancelled ? AbortSignal.any([limit, cancelled]) : limit, name);
+    } else {
+      const answer = await fetch(target, {
+        method: "POST", redirect: "error",
+        headers: { "content-type": "application/json", authorization: `Bearer ${connection.token}` },
+        body, signal: limit,
+      });
+      response = { ok: answer.ok, payload: await boundedJson(answer, name) };
+    }
+    const payload = response.payload as { result?: unknown; error?: unknown } | null;
     if (!response.ok || !payload || typeof payload !== "object" || !Object.hasOwn(payload, "result")) {
       throw new Error(typeof payload?.error === "string" ? payload.error.slice(0, 2_000) : `${name} server is unavailable. Start a new bot turn or try again.`);
     }
     return { jsonrpc: "2.0", id, result: payload.result };
   } catch (error) {
-    const detail = error instanceof Error && !/fetch failed|abort|timeout/i.test(error.message)
-      ? error.message : `${name} connection was interrupted. Do not repeat the action until its state is checked.`;
+    // A cancelled browser call is not answered: the engine is no longer waiting for it.
+    if (connection.kind === "browser" && cancelled?.aborted) return undefined;
+    const detail = interrupted(error)
+      ? `${name} connection was interrupted. Do not repeat the action until its state is checked.` : (error as Error).message;
     return failure(id, message.method, detail + RECOVERY[connection.kind]);
   }
 }
 
 function run(kind: HarnessMcpKind): void {
-  const connection = { url: process.env.OMB_HARNESS_URL ?? "", token: process.env.OMB_MCP_TOKEN ?? "", kind };
+  const connection = { url: process.env.OMB_HARNESS_URL ?? "", token: process.env.OMB_MCP_TOKEN ?? "", kind, timeoutMs: harnessCallTimeoutMs(kind) };
   let input = Buffer.alloc(0);
   let pending = 0;
+  /** Calls on their way to the server, by request id, so a cancel can end one. */
+  const inFlight = new Map<string | number, AbortController>();
   const output = (message: unknown) => {
     if (message === undefined) return;
     const line = `${JSON.stringify(message)}\n`;
@@ -120,16 +195,33 @@ function run(kind: HarnessMcpKind): void {
       let frame: unknown;
       try { frame = JSON.parse(line); }
       catch { output(failure(null, null, "Parse error.", -32700)); continue; }
-      if (pending >= MAX_PENDING) {
-        const request = frame as { id?: RpcId; method?: unknown } | null;
-        if (request && Object.hasOwn(request, "id")) output(failure(request.id ?? null, request.method, `Too many pending ${kind} requests.`));
+      const incoming = frame && typeof frame === "object" && !Array.isArray(frame) ? frame as { id?: RpcId; method?: unknown; params?: { requestId?: unknown } } : null;
+      if (kind === "browser" && incoming?.method === "notifications/cancelled" && !Object.hasOwn(incoming, "id")) {
+        // The engine gave up on a browser call. Close its request, so the
+        // server ends what waited behind it: a commit hold must not outlive
+        // the call that asked for it. Only the browser: the other routes
+        // abort their work when a request closes.
+        const target = incoming.params?.requestId;
+        if (typeof target === "string" || typeof target === "number") inFlight.get(target)?.abort();
         continue;
       }
+      if (pending >= MAX_PENDING) {
+        if (incoming && Object.hasOwn(incoming, "id")) output(failure(incoming.id ?? null, incoming.method, `Too many pending ${kind} requests.`));
+        continue;
+      }
+      const id = incoming?.id;
+      const cancel = kind === "browser" && (typeof id === "string" || typeof id === "number") ? new AbortController() : undefined;
+      if (cancel && id !== undefined && id !== null) inFlight.set(id, cancel);
       pending++;
-      void harnessMcpRequest(frame, connection).then(output).finally(() => { pending--; });
+      void harnessMcpRequest(frame, connection, cancel?.signal).then(output).finally(() => {
+        pending--;
+        if (cancel && id !== undefined && id !== null && inFlight.get(id) === cancel) inFlight.delete(id);
+      });
     }
     if (input.length > MAX_INPUT_BYTES) { process.stdin.destroy(); process.exitCode = 1; }
   });
+  // The engine went away: nobody is waiting for its browser calls any more.
+  if (kind === "browser") process.stdin.on("close", () => { for (const call of inFlight.values()) call.abort(); });
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
