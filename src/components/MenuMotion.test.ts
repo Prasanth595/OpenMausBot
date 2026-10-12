@@ -121,6 +121,17 @@ describe("menu motion", () => {
     });
   });
 
+  it("lets the finished animation unmount a closing menu at once", () => {
+    react.render(() => useMenuMotion(true, "menu"));
+    react.render(() => useMenuMotion(false, "menu"));
+    let finish!: () => void;
+    react.render(() => {
+      finish = useMenuMotion(false, "menu").finishClosing;
+    });
+    finish();
+    expect(react.render(() => useMenuMotion(false, "menu"))).toMatchObject({ shown: false, closing: false });
+  });
+
   it("reopens a menu that is still closing as a live menu", () => {
     react.render(() => useMenuMotion(true));
     react.render(() => useMenuMotion(false));

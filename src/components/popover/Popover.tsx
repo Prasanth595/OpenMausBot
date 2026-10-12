@@ -8,13 +8,14 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type AnimationEvent as ReactAnimationEvent,
   type CSSProperties,
   type FocusEvent as ReactFocusEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { popoverClosesOnKey, popoverClosesOnPointer } from "@/hooks/use-popover-dismiss";
-import { useMenuMotion } from "../MenuMotion";
+import { isReducedMotion, useMenuMotion } from "../MenuMotion";
 import motionStyles from "./popover-motion.module.css";
 import styles from "./popover.module.css";
 import {
@@ -110,6 +111,11 @@ export function Popover({
   // both the motion and the placement. So the motion classes only apply once
   // measured, and vars freeze for the session.
   const [measured, setMeasured] = useState(false);
+  // Overflow gate for the open grow: on from the measuring pass until the
+  // grow's animationend. The close shrink needs no state, it derives from
+  // `closing`. Never keyframed: overflow is not interpolable, so flipping it
+  // in a keyframe lands the scrollbar flip exactly on the last frame.
+  const [animating, setAnimating] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const internalContentRef = useRef<HTMLDivElement>(null);
@@ -128,7 +134,10 @@ export function Popover({
 
   // A fresh mount measures before animating; reset when fully unmounted.
   useEffect(() => {
-    if (!motion.shown) setMeasured(false);
+    if (!motion.shown) {
+      setMeasured(false);
+      setAnimating(false);
+    }
   }, [motion.shown]);
 
   const clearTimers = useCallback(() => {
@@ -193,12 +202,15 @@ export function Popover({
       const sheet = contentRef.current;
       if (!sheet) return;
       const viewport = { width: window.innerWidth, height: window.innerHeight };
-      // The outer shell's own height is the running animation (0 while
-      // growing), so the natural height always comes from the inner surface,
-      // which the height animation never resizes. Reading the outer box here
-      // is what used to collapse --menu-h to 0 mid-open, killing the motion
-      // and misplacing the sheet.
-      const naturalHeight = innerRef.current?.offsetHeight || sheet.offsetHeight || 0;
+      // Before the first paint there is no animation yet, so the outer box
+      // reads at its natural height — and with border-box sizing that is
+      // exactly what `height` animates, border included, so the grow lands
+      // without a snap on its last frame. Once measured the outer box may be
+      // mid-animation, so positioning keeps reading the inner surface, which
+      // the height animation never resizes.
+      const naturalHeight = measured
+        ? innerRef.current?.offsetHeight || sheet.offsetHeight || 0
+        : sheet.offsetHeight || 0;
       const size = { width: sheet.offsetWidth || width, height: naturalHeight };
       if (isPoint) {
         const next = pointPopoverPosition(
@@ -210,6 +222,7 @@ export function Popover({
         if (isMenuMotion && !measured) {
           setMenuHeightVars(sheet, naturalHeight, next.resolved === "above");
           setMeasured(true);
+          if (!quick && !isReducedMotion()) setAnimating(true);
         }
         setPosition((prev) =>
           prev && prev.left === next.left && prev.top === next.top && prev.resolved === next.resolved ? prev : next,
@@ -228,6 +241,7 @@ export function Popover({
       if (isMenuMotion && !measured) {
         setMenuHeightVars(sheet, naturalHeight, next.resolved === "above");
         setMeasured(true);
+        if (!quick && !isReducedMotion()) setAnimating(true);
       }
       setPosition((prev) =>
         prev && prev.left === next.left && prev.top === next.top && prev.resolved === next.resolved ? prev : next,
@@ -250,16 +264,23 @@ export function Popover({
     const sheet = contentRef.current;
     if (!sheet) return;
     if (!measured) {
-      const naturalHeight = innerRef.current?.offsetHeight || sheet.offsetHeight || 0;
+      // Same outer-box rule as the portal path above: pre-animation the shell
+      // reads at its natural height, border included.
+      const naturalHeight = sheet.offsetHeight || 0;
       setMenuHeightVars(sheet, naturalHeight, placement === "above");
       setMeasured(true);
+      if (!quick && !isReducedMotion()) setAnimating(true);
     }
   }, [motion.shown, portal, isMenuMotion, placement, repositionKey, contentRef, measured]);
 
-  // A keyboard open lands on the first runnable row once placed.
+  // A keyboard open lands on the first runnable row. When the grow plays,
+  // only after it finishes: focusing mid-grow scrolls the clipping shell and
+  // it snaps back on the last frame (the reference focuses post-animation
+  // for the same reason). With no motion, at once once placed.
   useEffect(() => {
     if (!open || !focusFirst.current) return;
     if (portal && !position) return;
+    if (isMenuMotion && !quick && !isReducedMotion()) return;
     focusFirst.current = false;
     const sheet = contentRef.current;
     if (!sheet) return;
@@ -267,7 +288,37 @@ export function Popover({
       sheet.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)') ??
       sheet.querySelector<HTMLElement>("button:not(:disabled), [href], [tabindex]");
     (first ?? sheet).focus();
-  }, [open, portal, position, contentRef]);
+  }, [open, portal, position, contentRef, isMenuMotion, quick]);
+
+  const focusFirstRow = useCallback(() => {
+    if (!focusFirst.current) return;
+    focusFirst.current = false;
+    const sheet = contentRef.current;
+    if (!sheet) return;
+    const first =
+      sheet.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)') ??
+      sheet.querySelector<HTMLElement>("button:not(:disabled), [href], [tabindex]");
+    (first ?? sheet).focus({ preventScroll: true });
+  }, [contentRef]);
+
+  // The shell's own animations report back (row animations bubble past via
+  // the target check): a finished close unmounts at once instead of waiting
+  // out the timer, a finished open drops the overflow gate and lands focus.
+  // A starting animation raises the gate, covering restarts (a reopen
+  // mid-close never re-runs the measuring pass that raised it first).
+  const onShellAnimationEnd = (event: ReactAnimationEvent<HTMLDivElement>) => {
+    if (!isMenuMotion || event.target !== event.currentTarget) return;
+    if (motion.closing) {
+      motion.finishClosing();
+      return;
+    }
+    setAnimating(false);
+    focusFirstRow();
+  };
+  const onShellAnimationStart = (event: ReactAnimationEvent<HTMLDivElement>) => {
+    if (!isMenuMotion || event.target !== event.currentTarget) return;
+    setAnimating(true);
+  };
 
   const hoverOpen = () => {
     if (!leave.enabled || pinned || isPoint) return;
@@ -289,6 +340,8 @@ export function Popover({
   // Menu motion splits in two layers so the shadow never jumps: the outer
   // shell animates height (its shadow grows with the box) while the inner
   // surface only hides overflow during the grow/shrink. `quick` skips both.
+  // The gate is state, not a keyframe: closing derives it, the open grow
+  // holds it from measuring until its animationend.
   const motionClass =
     quick || !measured
       ? ""
@@ -297,8 +350,8 @@ export function Popover({
           ? motionStyles.menuOut
           : motionStyles.menuIn
         : motion.className;
-  const clipClass =
-    !quick && isMenuMotion && measured ? (motion.closing ? motionStyles.menuClipOut : motionStyles.menuClipIn) : "";
+  const gateOverflow = isMenuMotion && (motion.closing || animating);
+  const animatingClass = gateOverflow ? motionStyles.menuAnimating : "";
   // Static chrome lives in the module; the class strings below only pick
   // which module class applies. (The pop surface keeps its own name so the
   // headless/pop distinction still reads at the call site.)
@@ -332,9 +385,17 @@ export function Popover({
         ...style,
       }
     : style;
-  const menuInnerStyle: CSSProperties | undefined = portal
-    ? { maxHeight: `calc(100dvh - ${EDGE_MARGIN * 2}px)`, overflowY: "auto", overscrollBehavior: "contain" }
-    : undefined;
+  const menuInnerStyle: CSSProperties | undefined = !isMenuMotion
+    ? undefined
+    : portal
+      ? {
+          maxHeight: `calc(100dvh - ${EDGE_MARGIN * 2}px)`,
+          overflowY: gateOverflow ? ("hidden" as const) : ("auto" as const),
+          overscrollBehavior: "contain" as const,
+        }
+      : gateOverflow
+        ? { overflowY: "hidden" as const }
+        : undefined;
 
   const inlinePlacementClass =
     placement === "above"
@@ -362,6 +423,8 @@ export function Popover({
           close(!isPoint);
         }
       }}
+      onAnimationEnd={onShellAnimationEnd}
+      onAnimationStart={onShellAnimationStart}
       style={contentStyle}
       className={cn(
         isMenuMotion ? menuShellClass : surfaceClass,
@@ -371,7 +434,7 @@ export function Popover({
       )}
     >
       {isMenuMotion ? (
-        <div ref={innerRef} style={menuInnerStyle} className={cn(menuInnerClass, clipClass, className)}>
+        <div ref={innerRef} style={menuInnerStyle} className={cn(menuInnerClass, animatingClass, className)}>
           {typeof children === "function" ? children({ open, close }) : children}
         </div>
       ) : typeof children === "function" ? (

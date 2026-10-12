@@ -3,9 +3,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 
 // Drawn open: motion and dismissal are not what is tested here.
-vi.mock("../MenuMotion", () => ({
+vi.mock("../MenuMotion", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../MenuMotion")>()),
   useMenuMotion: () => ({ shown: true, closing: false, className: "", exitProps: {} }),
   useHeldMenuMotion: (value: unknown) => ({ shown: value !== null, value, closing: false, className: "", exitProps: {} }),
+  isReducedMotion: () => true,
 }));
 vi.mock("@/hooks/use-popover-dismiss", () => ({
   popoverClosesOnKey: () => false,
@@ -13,7 +15,7 @@ vi.mock("@/hooks/use-popover-dismiss", () => ({
   usePopoverDismiss: () => {},
 }));
 vi.mock("./popover-motion.module.css", () => ({
-  default: { menuIn: "menuIn", menuOut: "menuOut" },
+  default: { menuIn: "menuIn", menuOut: "menuOut", menuAnimating: "menuAnimating", rowFlow: "rowFlow" },
 }));
 // Static chrome resolves to stable names too, so assertions only check that
 // a style hook is present, never what it computes to. Split per component

@@ -13,7 +13,7 @@ import { SUBMENU_OPEN_DELAY_MS } from "./positioning";
 // CSS modules resolve to stable names here so open/close state mapping stays
 // assertable without reading any concrete animation values.
 vi.mock("./popover-motion.module.css", () => ({
-  default: { menuIn: "menuIn", menuOut: "menuOut" },
+  default: { menuIn: "menuIn", menuOut: "menuOut", menuAnimating: "menuAnimating", rowFlow: "rowFlow" },
 }));
 // Same for the static chrome: assertions only check that a style hook is
 // present, never what it computes to. Split per component like the modules.
@@ -130,6 +130,66 @@ describe("PopoverMenu in a document", () => {
     expect(document.activeElement).toBe(rows[3]);
     await key(rows[3]!, "ArrowDown");
     expect(document.activeElement).toBe(rows[0]);
+  });
+
+  it("lands keyboard focus only after the open finishes", async () => {
+    delete document.documentElement.dataset.reducedMotion;
+    await key(trigger(), "ArrowDown");
+    await flush();
+    // Still growing: focus is parked, so the clipping shell cannot
+    // scroll-jump under it mid-motion.
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(document.activeElement).not.toBe(rows[0]);
+    const surface = sheet()!.closest("[data-popover]") as HTMLElement;
+    await act(async () => {
+      surface.dispatchEvent(new Event("animationend", { bubbles: true }));
+    });
+    expect(document.activeElement).toBe(rows[0]);
+    document.documentElement.dataset.reducedMotion = "true";
+  });
+
+  it("gates the inner overflow while growing and restores it when the grow ends", async () => {
+    delete document.documentElement.dataset.reducedMotion;
+    await act(async () => trigger().click());
+    const surface = sheet()!.closest("[data-popover]") as HTMLElement;
+    const inner = surface.firstElementChild as HTMLElement;
+    expect(inner.style.overflowY).toBe("hidden");
+    expect(inner.className).toContain("menuAnimating");
+    await act(async () => {
+      surface.dispatchEvent(new Event("animationend", { bubbles: true }));
+    });
+    expect(inner.style.overflowY).toBe("auto");
+    expect(inner.className).not.toContain("menuAnimating");
+    document.documentElement.dataset.reducedMotion = "true";
+  });
+
+  it("staggers rows from the anchor edge behind the container motion", async () => {
+    await act(async () => trigger().click());
+    const group = sheet()!;
+    expect(group.className).toContain("rowFlow");
+    const wrappers = [...group.children] as HTMLElement[];
+    expect(wrappers.length).toBeGreaterThan(1);
+    // Each row carries its own slots (presence only, never values); custom
+    // renderItem rows inherit them from the wrapper.
+    for (const wrapper of wrappers) {
+      expect(wrapper.style.getPropertyValue("--row-open-d")).not.toBe("");
+      expect(wrapper.style.getPropertyValue("--row-close-d")).not.toBe("");
+    }
+  });
+
+  it("unmounts a select-exit the moment its close animation ends", async () => {
+    delete document.documentElement.dataset.reducedMotion;
+    await act(async () => trigger().click());
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    await act(async () => rows[0]!.click());
+    const surface = sheet()!.closest("[data-popover]") as HTMLElement;
+    expect(surface.className).toContain("menuOut");
+    // No timer wait: the animation finishing is what unmounts.
+    await act(async () => {
+      surface.dispatchEvent(new Event("animationend", { bubbles: true }));
+    });
+    expect(sheet()).toBeNull();
+    document.documentElement.dataset.reducedMotion = "true";
   });
 
   it("opens the submenu on hover only after the hover rests", async () => {

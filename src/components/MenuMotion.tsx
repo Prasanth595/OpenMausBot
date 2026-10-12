@@ -3,11 +3,24 @@ import { useLayoutEffect, useRef, useState } from "react";
 /** Same length as `--animate-pop-in` in styles.css. */
 export const MENU_MOTION_MS = 200;
 
+/** Popover menu container open length (its own CSS module). */
+export const MENU_OPEN_MS = 500;
+
 /** Exit length of the popover menu motion (its own CSS module). The sheet
  * must stay mounted this long so the shrink can finish playing. */
 export const MENU_CLOSE_MS = 250;
 
-function reducedMotion(): boolean {
+/** Per-row fade inside the menu open: rows share the second half of the
+ * open, staggered from the anchor edge. Pure opacity, so it never disturbs
+ * the shadow or the height motion. */
+export const MENU_ROW_IN_MS = 250;
+
+/** Per-row fade inside the menu close: the shrink leads, rows follow after a
+ * short lead and all land with the container. */
+export const MENU_ROW_OUT_MS = 50;
+export const MENU_ROW_OUT_LEAD_MS = 50;
+
+export function isReducedMotion(): boolean {
   if (typeof document === "undefined") return false;
   if (document.documentElement.dataset.reducedMotion === "true") return true;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -24,6 +37,10 @@ export interface MenuMotion {
    * accessibility tree, so nothing (a person, a screen reader, a test
    * driver) can reach a menu that is already closed. */
   exitProps: { inert?: boolean; "aria-hidden"?: boolean };
+  /** End the close the moment its animation finishes (animationend) instead
+   * of waiting out the unmount timer. Idempotent; the timer stays as the
+   * fallback for cancelled or never-started animations. */
+  finishClosing: () => void;
 }
 
 /** Keep a menu mounted through the same 200ms pop it uses to open, so close
@@ -44,22 +61,25 @@ export function useMenuMotion(open: boolean, kind: "pop" | "menu" = "pop", quick
     }
     if (!mounted) return;
     // Explicit opt-out (or OS reduced motion): unmount at once, no exit.
-    if (quick || reducedMotion()) {
+    if (quick || isReducedMotion()) {
       setMounted(false);
       return;
-    }
-    const timer = window.setTimeout(() => setMounted(false), closeMs);
+    }    const timer = window.setTimeout(() => setMounted(false), closeMs);
     return () => window.clearTimeout(timer);
   }, [open, mounted, closeMs, quick]);
 
   // Read `open` itself, not only the state that trails it, so the menu shows
   // on the render its trigger flips and goes inert on the render it closes.
   const closing = !open && mounted;
+  // Plain closure (not a hook): the unit harness stands in for React state
+  // without a real dispatcher, so hook calls would not survive it.
+  const finishClosing = () => setMounted(false);
   return {
     shown: open || mounted,
     closing,
     className: quick || kind === "menu" ? "" : closing ? "animate-pop-out pointer-events-none" : "animate-pop-in",
     exitProps: closing ? { inert: true, "aria-hidden": true } : {},
+    finishClosing,
   };
 }
 

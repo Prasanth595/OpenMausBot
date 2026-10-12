@@ -8,6 +8,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
+  type AnimationEvent as ReactAnimationEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
@@ -16,7 +18,15 @@ import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
 import motionStyles from "./popover-motion.module.css";
 import styles from "./popover-menu.module.css";
-import { useHeldMenuMotion } from "../MenuMotion";
+import {
+  MENU_CLOSE_MS,
+  MENU_OPEN_MS,
+  MENU_ROW_IN_MS,
+  MENU_ROW_OUT_LEAD_MS,
+  MENU_ROW_OUT_MS,
+  isReducedMotion,
+  useHeldMenuMotion,
+} from "../MenuMotion";
 import { Popover, setMenuHeightVars } from "./Popover";
 import {
   CLOSE_DELAY_MS,
@@ -178,6 +188,7 @@ function DefaultRow({
 function MenuRows({
   items,
   roomy,
+  upward,
   variant,
   renderItem,
   inSubmenu,
@@ -188,6 +199,8 @@ function MenuRows({
 }: {
   items: PopoverMenuItem[];
   roomy: boolean;
+  /** Stagger leads from the anchor edge: bottom-up when opening upward. */
+  upward: boolean;
   variant: PopoverVariant;
   renderItem?: PopoverMenuProps["renderItem"];
   inSubmenu: boolean;
@@ -196,10 +209,26 @@ function MenuRows({
   onSubmenuHover?: (item: PopoverMenuItem, element: HTMLElement) => void;
   onSubmenuLeave?: () => void;
 }) {
+  // Row stagger slots, mirroring the reference: the open shares its second
+  // half across rows, the close shares what remains after the shrink's lead.
+  const count = Math.max(items.length, 1);
+  const openStep = (MENU_OPEN_MS - MENU_ROW_IN_MS) / count;
+  const closeStep = (MENU_CLOSE_MS - MENU_ROW_OUT_LEAD_MS - MENU_ROW_OUT_MS) / count;
   return (
     <>
-      {items.map((item) => (
-        <div key={item.key}>
+      {items.map((item, index) => (
+        <div
+          key={item.key}
+          // Slots inherit into the row (custom renderItem rows included); the
+          // motion module turns them into delays. Values stay in JS so CSS
+          // never hardcodes timing.
+          style={
+            {
+              "--row-open-d": (upward ? count - 1 - index : index) * openStep,
+              "--row-close-d": MENU_ROW_OUT_LEAD_MS + (upward ? index : count - 1 - index) * closeStep,
+            } as CSSProperties
+          }
+        >
           {item.separatorBefore && (
             <div role="separator" className={cn(styles.separator, roomy && styles.separatorRoomy)} />
           )}
@@ -253,10 +282,15 @@ export function PopoverMenu({
   // Same measure-first gating as the main sheet: reading the height while
   // the grow runs returns the mid-animation height.
   const [subMeasured, setSubMeasured] = useState(false);
+  // Overflow gate for the submenu grow, mirroring the main sheet's.
+  const [subAnimating, setSubAnimating] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const subRef = useRef<HTMLDivElement>(null);
   const subInnerRef = useRef<HTMLDivElement>(null);
   const subRowRef = useRef<HTMLElement | null>(null);
+  // Keyboard/click submenu opens that arrive mid-grow park here until the
+  // grow's animationend, instead of focusing (and scroll-jumping) mid-motion.
+  const subFocusQueued = useRef(false);
   const subTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const extraInsideRefs = useMemo(() => [subRef], []);
 
@@ -290,12 +324,17 @@ export function PopoverMenu({
       const row = subRowRef.current;
       const sub = subRef.current;
       if (!menu || !row || !sub) return;
-      // Same rule as the main sheet: the outer box is the running animation,
-      // so the natural height comes from the inner surface.
-      const subHeight = subInnerRef.current?.offsetHeight || sub.offsetHeight || 0;
+      // Same rule as the main sheet: pre-animation the outer box reads at its
+      // natural height (border included, like `height` animates it), so the
+      // grow lands without a last-frame snap; mid-animation, read the inner
+      // surface, which the height animation never resizes.
+      const subHeight = !subMeasured
+        ? sub.offsetHeight || 0
+        : subInnerRef.current?.offsetHeight || sub.offsetHeight || 0;
       if (!subMeasured) {
         setMenuHeightVars(sub, subHeight, false);
         setSubMeasured(true);
+        if (!quick && !isReducedMotion()) setSubAnimating(true);
       }
       if (!portal) return;
       const menuBox = menu.getBoundingClientRect();
@@ -325,8 +364,15 @@ export function PopoverMenu({
     subRowRef.current = row;
     setSubPosition(null);
     setSubmenu(item.key);
-    if (focus) requestAnimationFrame(() => menuEnabledRows(subInnerRef.current)[0]?.focus());
-  }, []);
+    if (!focus) return;
+    // With no motion, focus at once on the next frame as before; otherwise
+    // park it until the grow finishes so the clip never scroll-jumps.
+    if (quick || isReducedMotion()) {
+      requestAnimationFrame(() => menuEnabledRows(subInnerRef.current)[0]?.focus());
+    } else {
+      subFocusQueued.current = true;
+    }
+  }, [quick]);
 
   const closeSub = useCallback((focusRow = false) => {
     if (subTimer.current) clearTimeout(subTimer.current);
@@ -394,7 +440,11 @@ export function PopoverMenu({
   const subMotion = useHeldMenuMotion(openItem ?? null, "menu", quick);
   const heldSubItem = subMotion.value;
   useEffect(() => {
-    if (!subMotion.shown) setSubMeasured(false);
+    if (!subMotion.shown) {
+      setSubMeasured(false);
+      setSubAnimating(false);
+      subFocusQueued.current = false;
+    }
   }, [subMotion.shown]);
   const roomy = placement !== "below";
   // The look lives on the animated outer shell (see Popover): the inner
@@ -402,8 +452,27 @@ export function PopoverMenu({
   const subShellClass = variant === "styled" ? styles.subShell : styles.subShellBare;
   const submenuInnerClass = variant === "styled" ? styles.subInner : "";
   const subMotionClass = quick || !subMeasured ? "" : subMotion.closing ? motionStyles.menuOut : motionStyles.menuIn;
-  const subClipClass = !quick && subMeasured ? (subMotion.closing ? motionStyles.menuClipOut : motionStyles.menuClipIn) : "";
+  const subGateOverflow = subMotion.closing || subAnimating;
+  const subAnimatingClass = subGateOverflow ? motionStyles.menuAnimating : "";
 
+  // Submenu mirror of the shell handlers in Popover: row animations bubble
+  // past via the target check. A starting animation raises the gate,
+  // covering submenu reopens that never re-run the measuring pass.
+  const onSubAnimationEnd = (event: ReactAnimationEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    if (subMotion.closing) {
+      subMotion.finishClosing();
+      return;
+    }
+    setSubAnimating(false);
+    if (!subFocusQueued.current) return;
+    subFocusQueued.current = false;
+    menuEnabledRows(subInnerRef.current)[0]?.focus({ preventScroll: true });
+  };
+  const onSubAnimationStart = (event: ReactAnimationEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget) return;
+    setSubAnimating(true);
+  };
   const renderSubSheet = (close: (refocus?: boolean) => void) =>
     open &&
     subMotion.shown &&
@@ -416,6 +485,8 @@ export function PopoverMenu({
         data-popover-variant={variant}
         {...subMotion.exitProps}
         onPointerEnter={() => subTimer.current && clearTimeout(subTimer.current)}
+        onAnimationEnd={onSubAnimationEnd}
+        onAnimationStart={onSubAnimationStart}
         style={
           portal
             ? {
@@ -440,14 +511,15 @@ export function PopoverMenu({
           // with no way to reach the cut-off rows.
           style={{
             maxHeight: `calc(100dvh - ${EDGE_MARGIN * 2}px)`,
-            overflowY: "auto",
-            overscrollBehavior: "contain",
+            overflowY: subGateOverflow ? ("hidden" as const) : ("auto" as const),
+            overscrollBehavior: "contain" as const,
           }}
-          className={cn(submenuInnerClass, subClipClass)}
+          className={cn(submenuInnerClass, subAnimatingClass, motionStyles.rowFlow)}
         >
           <MenuRows
             items={heldSubItem.submenu}
             roomy={roomy}
+            upward={false}
             variant={variant}
             renderItem={renderItem}
             inSubmenu
@@ -506,12 +578,13 @@ export function PopoverMenu({
             // Plain wrapper: the Popover shell above already carries the
             // styled surface (background, border, shadow, padding), so adding
             // another here would double borders and trap the shadow inside
-            // the outer overflow gate.
-            className={cn(className)}
+            // the outer overflow gate. rowFlow hooks the per-row stagger.
+            className={cn(motionStyles.rowFlow, className)}
           >
             <MenuRows
               items={items}
               roomy={roomy}
+              upward={placement === "above"}
               variant={variant}
               renderItem={renderItem}
               inSubmenu={false}
