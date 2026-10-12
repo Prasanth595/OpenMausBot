@@ -38,9 +38,12 @@ vi.mock("./popover-menu.module.css", () => ({
     subInner: "subInner",
     row: "row",
     rowActive: "rowActive",
+    rowDanger: "rowDanger",
+    rowOff: "rowOff",
     rowIcon: "rowIcon",
     rowIconRoomy: "rowIconRoomy",
     rowIconActive: "rowIconActive",
+    rowIconDanger: "rowIconDanger",
     rowMain: "rowMain",
     rowTitle: "rowTitle",
     rowSubtitle: "rowSubtitle",
@@ -130,6 +133,105 @@ describe("PopoverMenu in a document", () => {
     expect(document.activeElement).toBe(rows[3]);
     await key(rows[3]!, "ArrowDown");
     expect(document.activeElement).toBe(rows[0]);
+  });
+
+  it("walks radio rows and lets an unavailable one say its reason instead of acting", async () => {
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [
+            item("Live", { role: "menuitemradio", checked: true }),
+            item("Take turns", { role: "menuitemradio", checked: false, ariaDisabled: true }),
+          ],
+          ariaLabel: "Call mode",
+          open: true,
+          trigger: () => "Mode",
+        }),
+      );
+    });
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.getAttribute("aria-checked")).toBe("true");
+    expect(rows[1]!.getAttribute("aria-checked")).toBe("false");
+    expect(rows[1]!.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => rows[0]!.focus());
+    await key(rows[0]!, "ArrowDown");
+    expect(document.activeElement).toBe(rows[1]);
+    await act(async () => rows[1]!.click());
+    expect(picked).toEqual([]);
+    expect(sheet()).not.toBeNull();
+  });
+
+  it("lands focus on the first row when a context menu opens and hands it back on close", async () => {
+    const opener = document.createElement("button");
+    opener.textContent = "Row";
+    document.body.appendChild(opener);
+    opener.focus();
+    const menu = (isOpen: boolean) =>
+      createElement(PopoverMenu, {
+        items: [item("Usage"), item("Delete")],
+        ariaLabel: "Row actions",
+        anchor: { kind: "point", x: 40, y: 80 },
+        open: isOpen,
+        focusFirstOnOpen: true,
+        restoreFocusOnClose: true,
+      });
+    await act(async () => {
+      root.render(menu(true));
+    });
+    await flush();
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(document.activeElement).toBe(rows[0]);
+    await act(async () => {
+      root.render(menu(false));
+    });
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  it("keeps a hover-opened menu while the pointer rests on the sheet", async () => {
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [item("Usage"), item("Settings")],
+          ariaLabel: "More",
+          dismiss: { leave: true },
+          trigger: () => "More",
+        }),
+      );
+    });
+    const wrapper = host.firstElementChild as HTMLElement;
+    const pointer = (type: string, target: Element, relatedTarget: Element) =>
+      act(async () => {
+        target.dispatchEvent(new PointerEvent(type, { bubbles: true, relatedTarget }));
+      });
+    await pointer("pointerover", wrapper, document.body);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, OPEN_DELAY_MS + 40));
+    });
+    expect(sheet()).not.toBeNull();
+    const surface = sheet()!.closest("[data-popover]") as HTMLElement;
+    // Out of the trigger, into the sheet: the close grace dies on the sheet.
+    await pointer("pointerout", wrapper, surface);
+    await pointer("pointerover", surface, wrapper);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, CLOSE_DELAY_MS + 80));
+    });
+    expect(sheet()).not.toBeNull();
+    // Leaving the sheet closes after the grace.
+    await pointer("pointerout", surface, document.body);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, CLOSE_DELAY_MS + 80));
+    });
+    expect(sheet()).toBeNull();
+  });
+
+  it("never opens from an inert trigger", async () => {
+    await act(async () => {
+      root.render(createElement(PopoverMenu, { items: [item("Usage")], ariaLabel: "More", trigger: () => "More", triggerDisabled: true }));
+    });
+    await act(async () => trigger().click());
+    expect(sheet()).toBeNull();
   });
 
   it("lands keyboard focus only after the open finishes", async () => {

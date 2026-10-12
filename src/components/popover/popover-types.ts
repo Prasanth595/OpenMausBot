@@ -63,6 +63,15 @@ export interface PopoverProps {
   /** Skip motion entirely: no enter/exit and no held close — the sheet
    * unmounts on the render it closes. Default false. */
   quick?: boolean;
+  /** Focus the first enabled row on every open, not only keyboard opens.
+   * Point/context menus have no trigger to land focus on. Default false. */
+  focusFirstOnOpen?: boolean;
+  /** Closing hands focus back to whatever held it when the sheet opened:
+   * a context menu's opener is not this popover's trigger. Default false. */
+  restoreFocusOnClose?: boolean;
+  /** The trigger button is inert: it never opens, and it is drawn and
+   * announced as disabled. Default false. */
+  triggerDisabled?: boolean;
   /** Shared with a menu wrapper so a submenu can anchor to the same sheet. */
   contentRef?: RefObject<HTMLDivElement | null>;
   /** Extra nodes (a submenu sheet) that count as "inside" for dismissal. */

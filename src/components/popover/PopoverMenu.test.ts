@@ -41,9 +41,12 @@ vi.mock("./popover-menu.module.css", () => ({
     subInner: "subInner",
     row: "row",
     rowActive: "rowActive",
+    rowDanger: "rowDanger",
+    rowOff: "rowOff",
     rowIcon: "rowIcon",
     rowIconRoomy: "rowIconRoomy",
     rowIconActive: "rowIconActive",
+    rowIconDanger: "rowIconDanger",
     rowMain: "rowMain",
     rowTitle: "rowTitle",
     rowSubtitle: "rowSubtitle",
@@ -143,6 +146,36 @@ it("lets renderItem replace the row while staying keyboard-discoverable", () => 
   expect(html).toContain('class="my-row"');
   expect(html).toContain('data-menu-key="custom"');
   expect(html).not.toContain('class="row"');
+});
+
+it("carries a danger tone, a hint title and radio semantics as item state", () => {
+  const html = render([
+    { key: "delete", label: "Delete", danger: true, title: "Delete this bot", icon: createElement("span", { "data-icon": "trash" }), onSelect: () => {} },
+    { key: "turns", label: "Take turns", role: "menuitemradio", checked: false, ariaDisabled: true, onSelect: () => {} },
+    { key: "live", label: "Live", role: "menuitemradio", checked: true, onSelect: () => {} },
+  ]);
+  const row = (label: string) => {
+    const start = html.indexOf(`>${label}</span>`);
+    return html.slice(html.lastIndexOf("<button", start), html.indexOf("</button>", start) + 9);
+  };
+  const del = row("Delete");
+  expect(del).toContain("rowDanger");
+  expect(del).toContain("rowIconDanger");
+  expect(del).toContain('title="Delete this bot"');
+  const turns = row("Take turns");
+  expect(turns).toContain('role="menuitemradio"');
+  expect(turns).toContain('aria-checked="false"');
+  expect(turns).toContain('aria-disabled="true"');
+  expect(turns).toContain("rowOff");
+  const live = row("Live");
+  expect(live).toContain('aria-checked="true"');
+  expect(live).not.toContain('aria-disabled="true"');
+});
+
+it("inerts a disabled trigger", () => {
+  const html = render([{ key: "a", label: "Copy", onSelect: () => {} }], { defaultOpen: false, triggerDisabled: true });
+  expect(html).toContain('disabled=""');
+  expect(html).toContain('aria-disabled="true"');
 });
 
 it("headless variant carries no surface chrome", () => {

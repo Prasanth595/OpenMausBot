@@ -35,6 +35,18 @@
   @apply bg-raised-hover;
 }
 
+/* Destructive rows: icon and label carry the tone; hover still fills. */
+.rowDanger {
+  @apply text-danger;
+}
+
+/* Unavailable-but-reachable rows: quiet tone and no hover fill, but still in
+   the arrow path so their reason can be read out. Source order after the
+   base row picks these over its own hover fill. */
+.rowOff {
+  @apply text-ink-tertiary hover:bg-transparent;
+}
+
 /* Row icon tone: the default is the quiet tone; roomy menus and the active
    row speak up. Source order decides, so modifiers come after the base. */
 .rowIcon {
@@ -47,6 +59,10 @@
 
 .rowIconActive {
   @apply text-accent;
+}
+
+.rowIconDanger {
+  @apply text-danger;
 }
 
 /* Two-line rows stack their label over a subtitle and/or note. */

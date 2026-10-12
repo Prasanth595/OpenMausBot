@@ -58,6 +58,18 @@ export interface PopoverMenuItem {
   attention?: boolean;
   attentionTone?: "danger" | "accent";
   disabled?: boolean;
+  /** Draw the row in the danger tone (destructive actions). */
+  danger?: boolean;
+  /** Native tooltip: why a disabled row can't be picked, say. */
+  title?: string;
+  /** Row semantics: a plain action or one of a radio set. Default "menuitem". */
+  role?: "menuitem" | "menuitemradio";
+  /** Radio rows: whether this choice is the current one. */
+  checked?: boolean;
+  /** Unavailable, but still reachable: presses do nothing, yet the arrows
+   * can land here and read its reason out. `disabled` instead takes the row
+   * out of the arrow path (for rows with nothing to say). */
+  ariaDisabled?: boolean;
   separatorBefore?: boolean;
   heading?: string;
   trailing?: ReactNode;
@@ -103,12 +115,23 @@ export interface PopoverMenuProps {
   /** Skip motion entirely (main sheet and submenu): no enter/exit and no
    * held close. Default false. */
   quick?: boolean;
+  /** Focus the first enabled row on every open, not only keyboard opens
+   * (point/context menus). Default false. */
+  focusFirstOnOpen?: boolean;
+  /** Closing hands focus back to the opener the sheet captured. Default false. */
+  restoreFocusOnClose?: boolean;
+  /** The default trigger button is inert: disabled, no open. Default false. */
+  triggerDisabled?: boolean;
 }
 
-const menuEnabledRows = (menu: HTMLElement | null) =>
-  menu ? [...menu.querySelectorAll<HTMLElement>(':scope > div > [role="menuitem"]:not(:disabled)')] : [];
+// Rows the arrow keys walk: under a MenuRows wrapper, plain items and radio
+// choices alike — natively disabled rows are skipped, aria-disabled ones stay
+// so the arrows can reach them and read their reason out.
+const MENU_ROWS =
+  ':scope > div > [role="menuitem"]:not(:disabled), :scope > div > [role="menuitemradio"]:not(:disabled)';
+const menuEnabledRows = (menu: HTMLElement | null) => (menu ? [...menu.querySelectorAll<HTMLElement>(MENU_ROWS)] : []);
 
-const SUBMENU_QUERY = ':scope > div > [role="menuitem"]:not(:disabled)';
+const SUBMENU_QUERY = MENU_ROWS;
 
 function DefaultRow({
   item,
@@ -138,7 +161,12 @@ function DefaultRow({
   // Row chrome lives in the module; only the state picks stay here.
   const defaultClass =
     variant === "styled"
-      ? cn(styles.row, (item.active || (item.submenu && openSubmenu === item.key)) && styles.rowActive)
+      ? cn(
+          styles.row,
+          (item.active || (item.submenu && openSubmenu === item.key)) && styles.rowActive,
+          item.danger && styles.rowDanger,
+          item.ariaDisabled && styles.rowOff,
+        )
       : "";
   if (renderItem) {
     return (
@@ -148,10 +176,13 @@ function DefaultRow({
   return (
     <button
       type="button"
-      role="menuitem"
+      role={item.role ?? "menuitem"}
+      aria-checked={item.role === "menuitemradio" ? item.checked === true : undefined}
+      aria-disabled={item.ariaDisabled || undefined}
       data-tour={item.tourId}
       data-menu-key={item.key}
       disabled={item.disabled}
+      title={item.title}
       aria-haspopup={item.submenu ? "menu" : undefined}
       aria-expanded={item.submenu ? openSubmenu === item.key : undefined}
       onClick={(event) => onItem(item, event.currentTarget)}
@@ -169,6 +200,7 @@ function DefaultRow({
           className={cn(
             styles.rowIcon,
             item.active ? styles.rowIconActive : roomy ? styles.rowIconRoomy : undefined,
+            item.danger && styles.rowIconDanger,
           )}
         >
           {item.icon}
@@ -285,6 +317,9 @@ export function PopoverMenu({
   portal = true,
   zIndex = 60,
   quick = false,
+  focusFirstOnOpen = false,
+  restoreFocusOnClose = false,
+  triggerDisabled = false,
 }: PopoverMenuProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
   const open = controlledOpen ?? uncontrolledOpen;
@@ -409,6 +444,8 @@ export function PopoverMenu({
 
   const selectItem = useCallback(
     (item: PopoverMenuItem, row: HTMLElement, close: (refocus?: boolean) => void) => {
+      // An unavailable-but-reachable row says its reason; it does not act.
+      if (item.ariaDisabled) return;
       if (item.submenu) {
         if (submenu === item.key) {
           // A click right after the hover intent opened this row is that same
@@ -589,6 +626,9 @@ export function PopoverMenu({
       contentRole="menu"
       motionKind="menu"
       quick={quick}
+      focusFirstOnOpen={focusFirstOnOpen}
+      restoreFocusOnClose={restoreFocusOnClose}
+      triggerDisabled={triggerDisabled}
       portal={portal}
       zIndex={zIndex}
       contentRef={menuRef}

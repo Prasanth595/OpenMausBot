@@ -41,6 +41,11 @@ export function setMenuHeightVars(sheet: HTMLElement, height: number, upward: bo
   sheet.style.setProperty("--menu-ty-to", upward ? `${Math.max(height, 0) * 0.65}px` : "0px");
 }
 
+/** A row the keyboard can land on anywhere under a sheet: plain items and
+ * radio choices, skipping natively disabled rows (an aria-disabled row stays
+ * reachable, so it can still say why it is unavailable). */
+export const MENU_ROW_SELECTOR = '[role="menuitem"]:not(:disabled), [role="menuitemradio"]:not(:disabled)';
+
 function leaveDelays(leave: PopoverDismissOptions["leave"]): {  enabled: boolean;
   openDelay: number;
   closeDelay: number;
@@ -81,6 +86,9 @@ export function Popover({
   contentRole = "dialog",
   motionKind = "pop",
   quick = false,
+  focusFirstOnOpen = false,
+  restoreFocusOnClose = false,
+  triggerDisabled = false,
   contentRef: externalContentRef,
   extraInsideRefs = NO_EXTRA_REFS,
   repositionKey,
@@ -147,6 +155,22 @@ export function Popover({
     closeTimer.current = null;
   }, []);
   useEffect(() => clearTimers, [clearTimers]);
+
+  // A context menu has no trigger to hand focus back to: remember who held
+  // it when the sheet opened and return it when the sheet closes. Declared
+  // before the focus effect below, so the opener is captured before focus
+  // moves onto the first row.
+  const openerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (!restoreFocusOnClose) return;
+    if (open) {
+      openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      return;
+    }
+    const opener = openerRef.current;
+    openerRef.current = null;
+    if (opener?.isConnected) opener.focus();
+  }, [open, restoreFocusOnClose]);
 
   const close = useCallback(
     (refocus = false) => {
@@ -273,22 +297,26 @@ export function Popover({
     }
   }, [motion.shown, portal, isMenuMotion, placement, repositionKey, contentRef, measured]);
 
-  // A keyboard open lands on the first runnable row. When the grow plays,
-  // only after it finishes: focusing mid-grow scrolls the clipping shell and
-  // it snaps back on the last frame (the reference focuses post-animation
-  // for the same reason). With no motion, at once once placed.
+  // A keyboard open lands on the first runnable row; `focusFirstOnOpen`
+  // extends that to pointer opens (context menus have no keyboard path in).
+  // When the grow plays, only after it finishes: focusing mid-grow scrolls
+  // the clipping shell and it snaps back on the last frame (the reference
+  // focuses post-animation for the same reason). With no motion, at once
+  // once placed.
   useEffect(() => {
-    if (!open || !focusFirst.current) return;
+    if (!open) return;
+    if (focusFirstOnOpen) focusFirst.current = true;
+    if (!focusFirst.current) return;
     if (portal && !position) return;
     if (isMenuMotion && !quick && !isReducedMotion()) return;
     focusFirst.current = false;
     const sheet = contentRef.current;
     if (!sheet) return;
     const first =
-      sheet.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)') ??
+      sheet.querySelector<HTMLElement>(MENU_ROW_SELECTOR) ??
       sheet.querySelector<HTMLElement>("button:not(:disabled), [href], [tabindex]");
     (first ?? sheet).focus();
-  }, [open, portal, position, contentRef, isMenuMotion, quick]);
+  }, [open, focusFirstOnOpen, portal, position, contentRef, isMenuMotion, quick]);
 
   const focusFirstRow = useCallback(() => {
     if (!focusFirst.current) return;
@@ -296,7 +324,7 @@ export function Popover({
     const sheet = contentRef.current;
     if (!sheet) return;
     const first =
-      sheet.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)') ??
+      sheet.querySelector<HTMLElement>(MENU_ROW_SELECTOR) ??
       sheet.querySelector<HTMLElement>("button:not(:disabled), [href], [tabindex]");
     (first ?? sheet).focus({ preventScroll: true });
   }, [contentRef]);
@@ -321,7 +349,7 @@ export function Popover({
   };
 
   const hoverOpen = () => {
-    if (!leave.enabled || pinned || isPoint) return;
+    if (!leave.enabled || triggerDisabled || pinned || isPoint) return;
     clearTimers();
     openTimer.current = setTimeout(() => setOpen(true), leave.openDelay);
   };
@@ -329,6 +357,13 @@ export function Popover({
     if (!leave.enabled || pinned || isPoint) return;
     clearTimers();
     closeTimer.current = setTimeout(() => setOpen(false), leave.closeDelay);
+  };
+  // The pointer resting on the sheet keeps a hover-open up: the close grace
+  // armed when it left the trigger must die here, or the menu closes under
+  // the pointer on its way from the trigger into the sheet.
+  const sheetHoverEnter = () => {
+    if (!leave.enabled || pinned || isPoint) return;
+    clearTimers();
   };
 
   const onRootBlur = (event: ReactFocusEvent<HTMLDivElement>) => {
@@ -417,6 +452,8 @@ export function Popover({
       data-popover-variant={variant}
       {...motion.exitProps}
       tabIndex={-1}
+      onPointerEnter={sheetHoverEnter}
+      onPointerLeave={hoverClose}
       onKeyDown={(event) => {
         if (event.key === "Tab" && tabCloses) {
           event.preventDefault();
@@ -457,19 +494,22 @@ export function Popover({
       onPointerEnter={hoverOpen}
       onPointerLeave={hoverClose}
       onFocus={() => {
-        if (leave.enabled) setOpen(true);
+        if (leave.enabled && !triggerDisabled) setOpen(true);
       }}
       onBlur={onRootBlur}
     >
       <button
         ref={triggerRef}
         type="button"
+        disabled={triggerDisabled}
+        aria-disabled={triggerDisabled || undefined}
         aria-haspopup={contentRole === "menu" ? "menu" : "dialog"}
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         aria-label={ariaLabel}
         title={triggerTitle}
         onClick={(event) => {
+          if (triggerDisabled) return;
           clearTimers();
           if (open && (pinned || !leave.enabled)) close();
           else {
