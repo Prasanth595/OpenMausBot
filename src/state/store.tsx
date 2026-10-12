@@ -333,6 +333,7 @@ export interface Task {
   createdAt: number;
   /** The person pinned this thread above the update-ordered list. */
   pinned?: boolean;
+  link?: string;
   /** Newest message time, or createdAt. Server-derived; local bumps use max. */
   updatedAt?: number;
   /** what this task has spent, banked once per settled turn */
@@ -579,17 +580,19 @@ export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMod
   surface?: Task["surface"] | null;
   /** false clears the pin */
   pinned?: boolean;
+  link?: string | null;
 };
 
 function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
-  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, snoozedUntil, surface, pinned, ...fields } = patch;
+  const { confirmFullAccess: _fullConsent, acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, snoozedUntil, surface, pinned, link, ...fields } = patch;
   return { ...fields, ...(resetApprovalToAsk ? { approvalMode: "ask", autoApprove: false, alwaysAllow: [] } : {}),
     ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }),
     ...(archivedAt === undefined ? {} : { archivedAt: archivedAt ?? undefined }),
     ...(snoozedUntil === undefined ? {} : { snoozedUntil: snoozedUntil ?? undefined }),
     // A person's pin or unpin is never the machine's record.
     ...(surface === undefined ? {} : { surface: surface ?? undefined, surfaceAuto: undefined }),
-    ...(pinned === undefined ? {} : { pinned: pinned ? true : undefined }) };
+    ...(pinned === undefined ? {} : { pinned: pinned ? true : undefined }),
+    ...(link === undefined ? {} : { link: link ?? undefined }) };
 }
 
 /** A snapshot must not move a thread backwards in the list. Local bumps can
@@ -1458,8 +1461,12 @@ export function botOpensTo(bot: Pick<NotificationThreadOwner, "threadId" | "main
 }
 
 /** Open a bot itself: its row, its pinned circle, the palette, the + menu,
- * ⌘1–9, the team map, a link to the bot, or the bot a dead thread link
- * falls back to. It opens where botOpensTo says. */
+ * ⌘1–9, the team map, a link to the bot, the bot a dead thread link falls
+ * back to, the bot the app reopens at launch, Edit profile on another bot,
+ * a restored bot, the next one after archiving, its voice settings from a
+ * room, or the chat a Cloud's setup job went to. It opens where botOpensTo
+ * says. The bot on screen is selected again where it is (its computer from
+ * the workspace view, its own Edit profile): the person sees that thread. */
 export function openBot(
   dispatch: (action: Action) => void,
   bot: Pick<NotificationThreadOwner, "id" | "threadId" | "mainThreadId" | "tasks">,
@@ -3945,6 +3952,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
     return wrapped;
   }, [botPatchQueue]);
+
+  // The app opens the bot it remembers as that bot's row would (openBot):
+  // with threads hidden at its main thread, not at a thread an activity row
+  // or a notification left it on, where the person's next words would make
+  // that thread theirs and leave their own conversation behind. Once, at the
+  // first snapshot. With threads shown the bot stays where it was.
+  const launched = useRef(false);
+  useEffect(() => {
+    if (!state.hydrated || launched.current) return;
+    launched.current = true;
+    const bot = state.bots.find((candidate) => candidate.id === state.selectedId);
+    if (bot && state.activeView === "chat" && botOpensTo(bot, showThreads) !== bot.threadId) openBot(dispatch, bot, showThreads);
+  }, [state.hydrated, state.bots, state.selectedId, state.activeView, showThreads, dispatch]);
 
   // ── initial load + SSE fold ──────────────────────────────────────────
   useEffect(() => {
