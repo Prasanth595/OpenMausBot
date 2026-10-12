@@ -15,7 +15,18 @@ export function ChatGptPlanStatus({ instanceId }: { instanceId: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
-    if (!acknowledged && !document.querySelector("dialog[data-chatgpt-plan-welcome][open]")) dialog.current?.showModal();
+    const node = dialog.current;
+    if (acknowledged || !node) return;
+    // A modal inside a collapsed engine card is invisible yet still makes the
+    // whole page inert, so wait until every enclosing <details> is open.
+    const show = () => {
+      if (node.open || node.parentElement?.closest("details:not([open])")) return;
+      if (!document.querySelector("dialog[data-chatgpt-plan-welcome][open]")) node.showModal();
+    };
+    show();
+    // `toggle` does not bubble; capture it from any ancestor disclosure.
+    document.addEventListener("toggle", show, true);
+    return () => document.removeEventListener("toggle", show, true);
   }, [acknowledged]);
 
   const dismiss = () => {
