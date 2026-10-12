@@ -15,7 +15,7 @@ import { mcpSignInLink } from "@/lib/mcp-sign-in";
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
 import { connectorServiceAccess, isConnectorToolGrantShape } from "@/lib/connector-grants";
 import { BotAvatar } from "./Avatar";
-import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
+import { PopoverMenu } from "./popover/PopoverMenu";
 import { CATEGORY_SECTION_SIZE, catalogSections, inCategory, rankCategories } from "@/lib/app-catalog";
 import { McpServersPanel } from "./McpServersPanel";
 
@@ -790,11 +790,12 @@ export function PluginsPanel() {
               </button>
             ))}
             {moreCategories.length > 0 && (
-              <SidebarPopoverMenu
+              <PopoverMenu
                 placement="below"
+                align="end"
                 ariaLabel={t("apps.moreCategories")}
                 items={moreCategories.map((name) => ({ key: name, label: name, active: category === name, onSelect: () => pickCategory(name) }))}
-                renderTrigger={({ open }) => (
+                trigger={({ open }) => (
                   <span className={cn(pill, pillTone(filter === "all" && categoryInMore), open && !categoryInMore && "bg-raised-hover text-ink")}>
                     {categoryInMore ? category : t("apps.more")}
                     <ChevronDown size={14} aria-hidden="true" />
