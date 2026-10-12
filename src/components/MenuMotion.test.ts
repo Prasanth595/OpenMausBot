@@ -110,6 +110,17 @@ describe("menu motion", () => {
     expect(react.render(() => useMenuMotion(false))).toMatchObject({ shown: false, closing: false, exitProps: {} });
   });
 
+  it("quick skips motion and unmounts on the render it closes", () => {
+    const open = react.render(() => useMenuMotion(true, "pop", true));
+    expect(open).toMatchObject({ shown: true, closing: false, className: "", exitProps: {} });
+    expect(react.render(() => useMenuMotion(false, "pop", true))).toMatchObject({
+      shown: false,
+      closing: false,
+      className: "",
+      exitProps: {},
+    });
+  });
+
   it("reopens a menu that is still closing as a live menu", () => {
     react.render(() => useMenuMotion(true));
     react.render(() => useMenuMotion(false));
@@ -125,5 +136,12 @@ describe("menu motion", () => {
     const closing = react.render(() => useHeldMenuMotion<typeof anchor>(null));
     expect(closing).toMatchObject({ shown: true, closing: true, value: anchor });
     expect(closing.exitProps).toEqual({ inert: true, "aria-hidden": true });
+  });
+
+  it("quick held menus forget their payload at once", () => {
+    const anchor = { x: 10, y: 20 };
+    react.render(() => useHeldMenuMotion(anchor, "menu", true));
+    const closed = react.render(() => useHeldMenuMotion<typeof anchor>(null, "menu", true));
+    expect(closed).toMatchObject({ shown: false, closing: false, value: anchor, exitProps: {} });
   });
 });

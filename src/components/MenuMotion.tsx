@@ -29,8 +29,10 @@ export interface MenuMotion {
 /** Keep a menu mounted through the same 200ms pop it uses to open, so close
  * is the open motion played backwards. `kind: "menu"` only stretches the
  * unmount timer to the popover menu's own exit length; its open/close
- * classes live in the popover CSS module, so this returns none. */
-export function useMenuMotion(open: boolean, kind: "pop" | "menu" = "pop"): MenuMotion {
+ * classes live in the popover CSS module, so this returns none. `quick`
+ * skips motion entirely: no enter/exit classes and no held close — the menu
+ * unmounts on the render it closes. */
+export function useMenuMotion(open: boolean, kind: "pop" | "menu" = "pop", quick = false): MenuMotion {
   // True from the menu's first open until its close has finished playing.
   const [mounted, setMounted] = useState(open);
   const closeMs = kind === "menu" ? MENU_CLOSE_MS : MENU_MOTION_MS;
@@ -41,13 +43,14 @@ export function useMenuMotion(open: boolean, kind: "pop" | "menu" = "pop"): Menu
       return;
     }
     if (!mounted) return;
-    if (reducedMotion()) {
+    // Explicit opt-out (or OS reduced motion): unmount at once, no exit.
+    if (quick || reducedMotion()) {
       setMounted(false);
       return;
     }
     const timer = window.setTimeout(() => setMounted(false), closeMs);
     return () => window.clearTimeout(timer);
-  }, [open, mounted, closeMs]);
+  }, [open, mounted, closeMs, quick]);
 
   // Read `open` itself, not only the state that trails it, so the menu shows
   // on the render its trigger flips and goes inert on the render it closes.
@@ -55,15 +58,15 @@ export function useMenuMotion(open: boolean, kind: "pop" | "menu" = "pop"): Menu
   return {
     shown: open || mounted,
     closing,
-    className: kind === "menu" ? "" : closing ? "animate-pop-out pointer-events-none" : "animate-pop-in",
+    className: quick || kind === "menu" ? "" : closing ? "animate-pop-out pointer-events-none" : "animate-pop-in",
     exitProps: closing ? { inert: true, "aria-hidden": true } : {},
   };
 }
 
 /** Remember the last open payload so a menu can finish closing after its
  * owner has already cleared the state that positioned it. */
-export function useHeldMenuMotion<T>(value: T | null, kind: "pop" | "menu" = "pop"): MenuMotion & { value: T | null } {
-  const motion = useMenuMotion(value != null, kind);
+export function useHeldMenuMotion<T>(value: T | null, kind: "pop" | "menu" = "pop", quick = false): MenuMotion & { value: T | null } {
+  const motion = useMenuMotion(value != null, kind, quick);
   const held = useRef<T | null>(value);
   if (value != null) held.current = value;
   return { ...motion, value: value ?? held.current };

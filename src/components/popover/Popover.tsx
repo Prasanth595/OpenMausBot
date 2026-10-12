@@ -79,6 +79,7 @@ export function Popover({
   zIndex = 60,
   contentRole = "dialog",
   motionKind = "pop",
+  quick = false,
   contentRef: externalContentRef,
   extraInsideRefs = NO_EXTRA_REFS,
   repositionKey,
@@ -121,7 +122,7 @@ export function Popover({
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuId = useId();
-  const motion = useMenuMotion(open, motionKind);
+  const motion = useMenuMotion(open, motionKind, quick);
   const onPlacedRef = useRef(onPlaced);
   onPlacedRef.current = onPlaced;
 
@@ -287,16 +288,17 @@ export function Popover({
   const resolved = position?.resolved ?? (placement === "auto" ? "below" : placement);
   // Menu motion splits in two layers so the shadow never jumps: the outer
   // shell animates height (its shadow grows with the box) while the inner
-  // surface only hides overflow during the grow/shrink.
-  const motionClass = !measured
-    ? ""
-    : isMenuMotion
-      ? motion.closing
-        ? motionStyles.menuOut
-        : motionStyles.menuIn
-      : motion.className;
+  // surface only hides overflow during the grow/shrink. `quick` skips both.
+  const motionClass =
+    quick || !measured
+      ? ""
+      : isMenuMotion
+        ? motion.closing
+          ? motionStyles.menuOut
+          : motionStyles.menuIn
+        : motion.className;
   const clipClass =
-    isMenuMotion && measured ? (motion.closing ? motionStyles.menuClipOut : motionStyles.menuClipIn) : "";
+    !quick && isMenuMotion && measured ? (motion.closing ? motionStyles.menuClipOut : motionStyles.menuClipIn) : "";
   // Static chrome lives in the module; the class strings below only pick
   // which module class applies. (The pop surface keeps its own name so the
   // headless/pop distinction still reads at the call site.)

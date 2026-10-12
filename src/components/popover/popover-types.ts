@@ -60,6 +60,9 @@ export interface PopoverProps {
   /** Sheet motion: the generic pop, or the menu motion (container grows out
    * of its anchor edge, shrinks back on close). Default "pop". */
   motionKind?: "pop" | "menu";
+  /** Skip motion entirely: no enter/exit and no held close — the sheet
+   * unmounts on the render it closes. Default false. */
+  quick?: boolean;
   /** Shared with a menu wrapper so a submenu can anchor to the same sheet. */
   contentRef?: RefObject<HTMLDivElement | null>;
   /** Extra nodes (a submenu sheet) that count as "inside" for dismissal. */

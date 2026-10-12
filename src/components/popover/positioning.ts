@@ -31,6 +31,11 @@ const SUBMENU_GAP = 4;
 export const OPEN_DELAY_MS = 80;
 export const CLOSE_DELAY_MS = 250;
 
+/** A submenu opens only once the pointer has rested on its parent row this
+ * long — brushing over a row on the way elsewhere must not pop it open.
+ * Keyboard and click opens stay immediate; only the hover path waits. */
+export const SUBMENU_OPEN_DELAY_MS = 200;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }

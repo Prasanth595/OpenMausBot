@@ -15,6 +15,7 @@ export {
   OPEN_DELAY_MS,
   POPOVER_WIDTH,
   SUBMENU_MIN_WIDTH,
+  SUBMENU_OPEN_DELAY_MS,
   isRtlElement,
   nextMenuIndex,
   pointPopoverPosition,

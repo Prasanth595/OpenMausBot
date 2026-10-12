@@ -24,6 +24,7 @@ import {
   OPEN_DELAY_MS,
   POPOVER_WIDTH,
   SUBMENU_MIN_WIDTH,
+  SUBMENU_OPEN_DELAY_MS,
   isRtlElement,
   nextMenuIndex,
   submenuPosition,
@@ -88,6 +89,9 @@ export interface PopoverMenuProps {
   renderItem?: (item: PopoverMenuItem, defaults: PopoverMenuRenderDefaults) => ReactNode;
   portal?: boolean;
   zIndex?: number;
+  /** Skip motion entirely (main sheet and submenu): no enter/exit and no
+   * held close. Default false. */
+  quick?: boolean;
 }
 
 const menuEnabledRows = (menu: HTMLElement | null) =>
@@ -240,6 +244,7 @@ export function PopoverMenu({
   renderItem,
   portal = true,
   zIndex = 60,
+  quick = false,
 }: PopoverMenuProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
   const open = controlledOpen ?? uncontrolledOpen;
@@ -386,7 +391,7 @@ export function PopoverMenu({
   const openItem = submenu ? items.find((item) => item.key === submenu) : undefined;
   // The submenu stays mounted through its own shrink so closing it mirrors
   // opening: whole-container expand in, whole-container shrink out.
-  const subMotion = useHeldMenuMotion(openItem ?? null, "menu");
+  const subMotion = useHeldMenuMotion(openItem ?? null, "menu", quick);
   const heldSubItem = subMotion.value;
   useEffect(() => {
     if (!subMotion.shown) setSubMeasured(false);
@@ -396,8 +401,8 @@ export function PopoverMenu({
   // layer is just padding plus the overflow gate the grow reveals.
   const subShellClass = variant === "styled" ? styles.subShell : styles.subShellBare;
   const submenuInnerClass = variant === "styled" ? styles.subInner : "";
-  const subMotionClass = !subMeasured ? "" : subMotion.closing ? motionStyles.menuOut : motionStyles.menuIn;
-  const subClipClass = subMeasured ? (subMotion.closing ? motionStyles.menuClipOut : motionStyles.menuClipIn) : "";
+  const subMotionClass = quick || !subMeasured ? "" : subMotion.closing ? motionStyles.menuOut : motionStyles.menuIn;
+  const subClipClass = !quick && subMeasured ? (subMotion.closing ? motionStyles.menuClipOut : motionStyles.menuClipIn) : "";
 
   const renderSubSheet = (close: (refocus?: boolean) => void) =>
     open &&
@@ -475,6 +480,7 @@ export function PopoverMenu({
       variant={variant}
       contentRole="menu"
       motionKind="menu"
+      quick={quick}
       portal={portal}
       zIndex={zIndex}
       contentRef={menuRef}
@@ -513,7 +519,8 @@ export function PopoverMenu({
               onItem={(item, row) => selectItem(item, row, api.close)}
               onSubmenuHover={(item, row) => {
                 if (subTimer.current) clearTimeout(subTimer.current);
-                subTimer.current = setTimeout(() => openSub(item, row), OPEN_DELAY_MS);
+                // Hover intent only: keyboard and click opens stay immediate.
+                subTimer.current = setTimeout(() => openSub(item, row), SUBMENU_OPEN_DELAY_MS);
               }}
               onSubmenuLeave={() => {
                 if (!openItem) return;

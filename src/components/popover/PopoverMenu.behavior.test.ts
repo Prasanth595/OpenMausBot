@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PopoverMenu, type PopoverMenuItem } from "./PopoverMenu";
 import { MENU_CLOSE_MS } from "../MenuMotion";
+import { SUBMENU_OPEN_DELAY_MS } from "./positioning";
 
 // CSS modules resolve to stable names here so open/close state mapping stays
 // assertable without reading any concrete animation values.
@@ -129,6 +130,35 @@ describe("PopoverMenu in a document", () => {
     expect(document.activeElement).toBe(rows[3]);
     await key(rows[3]!, "ArrowDown");
     expect(document.activeElement).toBe(rows[0]);
+  });
+
+  it("opens the submenu on hover only after the hover rests", async () => {
+    await act(async () => trigger().click());
+    const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
+    await act(async () => {
+      support.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    // Still passing through: nothing pops open synchronously.
+    await flush();
+    expect(submenu()).toBeNull();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, SUBMENU_OPEN_DELAY_MS + 50));
+    });
+    expect(submenu()).not.toBeNull();
+  });
+
+  it("skips motion entirely when quick", async () => {
+    await act(async () => {
+      root.render(createElement(PopoverMenu, { items, ariaLabel: "You", trigger: () => "You", quick: true }));
+    });
+    await act(async () => trigger().click());
+    const surface = sheet()!.closest("[data-popover]") as HTMLElement;
+    expect(surface.className).not.toContain("menuIn");
+    expect(surface.className).not.toContain("menuOut");
+    // No held close either: picking a row unmounts the sheet at once.
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    await act(async () => rows[0]!.click());
+    expect(sheet()).toBeNull();
   });
 
   it("opens the submenu with the inline end arrow and closes only it with Escape", async () => {
