@@ -252,12 +252,12 @@ describe("the phone entries", () => {
 
   it("each line hands on its own destination", () => {
     const { list, onConnect, onGetApp } = items("computer", null, paid("pro", ready));
-    list[0]!.onSelect();
+    list[0]!.onSelect!();
     expect(onConnect).toHaveBeenLastCalledWith(expect.objectContaining({ id: "cloud" }));
-    list[1]!.onSelect();
+    list[1]!.onSelect!();
     expect(onConnect).toHaveBeenLastCalledWith(expect.objectContaining({ id: "here", target: "computer" }));
     expect(onGetApp).not.toHaveBeenCalled();
-    list[2]!.onSelect();
+    list[2]!.onSelect!();
     expect(onGetApp).toHaveBeenCalledOnce();
   });
 
@@ -377,8 +377,8 @@ describe("profileMenuItems", () => {
   it("opens the Usage and account pages of Settings", () => {
     const onUsage = vi.fn(), onAccount = vi.fn();
     const items = build({ onUsage, onAccount });
-    items.find((item) => item.key === "usage")!.onSelect();
-    items.find((item) => item.key === "account")!.onSelect();
+    items.find((item) => item.key === "usage")!.onSelect!();
+    items.find((item) => item.key === "account")!.onSelect!();
     expect(onUsage).toHaveBeenCalledOnce();
     expect(onAccount).toHaveBeenCalledOnce();
   });

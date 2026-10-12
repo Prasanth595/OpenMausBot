@@ -35,8 +35,7 @@ import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
 import { AboutDialog } from "./AboutDialog";
 import { PhoneAppDialog } from "./PhoneAppDialog";
-import type { SidebarMenuItem } from "./SidebarPopoverMenu";
-import { PopoverMenu } from "./popover/PopoverMenu";
+import { PopoverMenu, type PopoverMenuItem } from "./popover/PopoverMenu";
 import { ShortcutHint } from "./ShortcutHint";
 import { useSidebarPhoneStatus } from "./SidebarPhoneButton";
 import { useStore, type Action } from "@/state/store";
@@ -158,7 +157,7 @@ export function updateNoteworthy(phase: UpdatePhase, pending = false): boolean {
 }
 
 interface UpdateEntry {
-  item: SidebarMenuItem;
+  item: PopoverMenuItem;
   phase: UpdatePhase;
   pending: boolean;
   label: string;
@@ -276,7 +275,7 @@ export function phoneMenuItems({
   connected: boolean;
   onConnect: (destination: PhoneDestination) => void;
   onGetApp: () => void;
-}): SidebarMenuItem[] {
+}): PopoverMenuItem[] {
   return [
     ...destinations.map((destination) => ({
       key: destination.id === "cloud" ? "connect-phone-cloud" : "connect-phone",
@@ -289,7 +288,7 @@ export function phoneMenuItems({
           <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-success" />
         ) : undefined,
       onSelect: () => onConnect(destination),
-    } satisfies SidebarMenuItem)),
+    } satisfies PopoverMenuItem)),
     {
       key: "phone-app",
       label: t("sidebar.menu.getPhoneApp"),
@@ -315,10 +314,10 @@ export function profileMenuItems({
   onFeedback,
   onAccount,
 }: {
-  phone: SidebarMenuItem[];
+  phone: PopoverMenuItem[];
   /** Settings has a Usage page here (not on a remote server's window) */
   usage: boolean;
-  update: SidebarMenuItem | null;
+  update: PopoverMenuItem | null;
   /** the account this app signs in to (OpenMausBot Cloud), when it has one here */
   account: string | null;
   onUsage: () => void;
@@ -328,8 +327,8 @@ export function profileMenuItems({
   onHelp: () => void;
   onFeedback: () => void;
   onAccount: () => void;
-}): SidebarMenuItem[] {
-  const help: SidebarMenuItem[] = [
+}): PopoverMenuItem[] {
+  const help: PopoverMenuItem[] = [
     { key: "help", label: t("sidebar.menu.help"), icon: <HelpCircle size={18} />, onSelect: onHelp },
     { key: "feedback", label: t("sidebar.menu.feedback"), icon: <DiscordIcon size={17} />, onSelect: onFeedback },
     {
