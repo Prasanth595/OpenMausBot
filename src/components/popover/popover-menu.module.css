@@ -24,10 +24,11 @@
   @apply overflow-x-hidden p-1;
 }
 
-/* A menu row button. Hover, keyboard focus-within and the active/submenu-open
-   state all share one fill, so they compose as separate classes. */
+/* A menu row button. Hover and the active/submenu-open state share one
+   fill, so they compose as separate classes; keyboard focus keeps only the
+   global :focus-visible ring, never a fill of its own. */
 .row {
-  @apply flex min-h-8 w-full items-center gap-2 rounded-md px-3 py-2 text-start text-sm leading-5 outline-none hover:bg-raised-hover focus-within:bg-raised-hover disabled:opacity-60;
+  @apply flex min-h-8 w-full items-center gap-2 rounded-md px-3 py-2 text-start text-sm leading-5 outline-none hover:bg-raised-hover disabled:opacity-60;
 }
 
 .rowActive {
