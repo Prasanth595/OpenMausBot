@@ -203,10 +203,14 @@ export function Popover({
   }, [clearTimers, close, open, setOpen]);
 
   // Dismissal honors each flag independently. Deliberately no backdrop: the
-  // press that closes must still reach what the user aimed at.
+  // press that closes must still reach what the user aimed at. The extra
+  // inside refs are read through a live slot: a consumer may swap them after
+  // mount, and a stale first-render list would misjudge the press.
+  const extraInsideRefsLive = useRef(extraInsideRefs);
+  extraInsideRefsLive.current = extraInsideRefs;
   const insideRef = useRef({
     contains: (target: unknown) =>
-      [rootRef.current, contentRef.current, ...extraInsideRefs.map((ref) => ref.current)].some((node) =>
+      [rootRef.current, contentRef.current, ...extraInsideRefsLive.current.map((ref) => ref.current)].some((node) =>
         node?.contains(target as Node),
       ),
   });
