@@ -188,7 +188,6 @@ function DefaultRow({
 function MenuRows({
   items,
   roomy,
-  upward,
   variant,
   renderItem,
   inSubmenu,
@@ -199,8 +198,6 @@ function MenuRows({
 }: {
   items: PopoverMenuItem[];
   roomy: boolean;
-  /** Stagger leads from the anchor edge: bottom-up when opening upward. */
-  upward: boolean;
   variant: PopoverVariant;
   renderItem?: PopoverMenuProps["renderItem"];
   inSubmenu: boolean;
@@ -211,6 +208,9 @@ function MenuRows({
 }) {
   // Row stagger slots, mirroring the reference: the open shares its second
   // half across rows, the close shares what remains after the shrink's lead.
+  // The reveal order is direction-independent — the content rides the moving
+  // clip edge, so the first row is the one the open shows first and the last
+  // row the one the close retracts first, whichever way the menu opened.
   const count = Math.max(items.length, 1);
   const openStep = (MENU_OPEN_MS - MENU_ROW_IN_MS) / count;
   const closeStep = (MENU_CLOSE_MS - MENU_ROW_OUT_LEAD_MS - MENU_ROW_OUT_MS) / count;
@@ -224,8 +224,8 @@ function MenuRows({
           // never hardcodes timing.
           style={
             {
-              "--row-open-d": (upward ? count - 1 - index : index) * openStep,
-              "--row-close-d": MENU_ROW_OUT_LEAD_MS + (upward ? index : count - 1 - index) * closeStep,
+              "--row-open-d": index * openStep,
+              "--row-close-d": MENU_ROW_OUT_LEAD_MS + (count - 1 - index) * closeStep,
             } as CSSProperties
           }
         >
@@ -473,8 +473,10 @@ export function PopoverMenu({
     if (event.target !== event.currentTarget) return;
     setSubAnimating(true);
   };
+  // No `open` guard here: a submenu the user left open keeps its own held
+  // close when the whole menu goes down, so it shrinks alongside the main
+  // sheet instead of vanishing with it.
   const renderSubSheet = (close: (refocus?: boolean) => void) =>
-    open &&
     subMotion.shown &&
     heldSubItem?.submenu && (
       <div
@@ -519,7 +521,6 @@ export function PopoverMenu({
           <MenuRows
             items={heldSubItem.submenu}
             roomy={roomy}
-            upward={false}
             variant={variant}
             renderItem={renderItem}
             inSubmenu
@@ -584,7 +585,6 @@ export function PopoverMenu({
             <MenuRows
               items={items}
               roomy={roomy}
-              upward={placement === "above"}
               variant={variant}
               renderItem={renderItem}
               inSubmenu={false}

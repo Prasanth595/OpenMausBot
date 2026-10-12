@@ -10,14 +10,17 @@ export const MENU_OPEN_MS = 500;
  * must stay mounted this long so the shrink can finish playing. */
 export const MENU_CLOSE_MS = 250;
 
-/** Per-row fade inside the menu open: rows share the second half of the
- * open, staggered from the anchor edge. Pure opacity, so it never disturbs
- * the shadow or the height motion. */
+/** Per-row settle inside the menu open: rows share the second half of the
+ * open, staggered in reveal order (first row first) and rising a few px
+ * along the container's sweep. It stays cheap (opacity + small translate on
+ * the row itself), so it never disturbs the shadow or the height motion. */
 export const MENU_ROW_IN_MS = 250;
 
-/** Per-row fade inside the menu close: the shrink leads, rows follow after a
- * short lead and all land with the container. */
-export const MENU_ROW_OUT_MS = 50;
+/** Per-row fade inside the menu close: the shrink leads, then the rows dim
+ * in a tight overlapping cascade that lands with the container. The fade
+ * stays long (and the steps small) against a short per-row blink, so a row
+ * recedes with the closing edge instead of popping out. */
+export const MENU_ROW_OUT_MS = 120;
 export const MENU_ROW_OUT_LEAD_MS = 50;
 
 export function isReducedMotion(): boolean {

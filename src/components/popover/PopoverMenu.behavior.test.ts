@@ -163,18 +163,24 @@ describe("PopoverMenu in a document", () => {
     document.documentElement.dataset.reducedMotion = "true";
   });
 
-  it("staggers rows from the anchor edge behind the container motion", async () => {
+  it("staggers rows in reveal order behind the container motion", async () => {
     await act(async () => trigger().click());
     const group = sheet()!;
     expect(group.className).toContain("rowFlow");
     const wrappers = [...group.children] as HTMLElement[];
     expect(wrappers.length).toBeGreaterThan(1);
-    // Each row carries its own slots (presence only, never values); custom
+    // Each row carries its own slots (presence only for the values); custom
     // renderItem rows inherit them from the wrapper.
     for (const wrapper of wrappers) {
       expect(wrapper.style.getPropertyValue("--row-open-d")).not.toBe("");
       expect(wrapper.style.getPropertyValue("--row-close-d")).not.toBe("");
     }
+    // Reveal order is direction-independent: the first row leads the open,
+    // the last row leads the close. (Relative order only — never concrete
+    // delay values.)
+    const delay = (wrapper: HTMLElement, prop: string) => Number(wrapper.style.getPropertyValue(prop));
+    expect(delay(wrappers[0]!, "--row-open-d")).toBeLessThan(delay(wrappers[wrappers.length - 1]!, "--row-open-d"));
+    expect(delay(wrappers[wrappers.length - 1]!, "--row-close-d")).toBeLessThan(delay(wrappers[0]!, "--row-close-d"));
   });
 
   it("unmounts a select-exit the moment its close animation ends", async () => {
@@ -273,6 +279,26 @@ describe("PopoverMenu in a document", () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, MENU_CLOSE_MS)); });
     expect(submenu()).toBeNull();
     expect(sheet()).not.toBeNull();
+    document.documentElement.dataset.reducedMotion = "true";
+  });
+
+  it("keeps a submenu shrinking alongside the main sheet when the whole menu closes", async () => {
+    delete document.documentElement.dataset.reducedMotion;
+    await act(async () => trigger().click());
+    const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
+    support.focus();
+    await key(support, "ArrowRight");
+    await flush();
+    expect(submenu()).not.toBeNull();
+    // Escape from outside the submenu closes everything: the submenu must
+    // play its own shrink in parallel, not vanish the moment the main does.
+    await key(sheet()!, "Escape");
+    expect(submenu()).not.toBeNull();
+    expect(submenu()!.className).toContain("menuOut");
+    expect(submenu()!.hasAttribute("inert")).toBe(true);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, MENU_CLOSE_MS)); });
+    expect(submenu()).toBeNull();
+    expect(sheet()).toBeNull();
     document.documentElement.dataset.reducedMotion = "true";
   });
 
