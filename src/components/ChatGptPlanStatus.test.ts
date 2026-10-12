@@ -62,6 +62,26 @@ it("opens the welcome immediately when nothing encloses it in a closed disclosur
   expect(showModal).toHaveBeenCalledTimes(1);
 });
 
+it("opens immediately with no enclosing disclosure, as in the model picker", () => {
+  act(() => root.render(createElement(ChatGptPlanStatus, { instanceId: "chatgpt" })));
+  expect(showModal).toHaveBeenCalledTimes(1);
+});
+
+it("does not open after unmounting when the card is expanded later", () => {
+  const details = mount(false);
+  act(() => root.render(createElement("details", { "data-engine-card": "chatgpt" }, createElement("summary", null, "ChatGPT"))));
+  toggle(host.querySelector("details")!, true);
+  expect(details.isConnected).toBe(true);
+  expect(showModal).not.toHaveBeenCalled();
+});
+
+it("does not open once another mount of the welcome was acknowledged", () => {
+  const details = mount(false);
+  localStorage.setItem("omb:chatgpt-plan-welcome:chatgpt", "1");
+  toggle(details, true);
+  expect(showModal).not.toHaveBeenCalled();
+});
+
 it("stays closed after the welcome was acknowledged", () => {
   localStorage.setItem("omb:chatgpt-plan-welcome:chatgpt", "1");
   const details = mount(false);

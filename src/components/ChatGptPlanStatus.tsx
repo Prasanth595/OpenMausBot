@@ -21,13 +21,15 @@ export function ChatGptPlanStatus({ instanceId }: { instanceId: string }) {
     // whole page inert, so wait until every enclosing <details> is open.
     const show = () => {
       if (node.open || node.parentElement?.closest("details:not([open])")) return;
+      // Another mount of this welcome may have been acknowledged since.
+      try { if (localStorage.getItem(key) === "1") return; } catch { /* Fall through and show it. */ }
       if (!document.querySelector("dialog[data-chatgpt-plan-welcome][open]")) node.showModal();
     };
     show();
     // `toggle` does not bubble; capture it from any ancestor disclosure.
     document.addEventListener("toggle", show, true);
     return () => document.removeEventListener("toggle", show, true);
-  }, [acknowledged]);
+  }, [acknowledged, key]);
 
   const dismiss = () => {
     try { localStorage.setItem(key, "1"); } catch { /* Private browsing may block persistence. */ }
