@@ -430,6 +430,14 @@ export function PopoverMenu({
         <div
           ref={subInnerRef}
           onKeyDown={(event) => onMenuKey(event, true, heldSubItem.submenu ?? [], close)}
+          // Same scroll caps as the main sheet: a submenu taller than the
+          // window scrolls inside its own box instead of running off-screen
+          // with no way to reach the cut-off rows.
+          style={{
+            maxHeight: `calc(100dvh - ${EDGE_MARGIN * 2}px)`,
+            overflowY: "auto",
+            overscrollBehavior: "contain",
+          }}
           className={cn(submenuInnerClass, subClipClass)}
         >
           <MenuRows

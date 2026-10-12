@@ -149,6 +149,19 @@ describe("PopoverMenu in a document", () => {
     expect(document.activeElement).toBe(support);
   });
 
+  it("scrolls a submenu taller than the window inside its own box", async () => {
+    await act(async () => trigger().click());
+    const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
+    support.focus();
+    await key(support, "ArrowRight");
+    await flush();
+    // The inner layer (not the animated outer shell) carries the scroll
+    // caps, so a tall submenu scrolls instead of running off-screen.
+    const inner = submenu()!.firstElementChild as HTMLElement;
+    expect(inner.style.overflowY).toBe("auto");
+    expect(inner.style.maxHeight).not.toBe("");
+  });
+
   it("keeps a closing submenu mounted and inert until it finishes closing", async () => {
     delete document.documentElement.dataset.reducedMotion;
     await act(async () => trigger().click());
