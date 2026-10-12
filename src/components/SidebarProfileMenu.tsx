@@ -35,7 +35,8 @@ import { InitialsAvatar } from "./Avatar";
 import { DiscordIcon } from "./DiscordIcon";
 import { AboutDialog } from "./AboutDialog";
 import { PhoneAppDialog } from "./PhoneAppDialog";
-import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
+import type { SidebarMenuItem } from "./SidebarPopoverMenu";
+import { PopoverMenu } from "./popover/PopoverMenu";
 import { ShortcutHint } from "./ShortcutHint";
 import { useSidebarPhoneStatus } from "./SidebarPhoneButton";
 import { useStore, type Action } from "@/state/store";
@@ -396,12 +397,13 @@ export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } 
 
   return (
     <>
-      <SidebarPopoverMenu
+      <PopoverMenu
         items={items}
         ariaLabel={name}
+        placement="above"
         triggerClassName={"shrink-0 w-full rounded-md [&>span]:rounded-md"}
         triggerTitle={iconOnly ? name : undefined}
-        renderTrigger={({ open }) => iconOnly ? (
+        trigger={() => iconOnly ? (
           <span
             ref={triggerRef}
             className={cn(
