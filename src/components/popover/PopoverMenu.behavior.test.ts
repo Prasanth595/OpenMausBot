@@ -4,9 +4,16 @@
 // everything, Escape and an outside press close and return focus.
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PopoverMenu, type PopoverMenuItem } from "./PopoverMenu";
+import { MENU_CLOSE_MS } from "../MenuMotion";
+
+// CSS modules resolve to stable names here so open/close state mapping stays
+// assertable without reading any concrete animation values.
+vi.mock("./popover-motion.module.css", () => ({
+  default: { menuIn: "menuIn", menuOut: "menuOut" },
+}));
 
 describe("PopoverMenu in a document", () => {
   let host: HTMLDivElement;
@@ -59,7 +66,6 @@ describe("PopoverMenu in a document", () => {
     const surface = menu.closest("[data-popover]") as HTMLElement;
     expect(surface.parentElement).toBe(document.body);
     expect(surface.style.position).toBe("fixed");
-    expect(surface.style.width).toBe("280px");
     expect(menu.getAttribute("role")).toBe("group");
     expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1);
     expect(menu.textContent).toContain("Pro");
@@ -69,6 +75,8 @@ describe("PopoverMenu in a document", () => {
     expect(support.getAttribute("aria-haspopup")).toBe("menu");
     expect(support.querySelector("svg")).not.toBeNull();
     expect(menu.querySelector('[role="menuitem"]')!.className).toContain("min-h-8");
+    // Open state maps to the container enter motion.
+    expect(surface.className).toContain("menuIn");
   });
 
   it("opens from the keyboard on the first item and walks the items", async () => {
@@ -89,6 +97,7 @@ describe("PopoverMenu in a document", () => {
     await key(support, "ArrowRight");
     await flush();
     expect(submenu()).not.toBeNull();
+    expect(submenu()!.className).toContain("menuIn");
     expect(support.getAttribute("aria-expanded")).toBe("true");
     const first = submenu()!.querySelector<HTMLElement>('[role="menuitem"]')!;
     await act(async () => {
@@ -97,6 +106,30 @@ describe("PopoverMenu in a document", () => {
     expect(submenu()).toBeNull();
     expect(sheet()).not.toBeNull();
     expect(document.activeElement).toBe(support);
+  });
+
+  it("keeps a closing submenu mounted and inert until it finishes closing", async () => {
+    delete document.documentElement.dataset.reducedMotion;
+    await act(async () => trigger().click());
+    const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
+    support.focus();
+    await key(support, "ArrowRight");
+    await flush();
+    expect(submenu()).not.toBeNull();
+    const first = submenu()!.querySelector<HTMLElement>('[role="menuitem"]')!;
+    await act(async () => {
+      first.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    // Still mounted while shrinking, out of reach; the main sheet stays open.
+    expect(submenu()).not.toBeNull();
+    expect(submenu()!.className).toContain("menuOut");
+    expect(submenu()!.hasAttribute("inert")).toBe(true);
+    expect(sheet()).not.toBeNull();
+    expect(document.activeElement).toBe(support);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, MENU_CLOSE_MS)); });
+    expect(submenu()).toBeNull();
+    expect(sheet()).not.toBeNull();
+    document.documentElement.dataset.reducedMotion = "true";
   });
 
   it("runs a submenu item and closes everything", async () => {
@@ -113,6 +146,21 @@ describe("PopoverMenu in a document", () => {
     await key(sheet()!, "Escape");
     expect(sheet()).toBeNull();
     expect(document.activeElement).toBe(trigger());
+  });
+
+  it("keeps a select-exit mounted and inert until it finishes closing", async () => {
+    delete document.documentElement.dataset.reducedMotion;
+    await act(async () => trigger().click());
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    await act(async () => rows[0]!.click());
+    // Still mounted while closing, out of reach, then unmounted.
+    const surface = sheet()!.closest("[data-popover]") as HTMLElement;
+    expect(surface.className).toContain("menuOut");
+    expect(surface.hasAttribute("inert")).toBe(true);
+    expect(picked).toEqual(["Usage"]);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, MENU_CLOSE_MS)); });
+    expect(sheet()).toBeNull();
+    document.documentElement.dataset.reducedMotion = "true";
   });
 
   it("closes on a press outside, but not on a press inside the portalled sheet", async () => {

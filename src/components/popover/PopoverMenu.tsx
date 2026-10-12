@@ -14,7 +14,9 @@ import {
 import { createPortal } from "react-dom";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { Popover } from "./Popover";
+import motionStyles from "./popover-motion.module.css";
+import { useHeldMenuMotion } from "../MenuMotion";
+import { Popover, setMenuHeightVars } from "./Popover";
 import {
   CLOSE_DELAY_MS,
   EDGE_MARGIN,
@@ -256,8 +258,12 @@ export function PopoverMenu({
   const open = controlledOpen ?? uncontrolledOpen;
   const [submenu, setSubmenu] = useState<string | null>(null);
   const [subPosition, setSubPosition] = useState<{ left: number; top: number } | null>(null);
+  // Same measure-first gating as the main sheet: reading the height while
+  // the grow runs returns the mid-animation height.
+  const [subMeasured, setSubMeasured] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const subRef = useRef<HTMLDivElement>(null);
+  const subInnerRef = useRef<HTMLDivElement>(null);
   const subRowRef = useRef<HTMLElement | null>(null);
   const subTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const extraInsideRefs = useMemo(() => [subRef], []);
@@ -283,39 +289,51 @@ export function PopoverMenu({
   );
 
   // Keep the submenu sheet inside the window, re-measuring when the window
-  // moves under it.
+  // moves under it. The sheet's own height feeds the menu motion in the same
+  // pass; submenus always reveal downward like the reference.
   useLayoutEffect(() => {
-    if (!open || !submenu || !portal) return;
+    if (!open || !submenu) return;
     const place = () => {
       const menu = menuRef.current;
       const row = subRowRef.current;
       const sub = subRef.current;
       if (!menu || !row || !sub) return;
-      setSubPosition(
-        submenuPosition(
-          menu.getBoundingClientRect(),
-          row.getBoundingClientRect(),
-          { width: sub.offsetWidth || SUBMENU_MIN_WIDTH, height: sub.offsetHeight || 0 },
-          { width: window.innerWidth, height: window.innerHeight },
-          isRtlElement(menu),
-        ),
+      // Same rule as the main sheet: the outer box is the running animation,
+      // so the natural height comes from the inner surface.
+      const subHeight = subInnerRef.current?.offsetHeight || sub.offsetHeight || 0;
+      if (!subMeasured) {
+        setMenuHeightVars(sub, subHeight, false);
+        setSubMeasured(true);
+      }
+      if (!portal) return;
+      const menuBox = menu.getBoundingClientRect();
+      const placed = submenuPosition(
+        menuBox,
+        row.getBoundingClientRect(),
+        { width: sub.offsetWidth || SUBMENU_MIN_WIDTH, height: subHeight },
+        { width: window.innerWidth, height: window.innerHeight },
+        isRtlElement(menu),
+      );
+      setSubPosition((prev) =>
+        prev && prev.left === placed.left && prev.top === placed.top ? prev : { ...placed },
       );
     };
     place();
+    if (!portal) return;
     window.addEventListener("resize", place);
     window.addEventListener("scroll", place, true);
     return () => {
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [open, submenu, portal, items.length]);
+  }, [open, submenu, portal, items.length, subMeasured]);
 
   const openSub = useCallback((item: PopoverMenuItem, row: HTMLElement, focus = false) => {
     if (subTimer.current) clearTimeout(subTimer.current);
     subRowRef.current = row;
     setSubPosition(null);
     setSubmenu(item.key);
-    if (focus) requestAnimationFrame(() => menuEnabledRows(subRef.current)[0]?.focus());
+    if (focus) requestAnimationFrame(() => menuEnabledRows(subInnerRef.current)[0]?.focus());
   }, []);
 
   const closeSub = useCallback((focusRow = false) => {
@@ -335,7 +353,9 @@ export function PopoverMenu({
       }
       item.onSelect?.();
       onSelect?.(item.key);
-      if (!item.keepOpen) close(!isPointAnchor);
+      if (!item.keepOpen) {
+        close(!isPointAnchor);
+      }
     },
     [submenu, closeSub, openSub, onSelect, isPointAnchor],
   );
@@ -377,20 +397,35 @@ export function PopoverMenu({
   );
 
   const openItem = submenu ? items.find((item) => item.key === submenu) : undefined;
+  // The submenu stays mounted through its own shrink so closing it mirrors
+  // opening: whole-container expand in, whole-container shrink out.
+  const subMotion = useHeldMenuMotion(openItem ?? null, "menu");
+  const heldSubItem = subMotion.value;
+  useEffect(() => {
+    if (!subMotion.shown) setSubMeasured(false);
+  }, [subMotion.shown]);
   const roomy = placement !== "below";
-  const submenuSurface =
-    variant === "styled" ? "overflow-hidden border border-hairline/50 bg-menu shadow-xl rounded-md p-1" : "";
+  // The look lives on the animated outer shell (see Popover): the inner
+  // layer is just padding plus the overflow gate the grow reveals.
+  const subShellClass =
+    variant === "styled"
+      ? "overflow-hidden border border-hairline/50 bg-menu shadow-xl rounded-md"
+      : "overflow-hidden";
+  const submenuInnerClass = variant === "styled" ? "overflow-x-hidden p-1" : "";
+  const subMotionClass = !subMeasured ? "" : subMotion.closing ? motionStyles.menuOut : motionStyles.menuIn;
+  const subClipClass = subMeasured ? (subMotion.closing ? motionStyles.menuClipOut : motionStyles.menuClipIn) : "";
 
   const renderSubSheet = (close: (refocus?: boolean) => void) =>
     open &&
-    openItem?.submenu && (
+    subMotion.shown &&
+    heldSubItem?.submenu && (
       <div
         ref={subRef}
         role="menu"
-        aria-label={typeof openItem.label === "string" ? openItem.label : openItem.key}
+        aria-label={typeof heldSubItem.label === "string" ? heldSubItem.label : heldSubItem.key}
         data-popover-submenu
         data-popover-variant={variant}
-        onKeyDown={(event) => onMenuKey(event, true, openItem.submenu ?? [], close)}
+        {...subMotion.exitProps}
         onPointerEnter={() => subTimer.current && clearTimeout(subTimer.current)}
         style={
           portal
@@ -406,20 +441,28 @@ export function PopoverMenu({
               }
             : undefined
         }
-        className={cn(submenuSurface, !portal && "absolute start-full top-0 z-50 ms-1", "animate-pop-in", submenuClassName)}
+        className={cn(subShellClass, !portal && "absolute start-full top-0 z-50 ms-1", subMotionClass, submenuClassName)}
       >
-        <MenuRows
-          items={openItem.submenu}
-          roomy={roomy}
-          variant={variant}
-          renderItem={renderItem}
-          inSubmenu
-          onItem={(item) => {
-            item.onSelect?.();
-            onSelect?.(item.key);
-            if (!item.keepOpen) close(!isPointAnchor);
-          }}
-        />
+        <div
+          ref={subInnerRef}
+          onKeyDown={(event) => onMenuKey(event, true, heldSubItem.submenu ?? [], close)}
+          className={cn(submenuInnerClass, subClipClass)}
+        >
+          <MenuRows
+            items={heldSubItem.submenu}
+            roomy={roomy}
+            variant={variant}
+            renderItem={renderItem}
+            inSubmenu
+            onItem={(item) => {
+              item.onSelect?.();
+              onSelect?.(item.key);
+              if (!item.keepOpen) {
+                close(!isPointAnchor);
+              }
+            }}
+          />
+        </div>
       </div>
     );
 
@@ -437,8 +480,9 @@ export function PopoverMenu({
       trigger={trigger}
       triggerClassName={triggerClassName}
       triggerTitle={triggerTitle}
-      variant="headless"
+      variant={variant}
       contentRole="menu"
+      motionKind="menu"
       portal={portal}
       zIndex={zIndex}
       contentRef={menuRef}
@@ -461,10 +505,11 @@ export function PopoverMenu({
                 CLOSE_DELAY_MS,
               );
             }}
-            className={cn(
-              variant === "styled" ? "overflow-hidden border border-hairline/50 bg-menu shadow-xl rounded-md p-1" : "",
-              className,
-            )}
+            // Plain wrapper: the Popover shell above already carries the
+            // styled surface (background, border, shadow, padding), so adding
+            // another here would double borders and trap the shadow inside
+            // the outer overflow gate.
+            className={cn(className)}
           >
             <MenuRows
               items={items}
@@ -472,7 +517,7 @@ export function PopoverMenu({
               variant={variant}
               renderItem={renderItem}
               inSubmenu={false}
-              openSubmenu={submenu}
+              openSubmenu={heldSubItem?.key}
               onItem={(item, row) => selectItem(item, row, api.close)}
               onSubmenuHover={(item, row) => {
                 if (subTimer.current) clearTimeout(subTimer.current);

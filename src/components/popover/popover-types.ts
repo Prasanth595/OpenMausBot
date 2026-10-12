@@ -57,6 +57,9 @@ export interface PopoverProps {
   zIndex?: number;
   /** ARIA role of the floating sheet. Default "dialog"; menus pass "menu". */
   contentRole?: string;
+  /** Sheet motion: the generic pop, or the menu motion (container grows out
+   * of its anchor edge, shrinks back on close). Default "pop". */
+  motionKind?: "pop" | "menu";
   /** Shared with a menu wrapper so a submenu can anchor to the same sheet. */
   contentRef?: RefObject<HTMLDivElement | null>;
   /** Extra nodes (a submenu sheet) that count as "inside" for dismissal. */

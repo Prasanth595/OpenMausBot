@@ -15,6 +15,7 @@ import { createPortal } from "react-dom";
 import { cn } from "@/lib/cn";
 import { popoverClosesOnKey, popoverClosesOnPointer } from "@/hooks/use-popover-dismiss";
 import { useMenuMotion } from "../MenuMotion";
+import motionStyles from "./popover-motion.module.css";
 import {
   CLOSE_DELAY_MS,
   EDGE_MARGIN,
@@ -22,14 +23,23 @@ import {
   POPOVER_WIDTH,
   isRtlElement,
   pointPopoverPosition,
-  transformOriginForPlacement,
   triggerPopoverPosition,
   type PopoverPlacement,
 } from "./positioning";
 import type { PopoverDismissOptions, PopoverProps } from "./popover-types";
 
-function leaveDelays(leave: PopoverDismissOptions["leave"]): {
-  enabled: boolean;
+/** Height-animation variables for the menu motion, written imperatively in
+ * the same pre-paint pass that positions the sheet so the first painted
+ * frame already grows from the right size. `upward` pins the far edge while
+ * opening above the anchor. */
+export function setMenuHeightVars(sheet: HTMLElement, height: number, upward: boolean) {
+  const full = `${Math.max(height, 0)}px`;
+  sheet.style.setProperty("--menu-h", full);
+  sheet.style.setProperty("--menu-ty-from", upward ? full : "0px");
+  sheet.style.setProperty("--menu-ty-to", upward ? `${Math.max(height, 0) * 0.65}px` : "0px");
+}
+
+function leaveDelays(leave: PopoverDismissOptions["leave"]): {  enabled: boolean;
   openDelay: number;
   closeDelay: number;
 } {
@@ -67,6 +77,7 @@ export function Popover({
   portal = true,
   zIndex = 60,
   contentRole = "dialog",
+  motionKind = "pop",
   contentRef: externalContentRef,
   extraInsideRefs = NO_EXTRA_REFS,
   repositionKey,
@@ -88,20 +99,35 @@ export function Popover({
   const tabCloses = dismiss?.tabCloses ?? true;
   const leave = leaveDelays(dismiss?.leave);
   const isPoint = anchor.kind === "point";
+  const isMenuMotion = motionKind === "menu";
 
   const [pinned, setPinned] = useState(false);
   const [position, setPosition] = useState<{ left: number; top: number; resolved: Exclude<PopoverPlacement, "auto"> } | null>(null);
+  // The height animation must measure the natural height first: reading it
+  // while the grow is running returns the mid-animation height and corrupts
+  // both the motion and the placement. So the motion classes only apply once
+  // measured, and vars freeze for the session.
+  const [measured, setMeasured] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const internalContentRef = useRef<HTMLDivElement>(null);
+  const innerRef = useRef<HTMLDivElement>(null);
   const contentRef = externalContentRef ?? internalContentRef;
+  // The inner surface keeps its natural height while the outer shell plays
+  // the height animation, so all menu measuring reads here, never the
+  // animated outer box.
   const focusFirst = useRef(false);
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuId = useId();
-  const motion = useMenuMotion(open);
+  const motion = useMenuMotion(open, motionKind);
   const onPlacedRef = useRef(onPlaced);
   onPlacedRef.current = onPlaced;
+
+  // A fresh mount measures before animating; reset when fully unmounted.
+  useEffect(() => {
+    if (!motion.shown) setMeasured(false);
+  }, [motion.shown]);
 
   const clearTimers = useCallback(() => {
     if (openTimer.current) clearTimeout(openTimer.current);
@@ -165,7 +191,13 @@ export function Popover({
       const sheet = contentRef.current;
       if (!sheet) return;
       const viewport = { width: window.innerWidth, height: window.innerHeight };
-      const size = { width: sheet.offsetWidth || width, height: sheet.offsetHeight || 0 };
+      // The outer shell's own height is the running animation (0 while
+      // growing), so the natural height always comes from the inner surface,
+      // which the height animation never resizes. Reading the outer box here
+      // is what used to collapse --menu-h to 0 mid-open, killing the motion
+      // and misplacing the sheet.
+      const naturalHeight = innerRef.current?.offsetHeight || sheet.offsetHeight || 0;
+      const size = { width: sheet.offsetWidth || width, height: naturalHeight };
       if (isPoint) {
         const next = pointPopoverPosition(
           { x: anchor.x, y: anchor.y },
@@ -173,6 +205,10 @@ export function Popover({
           viewport,
           { offset, rtl: isRtlElement(sheet) },
         );
+        if (isMenuMotion && !measured) {
+          setMenuHeightVars(sheet, naturalHeight, next.resolved === "above");
+          setMeasured(true);
+        }
         setPosition((prev) =>
           prev && prev.left === next.left && prev.top === next.top && prev.resolved === next.resolved ? prev : next,
         );
@@ -187,6 +223,10 @@ export function Popover({
         offset,
         rtl: isRtlElement(triggerEl),
       });
+      if (isMenuMotion && !measured) {
+        setMenuHeightVars(sheet, naturalHeight, next.resolved === "above");
+        setMeasured(true);
+      }
       setPosition((prev) =>
         prev && prev.left === next.left && prev.top === next.top && prev.resolved === next.resolved ? prev : next,
       );
@@ -199,7 +239,20 @@ export function Popover({
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [motion.shown, portal, isPoint, anchor, placement, align, offset, width, repositionKey, contentRef]);
+  }, [motion.shown, portal, isPoint, anchor, placement, align, offset, width, repositionKey, contentRef, isMenuMotion, measured]);
+
+  // Inline sheets skip positioning but still need their measured height for
+  // the menu motion, in the same pre-paint pass.
+  useLayoutEffect(() => {
+    if (!motion.shown || portal || !isMenuMotion) return;
+    const sheet = contentRef.current;
+    if (!sheet) return;
+    if (!measured) {
+      const naturalHeight = innerRef.current?.offsetHeight || sheet.offsetHeight || 0;
+      setMenuHeightVars(sheet, naturalHeight, placement === "above");
+      setMeasured(true);
+    }
+  }, [motion.shown, portal, isMenuMotion, placement, repositionKey, contentRef, measured]);
 
   // A keyboard open lands on the first runnable row once placed.
   useEffect(() => {
@@ -231,8 +284,30 @@ export function Popover({
   };
 
   const resolved = position?.resolved ?? (placement === "auto" ? "below" : placement);
+  // Menu motion splits in two layers so the shadow never jumps: the outer
+  // shell animates height (its shadow grows with the box) while the inner
+  // surface only hides overflow during the grow/shrink.
+  const motionClass = !measured
+    ? ""
+    : isMenuMotion
+      ? motion.closing
+        ? motionStyles.menuOut
+        : motionStyles.menuIn
+      : motion.className;
+  const clipClass =
+    isMenuMotion && measured ? (motion.closing ? motionStyles.menuClipOut : motionStyles.menuClipIn) : "";
   const surfaceClass =
     variant === "styled" ? "overflow-hidden border border-hairline/50 bg-menu shadow-xl rounded-md p-1" : "";
+  // Menu motion puts the look on the animated outer shell so its shadow is
+  // the box's own (an element's own shadow is never clipped by its own
+  // overflow); the inner layer is just padding plus the scroll container the
+  // grow reveals. A shadow left on the inner surface would be cut off by the
+  // outer overflow gate, at rest as well as mid-motion.
+  const menuShellClass =
+    variant === "styled"
+      ? "overflow-hidden border border-hairline/50 bg-menu shadow-xl rounded-md"
+      : "overflow-hidden";
+  const menuInnerClass = variant === "styled" ? "overflow-x-hidden p-1" : "";
 
   const contentStyle: CSSProperties | undefined = portal
     ? {
@@ -241,15 +316,23 @@ export function Popover({
         top: position?.top ?? 0,
         width,
         maxWidth: `calc(100vw - ${EDGE_MARGIN * 2}px)`,
-        maxHeight: `calc(100dvh - ${EDGE_MARGIN * 2}px)`,
-        overflowY: "auto",
-        overscrollBehavior: "contain",
-        transformOrigin: transformOriginForPlacement(resolved),
+        // Menu motion scrolls its inner surface instead, so the outer shell
+        // (and its shadow) tracks the animated height exactly.
+        ...(isMenuMotion
+          ? null
+          : {
+              maxHeight: `calc(100dvh - ${EDGE_MARGIN * 2}px)`,
+              overflowY: "auto" as const,
+              overscrollBehavior: "contain" as const,
+            }),
         visibility: position ? undefined : "hidden",
         zIndex,
         ...style,
       }
     : style;
+  const menuInnerStyle: CSSProperties | undefined = portal
+    ? { maxHeight: `calc(100dvh - ${EDGE_MARGIN * 2}px)`, overflowY: "auto", overscrollBehavior: "contain" }
+    : undefined;
 
   const inlinePlacementClass =
     placement === "above"
@@ -278,9 +361,23 @@ export function Popover({
         }
       }}
       style={contentStyle}
-      className={cn(surfaceClass, !portal && inlinePlacementClass, !portal && "z-40", motion.className, className)}
+      className={cn(
+        isMenuMotion ? menuShellClass : surfaceClass,
+        !portal && inlinePlacementClass,
+        !portal && "z-40",
+        motionClass,
+        !isMenuMotion && className,
+      )}
     >
-      {typeof children === "function" ? children({ open, close }) : children}
+      {isMenuMotion ? (
+        <div ref={innerRef} style={menuInnerStyle} className={cn(menuInnerClass, clipClass, className)}>
+          {typeof children === "function" ? children({ open, close }) : children}
+        </div>
+      ) : typeof children === "function" ? (
+        children({ open, close })
+      ) : (
+        children
+      )}
     </div>
   );
 

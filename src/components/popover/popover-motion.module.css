@@ -1,0 +1,86 @@
+/* Popover menu motion, scoped to the generic popover. Follows
+   material-web's menu open/close: the whole container grows in height out of
+   its anchor edge and shrinks back on close, with the surface fading in
+   first on open and out last on close. Height (not scale or clip) is
+   animated on an outer shell so the box shadow grows with the box instead of
+   jumping; an inner layer only hides overflow while growing.
+   --menu-h is the measured full height in px, written from JS before first
+   paint; --menu-ty-from/to pin the far edge when opening upward. */
+.menuIn {
+  animation: popover-menu-in 500ms cubic-bezier(0.3, 0, 0, 1);
+}
+
+.menuOut {
+  animation: popover-menu-out 250ms cubic-bezier(0.3, 0, 0.8, 0.15) forwards;
+  pointer-events: none;
+}
+
+/* Overflow gate for the scrolling layer: hidden while the shell grows or
+   shrinks, back to normal after (no fill on open, frozen on close). */
+.menuClipIn {
+  animation: popover-menu-clip 500ms;
+}
+
+.menuClipOut {
+  animation: popover-menu-clip 250ms forwards;
+}
+
+@keyframes popover-menu-in {
+  0% {
+    height: 0;
+    transform: translateY(var(--menu-ty-from, 0px));
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    height: var(--menu-h, auto);
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes popover-menu-out {
+  0% {
+    height: var(--menu-h, auto);
+    transform: translateY(0);
+    opacity: 1;
+  }
+  80% {
+    height: calc(var(--menu-h, 0px) * 0.35);
+    transform: translateY(var(--menu-ty-to, 0px));
+    opacity: 1;
+  }
+  100% {
+    height: calc(var(--menu-h, 0px) * 0.35);
+    transform: translateY(var(--menu-ty-to, 0px));
+    opacity: 0;
+  }
+}
+
+@keyframes popover-menu-clip {
+  from {
+    overflow: hidden;
+  }
+  to {
+    overflow: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menuIn,
+  .menuOut,
+  .menuClipIn,
+  .menuClipOut {
+    animation: none;
+  }
+}
+
+/* App-level reduced-motion flag; mirrors the media block above. */
+:root[data-reduced-motion="true"] .menuIn,
+:root[data-reduced-motion="true"] .menuOut,
+:root[data-reduced-motion="true"] .menuClipIn,
+:root[data-reduced-motion="true"] .menuClipOut {
+  animation: none;
+}

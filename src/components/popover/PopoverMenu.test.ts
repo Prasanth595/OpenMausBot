@@ -5,11 +5,15 @@ import { expect, it, vi } from "vitest";
 // Drawn open: motion and dismissal are not what is tested here.
 vi.mock("../MenuMotion", () => ({
   useMenuMotion: () => ({ shown: true, closing: false, className: "", exitProps: {} }),
+  useHeldMenuMotion: (value: unknown) => ({ shown: value !== null, value, closing: false, className: "", exitProps: {} }),
 }));
 vi.mock("@/hooks/use-popover-dismiss", () => ({
   popoverClosesOnKey: () => false,
   popoverClosesOnPointer: () => false,
   usePopoverDismiss: () => {},
+}));
+vi.mock("./popover-motion.module.css", () => ({
+  default: { menuIn: "menuIn", menuOut: "menuOut" },
 }));
 
 import { PopoverMenu, type PopoverMenuItem } from "./PopoverMenu";
