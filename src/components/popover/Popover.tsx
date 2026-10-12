@@ -1,0 +1,339 @@
+// Generic floating shell: trigger- or point-anchored, portal or inline,
+// headless or styled. It knows nothing about menus — PopoverMenu composes on
+// top of it. Business state never lives here; everything arrives via props.
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type FocusEvent as ReactFocusEvent,
+} from "react";
+import { createPortal } from "react-dom";
+import { cn } from "@/lib/cn";
+import { popoverClosesOnKey, popoverClosesOnPointer } from "@/hooks/use-popover-dismiss";
+import { useMenuMotion } from "../MenuMotion";
+import {
+  CLOSE_DELAY_MS,
+  EDGE_MARGIN,
+  OPEN_DELAY_MS,
+  POPOVER_WIDTH,
+  isRtlElement,
+  pointPopoverPosition,
+  transformOriginForPlacement,
+  triggerPopoverPosition,
+  type PopoverPlacement,
+} from "./positioning";
+import type { PopoverDismissOptions, PopoverProps } from "./popover-types";
+
+function leaveDelays(leave: PopoverDismissOptions["leave"]): {
+  enabled: boolean;
+  openDelay: number;
+  closeDelay: number;
+} {
+  if (leave === true) return { enabled: true, openDelay: OPEN_DELAY_MS, closeDelay: CLOSE_DELAY_MS };
+  if (!leave) return { enabled: false, openDelay: OPEN_DELAY_MS, closeDelay: CLOSE_DELAY_MS };
+  return {
+    enabled: true,
+    openDelay: leave.openDelay ?? OPEN_DELAY_MS,
+    closeDelay: leave.closeDelay ?? CLOSE_DELAY_MS,
+  };
+}
+
+// Stable defaults: fresh object/array literals here would re-run the
+// placement and dismissal effects on every render.
+const DEFAULT_ANCHOR = { kind: "trigger" } as const;
+const NO_EXTRA_REFS: Array<{ current: HTMLElement | null }> = [];
+
+export function Popover({
+  ariaLabel,
+  open: controlledOpen,
+  defaultOpen = false,
+  onOpenChange,
+  anchor = DEFAULT_ANCHOR,
+  placement = "auto",
+  align = "start",
+  offset,
+  width = POPOVER_WIDTH,
+  dismiss,
+  trigger,
+  triggerClassName = "w-full",
+  triggerTitle,
+  variant = "styled",
+  className,
+  style,
+  portal = true,
+  zIndex = 60,
+  contentRole = "dialog",
+  contentRef: externalContentRef,
+  extraInsideRefs = NO_EXTRA_REFS,
+  repositionKey,
+  onPlaced,
+  children,
+}: PopoverProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(defaultOpen);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (controlledOpen === undefined) setUncontrolledOpen(next);
+      onOpenChange?.(next);
+    },
+    [controlledOpen, onOpenChange],
+  );
+
+  const outsidePress = dismiss?.outsidePress ?? true;
+  const escape = dismiss?.escape ?? true;
+  const tabCloses = dismiss?.tabCloses ?? true;
+  const leave = leaveDelays(dismiss?.leave);
+  const isPoint = anchor.kind === "point";
+
+  const [pinned, setPinned] = useState(false);
+  const [position, setPosition] = useState<{ left: number; top: number; resolved: Exclude<PopoverPlacement, "auto"> } | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const internalContentRef = useRef<HTMLDivElement>(null);
+  const contentRef = externalContentRef ?? internalContentRef;
+  const focusFirst = useRef(false);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const menuId = useId();
+  const motion = useMenuMotion(open);
+  const onPlacedRef = useRef(onPlaced);
+  onPlacedRef.current = onPlaced;
+
+  const clearTimers = useCallback(() => {
+    if (openTimer.current) clearTimeout(openTimer.current);
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    openTimer.current = null;
+    closeTimer.current = null;
+  }, []);
+  useEffect(() => clearTimers, [clearTimers]);
+
+  const close = useCallback(
+    (refocus = false) => {
+      clearTimers();
+      setPinned(false);
+      setOpen(false);
+      if (refocus) triggerRef.current?.focus();
+    },
+    [clearTimers, setOpen],
+  );
+
+  const toggle = useCallback(() => {
+    clearTimers();
+    if (open) close();
+    else {
+      setPinned(true);
+      setOpen(true);
+    }
+  }, [clearTimers, close, open, setOpen]);
+
+  // Dismissal honors each flag independently. Deliberately no backdrop: the
+  // press that closes must still reach what the user aimed at.
+  const insideRef = useRef({
+    contains: (target: unknown) =>
+      [rootRef.current, contentRef.current, ...extraInsideRefs.map((ref) => ref.current)].some((node) =>
+        node?.contains(target as Node),
+      ),
+  });
+
+  useEffect(() => {
+    if (!open || (!outsidePress && !escape)) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (!escape || !popoverClosesOnKey(event)) return;
+      event.preventDefault();
+      close(!isPoint);
+    };
+    const onDown = (event: PointerEvent) => {
+      if (!outsidePress) return;
+      if (popoverClosesOnPointer(event.target, insideRef.current)) close(false);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onDown);
+    };
+  }, [open, outsidePress, escape, close, isPoint, contentRef, extraInsideRefs]);
+
+  // Measure the sheet against its anchor and keep it inside the window.
+  useLayoutEffect(() => {
+    if (!motion.shown || !portal) return;
+    const place = () => {
+      const sheet = contentRef.current;
+      if (!sheet) return;
+      const viewport = { width: window.innerWidth, height: window.innerHeight };
+      const size = { width: sheet.offsetWidth || width, height: sheet.offsetHeight || 0 };
+      if (isPoint) {
+        const next = pointPopoverPosition(
+          { x: anchor.x, y: anchor.y },
+          size,
+          viewport,
+          { offset, rtl: isRtlElement(sheet) },
+        );
+        setPosition((prev) =>
+          prev && prev.left === next.left && prev.top === next.top && prev.resolved === next.resolved ? prev : next,
+        );
+        onPlacedRef.current?.({ left: next.left, top: next.top });
+        return;
+      }
+      const triggerEl = triggerRef.current;
+      if (!triggerEl) return;
+      const next = triggerPopoverPosition(triggerEl.getBoundingClientRect(), size, viewport, {
+        placement,
+        align,
+        offset,
+        rtl: isRtlElement(triggerEl),
+      });
+      setPosition((prev) =>
+        prev && prev.left === next.left && prev.top === next.top && prev.resolved === next.resolved ? prev : next,
+      );
+      onPlacedRef.current?.({ left: next.left, top: next.top });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [motion.shown, portal, isPoint, anchor, placement, align, offset, width, repositionKey, contentRef]);
+
+  // A keyboard open lands on the first runnable row once placed.
+  useEffect(() => {
+    if (!open || !focusFirst.current) return;
+    if (portal && !position) return;
+    focusFirst.current = false;
+    const sheet = contentRef.current;
+    if (!sheet) return;
+    const first =
+      sheet.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)') ??
+      sheet.querySelector<HTMLElement>("button:not(:disabled), [href], [tabindex]");
+    (first ?? sheet).focus();
+  }, [open, portal, position, contentRef]);
+
+  const hoverOpen = () => {
+    if (!leave.enabled || pinned || isPoint) return;
+    clearTimers();
+    openTimer.current = setTimeout(() => setOpen(true), leave.openDelay);
+  };
+  const hoverClose = () => {
+    if (!leave.enabled || pinned || isPoint) return;
+    clearTimers();
+    closeTimer.current = setTimeout(() => setOpen(false), leave.closeDelay);
+  };
+
+  const onRootBlur = (event: ReactFocusEvent<HTMLDivElement>) => {
+    if (!leave.enabled || pinned || isPoint) return;
+    if (!event.relatedTarget || !rootRef.current?.contains(event.relatedTarget as Node)) setOpen(false);
+  };
+
+  const resolved = position?.resolved ?? (placement === "auto" ? "below" : placement);
+  const surfaceClass =
+    variant === "styled" ? "overflow-hidden border border-hairline/50 bg-menu shadow-xl rounded-md p-1" : "";
+
+  const contentStyle: CSSProperties | undefined = portal
+    ? {
+        position: "fixed",
+        left: position?.left ?? 0,
+        top: position?.top ?? 0,
+        width,
+        maxWidth: `calc(100vw - ${EDGE_MARGIN * 2}px)`,
+        maxHeight: `calc(100dvh - ${EDGE_MARGIN * 2}px)`,
+        overflowY: "auto",
+        overscrollBehavior: "contain",
+        transformOrigin: transformOriginForPlacement(resolved),
+        visibility: position ? undefined : "hidden",
+        zIndex,
+        ...style,
+      }
+    : style;
+
+  const inlinePlacementClass =
+    placement === "above"
+      ? "absolute bottom-full mb-1 start-0"
+      : placement === "before"
+        ? "absolute end-full me-1 top-0"
+        : placement === "after"
+          ? "absolute start-full ms-1 top-0"
+          : "absolute top-full mt-1 end-0";
+
+  const sheet = motion.shown && (
+    <div
+      ref={contentRef}
+      id={menuId}
+      role={contentRole}
+      aria-label={ariaLabel}
+      data-popover
+      data-popover-placement={resolved}
+      data-popover-variant={variant}
+      {...motion.exitProps}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Tab" && tabCloses) {
+          event.preventDefault();
+          close(!isPoint);
+        }
+      }}
+      style={contentStyle}
+      className={cn(surfaceClass, !portal && inlinePlacementClass, !portal && "z-40", motion.className, className)}
+    >
+      {typeof children === "function" ? children({ open, close }) : children}
+    </div>
+  );
+
+  if (isPoint || !trigger) {
+    if (!portal) return <>{sheet}</>;
+    return typeof document !== "undefined" && sheet ? createPortal(sheet, document.body) : null;
+  }
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative"
+      onPointerEnter={hoverOpen}
+      onPointerLeave={hoverClose}
+      onFocus={() => {
+        if (leave.enabled) setOpen(true);
+      }}
+      onBlur={onRootBlur}
+    >
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup={contentRole === "menu" ? "menu" : "dialog"}
+        aria-expanded={open}
+        aria-controls={open ? menuId : undefined}
+        aria-label={ariaLabel}
+        title={triggerTitle}
+        onClick={(event) => {
+          clearTimers();
+          if (open && (pinned || !leave.enabled)) close();
+          else {
+            focusFirst.current = event.detail === 0;
+            setPinned(true);
+            setOpen(true);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (open || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+          event.preventDefault();
+          focusFirst.current = true;
+          setPinned(true);
+          setOpen(true);
+        }}
+        className={triggerClassName}
+      >
+        {trigger({ open, toggle, close })}
+      </button>
+
+      {!portal ? (
+        sheet
+      ) : typeof document !== "undefined" && sheet ? (
+        createPortal(sheet, document.body)
+      ) : null}
+    </div>
+  );
+}
