@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PopoverMenu, type PopoverMenuItem } from "./PopoverMenu";
 import { MENU_CLOSE_MS } from "../MenuMotion";
-import { CLOSE_DELAY_MS, OPEN_DELAY_MS, SUBMENU_OPEN_DELAY_MS } from "./positioning";
+import { CLOSE_DELAY_MS, OPEN_DELAY_MS, SUBMENU_CONFIRM_MS, SUBMENU_OPEN_DELAY_MS } from "./positioning";
 
 // CSS modules resolve to stable names here so open/close state mapping stays
 // assertable without reading any concrete animation values.
@@ -270,6 +270,47 @@ describe("PopoverMenu in a document", () => {
     expect(submenu()).toBeNull();
     expect(support.getAttribute("aria-expanded")).not.toBe("true");
     expect(support.className).not.toContain("rowActive");
+  });
+
+  it("keeps the submenu when a click lands just as the hover-open fires", async () => {
+    await act(async () => trigger().click());
+    const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
+    await act(async () => {
+      support.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, SUBMENU_OPEN_DELAY_MS + 50));
+    });
+    expect(submenu()).not.toBeNull();
+    // The click the user aimed at the row arrives right after the hover-open:
+    // it confirms the open instead of toggling the fresh submenu shut.
+    await act(async () => support.click());
+    expect(submenu()).not.toBeNull();
+    expect(support.getAttribute("aria-expanded")).toBe("true");
+    expect(support.className).toContain("rowActive");
+    // The confirmation is spent: the next click toggles as usual.
+    await act(async () => support.click());
+    expect(submenu()).toBeNull();
+    expect(support.getAttribute("aria-expanded")).not.toBe("true");
+  });
+
+  it("toggles the submenu shut when the click comes after the hover-open settles", async () => {
+    await act(async () => trigger().click());
+    const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
+    await act(async () => {
+      support.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, SUBMENU_OPEN_DELAY_MS + 50));
+    });
+    expect(submenu()).not.toBeNull();
+    // The hover-open is no longer fresh: this click is a deliberate toggle.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, SUBMENU_CONFIRM_MS + 50));
+    });
+    await act(async () => support.click());
+    expect(submenu()).toBeNull();
+    expect(support.getAttribute("aria-expanded")).not.toBe("true");
   });
 
   it("skips motion entirely when quick", async () => {

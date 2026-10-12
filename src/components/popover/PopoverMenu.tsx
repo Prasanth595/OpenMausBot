@@ -33,6 +33,7 @@ import {
   EDGE_MARGIN,
   OPEN_DELAY_MS,
   POPOVER_WIDTH,
+  SUBMENU_CONFIRM_MS,
   SUBMENU_MIN_WIDTH,
   SUBMENU_OPEN_DELAY_MS,
   isRtlElement,
@@ -308,6 +309,9 @@ export function PopoverMenu({
   // abandon the intent without disturbing a close already in flight.
   const subTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const subOpenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // When the hover intent opened a submenu: a parent-row click this soon
+  // after it is the open gesture itself (still mid-press), not a toggle.
+  const subConfirmAt = useRef<number | null>(null);
   const cancelSubTimers = useCallback(() => {
     if (subTimer.current) clearTimeout(subTimer.current);
     if (subOpenTimer.current) clearTimeout(subOpenTimer.current);
@@ -380,6 +384,7 @@ export function PopoverMenu({
 
   const openSub = useCallback((item: PopoverMenuItem, row: HTMLElement, focus = false) => {
     cancelSubTimers();
+    subConfirmAt.current = null;
     subRowRef.current = row;
     setSubPosition(null);
     setSubmenu(item.key);
@@ -395,6 +400,7 @@ export function PopoverMenu({
 
   const closeSub = useCallback((focusRow = false) => {
     cancelSubTimers();
+    subConfirmAt.current = null;
     setSubmenu(null);
     if (focusRow) subRowRef.current?.focus();
   }, [cancelSubTimers]);
@@ -404,8 +410,18 @@ export function PopoverMenu({
   const selectItem = useCallback(
     (item: PopoverMenuItem, row: HTMLElement, close: (refocus?: boolean) => void) => {
       if (item.submenu) {
-        if (submenu === item.key) closeSub();
-        else openSub(item, row, true);
+        if (submenu === item.key) {
+          // A click right after the hover intent opened this row is that same
+          // open gesture (possibly still mid-press), not a deliberate toggle:
+          // keep the fresh submenu. The window expires, so a later click closes.
+          const fresh =
+            subConfirmAt.current !== null &&
+            performance.now() - subConfirmAt.current < SUBMENU_CONFIRM_MS;
+          subConfirmAt.current = null;
+          if (!fresh) closeSub();
+        } else {
+          openSub(item, row, true);
+        }
         return;
       }
       item.onSelect?.();
@@ -625,6 +641,7 @@ export function PopoverMenu({
                 subOpenTimer.current = setTimeout(() => {
                   subOpenTimer.current = null;
                   openSub(item, row);
+                  subConfirmAt.current = performance.now();
                 }, SUBMENU_OPEN_DELAY_MS);
               }}
               onSubmenuExit={() => {

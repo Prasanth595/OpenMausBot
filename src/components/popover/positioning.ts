@@ -36,6 +36,12 @@ export const CLOSE_DELAY_MS = 250;
  * Keyboard and click opens stay immediate; only the hover path waits. */
 export const SUBMENU_OPEN_DELAY_MS = 200;
 
+/** A click on the parent row within this window of a hover-open confirms
+ * that open instead of toggling the fresh submenu shut: the click gesture
+ * and the hover intent land together, and the user meant to open it, not to
+ * close it. After the window, clicking the row toggles as usual. */
+export const SUBMENU_CONFIRM_MS = 400;
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
