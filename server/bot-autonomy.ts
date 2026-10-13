@@ -1984,7 +1984,7 @@ export class BotAutonomy {
    * unanswered too long, or its conversation went away). The server only
    * passes "blocked": a PR merged or closed meanwhile is not the goal done
    * (see citedPrsOutcome). */
-  resolveNeedsInput(threadId: string, detail: string, status: "completed" | "blocked"): BotGoal | null {
+  resolveNeedsInput(threadId: string, detail: string, status: "blocked"): BotGoal | null {
     const goal = this.goals.get(threadId);
     if (!goal || goal.status !== "needs-input") return null;
     goal.status = status;
@@ -2300,18 +2300,19 @@ export function prsCited(text: string): Array<{ number: number; slug?: string }>
  * still open. */
 export const NEEDS_INPUT_PR_CHECK_MAX = 8;
 
-/** The PRs a waiting goal's question cites, plus every bare "#N" it names: a
- * bare number may be the delivery while "PR #N" is only a dependency (in
- * cc5c122f the delivery #9286 entered 29 h after PR #9300 merged). A bare
- * number that is an issue fails `gh pr view`, so it reads as unknown. */
-export function goalCitedPrs(text: string): Array<{ number: number; slug?: string }> {
-  const found = prsCited(text);
+/** The PRs a waiting goal's question cites ("PR #N", links: explicit), plus
+ * every bare "#N" it names: a bare number may be the delivery while "PR #N"
+ * is only a dependency (in cc5c122f the delivery #9286 entered 29 h after PR
+ * #9300 merged). A bare number that gh says is no PR (an issue) is dropped by
+ * the caller; bare numbers alone never settle a question. */
+export function goalCitedPrs(text: string): Array<{ number: number; slug?: string; explicit: boolean }> {
+  const found = prsCited(text).map((pr) => ({ ...pr, explicit: true }));
   const seen = new Set(found.map((pr) => pr.number));
   for (const match of text.matchAll(/(?<![\w/])#(\d{3,7})\b/g)) {
     const number = Number(match[1]);
     if (seen.has(number)) continue;
     seen.add(number);
-    found.push({ number });
+    found.push({ number, explicit: false });
   }
   return found;
 }
@@ -2320,20 +2321,29 @@ export interface CitedPrState {
   number: number;
   /** gh's state: MERGED, CLOSED, OPEN, or "?" when it could not be read. */
   state: string;
+  /** Cited as "PR #N" or a PR link (not a bare "#N"). */
+  explicit?: boolean;
+  /** When it was merged or closed (gh's mergedAt / closedAt), if it was. */
+  changedAt?: number;
 }
 
 export type CitedPrsOutcome =
   | { kind: "merged"; chip: string; report: string }
   | { kind: "closed"; signature: string; chip: string; report: string };
 
-/** What a waiting goal's cited PRs say about its question. The server never
- * closes the goal as completed from this: merged ends the question, not the
- * goal (merge is not delivery), so the goal resumes for the bot to check the
- * result; a PR closed without merge may have been abandoned or folded into a
- * batch, so the bot is told and the goal keeps waiting. Anything open or
- * unknown changes nothing. */
-export function citedPrsOutcome(states: readonly CitedPrState[]): CitedPrsOutcome | null {
-  if (!states.length || !states.every((each) => each.state === "MERGED" || each.state === "CLOSED")) return null;
+/** What a waiting goal's cited PRs say about its question, asked at
+ * `askedAt`. Only a change AFTER the question can answer it: a PR already
+ * merged when the bot asked ("posso rodar o release?") says nothing new, and
+ * counting it resumed the goal every 10 min while the bot asked again. The
+ * server never closes the goal as completed from this: merged ends the
+ * question, not the goal (merge is not delivery), so the goal resumes for the
+ * bot to check the result; a PR closed without merge may have been abandoned
+ * or folded into a batch, so the bot is told and the goal keeps waiting.
+ * Anything open, unknown, or only bare numbers changes nothing. */
+export function citedPrsOutcome(states: readonly CitedPrState[], askedAt: number): CitedPrsOutcome | null {
+  if (!states.length || !states.some((each) => each.explicit === true)) return null;
+  if (!states.every((each) => each.state === "MERGED" || each.state === "CLOSED")) return null;
+  if (!states.some((each) => each.changedAt !== undefined && each.changedAt > askedAt)) return null;
   const listOf = (state: string) => states.filter((each) => each.state === state).map((each) => `#${each.number}`).join(", ");
   const merged = listOf("MERGED");
   const closed = listOf("CLOSED");
@@ -2348,7 +2358,7 @@ export function citedPrsOutcome(states: readonly CitedPrState[]): CitedPrsOutcom
     kind: "closed",
     signature: states.map((each) => `${each.number}:${each.state}`).sort().join(","),
     chip: `PR citada fechada sem merge: ${closed}. O objetivo continua esperando o dono`,
-    report: `[Servidor: PR fechada sem merge] A pergunta deste objetivo citava ${closed} (fechada sem merge)${merged ? ` e ${merged} (mergeada)` : ""}. Fechar não é entregar: pode ter sido abandono ou troca por um lote. O objetivo continua esperando o dono. Confira para onde o trabalho foi e atualize a pergunta, ou retome se ela não vale mais.`,
+    report: `[Servidor: PR fechada sem merge] A pergunta deste objetivo citava ${closed} (fechada sem merge)${merged ? ` e ${merged} (mergeada)` : ""}. Fechar não é entregar: pode ter sido abandono ou troca por um lote. O objetivo continua esperando a resposta do dono. Confira para onde o trabalho foi e, se a pergunta mudou, diga a ele na sua resposta o estado atual e o que precisa dele.`,
   };
 }
 

@@ -910,7 +910,11 @@ describe("reports", () => {
 });
 
 describe("a goal waiting on the person about a PR", () => {
-  it("reads the PRs its question cites", () => {
+  const ASKED = Date.UTC(2026, 9, 9, 12, 0);
+  const after = ASKED + 3_600_000;
+  const before = ASKED - 3_600_000;
+
+  it("reads the PRs its question cites, and the server only ever stops a waiting goal, never completes it", () => {
     expect(prsCited("GO para mergear a PR #9303? https://github.com/example-org/example-repo/pull/9286 e pull request 9290")).toEqual([
       { number: 9286, slug: "example-org/example-repo" }, { number: 9303 }, { number: 9290 },
     ]);
@@ -919,39 +923,60 @@ describe("a goal waiting on the person about a PR", () => {
     autonomy.startGoal("chief", "t1", { goal: "merge", maxTurns: 5, maxHours: 2 });
     autonomy.finishGoal("t1", "needs-input", "GO para a PR #9303?");
     expect(autonomy.needsInputGoals().map((goal) => goal.threadId)).toEqual(["t1"]);
-    expect(autonomy.resolveNeedsInput("t1", "PR #9303 mergeada", "completed")?.status).toBe("completed");
+    expect(autonomy.resolveNeedsInput("t1", "sem resposta há mais de 12 h", "blocked")?.status).toBe("blocked");
     expect(autonomy.needsInputGoals()).toEqual([]);
     expect(autonomy.resolveNeedsInput("t1", "x", "blocked")).toBeNull();
   });
 
   it("also checks the bare #N a question names, which may be the delivery and not the dependency", () => {
     // cc5c122f: "PR #9300" was only a dependency; the delivery was the bare "#9286"
-    expect(goalCitedPrs("GO para a #9286 depois que a PR #9300 entrar?")).toEqual([{ number: 9300 }, { number: 9286 }]);
-    expect(goalCitedPrs("https://github.com/o/r/pull/9286 e #9286")).toEqual([{ number: 9286, slug: "o/r" }]);
+    expect(goalCitedPrs("GO para a #9286 depois que a PR #9300 entrar?")).toEqual([{ number: 9300, explicit: true }, { number: 9286, explicit: false }]);
+    expect(goalCitedPrs("https://github.com/o/r/pull/9286 e #9286")).toEqual([{ number: 9286, slug: "o/r", explicit: true }]);
     // an anchor or a two-digit tag is not a PR
     expect(goalCitedPrs("veja issues/12#issuecomment-1 e o item #12")).toEqual([]);
   });
 
-  it("never closes the goal as completed: all merged resumes it to check the result", () => {
-    const outcome = citedPrsOutcome([{ number: 9303, state: "MERGED" }, { number: 9290, state: "MERGED" }]);
+  it("never closes the goal as completed: merged after the question resumes it to check the result", () => {
+    const outcome = citedPrsOutcome([{ number: 9303, state: "MERGED", explicit: true, changedAt: after }, { number: 9290, state: "MERGED", explicit: true, changedAt: before }], ASKED);
     expect(outcome?.kind).toBe("merged");
     expect(outcome?.report).toContain("#9303, #9290");
     expect(outcome?.report).toContain("Merge não é entrega");
     expect(outcome?.report).toContain("goal_end");
   });
 
+  it("says nothing new when every cited PR was already merged or closed when the bot asked", () => {
+    // "Levar a PR #9300 até produção" — merged, then "posso rodar o release?": resuming that looped every 10 min
+    expect(citedPrsOutcome([{ number: 9300, state: "MERGED", explicit: true, changedAt: before }], ASKED)).toBeNull();
+    // a state with no time cannot prove it changed after the question
+    expect(citedPrsOutcome([{ number: 9300, state: "MERGED", explicit: true }], ASKED)).toBeNull();
+  });
+
   it("treats a PR closed without merge as news for the bot, not as an answer", () => {
-    const outcome = citedPrsOutcome([{ number: 9303, state: "MERGED" }, { number: 9290, state: "CLOSED" }]);
+    const outcome = citedPrsOutcome([{ number: 9303, state: "MERGED", explicit: true, changedAt: before }, { number: 9290, state: "CLOSED", explicit: true, changedAt: after }], ASKED);
     expect(outcome?.kind).toBe("closed");
     expect(outcome?.report).toContain("#9290");
     expect(outcome?.report).toContain("fechada sem merge");
+    expect(outcome?.report).not.toContain("atualize a pergunta");
     expect(outcome?.kind === "closed" && outcome.signature).toBe("9290:CLOSED,9303:MERGED");
   });
 
-  it("changes nothing while a cited PR is open or its state is unknown", () => {
-    expect(citedPrsOutcome([])).toBeNull();
-    expect(citedPrsOutcome([{ number: 1, state: "MERGED" }, { number: 2, state: "OPEN" }])).toBeNull();
-    expect(citedPrsOutcome([{ number: 1, state: "CLOSED" }, { number: 2, state: "?" }])).toBeNull();
+  it("changes nothing while a cited PR is open or unknown, or when only bare numbers are cited", () => {
+    expect(citedPrsOutcome([], ASKED)).toBeNull();
+    expect(citedPrsOutcome([{ number: 1, state: "MERGED", explicit: true, changedAt: after }, { number: 2, state: "OPEN", explicit: false }], ASKED)).toBeNull();
+    expect(citedPrsOutcome([{ number: 1, state: "CLOSED", explicit: true, changedAt: after }, { number: 2, state: "?", explicit: true }], ASKED)).toBeNull();
+    expect(citedPrsOutcome([{ number: 9286, state: "MERGED", explicit: false, changedAt: after }], ASKED)).toBeNull();
+  });
+
+  it("does not loop: once the bot asks again after the merge, the same PRs answer nothing", () => {
+    const autonomy = make();
+    autonomy.startGoal("chief", "t1", { goal: "Levar a PR #9300 até produção", maxTurns: 5, maxHours: 2 });
+    const asked = autonomy.finishGoal("t1", "needs-input", "GO para mergear a PR #9300?")!;
+    const merged = asked.finishedAt! + 60_000;
+    expect(citedPrsOutcome([{ number: 9300, state: "MERGED", explicit: true, changedAt: merged }], asked.finishedAt!)?.kind).toBe("merged");
+    autonomy.resumeGoalAfterInput("t1");
+    now += 120_000;
+    const again = autonomy.finishGoal("t1", "needs-input", "A PR #9300 entrou. Posso rodar o release de produção?")!;
+    expect(citedPrsOutcome([{ number: 9300, state: "MERGED", explicit: true, changedAt: merged }], again.finishedAt!)).toBeNull();
   });
 
   it("tells the bot about a closed PR once, while the goal keeps waiting", () => {

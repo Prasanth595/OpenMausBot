@@ -8,7 +8,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { writeFileAtomic } from "./atomic.ts";
-import { readFile as readFileAsync, rm as removeDirectory } from "node:fs/promises";
+import { rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
 import { basename, extname, join } from "node:path";
@@ -422,7 +422,7 @@ import { DiskWatch, freeBytes as volumeFreeBytes } from "./disk-watch.ts";
 import { addOwnWorktree, breakerRepo, cacheLine, enqueueSeededStart, groupExec, installText, prepareCliWorktree, pruneDanglingLinks, seededStartChain, cloneSeedCaches, ensureLink, type Exec as OwnExec, hooksFolder, leftOwnWorktrees, leftWorktreesReport, noteOwnFailure, ownBreakerCli, ownBreakerItem, type OwnBreakerState, ownBreakerTripped, rearmOwnBreaker, findCacheDirs, ownLinkPath, ownSettingsFor, OwnWorktreeStore, planOwnWorktree, realCloneIo, realDirFs, refreshSeed, savedText, claudeConfigPath, trustFoldersInClaudeConfig } from "./own-worktrees.ts";
 import { BG_JOB_MAX_MS, cutLeftovers, parseLsofCwd, backgroundProcesses, bgJobOverdueReport, bgJobResumePrompt, jobAlive, newTurnTree, noteDescendants, psTable, gateLabel, mergeProcesses, sessionGates, type BgProcess, type TurnTree } from "./bg-jobs.ts";
 import { spawn as spawnCcProcess, execFile as execFileCc, execFileSync as execFileSyncCc, type ChildProcess as CcChildProcess } from "node:child_process";
-import { archiveBlockers, claimedPrNumbers, claimsInToolCalls, githubSlug, newDeliveryCache, openPrsOfSession, parseLsRemoteTag, PRODUCTION_TAG, releaseRecordFrom, resumeNeeded, watchProductionDelivery, type ReleaseRecord } from "./prod-delivery.ts";
+import { archiveBlockers, claimedPrNumbers, claimsInToolCalls, githubSlug, newDeliveryCache, notAPullRequest, openPrsOfSession, parseLsRemoteTag, PRODUCTION_TAG, readReleaseRecord, resumeNeeded, watchProductionDelivery, type ReleaseRecord } from "./prod-delivery.ts";
 import { climbStopLadder, ownerItemCiting } from "./stop-ladder.ts";
 import { checkArchivedOutside, githubLookups } from "./archived-outside.ts";
 import { computerErrorPt, isInfraFailure } from "./error-pt.ts";
@@ -9153,16 +9153,22 @@ async function revalidateNeedsInputGoals(): Promise<void> {
       }
       if (now - (needsInputChecks.get(goal.threadId) ?? 0) < 10 * 60_000) continue;
       needsInputChecks.set(goal.threadId, now);
-      const prs = goalCitedPrs(`${goal.detail ?? ""}\n${goal.goal}`);
+      // the question is what the world may answer: the PRs it cites, not the goal's own text
+      const prs = goalCitedPrs(goal.detail ?? "");
       if (!prs.length || prs.length > NEEDS_INPUT_PR_CHECK_MAX) continue;
       const states: CitedPrState[] = [];
       for (const pr of prs) {
         try {
-          const out = await execCc("gh", ["pr", "view", String(pr.number), ...(pr.slug ? ["--repo", pr.slug] : []), "--json", "state", "--jq", ".state"], watchCwd(goal.botId, goal.threadId));
-          states.push({ number: pr.number, state: out.trim() });
-        } catch { states.push({ number: pr.number, state: "?" }); }
+          const view = JSON.parse(await execCc("gh", ["pr", "view", String(pr.number), ...(pr.slug ? ["--repo", pr.slug] : []), "--json", "state,mergedAt,closedAt"], watchCwd(goal.botId, goal.threadId))) as { state?: string; mergedAt?: string | null; closedAt?: string | null };
+          const changedAt = Date.parse(view.mergedAt ?? view.closedAt ?? "");
+          states.push({ number: pr.number, state: view.state ?? "?", explicit: pr.explicit, ...(Number.isFinite(changedAt) ? { changedAt } : {}) });
+        } catch (error) {
+          // a bare number that is an issue is not cited as a PR at all
+          if (notAPullRequest(error)) continue;
+          states.push({ number: pr.number, state: "?", explicit: pr.explicit });
+        }
       }
-      const outcome = citedPrsOutcome(states);
+      const outcome = citedPrsOutcome(states, goal.finishedAt ?? goal.startedAt);
       if (!outcome) continue;
       if (outcome.kind === "merged" ? !autonomy.resumeGoalAfterInput(goal.threadId) : !autonomy.notePrNotice(goal.threadId, outcome.signature)) continue;
       autonomy.addReport(goal.botId, goal.threadId, outcome.report);
@@ -12155,19 +12161,20 @@ async function releaseHistoryDir(): Promise<string | null> {
   releaseHistory.at = Date.now();
   try {
     const root = (await execCc("plutil", ["-extract", "EnvironmentVariables.NURIA_PLATFORM_ROOT", "raw", RELEASE_AGENT_PLIST])).trim();
-    releaseHistory.dir = root.startsWith("/") ? join(root, ".deploy-history") : null;
+    const dir = root.startsWith("/") ? join(root, ".deploy-history") : null;
+    releaseHistory.dir = dir && existsSync(dir) ? dir : null;
   } catch {
     releaseHistory.dir = null;
   }
+  if (!releaseHistory.dir) console.warn(`[delivery] the release corridor's records cannot be found (${RELEASE_AGENT_PLIST}: NURIA_PLATFORM_ROOT/.deploy-history): nothing is announced in production until they can`);
   return releaseHistory.dir;
 }
-/** What the corridor recorded for a production commit; null when nothing
- * (no release of it, or its records cannot be found): then it is not announced. */
-async function releaseRecordOf(sha: string): Promise<ReleaseRecord | null> {
+/** What the corridor recorded for a production commit: null when it recorded
+ * nothing of it, "unavailable" when its records cannot be found here. */
+async function releaseRecordOf(sha: string): Promise<ReleaseRecord | null | "unavailable"> {
   const dir = await releaseHistoryDir();
-  if (!dir || !/^[0-9a-f]{40}$/.test(sha)) return null;
-  const read = (path: string) => readFileAsync(path, "utf8").catch(() => null);
-  return releaseRecordFrom(await read(join(dir, "post-release", sha, "result.env")), await read(join(dir, "deploy-receipt-production.env")), sha);
+  if (!dir) return "unavailable";
+  return /^[0-9a-f]{40}$/.test(sha) ? readReleaseRecord(dir, sha) : null;
 }
 const delivery = { running: false, lastAt: 0 };
 function watchDelivery(): void {
@@ -12182,8 +12189,8 @@ function watchDelivery(): void {
     chip: (session, text) => ccChip(session as CcSession, text),
     save: () => ccLedger.save(),
     log: (line) => console.log(line),
-    // where the Nuria release runs on this Mac, its own records prove production
-    ...(productivityEnabled ? { releaseRecord: releaseRecordOf } : {}),
+    // where the Nuria release runs on this Mac (its LaunchAgent is installed), its own records prove production
+    ...(existsSync(RELEASE_AGENT_PLIST) ? { releaseRecord: releaseRecordOf } : {}),
   }, deliveryCache)
     .catch((error) => console.error(`[delivery] ${error instanceof Error ? error.message : String(error)}`))
     .finally(() => { delivery.running = false; });
