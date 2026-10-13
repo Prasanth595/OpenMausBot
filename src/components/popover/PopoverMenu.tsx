@@ -750,6 +750,9 @@ export function PopoverMenu({
             renderHeader={renderHeader}
             inSubmenu
             onItem={(item) => {
+              // Same guard as selectItem: an aria-disabled row is reachable
+              // for its reason, but presses do nothing.
+              if (item.ariaDisabled) return;
               item.onSelect?.();
               onSelect?.(item.key);
               if (!item.keepOpen) {
