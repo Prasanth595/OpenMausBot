@@ -8,7 +8,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { writeFileAtomic } from "./atomic.ts";
-import { rm as removeDirectory } from "node:fs/promises";
+import { readFile as readFileAsync, rm as removeDirectory } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
 import { basename, extname, join } from "node:path";
@@ -422,7 +422,7 @@ import { DiskWatch, freeBytes as volumeFreeBytes } from "./disk-watch.ts";
 import { addOwnWorktree, breakerRepo, cacheLine, enqueueSeededStart, groupExec, installText, prepareCliWorktree, pruneDanglingLinks, seededStartChain, cloneSeedCaches, ensureLink, type Exec as OwnExec, hooksFolder, leftOwnWorktrees, leftWorktreesReport, noteOwnFailure, ownBreakerCli, ownBreakerItem, type OwnBreakerState, ownBreakerTripped, rearmOwnBreaker, findCacheDirs, ownLinkPath, ownSettingsFor, OwnWorktreeStore, planOwnWorktree, realCloneIo, realDirFs, refreshSeed, savedText, claudeConfigPath, trustFoldersInClaudeConfig } from "./own-worktrees.ts";
 import { BG_JOB_MAX_MS, cutLeftovers, parseLsofCwd, backgroundProcesses, bgJobOverdueReport, bgJobResumePrompt, jobAlive, newTurnTree, noteDescendants, psTable, gateLabel, mergeProcesses, sessionGates, type BgProcess, type TurnTree } from "./bg-jobs.ts";
 import { spawn as spawnCcProcess, execFile as execFileCc, execFileSync as execFileSyncCc, type ChildProcess as CcChildProcess } from "node:child_process";
-import { archiveBlockers, claimedPrNumbers, claimsInToolCalls, githubSlug, newDeliveryCache, openPrsOfSession, parseLsRemoteTag, PRODUCTION_TAG, resumeNeeded, watchProductionDelivery } from "./prod-delivery.ts";
+import { archiveBlockers, claimedPrNumbers, claimsInToolCalls, githubSlug, newDeliveryCache, openPrsOfSession, parseLsRemoteTag, PRODUCTION_TAG, releaseRecordFrom, resumeNeeded, watchProductionDelivery, type ReleaseRecord } from "./prod-delivery.ts";
 import { climbStopLadder, ownerItemCiting } from "./stop-ladder.ts";
 import { checkArchivedOutside, githubLookups } from "./archived-outside.ts";
 import { computerErrorPt, isInfraFailure } from "./error-pt.ts";
@@ -12145,6 +12145,30 @@ async function watchOrphanedIssues(): Promise<void> {
 
 // Merged PRs of Claude Code sessions reaching production (server/prod-delivery.ts).
 const deliveryCache = newDeliveryCache();
+/** The release's LaunchAgent names the clone the corridor runs from
+ * (NURIA_PLATFORM_ROOT); its .deploy-history holds the records that prove a
+ * commit reached production. Read again every 10 min, so a moved clone is followed. */
+const RELEASE_AGENT_PLIST = join(homedir(), "Library", "LaunchAgents", "com.nuria.production-release.plist");
+const releaseHistory = { dir: null as string | null, at: 0 };
+async function releaseHistoryDir(): Promise<string | null> {
+  if (Date.now() - releaseHistory.at < 10 * 60_000) return releaseHistory.dir;
+  releaseHistory.at = Date.now();
+  try {
+    const root = (await execCc("plutil", ["-extract", "EnvironmentVariables.NURIA_PLATFORM_ROOT", "raw", RELEASE_AGENT_PLIST])).trim();
+    releaseHistory.dir = root.startsWith("/") ? join(root, ".deploy-history") : null;
+  } catch {
+    releaseHistory.dir = null;
+  }
+  return releaseHistory.dir;
+}
+/** What the corridor recorded for a production commit; null when nothing
+ * (no release of it, or its records cannot be found): then it is not announced. */
+async function releaseRecordOf(sha: string): Promise<ReleaseRecord | null> {
+  const dir = await releaseHistoryDir();
+  if (!dir || !/^[0-9a-f]{40}$/.test(sha)) return null;
+  const read = (path: string) => readFileAsync(path, "utf8").catch(() => null);
+  return releaseRecordFrom(await read(join(dir, "post-release", sha, "result.env")), await read(join(dir, "deploy-receipt-production.env")), sha);
+}
 const delivery = { running: false, lastAt: 0 };
 function watchDelivery(): void {
   if (delivery.running || Date.now() - delivery.lastAt < 60_000) return;
@@ -12158,6 +12182,8 @@ function watchDelivery(): void {
     chip: (session, text) => ccChip(session as CcSession, text),
     save: () => ccLedger.save(),
     log: (line) => console.log(line),
+    // where the Nuria release runs on this Mac, its own records prove production
+    ...(productivityEnabled ? { releaseRecord: releaseRecordOf } : {}),
   }, deliveryCache)
     .catch((error) => console.error(`[delivery] ${error instanceof Error ? error.message : String(error)}`))
     .finally(() => { delivery.running = false; });

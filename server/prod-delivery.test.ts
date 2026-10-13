@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { archiveBlockers, claimedPrNumbers, claimsInToolCalls, DELIVERY_CHECK_MS, deliveryReport, mergeStatePt, prOwnership, sessionBranches, githubSlug, newDeliveryCache, parseLsRemoteTag, prLinks, prsOfSession, productionTime, resumeNeeded, watchProductionDelivery, type CcDelivery, type DeliveryDeps } from "./prod-delivery.ts";
+import { archiveBlockers, claimedPrNumbers, claimsInToolCalls, DELIVERY_CHECK_MS, deliveryReport, mergeStatePt, prOwnership, sessionBranches, githubSlug, newDeliveryCache, parseLsRemoteTag, prLinks, prsOfSession, productionTime, releaseRecordFrom, resumeNeeded, ROLLBACK_WATCH_MS, unpublishedApps, watchProductionDelivery, type CcDelivery, type DeliveryDeps, type ReleaseRecord } from "./prod-delivery.ts";
 
 const SLUG = "dinhogehm/nuria-platform";
 const TAG = "c".repeat(40);
@@ -21,7 +21,7 @@ const worktreeGit = (repo: string, args: string[]): string | null => {
   return `${HEAD}\n`;
 };
 
-function fakeDeps(over: Partial<{ state: string; compare: string; tag: string | null; head: string }> = {}) {
+function fakeDeps(over: Partial<{ state: string; compare: string; tag: string | null; head: string; record: ReleaseRecord | null; files: string[] }> = {}) {
   const calls: string[][] = [];
   const reports: string[] = [];
   const chips: string[] = [];
@@ -30,6 +30,7 @@ function fakeDeps(over: Partial<{ state: string; compare: string; tag: string | 
     now: () => now,
     gh: async (args) => {
       calls.push(args);
+      if (args[0] === "pr" && args.includes("files")) return `${(over.files ?? []).join("\n")}\n`;
       if (args[0] === "pr") return JSON.stringify({ state: over.state ?? "MERGED", mergeCommit: { oid: MERGE }, headRefName: over.head ?? BRANCH, headRefOid: "f".repeat(40) });
       if (args[1]!.includes("/compare/")) return `${over.compare ?? "ahead"}\n`;
       if (args[1]!.includes("/commits/")) return "2026-09-30T19:40:00Z\n";
@@ -46,6 +47,8 @@ function fakeDeps(over: Partial<{ state: string; compare: string; tag: string | 
     report: (_session, text) => { reports.push(text); },
     chip: (_session, text) => { chips.push(text); },
     save: () => {},
+    // the corridor's own record of the tag's commit: healthy, deployed at 30/09 16:40 BRT
+    releaseRecord: async () => (over.record === undefined ? { result: "healthy", deployedAt: "2026-09-30T19:40:00Z" } : over.record),
   };
   return { deps, calls, reports, chips, advance: (ms: number) => { now += ms; } };
 }
@@ -107,11 +110,17 @@ describe("delivery in production", () => {
     expect(reports[0]).toContain("cc_session_archive");
     expect(reports[0]).toContain("No ID, no notice");
     expect(chips[0]).toContain("PR #9400");
-    const before = calls.length;
+    // the next pass asks GitHub nothing; only the tag is read again, for a rollback within the day
+    const asked = () => calls.filter((call) => call[0] !== "git").length;
+    const before = asked();
     advance(DELIVERY_CHECK_MS);
     await watchProductionDelivery([s], deps, cache);
     expect(reports).toHaveLength(1);
-    expect(calls.length).toBe(before);
+    expect(asked()).toBe(before);
+    const tagReads = calls.filter((call) => call[0] === "git").length;
+    advance(ROLLBACK_WATCH_MS);
+    await watchProductionDelivery([s], deps, cache);
+    expect(calls.filter((call) => call[0] === "git").length).toBe(tagReads);
   });
 
   it("keeps waiting while the tag is behind the merge, and re-reads it only every 10 min", async () => {
@@ -141,6 +150,95 @@ describe("delivery in production", () => {
     await watchProductionDelivery([{ ...session(), status: "archived" }], archived.deps, newDeliveryCache());
     expect(archived.calls).toEqual([]);
     expect(deliveryReport({ id: "s", title: "t" }, [{ url: "u", number: 1, mergeSha: MERGE, productionSince: "30/09 16:40" }], TAG)).toContain("PR #1 (u)");
+  });
+});
+
+describe("proof of production, from the release corridor's own record", () => {
+  const RESULT = `MODE=dry-run\nCOMMIT=${TAG}\nSTARTED_AT=2026-10-13T05:39:55Z\nFINISHED_AT=2026-10-13T05:44:29Z\nRESULT=healthy\n`;
+  const RECEIPT = `RECEIPT_VERSION=2\nCOMMIT=${TAG}\nENV=production\nDEPLOYED_AT=2026-10-13T05:38:30Z\nREMOTE_TARGET_COUNT=2\nREMOTE_TARGETS=pages:nuria-kb-pages:f2d1a3b0,worker:agenda:67ecc3f3\nPURGE_RESULT=success\n`;
+
+  it("reads the post-release verdict of the very commit, and the receipt's time and targets only when the receipt is that commit's", () => {
+    expect(releaseRecordFrom(RESULT, RECEIPT, TAG)).toEqual({ result: "healthy", deployedAt: "2026-10-13T05:38:30Z", targets: ["pages:nuria-kb-pages", "worker:agenda"] });
+    // the receipt is a later release's: the verdict stands, its time and targets are not this commit's
+    expect(releaseRecordFrom(RESULT, RECEIPT.replaceAll(TAG, "d".repeat(40)), TAG)).toEqual({ result: "healthy" });
+    expect(releaseRecordFrom(RESULT, null, TAG)).toEqual({ result: "healthy" });
+    // no record of this commit: the corridor did not release it
+    expect(releaseRecordFrom(null, RECEIPT, TAG)).toBeNull();
+    expect(releaseRecordFrom(RESULT.replace(`COMMIT=${TAG}`, `COMMIT=${"d".repeat(40)}`), RECEIPT, TAG)).toBeNull();
+    expect(releaseRecordFrom(RESULT.replace("RESULT=healthy", "RESULT=rolled_back"), RECEIPT, TAG)).toMatchObject({ result: "rolled_back" });
+  });
+
+  it("names the apps a PR changed that the release has no target for", () => {
+    const targets = ["pages:nuria-kb-pages", "pages:nuria-web", "worker:agenda", "worker:core"];
+    expect(unpublishedApps(["apps/kb-pages/src/search.ts"], targets)).toEqual([]);
+    expect(unpublishedApps(["apps/kb-pages/src/search.ts"], ["worker:agenda"])).toEqual(["kb-pages"]);
+    expect(unpublishedApps(["web/src/App.tsx", "apps/agenda/src/a.ts"], targets)).toEqual([]);
+    expect(unpublishedApps(["apps/sdk/index.ts", "apps/core/src/x.ts", "apps/sdk/b.ts"], targets)).toEqual(["sdk"]);
+    // scripts, docs and shared packages have no target of their own
+    expect(unpublishedApps(["scripts/release.sh", "docs/claude/deploy.md", "packages/shared/x.ts"], targets)).toEqual([]);
+  });
+
+  it("takes the time from the receipt, never from the tag's commit", async () => {
+    const f = fakeDeps({ record: { result: "healthy", deployedAt: "2026-10-13T05:38:30Z" } });
+    await watchProductionDelivery([session()], f.deps, newDeliveryCache());
+    expect(f.reports[0]).toContain("em produção desde 13/10 02:38");
+    expect(f.calls.some((call) => call[1]?.includes("/commits/"))).toBe(false);
+  });
+
+  it("says the time is unknown when the corridor's record has none", async () => {
+    const f = fakeDeps({ record: { result: "healthy" } });
+    await watchProductionDelivery([session()], f.deps, newDeliveryCache());
+    expect(f.reports[0]).toContain("horário do deploy indisponível");
+    expect(f.chips[0]).toBe("em produção, horário do deploy indisponível (PR #9400)");
+  });
+
+  it("does not announce a tag the corridor did not release, says so once, and announces once a record appears", async () => {
+    // 09/10: the tag was moved outside the corridor, and #9483 was announced to the owner, the Monitor and QA
+    const f = fakeDeps({ record: null });
+    const cache = newDeliveryCache();
+    const s = session();
+    await watchProductionDelivery([s], f.deps, cache);
+    expect(f.reports).toHaveLength(1);
+    expect(f.reports[0]).not.toContain("delivered in production");
+    expect(f.reports[0]).toContain("sem release saudável registrado pelo corredor");
+    expect(f.chips[0]).toContain("não anunciada");
+    expect(s.delivery?.prs["9400"]?.reportedAt).toBeUndefined();
+    f.advance(DELIVERY_CHECK_MS);
+    await watchProductionDelivery([s], f.deps, cache);
+    expect(f.reports).toHaveLength(1);
+    f.deps.releaseRecord = async () => ({ result: "healthy", deployedAt: "2026-09-30T19:40:00Z" });
+    f.advance(DELIVERY_CHECK_MS);
+    await watchProductionDelivery([s], f.deps, cache);
+    expect(f.reports[1]).toContain("em produção desde 30/09 16:40");
+  });
+
+  it("does not announce a PR whose app has no publish target in the release", async () => {
+    // 12/10: #9528 changed apps/kb-pages, then in DEPLOY_EXCLUDED_APPS, and was announced ~8 h before it was published
+    const f = fakeDeps({ record: { result: "healthy", deployedAt: "2026-09-30T19:40:00Z", targets: ["worker:agenda"] }, files: ["apps/kb-pages/src/search.ts"] });
+    const s = session();
+    await watchProductionDelivery([s], f.deps, newDeliveryCache());
+    expect(f.reports).toHaveLength(1);
+    expect(f.reports[0]).toContain("kb-pages");
+    expect(f.reports[0]).toContain("sem caminho de publicação");
+    expect(s.delivery?.prs["9400"]?.reportedAt).toBeUndefined();
+  });
+
+  it("reopens a delivery when the tag moves back past its merge", async () => {
+    const f = fakeDeps();
+    const cache = newDeliveryCache();
+    const s = session();
+    await watchProductionDelivery([s], f.deps, cache);
+    expect(s.delivery?.prs["9400"]).toMatchObject({ productionTag: TAG });
+    // a rollback: the tag now points at a commit that does not contain the merge
+    const BACK = "b".repeat(40);
+    f.deps.git = async (_repo, args) => (args[0] === "remote" ? `git@github.com:${SLUG}.git\n` : `${BACK}\trefs/tags/nuria-production-deployed\n`);
+    const gh = f.deps.gh;
+    f.deps.gh = async (args) => (args[1]?.includes(`...${BACK}`) ? "behind\n" : gh(args));
+    f.advance(DELIVERY_CHECK_MS);
+    await watchProductionDelivery([s], f.deps, cache);
+    expect(f.reports.at(-1)).toContain("saiu de produção");
+    expect(s.delivery?.prs["9400"]?.reportedAt).toBeUndefined();
+    expect(s.delivery?.prs["9400"]?.productionTag).toBeUndefined();
   });
 });
 
