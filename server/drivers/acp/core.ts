@@ -25,9 +25,10 @@
 // session/update notifications, so updates are double-gated: nothing emits
 // before the prompt is sent, and `_meta.isReplay` updates are dropped. Session
 // configuration is the exception: its live updates apply before prompting too.
-import { homedir } from "node:os";
+import { mkdtempSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
 import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
@@ -37,6 +38,8 @@ import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
 import { deletePromptSplitReceipt, promptHalves, readPromptSplitReceipt, splitSessionPrompt, writePromptSplitReceipt } from "../prompt-split.ts";
 import type { PromptSplitReceipt } from "../prompt-split.ts";
 import { describeSpawnFailure, execCli, killCliTree, spawnCli } from "../../procs.ts";
+import { runAcpOneShot } from "./background-text.ts";
+import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import {
   classifyQuiet, describeQuiet, lastSeenPhrase, LogTail, quietKey, sampleProcessTree,
   type LogSignal, type ProcessSample, type QuietState,
@@ -70,6 +73,7 @@ import type {
   SendTurnInput,
   ProviderErrorCode,
   RequestOutcome,
+  TextGenerationOptions,
   TurnImageInput,
 } from "../../contracts.ts";
 import { newEventId, newId, TurnNotStartedError } from "../../contracts.ts";
@@ -85,8 +89,8 @@ import { redactSecretsInText } from "../../redact.ts";
 import { recoveryPromptFor } from "../../resume-recovery.ts";
 import { sessionIdlePolicy } from "../session-idle.ts";
 import { classifyError } from "../retry.ts";
-import { canUseMcpServer, narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
-import { gateServer, mcpStdioServer } from "../../mcp-gate-config.ts";
+import { narrowsNativeTools, parseToolScope } from "../../../shared/tool-scope.ts";
+import { turnStdioMcpServers } from "../turn-mcp.ts";
 
 /** Failures the person fixes on their provider account, not by retrying:
  * the process that reported one is healthy and stays pooled. */
@@ -320,7 +324,7 @@ export interface AcpSupport {
   /** Part of the spawn contract beside the environment: state outside it
    * that a running process never reads again (OpenCode's auth.json), so a
    * conversation whose process predates a change gets a fresh one. */
-  spawnFingerprint?(env: Record<string, string | undefined>): string;
+  spawnFingerprint?(env: Record<string, string | undefined>, config: AcpConfig): string;
   /** The approval mode is applied to the session on every turn (in
    * configureSession) and nothing about the process depends on it, so an
    * approval change must not respawn the process. The pooled session may
@@ -328,6 +332,9 @@ export interface AcpSupport {
    * this turn's mode and throw unless the runtime confirms it; the core then
    * sends no prompt and discards the process (see approvalUnconfirmed). */
   sessionScopedApproval?: boolean;
+  /** False when this engine cannot run memory upkeep's one-shot text call
+   * cleanly (generateMemoryText, ./background-text.ts). On by default. */
+  backgroundText?: false;
   /** Mutate the child env in place: strip a key, inject a policy. Receives the
    *  instance config so a support can vary with fullAuto, and the instance
    *  environment so it can tell a key the server put there on purpose from
@@ -372,15 +379,16 @@ export interface AcpSupport {
    *  snapshot share `transformEnv` and must not see a per-turn overlay. */
   applyTurnEnv?(
     env: Record<string, string | undefined>,
-    ctx: { model?: string; requestedModel?: string; fullAuto: boolean; botId?: string; cwd: string; toolScope?: SendTurnInput["toolScope"] },
+    ctx: { model?: string; requestedModel?: string; fullAuto: boolean; botId?: string; cwd: string; toolScope?: SendTurnInput["toolScope"]; threadId: string; mcpServers: Array<{ name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> }> },
   ): void;
   /** Pick the ACP authenticate methodId from initialize's advertised
    * authMethods; return null to skip the authenticate step. `env` is the
    * environment the agent process was spawned with. */
   pickAuthMethod(authMethods: Array<{ id?: string }>, env: Record<string, string | undefined>): string | null;
-  /** "fail": abort the turn if auth is missing/errors (subscription CLIs).
-   *  "continue": proceed anyway (CLIs that work off an ambient login). */
-  authFailure: "fail" | "continue";
+  /** "fail": abort if auth is missing/errors (subscription CLIs).
+   * "fail-request": cached API credentials need no method, but a requested
+   * OAuth login must succeed. "continue": proceed on an ambient login. */
+  authFailure: "fail" | "fail-request" | "continue";
   /** snapshot(): can this harness actually run a turn? (env already carries the
    *  merged config). May be async for harnesses that have to ask the CLI. */
   isAuthenticated(
@@ -412,6 +420,7 @@ export interface AcpSupport {
   configureSession?(ctx: {
     request: (method: string, params: unknown, timeoutMs?: number) => Promise<any>;
     sessionId: string;
+    env: Record<string, string | undefined>;
     config: AcpConfig;
     turn: SendTurnInput;
     /** `session/new` (or `session/load`) advertised model list, verbatim. Some
@@ -660,6 +669,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
   const decodeConfig = decodeAcpConfig(support.defaultCli);
   const DENY_TIMEOUT_NOTE =
     "OpenMausBot: nobody answered this permission request in time. Skip this action and finish what you can without it.";
+  // shown to the person: no engine slug, and what to do next
+  const QUESTION_NO_MATCH_NOTE =
+    "That answer isn't one of the choices this engine can take, so the question was closed and the turn stopped. Ask again and pick one of the options.";
 
   return {
     driverKind: DRIVER_KIND,
@@ -863,61 +875,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       // server named before every tool came back "Tool not found"). The
       // catalog passes through whole: the agent searches tools itself.
       type AcpMcpServer = { name: string; command: string; args: string[]; env: Array<{ name: string; value: string }> };
-      const acpMcpServers = (turn: SendTurnInput) => {
-        const servers: AcpMcpServer[] = [];
-        const acpEnv = (env: Record<string, string>) =>
-          Object.entries(env).map(([name, value]) => ({ name, value: String(value) }));
-        const agents = turn.integrations?.agents;
-        if (agents) {
-          servers.push({ name: "agents", command: agents.command, args: agents.args, env: acpEnv(agents.env) });
-        }
-        const composio = turn.integrations?.composio;
-        if (composio) {
-          servers.push({
-            name: "composio",
-            command: composio.command,
-            args: composio.args,
-            env: acpEnv(composio.env),
-          });
-        }
-        const browser = turn.integrations?.browser;
-        if (browser) {
-          servers.push({ name: "browser", command: browser.command, args: browser.args, env: acpEnv(browser.env) });
-        }
-        const data = turn.integrations?.data;
-        if (data) {
-          servers.push({ name: "data", command: data.command, args: data.args, env: acpEnv(data.env) });
-        }
-        // The bot's computer, mounted exactly like the Claude driver does:
-        // host and sandbox Cua connections expose Cua Driver's own MCP server.
-        // (A cloud boat is not mounted here at all: a cloud turn runs ON the boat.)
-        if (turn.integrations?.localComputer) {
-          const local = turn.integrations.localComputer;
-          servers.push({
-            name: "computer",
-            command: local.command,
-            args: local.args,
-            env: acpEnv(local.env ?? {}),
-          });
-        }
-        // user-configured servers, after the built-ins: a residual name
-        // collision keeps the built-in (reserved names are filtered at the
-        // config boundary; this is defense in depth).
-        for (const [name, server] of Object.entries(turn.integrations?.custom ?? {})) {
-          if (servers.some((existing) => existing.name === name)) continue;
-          const stdio = "url" in server ? mcpStdioServer(server, { nodeEnv: { ELECTRON_RUN_AS_NODE: "1" } }) : server;
-          if (!stdio) continue;
-          servers.push({ name, command: stdio.command, args: stdio.args ?? [], env: acpEnv(stdio.env ?? {}) });
-        }
-        if (turn.toolScope === undefined) return servers;
-        return servers.filter((server) => canUseMcpServer(turn.toolScope, server.name)).map((server) => {
-          const original = { command: server.command, args: server.args, env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])) };
-          const gated = gateServer({ name: server.name, server: original, threadId: turn.threadId, budget: 0,
-            toolScope: turn.toolScope, nodeEnv: { ELECTRON_RUN_AS_NODE: "1" } });
-          if (!gated) throw new Error("Tool selection requires an MCP gate.");
-          return { name: server.name, command: gated.command, args: gated.args, env: acpEnv(gated.env) };
-        });
-      };
+      const acpMcpServers = (turn: SendTurnInput): AcpMcpServer[] =>
+        turnStdioMcpServers(turn).map((server) => ({ ...server,
+          env: Object.entries(server.env).map(([name, value]) => ({ name, value: String(value) })) }));
 
       /** While a prompt runs, notice when the agent goes quiet and tell the
        *  person what it is doing: retrying, compressing, waiting on its
@@ -1295,7 +1255,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             ? options.flatMap((option) => typeof option.name === "string" && option.name.trim() ? [option.name.trim()] : [])
             : [];
           const askQuestions = isQuestion && questionChoices.length
-            ? parseAskQuestions({ questions: [{ question: summary, options: questionChoices }] }) ?? undefined
+            // an ACP question answers with one of its option ids, never text,
+            // so the card must not offer a free-text "Other" it cannot send
+            ? parseAskQuestions({ questions: [{ question: summary, options: questionChoices, custom: false }] }) ?? undefined
             : undefined;
           const requestId = newId();
           const finish = (
@@ -1332,12 +1294,25 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               remembered.add(operationKey);
               sessionAllows.set(threadId, remembered);
             }
-            if (behavior !== "cancel" && !optionId) missing(isQuestion ? "matching answer" : want);
+            if (behavior !== "cancel" && !optionId) {
+              if (!isQuestion) missing(want);
+              // a typed answer (or one an older client sent as text) that is
+              // none of the offered options: say so plainly, without the
+              // engine's internal name
+              else if (behavior === "answer") {
+                emit({ ...base(threadId, current.turnId), type: "runtime.error", message: QUESTION_NO_MATCH_NOTE });
+              }
+            }
             send({
               jsonrpc: "2.0",
               id: msg.id,
               result: optionId ? { outcome: { outcome: "selected", optionId } } : cancelled,
             });
+            // ACP only means a "cancelled" outcome as part of cancelling the
+            // prompt turn, so an agent may wait for session/cancel after it
+            // (Antigravity does, and the turn sat on Thinking). Follow the
+            // contract: end the turn instead of leaving it hanging.
+            if (!optionId && behavior !== "cancel" && session.current === current) active.get(threadId)?.interrupt();
             emit({
               ...base(threadId, current.turnId),
               type: "request.resolved",
@@ -1405,7 +1380,12 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 });
               } else if (typeof delta === "string" && delta) {
                 current.state.text += delta;
-                emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "assistant_text", delta });
+                const trimmed = current.state.text.trimStart();
+                if (!trimmed.startsWith("<SYSTEM_MESSAGE") &&
+                    !trimmed.startsWith("The following is a <SYSTEM_MESSAGE") &&
+                    !trimmed.startsWith("<SYSTEM_NOTIFICATION")) {
+                  emit({ ...base(threadId, current.turnId), type: "content.delta", streamKind: "assistant_text", delta });
+                }
               }
               break;
             }
@@ -1540,7 +1520,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           session.dead = true;
           const current = session.current;
           if (!current) return;
-          emit({ ...base(threadId, current.turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command) });
+          emit({ ...base(threadId, current.turnId), type: "runtime.error", ...describeSpawnFailure(e, launch.command, cwd) });
           settle(threadId, session, false, "spawn_error");
         });
         child.on("close", (code) => {
@@ -1601,8 +1581,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           return { turnId };
         }
         const resolvedModel = support.resolveTurnModel?.(turn.model, env);
+        const mcpServers = acpMcpServers(turn);
         support.applyTurnEnv?.(env, {
           model: resolvedModel, requestedModel: turn.model, fullAuto: turnConfig.fullAuto === true, botId: turn.botId, cwd, toolScope: turn.toolScope,
+          threadId, mcpServers,
         });
         // Rebound once, before the prompt, when a fallbackModel support swaps
         // a model this session does not offer for one it does.
@@ -1610,7 +1592,6 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           resolvedModel !== undefined && resolvedModel !== turn.model
             ? { ...turn, model: resolvedModel }
             : turn;
-        const mcpServers = acpMcpServers(turn);
         let launch: { command: string; args?: string[]; env?: Record<string, string | undefined> };
         try {
           launch = support.resolveCommand
@@ -1656,7 +1637,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         const contractKey = JSON.stringify([
           launch.command, launch.args ?? [], spawnArgs, cwd,
           support.sessionScopedApproval ? null : turnConfig.fullAuto === true, envFingerprint,
-          support.spawnFingerprint?.(spawnEnv) ?? null,
+          support.spawnFingerprint?.(spawnEnv, turnConfig) ?? null,
           turn.toolScope ?? null,
           inheritedScopeFingerprint,
         ]);
@@ -1765,8 +1746,9 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
 
         /** Emit buffered assistant text as its own item, then clear it. */
         const flushAssistantText = () => {
-          const text = state.text;
+          const raw = state.text;
           state.text = "";
+          const text = stripLeakedSystemHarnessMessages(raw);
           if (!text.trim()) return;
           state.producedItem = true;
           emit({ ...base(threadId, turnId), type: "item.completed", itemType: "assistant_text", text });
@@ -1856,7 +1838,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     await request("authenticate", { methodId }, INIT_TIMEOUT);
                     session.authenticated = true;
                   } catch {
-                    if (support.authFailure === "fail") throw new Error(support.loginNote);
+                    if (support.authFailure !== "continue") throw new Error(support.loginNote);
                     // else: proceed on an ambient login
                   }
                 } else if (support.authFailure === "fail") {
@@ -2048,6 +2030,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                     return result;
                   },
                   sessionId,
+                  env: spawnEnv,
                   config: turnConfig,
                   turn: cliTurn,
                   sessionModels: Array.isArray(session.sessionConfigResult?.models?.availableModels)
@@ -2296,19 +2279,87 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
       const snapshot = async (): Promise<ProviderSnapshot> => {
         const env = childEnv();
         if (support.snapshot) return support.snapshot(env, config, instanceId);
-        const version = await new Promise<string | null>((resolve) => {
-          execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout, stderr) =>
-            resolve(err ? null : versionFromProbe(stdout, stderr)),
-          );
+        const probe = await new Promise<{ version?: string; reason?: string }>((resolve) => {
+          execCli(config.cli, ["--version"], { timeout: 8000, env }, (err, stdout, stderr) => {
+            if (err) {
+              const failure = err as NodeJS.ErrnoException & { killed?: boolean };
+              const reason = failure.code === "ENOENT"
+                ? `\`${config.cli}\` isn't installed, or isn't on this app's PATH. Install it for the user running OpenMausBot or use Set CLI, then check again.`
+                : failure.code === "EACCES" || failure.code === "EPERM"
+                  ? `\`${config.cli}\` isn't executable. Check its file permissions, then check again.`
+                  : failure.killed && failure.code == null
+                    ? `\`${config.cli}\` version check timed out after 8 seconds. Check it in a terminal on the server, then try again.`
+                    : `\`${config.cli}\` version check failed. Run it with --version on the server to diagnose the installation, then check again.`;
+              // Do not echo arbitrary CLI output or its environment into Settings.
+              resolve({ reason });
+              return;
+            }
+            const version = versionFromProbe(stdout, stderr);
+            resolve(version ? { version } : { reason: `\`${config.cli}\` returned no version. Check the configured executable with --version, then try again.` });
+          });
         });
-        if (!version) return { state: "unavailable", reason: `\`${config.cli}\` CLI not found` };
-        return { state: "available", version, authenticated: await support.isAuthenticated(env, config, instanceId) };
+        if (!probe.version) return { state: "unavailable", reason: probe.reason };
+        return { state: "available", version: probe.version, authenticated: await support.isAuthenticated(env, config, instanceId) };
+      };
+
+      /** Memory upkeep's one-shot call on this engine's own provider: a
+       * fresh process and session, never a chat's, with no MCP servers, in
+       * an empty folder, in the interactive approval mode, refusing any
+       * tool, file or permission request. Off the turn path: upkeep calls
+       * it after a chat goes quiet and at the nightly tidy-up. */
+      const generateMemoryText = async (prompt: string, options: TextGenerationOptions = {}): Promise<string> => {
+        if (startupModelRefresh) await startupModelRefresh;
+        const turnConfig: AcpConfig = { ...config, fullAuto: false };
+        const env = childEnv(turnConfig);
+        if (support.requireAuthenticationBeforeSpawn && !(await support.isAuthenticated(env, turnConfig, instanceId))) {
+          throw new Error(support.loginNote);
+        }
+        const cwd = mkdtempSync(join(tmpdir(), "omb-acp-memory-"));
+        try {
+          const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd } as SendTurnInput;
+          support.applyTurnEnv?.(env, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });
+          const launch = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
+          const spawnEnv = launch.env ?? env;
+          return await runAcpOneShot({
+            displayName: support.displayName,
+            spawn: spawnCli,
+            kill: killCliTree,
+            command: launch.command,
+            argv: [...(launch.args ?? []), ...support.spawnArgs(turnConfig, turn)],
+            env: spawnEnv,
+            cwd,
+            prompt,
+            defaultModel: models.default,
+            pickAuthMethod: (methods) => support.pickAuthMethod(methods, spawnEnv),
+            authRequired: support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail",
+            loginNote: support.loginNote,
+            ...(support.configureSession ? {
+              configure: ({ request, sessionId, session }) => support.configureSession!({
+                request,
+                sessionId,
+                env: spawnEnv,
+                config: turnConfig,
+                turn,
+                sessionModels: Array.isArray(session?.models?.availableModels) ? session.models.availableModels : [],
+                currentModelId: session?.models?.currentModelId,
+                notice: () => undefined,
+              }),
+            } : {}),
+            options,
+          });
+        } finally {
+          // On Windows the engine process can still hold the folder for a
+          // moment after it exits; a cleanup failure must never replace the
+          // one-shot's own result or error. The OS temp folder is reclaimed later.
+          try { rmSync(cwd, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* left for the OS */ }
+        }
       };
 
       return {
         instanceId,
         driverKind: DRIVER_KIND,
         displayName: input.displayName,
+        ...(support.backgroundText === false ? {} : { generateMemoryText }),
         enabled: input.enabled,
         get models() {
           return models;

@@ -28,6 +28,15 @@ describe("sidebar footer places", () => {
     expect(html).not.toContain("data-sidebar-nav=");
   });
 
+  it("ignores the collapsible header props, there are no rows to fold", () => {
+    function Capture() {
+      return SidebarFooterNav({ density: "comfortable", collapsed: true, onToggleCollapsed: () => {} });
+    }
+    const html = renderToStaticMarkup(createElement(Capture));
+    expect(html).toContain('data-tour="tools"');
+    expect(html).not.toContain("data-sidebar-nav=");
+  });
+
   it("offers Apps beside the profile", () => {
     function Capture() { return SidebarAppsButton(); }
     const html = renderToStaticMarkup(createElement(Capture));

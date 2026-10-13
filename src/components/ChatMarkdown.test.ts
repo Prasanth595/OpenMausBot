@@ -21,6 +21,7 @@ import {
   messageNeedsKatex,
 } from "./ChatMarkdown";
 import { StoreProvider } from "@/state/store";
+import { setLocale } from "@/lib/i18n";
 import { ThreadRefsContext } from "./ThreadRefs";
 import * as AttachmentPreview from "./AttachmentPreview";
 
@@ -637,6 +638,35 @@ describe("ChatMarkdown attachments", () => {
     expect(html).toContain('title="Save a copy"');
     expect(html).not.toContain("/Users/milind/report.md");
     expect(html).not.toContain("C:/Users/Maus/report.md");
+  });
+
+  it("says an image with no source is unavailable in the person's language", () => {
+    setLocale("de");
+    try {
+      expect(renderToStaticMarkup(createElement(ChatMarkdown, { text: "![Sideboard]()" }))).toContain("Bild nicht verfügbar");
+    } finally {
+      setLocale("en");
+    }
+  });
+
+  it("keeps delivered-file downloads scoped alongside GitHub reference pills", () => {
+    const save = vi.spyOn(AttachmentPreview, "useLocalFileSave");
+    const message = { threadId: "thread-1", messageId: "message-1" };
+    try {
+      const html = renderToStaticMarkup(createElement(ChatMarkdown, {
+        text: "See https://github.com/a/app/pull/7 and [report.pdf](/work/report.pdf).",
+        message,
+        delivered: { "report.pdf": "/store/delivered-report.pdf" },
+      }));
+      expect(html).toContain('data-github-ref="pull"');
+      expect(html).toContain("<span>#7</span>");
+      expect(html).toContain('title="Save a copy"');
+      expect(save).toHaveBeenCalledWith("/store/delivered-report.pdf", "report.pdf", message);
+      expect(html).not.toContain("/store/delivered-report.pdf");
+      expect(html).not.toContain("/work/report.pdf");
+    } finally {
+      save.mockRestore();
+    }
   });
 
   it("routes a backslash Windows path through the scoped file handlers, every backslash intact", () => {

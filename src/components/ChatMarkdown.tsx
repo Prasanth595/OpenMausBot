@@ -33,6 +33,9 @@ import {
 import { repairMarkdownTables } from "../lib/markdown-tables";
 import { TRANSCRIPT_WINDOW_SIZE } from "../lib/transcript-window";
 import { windowsPathDestinations } from "../../shared/markdown-windows-paths";
+import { githubRefFromProps, remarkGithubRefs } from "@/lib/github-refs";
+import { GITHUB_REF_ICONS, LinkHoverCard } from "@/components/LinkHoverCard";
+import { useThreadLinkMenu } from "@/components/ThreadLinkMenu";
 import { looksLikeThreadRefUrl, parseThreadRefUrl, resolveThreadRefAddress, remarkThreadRefs } from "../lib/thread-refs";
 import { MarkdownImagePreview, MessageFolderFiles, OutsideWorkspaceFile, saveFailureText, useLocalFileSave, type MessageAttachmentContext } from "./AttachmentPreview";
 import { ThreadLink, ThreadRefsContext, threadLinkFromProps, type ThreadRefsValue } from "./ThreadRefs";
@@ -673,8 +676,8 @@ export function MermaidDiagram({ code }: MermaidDiagramProps) {
 // and an <a href="file://…"> would still reach setWindowOpenHandler on a
 // middle or modifier click, which calls shell.openExternal without the main
 // process' containment check.
-function LocalFileLink({ filePath, children, message }: { filePath: string; children?: ReactNode; message?: MessageAttachmentContext }) {
-  const save = useLocalFileSave(filePath, undefined, message);
+function LocalFileLink({ filePath, name, children, message }: { filePath: string; name?: string; children?: ReactNode; message?: MessageAttachmentContext }) {
+  const save = useLocalFileSave(filePath, name, message);
   if (!message) {
     return <span title="Unavailable legacy file reference" className="break-words text-ink-secondary">{children}</span>;
   }
@@ -688,7 +691,7 @@ function LocalFileLink({ filePath, children, message }: { filePath: string; chil
 
   return (
     <span dir="ltr" className="inline-flex flex-wrap items-center gap-x-1.5 [unicode-bidi:isolate]">
-      <TableFileButton path={filePath} name={filePath.split(/[\\/]/).at(-1) ?? filePath} message={message} />
+      <TableFileButton path={filePath} name={name ?? fileName(filePath)} message={message} />
       <button
         type="button"
         onClick={() => void save.save()}
@@ -983,7 +986,15 @@ interface MessageScope {
   imageOffsets?: Map<number, number>;
   threads: ThreadRefsValue["threads"];
   currentBotId?: string;
+  /** Files the bot delivered with attach_file, by name. An inline link to one
+   * of them saves that delivered copy, so the file shows once, in the text. */
+  delivered?: DeliveredFiles;
 }
+
+/** A delivered file's name to its stored attachment path. */
+export type DeliveredFiles = Readonly<Record<string, string>>;
+
+const fileName = (path: string) => path.split(/[\\/]/).at(-1) ?? path;
 
 const MessageScopeContext = createContext<MessageScope>({ threads: [] });
 
@@ -1009,7 +1020,7 @@ function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
   const { message, imageOffsets } = useContext(MessageScopeContext);
   const { src, alt } = props;
   if (!src) {
-    return <span className="text-[12px] text-danger" role="alert">Image unavailable</span>;
+    return <span className="text-[12px] text-danger" role="alert">{t("attach.imageUnavailable")}</span>;
   }
   const filePath = localFilePath(src) ?? undefined;
   const sourceOffset = props.node?.position?.start.offset;
@@ -1025,8 +1036,11 @@ function MarkdownImage(props: ComponentProps<"img"> & ExtraProps) {
   );
 }
 
-function MarkdownLink({ href, children }: { href?: string; children?: ReactNode }) {
-  const { threads, currentBotId, message } = useContext(MessageScopeContext);
+function MarkdownLink({ href, children, ...rest }: { href?: string; children?: ReactNode }) {
+  // SAFETY: react-markdown hands hast data-* attributes through as string props
+  const props = rest as Record<string, unknown>;
+  const { threads, currentBotId, message, delivered } = useContext(MessageScopeContext);
+  const linkMenu = useThreadLinkMenu(href);
   // a canonical thread link is a chip whatever text carries it;
   // a dead one keeps its label as plain text rather than handing
   // the app's own scheme to the shell
@@ -1035,19 +1049,41 @@ function MarkdownLink({ href, children }: { href?: string; children?: ReactNode 
   if (ref) return <ThreadLink target={ref} ambiguous={ref.ambiguous}>{children}</ThreadLink>;
   if (address || (href && looksLikeThreadRefUrl(href))) return <span className="break-words">{children}</span>;
   const localPath = localFilePath(href);
-  if (localPath) return <LocalFileLink filePath={localPath} message={message}>{children}</LocalFileLink>;
+  if (localPath) {
+    const copy = delivered && Object.hasOwn(delivered, fileName(localPath)) ? delivered[fileName(localPath)] : undefined;
+    return <LocalFileLink filePath={copy ?? localPath} name={copy ? fileName(localPath) : undefined} message={message}>{children}</LocalFileLink>;
+  }
+  if (!href || !/^https?:\/\//i.test(href)) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" dir="auto" className={LINK_CLASS}>
+        {children}
+      </a>
+    );
+  }
+  const github = githubRefFromProps(props, href);
+  const Icon = github ? GITHUB_REF_ICONS[github.kind] : null;
   return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      dir="auto"
-      className="break-words text-accent underline decoration-accent/40 hover:decoration-accent [unicode-bidi:isolate]"
-    >
-      {children}
-    </a>
+    <LinkHoverCard href={href} github={github}>
+      {(hoverAnchor) => { const anchor = linkMenu.onContextMenu ? { ...hoverAnchor, onContextMenu: linkMenu.onContextMenu } : hoverAnchor; return <>{linkMenu.menu}{Icon ? (
+        // a GitHub reference reads as a small pill. Left to right and
+        // isolated, so "#2547" never turns into "2547#" in a right-to-left
+        // line. The full address is the tooltip.
+        <a {...anchor} href={href} target="_blank" rel="noreferrer" dir="ltr" title={href} data-github-ref={github!.kind} className={GITHUB_REF_CLASS}>
+          <Icon size={13} aria-hidden="true" className="shrink-0 self-center text-ink-tertiary" />
+          <span>{children}</span>
+        </a>
+      ) : (
+        <a {...anchor} href={href} target="_blank" rel="noreferrer" dir="auto" className={LINK_CLASS}>
+          {children}
+        </a>
+      )}</>; }}
+    </LinkHoverCard>
   );
 }
+
+const LINK_CLASS = "break-words text-accent underline decoration-accent/40 hover:decoration-accent [unicode-bidi:isolate]";
+const GITHUB_REF_CLASS =
+  "inline-flex items-baseline gap-1 whitespace-nowrap rounded-full bg-inset px-1.5 align-baseline font-mono text-[0.88em] text-ink underline decoration-ink/30 underline-offset-2 hover:decoration-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [unicode-bidi:isolate]";
 
 const MARKDOWN_COMPONENTS: Components = {
   pre: MarkdownCode,
@@ -1058,7 +1094,7 @@ const MARKDOWN_COMPONENTS: Components = {
     // but outside it — off the left edge in a right-to-left paragraph,
     // where the line ends.
     return (
-      <code dir="ltr" className="rounded bg-inset px-1 py-px text-[13px] break-words [unicode-bidi:isolate]">{children}</code>
+      <code dir="ltr" className="ui-code-chip break-words [unicode-bidi:isolate]">{children}</code>
     );
   },
   // markdown never emits a span itself (no raw HTML); the only
@@ -1129,9 +1165,10 @@ const MAY_LINK_THREAD = /#|openmausbot/i;
 const NO_THREAD_REFS: ThreadRefsValue = { threads: [] };
 
 /** Render message Markdown with math, protected code, scoped attachments, and mentions. */
-function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false }: {
+function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS, everyone = false, delivered }: {
   text: string; message?: MessageAttachmentContext;
   mentionPeers?: readonly MentionPeer[]; everyone?: boolean;
+  delivered?: DeliveredFiles;
 }) {
   // "#Title" mentions link to the threads the person can see (ThreadRefs);
   // @mentions were already decorated by remarkMentions, which runs first.
@@ -1161,10 +1198,10 @@ function ChatMarkdownComponent({ text, message, mentionPeers = NO_MENTION_PEERS,
   }, [needsMath]);
   const mathPlugin = needsMath && katexReady ? katexPlugin : null;
   return (
-    <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId }}>
+    <MessageScopeContext.Provider value={{ message, imageOffsets, threads, currentBotId, delivered }}>
       <div className="chat-md min-w-0 [&>*+*]:mt-2">
         <Markdown
-          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
+          remarkPlugins={[remarkGfm, remarkMath, remarkWindowsPathDestinations, unwrapLinkedImages, remarkGithubRefs, [remarkMentions, { peers: mentionPeers, everyone }], remarkThreadRefs(threads, currentBotId)]}
           rehypePlugins={mathPlugin ? [mathPlugin] : []}
           urlTransform={chatUrlTransform}
           components={MARKDOWN_COMPONENTS}
@@ -1197,4 +1234,12 @@ export const ChatMarkdown = memo(ChatMarkdownComponent, (previous, next) => (
   && previous.everyone === next.everyone
   && previous.message?.threadId === next.message?.threadId
   && previous.message?.messageId === next.message?.messageId
+  && sameDelivered(previous.delivered, next.delivered)
 ));
+
+function sameDelivered(previous: DeliveredFiles | undefined, next: DeliveredFiles | undefined): boolean {
+  if (previous === next) return true;
+  const a = Object.entries(previous ?? {});
+  const b = next ?? {};
+  return a.length === Object.keys(b).length && a.every(([name, path]) => b[name] === path);
+}

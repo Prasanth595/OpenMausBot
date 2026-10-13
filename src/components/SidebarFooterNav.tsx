@@ -24,7 +24,7 @@ export function SidebarAppsButton() {
       title={label}
       aria-pressed={state.pluginsOpen}
       className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors",
+        "flex size-[46px] shrink-0 items-center justify-center rounded-xl transition-colors",
         state.pluginsOpen ? "bg-raised text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
       )}
     >
