@@ -1784,7 +1784,8 @@ function usageSummary(bot: Bot, instances: AppState["instances"]): { short: stri
 }
 
 /** The header's "more" menu: find, export, usage and the inspector, behind
- * one button that opens on hover. */
+ * one button. Click is the only way in: a menu that opens on hover fires at
+ * the pointer just crossing the header. */
 function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
   bot: Bot;
   messages: readonly Message[];
@@ -1862,7 +1863,6 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
       ariaLabel={t("chat.more")}
       placement="below"
       align="end"
-      dismiss={{ leave: true }}
       trigger={({ open }) => (
         <span
           data-testid="chat-more"

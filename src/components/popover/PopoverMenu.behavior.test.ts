@@ -257,6 +257,32 @@ describe("PopoverMenu in a document", () => {
     expect(sheet()).toBeNull();
   });
 
+  it("stays shut under a passing pointer or focus unless the caller opts into hover", async () => {
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [item("Usage"), item("Settings")],
+          ariaLabel: "More",
+          trigger: () => "More",
+        }),
+      );
+    });
+    const wrapper = host.firstElementChild as HTMLElement;
+    const trigger = wrapper.querySelector("button")!;
+    await act(async () => {
+      wrapper.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, relatedTarget: document.body }));
+      await new Promise((resolve) => setTimeout(resolve, OPEN_DELAY_MS + 40));
+    });
+    expect(sheet()).toBeNull();
+    // Focus rides the same opt-in: a header button that takes focus on the
+    // way past must not throw its menu over the conversation.
+    await act(async () => trigger.focus());
+    expect(sheet()).toBeNull();
+    await act(async () => trigger.click());
+    await flush();
+    expect(sheet()).not.toBeNull();
+  });
+
   it("treats extra inside refs as inside: pressing them does not dismiss", async () => {
     const opener = document.createElement("button");
     opener.textContent = "…";

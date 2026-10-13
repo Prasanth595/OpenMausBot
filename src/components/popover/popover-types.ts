@@ -16,7 +16,8 @@ export interface PopoverDismissOptions {
   outsidePress?: boolean;
   /** Escape closes. Default true. */
   escape?: boolean;
-  /** Hover opens/closes with a delay (the header More button). Default false. */
+  /** Hover opens/closes with a delay. Opt-in per caller: menus that merely
+   * sit in a busy header stay click-only. Default false. */
   leave?: boolean | { openDelay?: number; closeDelay?: number };
   /** Tab closes and returns focus to the trigger. Default true. */
   tabCloses?: boolean;
