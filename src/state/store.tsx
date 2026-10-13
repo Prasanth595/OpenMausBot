@@ -3194,6 +3194,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // window — so the moment the user comes back is exactly when our engine
   // snapshot is most likely stale. Re-probe on focus, throttled so that
   // ordinary alt-tabbing doesn't spawn a `--version` call per switch.
+  // The model list should be fresh every time the app opens. Engines are
+  // signed in and out in terminals while the app is closed, and the instances
+  // snapshot the server streams at open can be hours old — so after the first
+  // snapshot lands, refresh every instance's models once, all at once. The
+  // stale list stays visible until each answer arrives, so opening the app is
+  // never slower for it.
+  const modelsRefreshedOnOpen = useRef(false);
+  const instanceCount = state.instances.length;
+  useEffect(() => {
+    if (modelsRefreshedOnOpen.current || instanceCount === 0) return;
+    modelsRefreshedOnOpen.current = true;
+    void Promise.allSettled(
+      state.instances.map((instance) => refreshModels(instance.instanceId)),
+    );
+  }, [instanceCount, refreshModels, state.instances]);
+
   const lastFocusProbe = useRef(0);
   useEffect(() => {
     const onFocus = () => {
