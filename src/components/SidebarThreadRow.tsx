@@ -405,7 +405,16 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
       onSelect: () => onRefreshPermissions(task),
     });
   }
-  items.push({ key: "delete", title: t("task.deleteAria"), leading: <Trash2 size={16} />, overrideClassNames: { row: "text-danger", leading: "text-danger" }, disabled: isWorking(task), onSelect: () => setDeleting(true) });
+  items.push({
+    key: "delete",
+    title: t("task.deleteAria"),
+    leading: <Trash2 size={16} />,
+    // The override replaces the row's fill, so the danger tone brings its
+    // own — and none of it while the row is disabled.
+    overrideClassNames: { row: "text-danger hover:bg-danger/10 disabled:hover:bg-transparent", leading: "text-danger" },
+    disabled: isWorking(task),
+    onSelect: () => setDeleting(true),
+  });
   return <>
     <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", current ? "bg-raised" : "hover:bg-raised/50")}>
       {renaming ? <input autoFocus value={draft} maxLength={80} aria-label={t("task.renameAria")}

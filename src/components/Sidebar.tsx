@@ -903,7 +903,9 @@ export function BotContextMenu({
         disabled: deleting,
         busy: deleting,
         hint: deleting ? t("sidebar.bot.deleteCheckingTitle") : undefined,
-        overrideClassNames: { row: "text-danger", leading: "text-danger" },
+        // The override replaces the row's fill, so the danger tone brings
+        // its own — and none of it while the delete is under way.
+        overrideClassNames: { row: "text-danger hover:bg-danger/10 disabled:hover:bg-transparent", leading: "text-danger" },
         onSelect: () => onDelete(bot),
       },
     );

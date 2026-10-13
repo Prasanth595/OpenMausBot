@@ -796,6 +796,29 @@ describe("PopoverMenu in a document", () => {
     expect(sheet()).toBeNull();
   });
 
+  it("leaves Tab to the browser at the ends when the caller opted out", async () => {
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [
+            item("band", { header: { title: "Approval", content: createElement("a", { href: "#levels" }, "Learn more") } }),
+            item("ask", { role: "menuitemradio", checked: true }),
+          ],
+          ariaLabel: "Approval",
+          dismiss: { tabCloses: false },
+          trigger: () => "Approval",
+        }),
+      );
+    });
+    await act(async () => trigger().click());
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+    await act(async () => rows[0]!.focus());
+    // Inside the sheet the ring still moves; past its last stop the menu
+    // stays up and the browser takes the key.
+    await tab(rows[0]!);
+    expect(sheet()).not.toBeNull();
+  });
+
   it("draws a band inside a submenu too, and its rows are the submenu's", async () => {
     await act(async () => {
       root.render(

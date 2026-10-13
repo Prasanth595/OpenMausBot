@@ -541,6 +541,7 @@ type MenuItemNode = {
   disabled?: boolean;
   busy?: boolean;
   hint?: string;
+  overrideClassNames?: { row?: string; leading?: string };
   submenu?: MenuItemNode[];
   onSelect?: () => void;
 };
@@ -687,5 +688,27 @@ describe("Thread link", () => {
     }));
     expect(markup.indexOf("</button>")).toBeLessThan(markup.indexOf(">#42</a>"));
     expect(markup.indexOf(">#42</a>")).toBeLessThan(markup.indexOf("<time"));
+  });
+});
+
+describe("Delete", () => {
+  it("keeps the danger tone with a fill of its own, inert while the thread works", () => {
+    vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
+    vi.stubGlobal("document", { body: { nodeType: 1 } });
+    const task = { threadId: "t1", title: "Fix the login" };
+    openMenu(renderRow(task, "scout"));
+    // The override replaces the shared row fill, so the danger tone brings
+    // its own — with the same guard a disabled row gets everywhere else.
+    const item = menuItem(renderRow(task, "scout", false), "Delete thread")!;
+    expect(item.disabled).toBe(false);
+    expect(item.overrideClassNames?.row).toContain("text-danger");
+    expect(item.overrideClassNames?.row).toContain("hover:bg-danger/10");
+    expect(item.overrideClassNames?.row).toContain("disabled:hover:bg-transparent");
+    expect(item.overrideClassNames?.leading).toContain("text-danger");
+
+    const working = { ...task, activity: "working" as const };
+    openMenu(renderRow(working, "scout"));
+    expect(menuItem(renderRow(working, "scout", false), "Delete thread")!.disabled).toBe(true);
+    vi.unstubAllGlobals();
   });
 });

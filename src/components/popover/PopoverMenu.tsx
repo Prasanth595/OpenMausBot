@@ -79,7 +79,10 @@ export interface PopoverMenuItem {
   /** Per-slot class names. A slot that is given one drops its default paint
    * (colours, fills, and the leading size default) so the caller's classes
    * take effect — the module's own rules are unlayered and would win the
-   * tie. Geometry (box, spacing, alignment, type, clamp) stays. */
+   * tie. Geometry (box, spacing, alignment, type, clamp) stays. A replaced
+   * row keeps what it still needs itself: a danger row carries its own fill,
+   * e.g. `hover:bg-danger/10 disabled:hover:bg-transparent`, since a
+   * disabled row must never light up. */
   overrideClassNames?: {
     row?: string;
     leading?: string;
@@ -104,6 +107,8 @@ export interface PopoverMenuItem {
    * out of the arrow path (for rows with nothing to say). */
   ariaDisabled?: boolean;
   separatorBefore?: boolean;
+  /** A small uppercase label over the row. For a group marker that names a
+   * section (and may carry content of its own), use a `header` item. */
   heading?: string;
   /** A header band for the rows under it. On an item this replaces the row:
    * the item is the group marker, and the row fields (title, leading,

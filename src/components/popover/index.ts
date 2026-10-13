@@ -1,6 +1,6 @@
 // Generic, business-logic-free floating UI: Popover shell + PopoverMenu.
 export { Popover } from "./Popover";
-export { PopoverMenu, type PopoverMenuItem, type PopoverMenuProps, type PopoverMenuRenderDefaults } from "./PopoverMenu";
+export { PopoverMenu, type PopoverMenuHeader, type PopoverMenuItem, type PopoverMenuProps, type PopoverMenuRenderDefaults } from "./PopoverMenu";
 export type {
   PopoverAnchor,
   PopoverContentApi,

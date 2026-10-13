@@ -34,8 +34,12 @@
   @apply flex min-h-8 w-full items-start gap-2 rounded-md px-3 py-2 text-start text-sm leading-5 outline-none disabled:opacity-60;
 }
 
+/* The shared hover fill. A row the caller disabled takes none of it: the
+   browser still matches `:hover` on a disabled button, and the fill would
+   claim the row is pickable. The guard sits after the fill, which picks it
+   over the fill's own hit. */
 .rowFill {
-  @apply hover:bg-raised-hover;
+  @apply hover:bg-raised-hover disabled:hover:bg-transparent;
 }
 
 .rowActive {
@@ -141,9 +145,9 @@
 
 /* A header band: a group marker between rows, not a row itself. Its padding
    starts where a row does, so the title lines up with the leading slot of the
-   rows under it. */
+   rows under it (the inner layer's own p-1 adds the rest of the old px-4). */
 .header {
-  @apply px-3 pb-2 pt-1.5;
+  @apply px-3 pb-2 pt-2;
 }
 
 .headerDivider {

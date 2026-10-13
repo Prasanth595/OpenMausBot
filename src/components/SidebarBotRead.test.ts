@@ -120,4 +120,20 @@ describe("bot menu deletion feedback", () => {
     expect(item.disabled).toBe(false);
     expect(item.getAttribute("aria-busy")).toBeNull();
   });
+
+  it("dresses the destructive row in the danger tone with a fill of its own, inert while it runs", () => {
+    draw();
+    // The override replaces the shared row fill, so the danger tone brings
+    // its own — with the same guard a disabled row gets everywhere else.
+    const item = button("Delete");
+    expect(item.className).toContain("text-danger");
+    expect(item.className).toContain("hover:bg-danger/10");
+    expect(item.className).toContain("disabled:hover:bg-transparent");
+
+    state = { ...state, deletingBots: { [bot.id]: true } };
+    draw();
+    const running = button("Deleting bot and owned computer…");
+    expect(running.className).toContain("hover:bg-danger/10");
+    expect(running.className).toContain("disabled:hover:bg-transparent");
+  });
 });
