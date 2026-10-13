@@ -587,6 +587,24 @@ export interface GroupTask {
 
 /** A room as a client may see it: the record plus the computed working
  * flag (publicGroupState). */
+export interface GroupLinkedChat {
+  label: string;
+  /** `t3-thread://…` or `https://…` only (checked by linkedChatOf). */
+  url: string;
+}
+
+/** A room's `linkedChat` from an untrusted body: the value, null to clear, or an error string. */
+export function linkedChatOf(value: unknown): GroupLinkedChat | null | string {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "linkedChat must be an object or null";
+  const { label, url } = value as Record<string, unknown>;
+  if (typeof label !== "string" || !label.trim() || label.length > 100) return "linkedChat.label must be 1-100 characters";
+  if (typeof url !== "string" || url.length > 500 || !/^(?:t3-thread:\/\/|https:\/\/)\S+$/.test(url)) {
+    return "linkedChat.url must be a t3-thread:// or https:// address";
+  }
+  return { label: label.trim(), url };
+}
+
 export interface WireGroup {
   /** Computed from the usage ledger, not stored in groups.json. */
   usage?: GroupThreadUsage | null;
@@ -618,6 +636,8 @@ export interface WireGroup {
   pinnedMessageId?: string;
   /** sidebar section heading this room is filed under. */
   section?: string;
+  /** A chat elsewhere this room is bridged to (e.g. a WongCode thread); shown as a header link. */
+  linkedChat?: GroupLinkedChat | null;
   /** New user-created rooms start with setup pending. */
   setupCompletedAt?: number | null;
   setupSkippedAt?: number | null;

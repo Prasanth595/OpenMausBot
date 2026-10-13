@@ -4,7 +4,7 @@
 // default responder; @mentions override that routing.
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { activeLocale, t } from "@/lib/i18n";
-import { ArrowDown, Check, ChevronDown, ChevronRight, Folder, FolderOpen, Loader2, MessageSquareReply, Pin, PinOff, Plus, Search, X } from "lucide-react";
+import { ArrowDown, Check, ChevronDown, ChevronRight, ExternalLink, Folder, FolderOpen, Loader2, MessageSquareReply, Pin, PinOff, Plus, Search, X } from "lucide-react";
 import {
   api,
   useStore,
@@ -1289,6 +1289,21 @@ export function GroupView({ group }: { group: Group }) {
         <div data-roomhead-identity className="flex min-w-0 items-center gap-2 @max-3xl/roomhead:basis-full" style={headerNoDragStyle}>
           <span className="truncate text-[15px] font-semibold text-ink">{group.name}</span>
           {!setupPending && !group.dm && <GroupTaskPicker group={group} />}
+          {group.linkedChat && (
+            // A new-window link: an app embedding OpenMaus (WongCode) routes it back to the
+            // linked chat; a plain browser hands the t3-thread:// address to the OS.
+            <a
+              href={group.linkedChat.url}
+              target="_blank"
+              rel="noreferrer"
+              data-roomhead-linked-chat
+              title={`Open ${group.linkedChat.label}`}
+              className="flex min-w-0 shrink items-center gap-1 rounded-md px-1.5 py-0.5 text-[12px] text-ink-secondary hover:bg-raised hover:text-ink"
+            >
+              <ExternalLink size={13} className="shrink-0" />
+              <span className="truncate">{group.linkedChat.label}</span>
+            </a>
+          )}
         </div>
         <div
           data-roomhead-controls

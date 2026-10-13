@@ -104,7 +104,7 @@ import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import * as boat from "./boat.ts";
 import { TeamComputers, teamComputerAssignment, teamComputerCreate, teamComputerOwner, type TeamComputerRecord } from "./team-computers.ts";
-import { isEffortLevel, type BotVisibility, type CardAnswerer, type ResolvedSender, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
+import { isEffortLevel, linkedChatOf, type BotVisibility, type CardAnswerer, type ResolvedSender, type WireBot, type WireGroup, type WireTask } from "../shared/wire.ts";
 import { isPersistentQuestionCard, QUESTION_DISMISS_MESSAGE, shouldSettleRequestCard } from "../shared/ask-question.ts";
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts";
 import type { TeamComputersPayload } from "../shared/team-computer.ts";
@@ -4582,6 +4582,11 @@ function updateChannel(groupId: string, value: unknown): GroupRecord {
   if (body.unread !== undefined) {
     if (typeof body.unread !== "boolean") throw Object.assign(new Error("unread must be true or false"), { status: 400 });
     patch.unread = body.unread;
+  }
+  if (body.linkedChat !== undefined) {
+    const linked = linkedChatOf(body.linkedChat);
+    if (typeof linked === "string") throw Object.assign(new Error(linked), { status: 400 });
+    patch.linkedChat = linked;
   }
   if (body.memberIds !== undefined) {
     // A DM is the pair it was opened for; only real rooms have a roster.

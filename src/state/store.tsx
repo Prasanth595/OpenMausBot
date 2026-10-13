@@ -13,7 +13,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { BotVisibility, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
+import type { BotVisibility, CloudBackend, GroupLinkedChat, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, ServerFrame, GroupThreadUsage, SteerQueueReason } from "../../shared/wire";
 import type { TurnDigest } from "../../shared/digest";
 import type { ToolScope } from "../../shared/tool-scope";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
@@ -246,6 +246,8 @@ export interface Group {
   pinnedMessageId?: string;
   /** sidebar section heading this room is filed under (shared with bots) */
   section?: string;
+  /** A bridged chat elsewhere (e.g. a WongCode thread), linked from the room header. */
+  linkedChat?: GroupLinkedChat | null;
   /** New user-created rooms remain in setup until Save or Skip. */
   setupCompletedAt?: number | null;
   setupSkippedAt?: number | null;
