@@ -107,7 +107,8 @@ async function menuOf(mid: string) {
   if (!more) return [];
   flushSync(() => more.click());
   await settle();
-  const items = [...document.querySelectorAll<HTMLButtonElement>(`[data-mid="${mid}"] [role=menuitem]`)]
+  // The sheet is portaled to the body, so read the open menu document-wide.
+  const items = [...document.querySelectorAll<HTMLButtonElement>("[role=menuitem]")]
     .map((item) => ({ label: item.textContent ?? "", title: item.title, disabled: item.disabled }));
   flushSync(() => more.click());
   await settle();
@@ -133,6 +134,10 @@ beforeAll(async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2026, 9, 3, 23, 0));
   vi.stubGlobal("fetch", () => new Promise(() => {}));
+  // A message menu's exit is a motion nicety: without reduced motion the
+  // sheet lingers through its held close, and reading each row's menu would
+  // see the previous row's rows too.
+  document.documentElement.dataset.reducedMotion = "true";
   const container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -141,6 +146,7 @@ beforeAll(async () => {
 });
 afterAll(() => {
   root.unmount();
+  delete document.documentElement.dataset.reducedMotion;
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });

@@ -17,7 +17,7 @@ const body = () => host.querySelector<HTMLElement>("p")!;
 const tray = () => host.querySelector<HTMLElement>('[data-testid="message-actions"]')!;
 const shown = () => tray().dataset.shown === "true";
 const more = () => tray().querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
-const items = () => [...host.querySelectorAll<HTMLButtonElement>("[role=menuitem]")];
+const items = () => [...document.querySelectorAll<HTMLButtonElement>("[role=menuitem]")];
 
 const pointer = (type: string, target: Element, pointerType: string) =>
   act(async () => {
@@ -48,6 +48,9 @@ async function render(forceOpen = false) {
 beforeEach(() => {
   setLocale("en");
   picked = [];
+  // The sheet's exit is a motion nicety: with reduced motion it unmounts on
+  // the render that closes it, which is when these tests read the DOM.
+  document.documentElement.dataset.reducedMotion = "true";
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -56,6 +59,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  delete document.documentElement.dataset.reducedMotion;
   vi.useRealTimers();
 });
 

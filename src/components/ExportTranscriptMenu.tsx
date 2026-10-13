@@ -2,13 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { Check, Copy, Download, Share } from "lucide-react";
 
 import { cn } from "@/lib/cn";
-import { useMenuMotion } from "./MenuMotion";
 import {
   copyTranscriptToClipboard,
   downloadMarkdownTranscript,
   formatTranscriptMarkdown,
   slugifyTranscriptFilename,
 } from "@/lib/export-transcript";
+import { PopoverMenu, type PopoverMenuItem } from "./popover/PopoverMenu";
 import type { Message } from "@/state/store";
 
 export interface ExportTranscriptMenuProps {
@@ -35,39 +35,13 @@ export function ExportTranscriptMenu({
   isGroup = false,
   className,
 }: ExportTranscriptMenuProps) {
-  const [open, setOpen] = useState(false);
-  const motion = useMenuMotion(open);
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const resetTimer = useRef<number | null>(null);
 
   useEffect(() => () => {
     if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
   }, []);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setOpen(false);
-      }
-    };
-
-    const onPointerDown = (event: PointerEvent) => {
-      if (event.target instanceof Node && !menuRef.current?.contains(event.target)) {
-        setOpen(false);
-      }
-    };
-
-    window.addEventListener("keydown", onKeyDown);
-    window.addEventListener("pointerdown", onPointerDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-      window.removeEventListener("pointerdown", onPointerDown);
-    };
-  }, [open]);
 
   const hasMessages = messages && messages.length > 0;
 
@@ -100,78 +74,42 @@ export function ExportTranscriptMenu({
     });
     const filename = slugifyTranscriptFilename(title);
     downloadMarkdownTranscript(filename, markdown);
-    setOpen(false);
   };
 
+  const items: PopoverMenuItem[] = hasMessages
+    ? [
+        {
+          key: "copy",
+          // The band over the rows, as the chat header's own export menu has it.
+          heading: "Export Conversation",
+          title: copied ? "Copied to clipboard!" : "Copy as Markdown",
+          leading: copied ? <Check className="text-success" /> : <Copy />,
+          // The confirmation replaces the label in place, so the sheet stays
+          // up long enough to read it.
+          keepOpen: true,
+          onSelect: () => { void handleCopy(); },
+        },
+        ...(copyFailed
+          ? [{ key: "copy-failed", render: <div role="status" className="px-3 py-2 text-[12px] text-ink-secondary">Clipboard unavailable. Download the Markdown file instead.</div> } satisfies PopoverMenuItem]
+          : []),
+        { key: "download", title: "Download as .md", leading: <Download />, onSelect: handleDownload },
+      ]
+    : [{ key: "empty", heading: "Export Conversation", render: <div className="px-3 py-2 text-[12px] text-ink-secondary">No messages to export yet.</div> }];
+
   return (
-    <div className="relative" ref={menuRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-label="Export conversation"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={cn(
-          "rounded-md p-1.5 transition-colors hover:bg-raised",
-          open ? "text-accent" : "text-ink-secondary hover:text-ink",
-          className,
-        )}
-        title="Export conversation as Markdown"
-      >
-        <Share size={18} />
-      </button>
-
-      {motion.shown && (
-        <div
-          role="menu"
-          aria-label="Export options"
-          className={cn("absolute right-0 top-full z-40 mt-1 w-[220px] overflow-hidden rounded-xl border border-hairline/50 bg-card py-1.5 shadow-2xl shadow-black/50", motion.className)} {...motion.exitProps}
-        >
-          <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-ink-tertiary">
-            Export Conversation
-          </div>
-
-          {!hasMessages ? (
-            <div className="px-3 py-2 text-[12px] text-ink-secondary">
-              No messages to export yet.
-            </div>
-          ) : (
-            <>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => void handleCopy()}
-                className="ui-menu-row text-ink"
-              >
-                {copied ? (
-                  <Check size={14} className="shrink-0 text-success" />
-                ) : (
-                  <Copy size={14} className="shrink-0 text-ink-secondary" />
-                )}
-                <span className="flex-1 truncate">
-                  {copied ? "Copied to clipboard!" : "Copy as Markdown"}
-                </span>
-              </button>
-
-              {copyFailed && (
-                <div role="status" className="px-3 py-2 text-[12px] text-ink-secondary">
-                  Clipboard unavailable. Download the Markdown file instead.
-                </div>
-              )}
-
-              <button
-                type="button"
-                role="menuitem"
-                onClick={handleDownload}
-                className="ui-menu-row text-ink"
-              >
-                <Download size={14} className="shrink-0 text-ink-secondary" />
-                <span className="flex-1 truncate">Download as .md</span>
-              </button>
-            </>
-          )}
-        </div>
+    <PopoverMenu
+      items={items}
+      ariaLabel="Export conversation"
+      placement="below"
+      align="end"
+      width={220}
+      triggerTitle="Export conversation as Markdown"
+      triggerClassName={cn("rounded-md p-1.5 transition-colors hover:bg-raised", className)}
+      trigger={({ open }) => (
+        <span className={cn("flex items-center justify-center", open ? "text-accent" : "text-ink-secondary hover:text-ink")}>
+          <Share size={18} />
+        </span>
       )}
-    </div>
+    />
   );
 }

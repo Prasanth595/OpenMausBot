@@ -149,9 +149,10 @@ describe.each(SEND_KEYS)("in %s mode", (mode) => {
 
   it("editing a sent message submits on the same key", () => {
     render(createElement(ChatView, { bot: { ...bot, messages: [{ id: "ask", role: "user", kind: "text", at: 1, text: "Try the new model" }] } }));
-    // Edit lives in the row's more menu (#2574).
+    // Edit lives in the row's more menu (#2574), whose sheet is portaled to
+    // the body, so read the open menu document-wide.
     flushSync(() => host.querySelector<HTMLButtonElement>('[data-mid="ask"] button[aria-haspopup="menu"]')!.click());
-    const edit = [...host.querySelectorAll<HTMLButtonElement>('[data-mid="ask"] [role=menuitem]')].find((item) => (item.textContent ?? "").startsWith("Edit"))!;
+    const edit = [...document.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].find((item) => (item.textContent ?? "").startsWith("Edit"))!;
     flushSync(() => edit.click());
     const editor = () => host.querySelector<HTMLTextAreaElement>("textarea:not([aria-label])")!;
     expect(editor().value).toBe("Try the new model");
