@@ -77,6 +77,7 @@ const NO_EXTRA_REFS: Array<{ current: HTMLElement | null }> = [];
 
 export function Popover({
   ariaLabel,
+  sheetAriaLabel,
   open: controlledOpen,
   defaultOpen = false,
   onOpenChange,
@@ -89,6 +90,7 @@ export function Popover({
   trigger,
   triggerClassName = "w-full",
   triggerTitle,
+  triggerRef: externalTriggerRef,
   variant = "styled",
   className,
   style,
@@ -137,6 +139,15 @@ export function Popover({
   const [animating, setAnimating] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  // The caller's own handle on the trigger button, if it keeps one: merged
+  // here so a dialog opened from a row can focus the button it came from.
+  const attachTriggerRef = useCallback(
+    (node: HTMLButtonElement | null) => {
+      triggerRef.current = node;
+      if (externalTriggerRef) externalTriggerRef.current = node;
+    },
+    [externalTriggerRef],
+  );
   const internalContentRef = useRef<HTMLDivElement>(null);
   const innerRef = useRef<HTMLDivElement>(null);
   const contentRef = externalContentRef ?? internalContentRef;
@@ -455,7 +466,7 @@ export function Popover({
       ref={contentRef}
       id={menuId}
       role={contentRole}
-      aria-label={ariaLabel}
+      aria-label={sheetAriaLabel ?? ariaLabel}
       data-popover
       data-popover-placement={resolved}
       data-popover-variant={variant}
@@ -464,7 +475,9 @@ export function Popover({
       onPointerEnter={sheetHoverEnter}
       onPointerLeave={hoverClose}
       onKeyDown={(event) => {
-        if (event.key === "Tab" && tabCloses) {
+        // A descendant that moved focus itself (a menu's header keeps Tab
+        // inside the sheet) has already prevented the default.
+        if (event.key === "Tab" && tabCloses && !event.defaultPrevented) {
           event.preventDefault();
           close(!isPoint);
         }
@@ -508,7 +521,7 @@ export function Popover({
       onBlur={onRootBlur}
     >
       <button
-        ref={triggerRef}
+        ref={attachTriggerRef}
         type="button"
         disabled={triggerDisabled}
         aria-disabled={triggerDisabled || undefined}

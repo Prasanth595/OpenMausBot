@@ -35,6 +35,10 @@ export interface PopoverContentApi {
 
 export interface PopoverProps {
   ariaLabel: string;
+  /** The floating sheet's own accessible name, when it differs from the
+   * trigger's (a menu titled "Approval mode for Grok" behind a button named
+   * "Ask for approval for Grok"). Defaults to ariaLabel. */
+  sheetAriaLabel?: string;
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -49,6 +53,9 @@ export interface PopoverProps {
   trigger?: (api: PopoverTriggerApi) => ReactNode;
   triggerClassName?: string;
   triggerTitle?: string;
+  /** The trigger button itself, for callers that must hand focus back to it
+   * (a dialog opened from a row, say): focused on close, refocused by code. */
+  triggerRef?: RefObject<HTMLButtonElement | null>;
   variant?: PopoverVariant;
   className?: string;
   style?: CSSProperties;

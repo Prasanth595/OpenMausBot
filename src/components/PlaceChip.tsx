@@ -1,7 +1,5 @@
 import { Check } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/cn";
-import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { instanceSupportsLocalComputer, localComputerDisabledReason, localComputerSelectable } from "@/lib/local-computer";
 import { effectivePlace, PLACES, placeLabelKey, placeOffered, type Place } from "@/lib/place";
@@ -10,6 +8,7 @@ import { useStore, type Bot, type Task } from "@/state/store";
 import type { PlaceView } from "../../shared/place-view";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { PlaceIcon } from "./PlaceIcon";
+import { PopoverMenu, type PopoverMenuItem } from "./popover/PopoverMenu";
 
 export type PlaceAvailability = Record<Place, boolean>;
 
@@ -60,9 +59,6 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   disabled?: boolean;
   onPin: (surface: Place | null) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const motion = useMenuMotion(open);
-  const wrapperRef = useRef<HTMLDivElement>(null);
   const { state } = useStore();
   const places = usePlaceViews(bot);
   const effective = effectivePlace(bot, task);
@@ -71,91 +67,71 @@ export function PlaceChip({ bot, task, live, disabled = false, onPin }: {
   const label = t(placeLabelKey(effective));
   const showLive = live && effective !== "off" && effective !== "auto";
   const title = off ? t("place.offHint") : disabled ? t("place.busy") : pinned ? t("place.pinnedHere") : t("place.fromBot");
-
-  useEffect(() => {
-    if (!open) return;
-    const outside = (event: MouseEvent) => { if (wrapperRef.current && !wrapperRef.current.contains(event.target as Node)) setOpen(false); };
-    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", outside);
-    document.addEventListener("keydown", escape);
-    return () => { document.removeEventListener("mousedown", outside); document.removeEventListener("keydown", escape); };
-  }, [open]);
-
-  const choose = (surface: Place | null) => { setOpen(false); if (surface !== (task?.surface ?? null)) onPin(surface); };
   const botDefault = bot.computer ?? "auto";
   // A bot on Auto offers Auto itself as the unpinned default, rather than
   // "follow this bot's setting" spelled out to end in the same word.
   const followsAuto = botDefault === "auto";
+  const choose = (surface: Place | null) => { if (surface !== (task?.surface ?? null)) onPin(surface); };
+  const check = <Check size={14} className="text-accent" aria-hidden="true" />;
+
+  const items: PopoverMenuItem[] = [
+    // The band groups the chip's own title with the places under it.
+    { key: "where-works", header: { title: t("place.chipTitle") } },
+    {
+      key: "auto",
+      role: "menuitemradio",
+      checked: !pinned,
+      active: !pinned,
+      title: followsAuto ? t("place.auto") : t("place.followBot"),
+      content: followsAuto ? t("place.autoDetail") : t("place.followBotDetail", { place: t(placeLabelKey(botDefault)) }),
+      lines: { content: -1 },
+      leading: <PlaceIcon place={botDefault} aria-hidden="true" />,
+      trailing: !pinned ? check : undefined,
+      onSelect: () => choose(null),
+    },
+    ...PLACES.filter((place) => placeOffered(place, state.config)).map((place): PopoverMenuItem => {
+      const selected = task?.surface === place;
+      const { view, reachable, policy } = places[place];
+      // A problem is named in the panel's own few words; a place
+      // the organisation or this server never offers stays plain.
+      const detail = !policy ? t("place.unavailable") : placeHasIssue(view) ? view.short : t(DESCRIPTION[place]);
+      return {
+        key: place,
+        role: "menuitemradio",
+        checked: selected,
+        active: selected,
+        title: t(placeLabelKey(place)),
+        content: detail,
+        lines: { content: -1 },
+        leading: <PlaceIcon place={place} aria-hidden="true" />,
+        trailing: selected ? check : undefined,
+        disabled: !reachable,
+        hint: !policy ? t("place.unavailable") : placeHasIssue(view) ? view.line : undefined,
+        onSelect: () => choose(place),
+      };
+    }),
+  ];
 
   return (
-    <div className="relative flex items-center" ref={wrapperRef}>
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label={t("place.chipAria", { place: label })}
-        disabled={disabled || off}
-        title={off || disabled ? title : `${label} — ${title}`}
-        data-testid="place-chip"
-        onClick={() => setOpen((value) => !value)}
-        className={cn(
-          "relative flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink",
-          pinned && "text-accent hover:text-accent",
-          (disabled || off) && "cursor-not-allowed opacity-45 hover:bg-transparent",
-        )}
-      >
-        <PlaceIcon place={effective} size={16} className="shrink-0 opacity-80" aria-hidden="true" />
-        {showLive && <span className="absolute right-1.5 top-1.5 size-1.5 animate-pulse rounded-full bg-success" aria-label={t("place.live")} />}
-      </button>
-      {motion.shown && (
-        <div role="menu" aria-label={t("place.chipTitle")} className={cn("absolute bottom-full left-0 z-40 mb-2 w-[300px] overflow-hidden rounded-2xl border border-hairline/40 bg-raised shadow-2xl", motion.className)} {...motion.exitProps}>
-          <div className="border-b border-hairline/20 px-4 py-3 text-[14px] font-medium text-ink">{t("place.chipTitle")}</div>
-          <div className="flex flex-col py-1.5">
-            <button
-              type="button"
-              role="menuitemradio"
-              aria-checked={!pinned}
-              onClick={() => choose(null)}
-              className={cn("flex items-start gap-3 px-4 py-2 text-left hover:bg-control/60", !pinned && "bg-control/40")}
-            >
-              <PlaceIcon place={botDefault} size={14} className="mt-0.5 shrink-0 opacity-70" aria-hidden="true" />
-              <span className="min-w-0 flex-1">
-                <span className="block text-[13px] text-ink">{followsAuto ? t("place.auto") : t("place.followBot")}</span>
-                <span className="block text-[11px] text-ink-secondary">
-                  {followsAuto ? t("place.autoDetail") : t("place.followBotDetail", { place: t(placeLabelKey(botDefault)) })}
-                </span>
-              </span>
-              {!pinned && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
-            </button>
-            {PLACES.filter((place) => placeOffered(place, state.config)).map((place) => {
-              const selected = task?.surface === place;
-              const { view, reachable, policy } = places[place];
-              // A problem is named in the panel's own few words; a place
-              // the organisation or this server never offers stays plain.
-              const detail = !policy ? t("place.unavailable") : placeHasIssue(view) ? view.short : t(DESCRIPTION[place]);
-              return (
-                <button
-                  key={place}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={selected}
-                  disabled={!reachable}
-                  title={!policy ? t("place.unavailable") : placeHasIssue(view) ? view.line : undefined}
-                  onClick={() => choose(place)}
-                  className={cn("flex items-start gap-3 px-4 py-2 text-left", reachable ? "hover:bg-control/60" : "cursor-not-allowed opacity-45", selected && "bg-control/40")}
-                >
-                  <PlaceIcon place={place} size={14} className="mt-0.5 shrink-0 opacity-70" aria-hidden="true" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[13px] text-ink">{t(placeLabelKey(place))}</span>
-                    <span className="block text-[11px] text-ink-secondary">{detail}</span>
-                  </span>
-                  {selected && <Check size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden="true" />}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+    <PopoverMenu
+      items={items}
+      ariaLabel={t("place.chipAria", { place: label })}
+      placement="above"
+      width={300}
+      zIndex={40}
+      triggerDisabled={disabled || off}
+      triggerClassName={cn(
+        "relative flex size-8 shrink-0 items-center justify-center rounded-full text-ink-secondary hover:bg-control hover:text-ink",
+        pinned && "text-accent hover:text-accent",
+        (disabled || off) && "cursor-not-allowed opacity-45 hover:bg-transparent",
       )}
-    </div>
+      triggerTitle={off || disabled ? title : `${label} — ${title}`}
+      trigger={() => (
+        <span data-testid="place-chip" className="contents">
+          <PlaceIcon place={effective} size={16} className="shrink-0 opacity-80" aria-hidden="true" />
+          {showLive && <span className="absolute right-1.5 top-1.5 size-1.5 animate-pulse rounded-full bg-success" aria-label={t("place.live")} />}
+        </span>
+      )}
+    />
   );
 }

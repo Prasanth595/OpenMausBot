@@ -59,6 +59,10 @@ vi.mock("./popover-menu.module.css", () => ({
     chev: "chev",
     separator: "separator",
     separatorRoomy: "separatorRoomy",
+    header: "header",
+    headerDivider: "headerDivider",
+    headerTitle: "headerTitle",
+    headerContent: "headerContent",
     heading: "heading",
   },
 }));
@@ -90,6 +94,11 @@ describe("PopoverMenu in a document", () => {
     });
   };
   const flush = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+  const tab = async (target: Element, shift = false) => {
+    await act(async () => {
+      target.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: shift, bubbles: true, cancelable: true }));
+    });
+  };
 
   beforeEach(async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -682,5 +691,131 @@ describe("PopoverMenu in a document", () => {
     expect(sheet()).not.toBeNull();
     await act(async () => document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
     expect(sheet()).toBeNull();
+  });
+
+  it("walks the rows past a header band without ever landing on it", async () => {
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [
+            item("band", { header: { title: "Where this works", content: "Picks one per task" } }),
+            item("Auto"),
+            item("Cloud computer"),
+          ],
+          ariaLabel: "Place",
+          trigger: () => "Place",
+        }),
+      );
+    });
+    await act(async () => trigger().click());
+    const band = sheet()!.querySelector<HTMLElement>("[data-popover-header]")!;
+    expect(band.textContent).toContain("Where this works");
+    expect(band.textContent).toContain("Picks one per task");
+    expect(band.className).toContain("headerDivider");
+    // The band is the item: no row of its own, so the arrows walk the two
+    // rows around it and wrap across it.
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(rows.map((row) => row.textContent)).toEqual(["Auto", "Cloud computer"]);
+    await act(async () => rows[0]!.focus());
+    await key(rows[0]!, "ArrowUp");
+    expect(document.activeElement).toBe(rows[1]);
+    await key(rows[1]!, "ArrowDown");
+    expect(document.activeElement).toBe(rows[0]);
+    expect(document.activeElement).not.toBe(band);
+  });
+
+  it("keeps a band's link in the sheet's Tab order and closes at either end", async () => {
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [
+            item("band", { header: { title: "How should actions be approved?", content: createElement("a", { href: "#levels" }, "Learn more") } }),
+            item("ask", { role: "menuitemradio", checked: true }),
+            item("full", { role: "menuitemradio" }),
+          ],
+          ariaLabel: "Approval",
+          trigger: () => "Approval",
+        }),
+      );
+    });
+    await act(async () => trigger().click());
+    const link = sheet()!.querySelector<HTMLElement>("[data-popover-header] a")!;
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+    await act(async () => rows[0]!.focus());
+    // Back out of the rows lands on the band's link; forward from there
+    // returns to the rows. One ring, no trap.
+    await tab(rows[0]!, true);
+    expect(document.activeElement).toBe(link);
+    await tab(link);
+    expect(document.activeElement).toBe(rows[0]);
+    await tab(rows[0]!);
+    expect(document.activeElement).toBe(rows[1]);
+    // The far end closes and hands focus back to the trigger.
+    await tab(rows[1]!);
+    expect(sheet()).toBeNull();
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  it("closes when Shift+Tab walks back past the band's first link", async () => {
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [
+            item("band", { header: { title: "Approval", content: createElement("button", { type: "button" }, "Learn more") } }),
+            item("ask", { role: "menuitemradio", checked: true }),
+          ],
+          ariaLabel: "Approval",
+          trigger: () => "Approval",
+        }),
+      );
+    });
+    await act(async () => trigger().click());
+    const link = sheet()!.querySelector<HTMLElement>("[data-popover-header] button")!;
+    await act(async () => link.focus());
+    await tab(link, true);
+    expect(sheet()).toBeNull();
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  it("closes on Tab as before when the band brings nothing focusable", async () => {
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [item("band", { header: { title: "Where this works" } }), item("Auto"), item("Cloud computer")],
+          ariaLabel: "Place",
+          trigger: () => "Place",
+        }),
+      );
+    });
+    await act(async () => trigger().click());
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    await act(async () => rows[0]!.focus());
+    // The rows stay arrow territory: Tab leaves the menu from the first row
+    // instead of walking the list.
+    await tab(rows[0]!);
+    expect(sheet()).toBeNull();
+  });
+
+  it("draws a band inside a submenu too, and its rows are the submenu's", async () => {
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [
+            item("support", { title: "Help and support", submenu: [item("band", { header: { title: "Help" } }), item("Help Center")] }),
+            item("Settings"),
+          ],
+          ariaLabel: "You",
+          trigger: () => "You",
+        }),
+      );
+    });
+    await act(async () => trigger().click());
+    const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][0]!;
+    support.focus();
+    await key(support, "ArrowRight");
+    await flush();
+    expect(submenu()).not.toBeNull();
+    expect(submenu()!.querySelector<HTMLElement>("[data-popover-header]")!.textContent).toBe("Help");
+    expect([...submenu()!.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((row) => row.textContent)).toEqual(["Help Center"]);
   });
 });

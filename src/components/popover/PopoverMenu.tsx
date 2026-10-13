@@ -49,6 +49,17 @@ import type {
   PopoverVariant,
 } from "./popover-types";
 
+export interface PopoverMenuHeader {
+  /** The band's primary line. */
+  title: ReactNode;
+  /** A second line under the title: plain text, a link or button, icons —
+   * anything. Its own classes stay in charge of how it looks. */
+  content?: ReactNode;
+  /** The hairline under the band, drawn between it and the rows below.
+   * Default true. */
+  divider?: boolean;
+}
+
 export interface PopoverMenuItem {
   key: string;
   /** The row's primary line. */
@@ -94,6 +105,12 @@ export interface PopoverMenuItem {
   ariaDisabled?: boolean;
   separatorBefore?: boolean;
   heading?: string;
+  /** A header band for the rows under it. On an item this replaces the row:
+   * the item is the group marker, and the row fields (title, leading,
+   * onSelect, …) are ignored. Bands are neither focusable nor part of the
+   * arrow path; anything focusable the content brings takes part in the
+   * sheet's Tab order instead. */
+  header?: PopoverMenuHeader;
   keepOpen?: boolean;
   /** Opens beside the menu instead of acting; onSelect is not called. */
   submenu?: PopoverMenuItem[];
@@ -112,6 +129,9 @@ export interface PopoverMenuRenderDefaults {
 export interface PopoverMenuProps {
   items: PopoverMenuItem[];
   ariaLabel: string;
+  /** The sheet's own accessible name when it differs from the trigger's.
+   * Defaults to ariaLabel. */
+  sheetAriaLabel?: string;
   anchor?: PopoverAnchor;
   placement?: PopoverPlacement;
   align?: PopoverAlign;
@@ -124,6 +144,9 @@ export interface PopoverMenuProps {
   trigger?: (api: { open: boolean; toggle: () => void; close: (refocus?: boolean) => void }) => ReactNode;
   triggerClassName?: string;
   triggerTitle?: string;
+  /** The trigger button itself, for callers that must focus it later (a
+   * dialog opened from a row returns focus here, say). */
+  triggerRef?: RefObject<HTMLButtonElement | null>;
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -133,6 +156,10 @@ export interface PopoverMenuProps {
    * Custom rows must render `[role="menuitem"][data-menu-key]` for keyboard
    * navigation to find them. */
   renderItem?: (item: PopoverMenuItem, defaults: PopoverMenuRenderDefaults) => ReactNode;
+  /** Replaces the default header band (separator chrome stays default).
+   * Custom bands must render `[data-popover-header]` so a focusable inside
+   * them joins the sheet's Tab order. */
+  renderHeader?: (header: PopoverMenuHeader, defaults: PopoverMenuRenderDefaults) => ReactNode;
   portal?: boolean;
   zIndex?: number;
   /** Skip motion entirely (main sheet and submenu): no enter/exit and no
@@ -158,6 +185,20 @@ const MENU_ROWS =
 const menuEnabledRows = (menu: HTMLElement | null) => (menu ? [...menu.querySelectorAll<HTMLElement>(MENU_ROWS)] : []);
 
 const SUBMENU_QUERY = MENU_ROWS;
+
+// Focusable elements a header band brings (a Learn more link, say): no menu
+// rows, so the arrows never land on them, but they share the sheet's Tab
+// order with the rows.
+const HEADER_FOCUSABLE =
+  ':scope > div > [data-popover-header] :is(a[href], button, input, select, textarea, [tabindex]):not(:disabled):not([tabindex="-1"])';
+
+/** The sheet's Tab stops: a band's focusables and the rows, in document
+ * order. Null when no band brings one — there the rows are arrow territory
+ * only and Tab keeps closing the menu, as it always has. */
+function menuTabStops(menu: HTMLElement): HTMLElement[] | null {
+  if (!menu.querySelector(HEADER_FOCUSABLE)) return null;
+  return [...menu.querySelectorAll<HTMLElement>(`${MENU_ROWS}, ${HEADER_FOCUSABLE}`)];
+}
 
 const NO_OUTSIDE_REFS: Array<RefObject<HTMLElement | null>> = [];
 
@@ -284,11 +325,31 @@ function DefaultRow({
   );
 }
 
+function HeaderBand({
+  header,
+  inSubmenu,
+  renderHeader,
+}: {
+  header: PopoverMenuHeader;
+  inSubmenu: boolean;
+  renderHeader?: PopoverMenuProps["renderHeader"];
+}) {
+  const className = cn(styles.header, header.divider !== false && styles.headerDivider);
+  if (renderHeader) return <>{renderHeader(header, { className, inSubmenu })}</>;
+  return (
+    <div data-popover-header className={className}>
+      <div className={styles.headerTitle}>{header.title}</div>
+      {header.content != null && <div className={styles.headerContent}>{header.content}</div>}
+    </div>
+  );
+}
+
 function MenuRows({
   items,
   roomy,
   variant,
   renderItem,
+  renderHeader,
   inSubmenu,
   openSubmenu,
   onItem,
@@ -300,6 +361,7 @@ function MenuRows({
   roomy: boolean;
   variant: PopoverVariant;
   renderItem?: PopoverMenuProps["renderItem"];
+  renderHeader?: PopoverMenuProps["renderHeader"];
   inSubmenu: boolean;
   openSubmenu?: string | null;
   onItem: (item: PopoverMenuItem, element: HTMLElement) => void;
@@ -333,20 +395,28 @@ function MenuRows({
           {item.separatorBefore && (
             <div role="separator" className={cn(styles.separator, roomy && styles.separatorRoomy)} />
           )}
-          {item.heading && <div className={styles.heading}>{item.heading}</div>}
-          {item.render ?? (
-            <DefaultRow
-              item={item}
-              roomy={roomy}
-              openSubmenu={openSubmenu}
-              variant={variant}
-              renderItem={renderItem}
-              inSubmenu={inSubmenu}
-              onItem={onItem}
-              onSubmenuHover={onSubmenuHover}
-              onSubmenuExit={onSubmenuExit}
-              onSubmenuLeave={onSubmenuLeave}
-            />
+          {item.header ? (
+            /* A band is the item: no row is rendered and the row fields are
+               ignored. It rides the same reveal slot as the rows around it. */
+            <HeaderBand header={item.header} inSubmenu={inSubmenu} renderHeader={renderHeader} />
+          ) : (
+            <>
+              {item.heading && <div className={styles.heading}>{item.heading}</div>}
+              {item.render ?? (
+                <DefaultRow
+                  item={item}
+                  roomy={roomy}
+                  openSubmenu={openSubmenu}
+                  variant={variant}
+                  renderItem={renderItem}
+                  inSubmenu={inSubmenu}
+                  onItem={onItem}
+                  onSubmenuHover={onSubmenuHover}
+                  onSubmenuExit={onSubmenuExit}
+                  onSubmenuLeave={onSubmenuLeave}
+                />
+              )}
+            </>
           )}
         </div>
       ))}
@@ -357,6 +427,7 @@ function MenuRows({
 export function PopoverMenu({
   items,
   ariaLabel,
+  sheetAriaLabel,
   anchor,
   placement = "auto",
   align = "start",
@@ -369,12 +440,14 @@ export function PopoverMenu({
   trigger,
   triggerClassName,
   triggerTitle,
+  triggerRef,
   open: controlledOpen,
   defaultOpen = false,
   onOpenChange,
   onClose,
   onSelect,
   renderItem,
+  renderHeader,
   portal = true,
   zIndex = 60,
   quick = false,
@@ -561,11 +634,23 @@ export function PopoverMenu({
         event.stopPropagation();
         closeSub(true);
       } else if (event.key === "Tab") {
+        // Tab walks the sheet's own stops: a band's focusables and the rows,
+        // in document order, closing at either end (never a trap). With no
+        // band focusables the rows stay arrow-only and Tab closes as before.
+        const stops = menuTabStops(menu);
+        const at = stops ? stops.indexOf(document.activeElement as HTMLElement) : -1;
+        const step = event.shiftKey ? at - 1 : at + 1;
+        if (stops && at >= 0 && step >= 0 && step < stops.length) {
+          event.preventDefault();
+          stops[step]?.focus();
+          return;
+        }
+        if (dismiss?.tabCloses === false) return;
         event.preventDefault();
         close(!isPointAnchor);
       }
     },
-    [openSub, closeSub, isPointAnchor],
+    [openSub, closeSub, isPointAnchor, dismiss],
   );
 
   const openItem = submenu ? items.find((item) => item.key === submenu) : undefined;
@@ -657,6 +742,7 @@ export function PopoverMenu({
             roomy={roomy}
             variant={variant}
             renderItem={renderItem}
+            renderHeader={renderHeader}
             inSubmenu
             onItem={(item) => {
               item.onSelect?.();
@@ -673,6 +759,7 @@ export function PopoverMenu({
   return (
     <Popover
       ariaLabel={ariaLabel}
+      sheetAriaLabel={sheetAriaLabel}
       open={open}
       onOpenChange={setOpen}
       anchor={anchor}
@@ -684,6 +771,7 @@ export function PopoverMenu({
       trigger={trigger}
       triggerClassName={triggerClassName}
       triggerTitle={triggerTitle}
+      triggerRef={triggerRef}
       variant={variant}
       contentRole="menu"
       motionKind="menu"
@@ -734,6 +822,7 @@ export function PopoverMenu({
               roomy={roomy}
               variant={variant}
               renderItem={renderItem}
+              renderHeader={renderHeader}
               inSubmenu={false}
               openSubmenu={openItem?.key}
               onItem={(item, row) => selectItem(item, row, api.close)}

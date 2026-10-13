@@ -139,6 +139,27 @@
   @apply mx-3;
 }
 
+/* A header band: a group marker between rows, not a row itself. Its padding
+   starts where a row does, so the title lines up with the leading slot of the
+   rows under it. */
+.header {
+  @apply px-3 pb-2 pt-1.5;
+}
+
+.headerDivider {
+  @apply border-b border-hairline/20;
+}
+
+.headerTitle {
+  @apply text-[14px] font-medium leading-5 text-ink;
+}
+
+/* The band's second line: plain text, a link, a button or icons. It keeps
+   whatever the caller renders, so no tone lands on the descendants. */
+.headerContent {
+  @apply mt-1 text-[12px] leading-snug text-ink-secondary;
+}
+
 .heading {
   @apply px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary;
 }

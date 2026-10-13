@@ -62,11 +62,15 @@ vi.mock("./popover-menu.module.css", () => ({
     chev: "chev",
     separator: "separator",
     separatorRoomy: "separatorRoomy",
+    header: "header",
+    headerDivider: "headerDivider",
+    headerTitle: "headerTitle",
+    headerContent: "headerContent",
     heading: "heading",
   },
 }));
 
-import { PopoverMenu, type PopoverMenuItem } from "./PopoverMenu";
+import { PopoverMenu, type PopoverMenuHeader, type PopoverMenuItem } from "./PopoverMenu";
 
 // Inline sheet: no portal, no document needed.
 const render = (items: PopoverMenuItem[], extra: Record<string, unknown> = {}) =>
@@ -150,6 +154,54 @@ it("draws headings and separators without business knowledge", () => {
   ]);
   expect(html).toContain('role="separator"');
   expect(html).toContain(">Share</div>");
+});
+
+it("draws a header band as a group marker above the rows, never as a row", () => {
+  const html = render([
+    { key: "band", header: { title: "Where this conversation works", content: createElement("a", { href: "#levels" }, "Learn more") } },
+    { key: "auto", title: "Auto", onSelect: () => {} },
+    { key: "cloud", title: "Cloud computer", onSelect: () => {} },
+  ]);
+  const band = html.slice(html.indexOf("data-popover-header"), html.indexOf('data-menu-key="auto"'));
+  expect(band).toContain('class="header headerDivider"');
+  expect(band).toContain('class="headerTitle"');
+  expect(band).toContain(">Where this conversation works</div>");
+  expect(band).toContain('class="headerContent"');
+  expect(band).toContain('<a href="#levels">Learn more</a>');
+  // The band is the item: no button, no row, no menu key for it.
+  expect(html).not.toContain('data-menu-key="band"');
+  expect(html.indexOf("data-popover-header")).toBeLessThan(html.indexOf('data-menu-key="auto"'));
+});
+
+it("keeps the band's divider off when the caller says so, and lets row fields fall away", () => {
+  const html = render([
+    {
+      key: "band",
+      header: { title: "Places", divider: false },
+      title: "ignored row title",
+      leading: createElement("span", { "data-icon": "ignored" }),
+      onSelect: () => {},
+    },
+    { key: "auto", title: "Auto", onSelect: () => {} },
+  ]);
+  expect(html).toContain('class="header"');
+  expect(html).not.toContain("headerDivider");
+  expect(html).not.toContain("ignored row title");
+  expect(html).not.toContain("ignored");
+  expect(html).toContain(">Places</div>");
+});
+
+it("hands the band to renderHeader while the divider stays default chrome", () => {
+  const html = render(
+    [{ key: "band", header: { title: "Places" } }, { key: "auto", title: "Auto", onSelect: () => {} }],
+    {
+      renderHeader: (header: PopoverMenuHeader, defaults: { className: string }) =>
+        createElement("div", { "data-popover-header": "", className: defaults.className }, `Section: ${String(header.title)}`),
+    },
+  );
+  expect(html).toContain("Section: Places");
+  expect(html).toContain('class="header headerDivider"');
+  expect(html).not.toContain("headerTitle");
 });
 
 it("lets renderItem replace the row while staying keyboard-discoverable", () => {

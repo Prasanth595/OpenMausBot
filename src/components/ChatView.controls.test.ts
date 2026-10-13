@@ -8,7 +8,7 @@ import type { ModelPicker } from "./ModelPicker";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: { key: string; title?: string; disabled?: boolean; heading?: string; active?: boolean; header?: { title?: string } }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
@@ -462,11 +462,15 @@ describe("thread control placement", () => {
 
   it.each([true, false])("pins a place per conversation from the composer only in Advanced (advanced: %s)", (advanced) => {
     fixture.advanced = advanced;
+    fixture.menus = [];
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     const pill = markup.slice(markup.indexOf("rounded-3xl bg-composer"), markup.indexOf("<textarea"));
     expect(pill.match(/data-testid="place-chip"/g) ?? []).toHaveLength(advanced ? 1 : 0);
-    // Nowhere else in the chat either: Simple follows the bot's Works on.
-    expect(markup.includes("Where this conversation works")).toBe(advanced);
+    // The picker's own menu, and nowhere else in the chat: Simple follows the
+    // bot's Works on. Its band carries the chip's title.
+    const placeMenu = fixture.menus.find((menu) => menu.items.some((item) => item.key === "where-works"));
+    expect(Boolean(placeMenu)).toBe(advanced);
+    expect(placeMenu?.items[0]?.header?.title ?? null).toBe(advanced ? "Where this conversation works" : null);
     fixture.advanced = true;
   });
 });

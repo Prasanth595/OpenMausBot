@@ -38,7 +38,8 @@ function render(bot: Bot, trustedModesAvailable = false) {
 }
 const choose = (label: string) => {
   flushSync(() => host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
-  const item = [...host.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+  // The sheet is portalled to the document, outside the mount host.
+  const item = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
     .find((button) => button.textContent?.startsWith(label));
   if (!item) throw new Error(`No ${label} level offered`);
   flushSync(() => item.click());

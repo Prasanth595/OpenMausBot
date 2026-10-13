@@ -1,11 +1,20 @@
-// The small menus in the sidebar header — New or share (+) and Active
-// Threads — must close on Escape and on a press outside them, and
-// must not lay an invisible backdrop over the window that eats the click the
-// user aimed at something else.
+// The sidebar header's menus — New or share (+) and Active Threads. The +
+// menu is the shared PopoverMenu now, so what is proven here is the wiring:
+// which rows the sidebar builds, and what each one opens. Escape, the
+// outside press and focus return live with the shell and are proven in
+// src/components/popover. The Active Threads popover is still hand-rolled,
+// so its own dismissal is checked here too. Neither menu may lay an
+// invisible backdrop over the window that eats the click the user aimed at
+// something else.
 import { Children, isValidElement, type EffectCallback, type ReactElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[] }));
+const fixture = vi.hoisted(() => ({
+  values: [] as unknown[],
+  index: 0,
+  effects: [] as EffectCallback[],
+  bots: [] as unknown[],
+}));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
@@ -39,11 +48,15 @@ vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => true }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: () => {} }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
-  return { ...original, useStore: () => ({ state: original.initialState, dispatch: vi.fn() }) };
+  return {
+    ...original,
+    useStore: () => ({ state: { ...original.initialState, bots: fixture.bots }, dispatch: vi.fn() }),
+  };
 });
 
 import { Sidebar } from "./Sidebar";
 import { SidebarNewChatPanel } from "./SidebarNewChatPanel";
+import { PopoverMenu } from "./popover/PopoverMenu";
 
 type Props = { children?: ReactNode; className?: string; onClick?: () => void; [key: string]: unknown };
 function nodes(value: ReactNode): ReactElement<Props>[] {
@@ -58,6 +71,8 @@ function render() {
   return nodes(Sidebar({ open: false, onClose: () => {} }));
 }
 const trigger = (label: string) => render().find((node) => node.type === "button" && node.props["aria-label"] === label)!;
+type PlusMenu = { ariaLabel: string; placement?: string; align?: string; items: Array<{ key: string; title?: string; value?: string; onSelect?: () => void }> };
+const plusMenu = (label = "New or share") => render().find((node) => node.type === PopoverMenu && node.props.ariaLabel === label)! as unknown as ReactElement<PlusMenu>;
 
 let window: EventTarget;
 function runEffects() {
@@ -79,22 +94,59 @@ function press(target: unknown) {
   Object.defineProperty(event, "target", { value: target });
   window.dispatchEvent(event);
 }
-
-const menus = [
-  { name: "New or share", label: "New or share", item: "Create team" },
-  { name: "Active Threads", label: "Active Threads", item: "No active threads" },
-];
 const text = (tree: ReactElement<Props>[]) => tree.map((node) => Children.toArray(node.props.children).filter((child) => typeof child === "string").join(" ")).join(" ");
 
 beforeEach(() => {
   fixture.values = [];
+  fixture.bots = [];
   window = new EventTarget();
   vi.stubGlobal("window", Object.assign(window, { innerWidth: 1280, innerHeight: 800, ogb: undefined, setTimeout, clearTimeout }));
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {}, removeItem: () => {} });
 });
 afterEach(() => { vi.unstubAllGlobals(); });
 
-describe.each(menus)("sidebar header menu: $name", ({ label, item }) => {
+describe("sidebar header menu: New or share", () => {
+  it("leads with New chat and carries the sidebar's creation rows", () => {
+    const menu = plusMenu();
+    expect(menu.props.placement).toBe("below");
+    expect(menu.props.align).toBe("end");
+    expect(menu.props.items.map((item) => item.key)).toEqual([
+      "new-chat",
+      "new-bot",
+      "new-group",
+      "create-team",
+      "templates",
+    ]);
+    expect(menu.props.items[0]!.title).toBe("New chat");
+    expect(menu.props.items.map((item) => item.title)).toContain("Create team");
+  });
+
+  it("drops teams and templates from a remote client's window", () => {
+    vi.stubGlobal("window", Object.assign(new EventTarget(), {
+      innerWidth: 1280, innerHeight: 800, ogb: { remoteClient: { active: true } }, setTimeout, clearTimeout,
+    }));
+    const menu = plusMenu("New");
+    expect(menu.props.items.map((item) => item.key)).toEqual(["new-chat", "new-bot", "new-group"]);
+  });
+
+  it("adds Archived bots with its count once a bot is archived", () => {
+    fixture.bots = [{ id: "bot", hidden: true }];
+    const archived = plusMenu().props.items.at(-1)!;
+    expect(archived.key).toBe("archived");
+    expect(archived.value).toBe("1");
+  });
+
+  it("opens the New chat panel through the leading row", () => {
+    expect(render().some((node) => node.type === SidebarNewChatPanel)).toBe(false);
+    plusMenu().props.items[0]!.onSelect!();
+    vi.stubGlobal("document", { body: {} });
+    expect(render().some((node) => node.type === SidebarNewChatPanel)).toBe(true);
+  });
+});
+
+describe("sidebar header menu: Active Threads", () => {
+  const label = "Active Threads";
+  const item = "No active threads";
   const open = () => {
     trigger(label).props.onClick!();
     const tree = render();
@@ -138,19 +190,5 @@ describe.each(menus)("sidebar header menu: $name", ({ label, item }) => {
     expect(text(render())).toContain(item);
     press({ closest: () => null });
     expect(text(render())).not.toContain(item);
-  });
-});
-
-describe("sidebar header menu: New chat", () => {
-  it("leads the + menu and opens the New chat panel in its place", () => {
-    trigger("New or share").props.onClick!();
-    const first = render().find((node) => node.type === "button" && text([node]).includes("New chat"));
-    expect(first).toBeDefined();
-    expect(render().some((node) => node.type === SidebarNewChatPanel)).toBe(false);
-    first!.props.onClick!();
-    vi.stubGlobal("document", { body: {} });
-    const tree = render();
-    expect(tree.some((node) => node.type === SidebarNewChatPanel)).toBe(true);
-    expect(text(tree)).not.toContain("Create team");
   });
 });

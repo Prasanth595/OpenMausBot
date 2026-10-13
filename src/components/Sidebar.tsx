@@ -1906,8 +1906,6 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
   const deletingRoom = deletingRoomId ? state.groups.find((g) => g.id === deletingRoomId) : undefined;
-  const [plusOpen, setPlusOpen] = useState(false);
-  const plusMotion = useMenuMotion(plusOpen);
   const advanced = useAdvancedMode();
   const [attentionOpen, setAttentionOpen] = useState(false);
   const attentionMotion = useMenuMotion(attentionOpen);
@@ -2001,9 +1999,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
 
   // Each header menu root wraps its trigger and its popover.
   const attentionMenuRef = useRef<HTMLDivElement>(null);
-  const plusMenuRef = useRef<HTMLDivElement>(null);
   usePopoverDismiss(attentionOpen, attentionMenuRef, () => setAttentionOpen(false));
-  usePopoverDismiss(plusOpen, plusMenuRef, () => setPlusOpen(false));
 
   useEffect(() => {
     if (remoteClient) return;
@@ -2374,93 +2370,41 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
               </>
             )}
           </div>}
-          {/* `contents` keeps the popover anchored to the header row */}
-          <div ref={plusMenuRef} className="contents">
-          <button
-            ref={importReturnRef}
-            onClick={() => setPlusOpen((o) => !o)}
-            aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
-            className={cn(
+          {/* The + menu is the profile menu's sibling: a trigger Popover owns
+              (so the dialog it can open gets its button back), anchored to
+              the button itself instead of to the header cluster. */}
+          <PopoverMenu
+            items={[
+              { key: "new-chat", title: t("sidebar.newChat.title"), leading: <MessageSquarePlus />, onSelect: () => setNewChatOpen(true) },
+              { key: "new-bot", title: t("sidebar.newBot"), leading: <BotIcon />, trailing: <ShortcutHint id="new-bot" />, onSelect: () => dispatch({ type: "toggleNewBot", open: true }) },
+              { key: "new-group", title: t("sidebar.newChannel.title"), leading: <Users />, onSelect: () => setNewRoom(true) },
+              ...(!remoteClient ? [
+                { key: "create-team", title: t("team.create"), leading: <FolderPlus />, onSelect: () => setNewTeam(true) },
+                { key: "templates", title: t("sidebar.teamLibrary"), leading: <Library />, onSelect: () => setTeamLibraryOpen(true) },
+                ...(archivedBots.length > 0
+                  ? [{
+                      key: "archived",
+                      title: t("sidebar.archived.title"),
+                      leading: <Archive />,
+                      value: String(archivedBots.length),
+                      onSelect: () => setArchivedBotsOpen(true),
+                    } satisfies PopoverMenuItem]
+                  : []),
+              ] : []),
+            ] satisfies PopoverMenuItem[]}
+            ariaLabel={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
+            placement="below"
+            align={density === "icons" ? "start" : "end"}
+            width={208}
+            zIndex={40}
+            triggerRef={importReturnRef}
+            triggerTitle={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
+            triggerClassName={cn(
               "flex items-center justify-center text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
               density === "icons" ? "size-[46px] shrink-0 rounded-xl" : "size-8 rounded-md",
             )}
-            title={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
-          >
-            <Plus size={density === "icons" ? 20 : 17} strokeWidth={2} />
-          </button>
-          {plusMotion.shown && (
-            <>
-              <div className={cn(
-                "absolute top-full z-40 mt-1 w-52 overflow-hidden rounded-md border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
-                density === "icons" ? "left-0" : "right-0",
-                plusMotion.className,
-              )} {...plusMotion.exitProps}>
-                <button
-                  onClick={() => {
-                    setPlusOpen(false);
-                    setNewChatOpen(true);
-                  }}
-                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                >
-                  <MessageSquarePlus size={16} className="text-ink-secondary" />
-                  {t("sidebar.newChat.title")}
-                </button>
-                <button
-                  onClick={() => {
-                    setPlusOpen(false);
-                    dispatch({ type: "toggleNewBot", open: true });
-                  }}
-                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                >
-                  <BotIcon size={16} className="text-ink-secondary" />
-                  <span className="flex-1">{t("sidebar.newBot")}</span>
-                  <ShortcutHint id="new-bot" />
-                </button>
-                <button
-                  onClick={() => {
-                    setPlusOpen(false);
-                    setNewRoom(true);
-                  }}
-                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                >
-                  <Users size={16} className="text-ink-secondary" />
-                  {t("sidebar.newChannel.title")}
-                </button>
-                {!remoteClient && <button
-                  onClick={() => { setPlusOpen(false); setNewTeam(true); }}
-                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                >
-                  <FolderPlus size={16} className="text-ink-secondary" /> {t("team.create")}
-                </button>}
-                {!remoteClient && <>
-                <button
-                  onClick={() => {
-                    setPlusOpen(false);
-                    setTeamLibraryOpen(true);
-                  }}
-                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                >
-                  <Library size={16} className="text-ink-secondary" />
-                  {t("sidebar.teamLibrary")}
-                </button>
-                {archivedBots.length > 0 && (
-                  <button
-                    onClick={() => {
-                      setPlusOpen(false);
-                      setArchivedBotsOpen(true);
-                    }}
-                    className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                  >
-                    <Archive size={16} className="text-ink-secondary" />
-                    <span className="flex-1">{t("sidebar.archived.title")}</span>
-                    <span className="text-[11.5px] text-ink-secondary">{archivedBots.length}</span>
-                  </button>
-                )}
-                </>}
-              </div>
-            </>
-          )}
-          </div>
+            trigger={() => <Plus size={density === "icons" ? 20 : 17} strokeWidth={2} />}
+          />
         </div>
       </div>
 
