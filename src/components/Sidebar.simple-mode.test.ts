@@ -171,16 +171,16 @@ describe("bot-first sidebar", () => {
       return tree;
     }
     renderToStaticMarkup(createElement(Capture));
-    return (tree as ReactElement<{ items: { key: string; label?: ReactNode; onSelect?: () => void }[] }>).props.items;
+    return (tree as ReactElement<{ items: { key: string; title?: ReactNode; onSelect?: () => void }[] }>).props.items;
   };
 
   it("only hides thread/folder creation in the bot context menu", () => {
     fixture.showThreads = true;
-    const enabled = menuItems().map((item) => item.label);
+    const enabled = menuItems().map((item) => item.title);
     expect(enabled).toContain("New thread");
     expect(enabled).toContain("New folder");
     fixture.showThreads = false;
-    const disabled = menuItems().map((item) => item.label);
+    const disabled = menuItems().map((item) => item.title);
     expect(disabled).not.toContain("New thread");
     expect(disabled).not.toContain("New folder");
     expect(disabled).toContain("Edit Profile");
@@ -188,7 +188,7 @@ describe("bot-first sidebar", () => {
   });
 
   it("Edit profile opens the panel without naming a section", () => {
-    const editProfile = () => menuItems().find((item) => item.label === "Edit Profile")!;
+    const editProfile = () => menuItems().find((item) => item.title === "Edit Profile")!;
 
     // the panel is closed: select the bot, then a bare open (the remembered
     // section, or a collapsed rail when nothing is stored)

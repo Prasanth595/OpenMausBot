@@ -51,20 +51,39 @@ import type {
 
 export interface PopoverMenuItem {
   key: string;
-  label: ReactNode;
-  subtitle?: ReactNode;
-  note?: ReactNode;
-  icon?: ReactNode;
+  /** The row's primary line. */
+  title?: ReactNode;
+  /** A second line under the title, sharing its column. */
+  content?: ReactNode;
+  /** The top band's start slot: usually an icon, drawn in a 20px box with a
+   * 16px size default for the icons inside it. */
+  leading?: ReactNode;
+  /** The top band's end slot: usually an icon, chip or shortcut. */
+  trailing?: ReactNode;
+  /** Right-aligned small text before the trailing slot. */
+  value?: string;
+  /** Line counts for the text slots: omitted = 1 line, a positive N clamps
+   * to N lines, -1 wraps freely, 0 does not render the slot at all. */
+  lines?: { title?: number; content?: number };
+  /** Per-slot class names. A slot that is given one drops its default paint
+   * (colours, fills, and the leading size default) so the caller's classes
+   * take effect — the module's own rules are unlayered and would win the
+   * tie. Geometry (box, spacing, alignment, type, clamp) stays. */
+  overrideClassNames?: {
+    row?: string;
+    leading?: string;
+    title?: string;
+    content?: string;
+    trailing?: string;
+  };
   active?: boolean;
   attention?: boolean;
   attentionTone?: "danger" | "accent";
   disabled?: boolean;
   /** Marks an in-progress row (with `disabled`): the work is under way. */
   busy?: boolean;
-  /** Draw the row in the danger tone (destructive actions). */
-  danger?: boolean;
   /** Native tooltip: why a disabled row can't be picked, say. */
-  title?: string;
+  hint?: string;
   /** Row semantics: a plain action or one of a radio set. Default "menuitem". */
   role?: "menuitem" | "menuitemradio";
   /** Radio rows: whether this choice is the current one. */
@@ -75,8 +94,6 @@ export interface PopoverMenuItem {
   ariaDisabled?: boolean;
   separatorBefore?: boolean;
   heading?: string;
-  trailing?: ReactNode;
-  value?: string;
   keepOpen?: boolean;
   /** Opens beside the menu instead of acting; onSelect is not called. */
   submenu?: PopoverMenuItem[];
@@ -169,21 +186,39 @@ function DefaultRow({
   onSubmenuExit?: () => void;
   onSubmenuLeave?: () => void;
 }) {
-  // Row chrome lives in the module; only the state picks stay here.
+  // Row chrome lives in the module; only the state picks stay here. A slot
+  // carrying an override class drops its default paint, so the caller's
+  // classes take effect: the module's rules are unlayered and would win any
+  // tie with the utilities layer.
+  const override = item.overrideClassNames;
   const defaultClass =
     variant === "styled"
       ? cn(
           styles.row,
+          !override?.row && styles.rowFill,
           (item.active || (item.submenu && openSubmenu === item.key)) && styles.rowActive,
-          item.danger && styles.rowDanger,
           item.ariaDisabled && styles.rowOff,
+          override?.row,
         )
-      : "";
+      : override?.row ?? "";
   if (renderItem) {
     return (
       <>{renderItem(item, { className: defaultClass, inSubmenu })}</>
     );
   }
+  // -1 wraps freely; anything else clamps, with the default (one line) left
+  // to the CSS fallback so the common case writes no variable.
+  const clamp = (lines: number | undefined) =>
+    lines === -1
+      ? undefined
+      : { className: styles.clamp, style: lines === undefined ? undefined : ({ "--row-lines": lines } as CSSProperties) };
+  const titleClamp = clamp(item.lines?.title);
+  const contentClamp = clamp(item.lines?.content);
+  const showTitle = item.title != null && item.lines?.title !== 0;
+  const showContent = item.content != null && item.lines?.content !== 0;
+  const hasValue = Boolean(item.value);
+  const hasTrailing = item.trailing != null;
+  const hasTail = hasValue || hasTrailing || item.attention === true || item.submenu != null;
   return (
     <button
       type="button"
@@ -194,7 +229,7 @@ function DefaultRow({
       data-menu-key={item.key}
       disabled={item.disabled}
       aria-busy={item.busy || undefined}
-      title={item.title}
+      title={item.hint}
       aria-haspopup={item.submenu ? "menu" : undefined}
       aria-expanded={item.submenu ? openSubmenu === item.key : undefined}
       onClick={(event) => onItem(item, event.currentTarget)}
@@ -207,32 +242,44 @@ function DefaultRow({
       }}
       className={defaultClass}
     >
-      {item.icon && (
+      {item.leading != null && (
         <span
           className={cn(
-            styles.rowIcon,
-            item.active ? styles.rowIconActive : roomy ? styles.rowIconRoomy : undefined,
-            item.danger && styles.rowIconDanger,
+            styles.rowLeading,
+            !override?.leading && styles.rowLeadingTone,
+            !override?.leading && styles.rowLeadingMedia,
+            !override?.leading && (item.active ? styles.rowLeadingActive : roomy ? styles.rowLeadingRoomy : undefined),
+            override?.leading,
           )}
         >
-          {item.icon}
+          {item.leading}
         </span>
       )}
-      {item.subtitle || item.note ? (
-        <span className={styles.rowMain}>
-          <span className={styles.rowTitle}>{item.label}</span>
-          {item.subtitle && <span className={styles.rowSubtitle}>{item.subtitle}</span>}
-          {item.note && <span className={styles.rowNote}>{item.note}</span>}
+      <span className={styles.rowMain}>
+        {showTitle && (
+          <span className={cn(styles.rowTitle, titleClamp?.className, override?.title)} style={titleClamp?.style}>
+            {item.title}
+          </span>
+        )}
+        {showContent && (
+          <span
+            className={cn(styles.rowContent, !override?.content && styles.rowContentTone, override?.content, contentClamp?.className)}
+            style={contentClamp?.style}
+          >
+            {item.content}
+          </span>
+        )}
+      </span>
+      {hasTail && (
+        <span className={styles.rowTail}>
+          {hasValue && <span className={styles.rowValue}>{item.value}</span>}
+          {hasTrailing && <span className={cn(styles.rowTailSlot, override?.trailing)}>{item.trailing}</span>}
+          {item.attention && (
+            <span className={cn(styles.dot, item.attentionTone === "accent" ? styles.dotAccent : styles.dotDanger)} />
+          )}
+          {item.submenu && <ChevronRight size={16} aria-hidden className={styles.chev} />}
         </span>
-      ) : (
-        <span className={styles.rowLabel}>{item.label}</span>
       )}
-      {item.value && <span className={styles.rowValue}>{item.value}</span>}
-      {item.trailing}
-      {item.attention && (
-        <span className={cn(styles.dot, item.attentionTone === "accent" ? styles.dotAccent : styles.dotDanger)} />
-      )}
-      {item.submenu && <ChevronRight size={16} aria-hidden className={styles.chev} />}
     </button>
   );
 }
@@ -569,7 +616,7 @@ export function PopoverMenu({
       <div
         ref={subRef}
         role="menu"
-        aria-label={typeof heldSubItem.label === "string" ? heldSubItem.label : heldSubItem.key}
+        aria-label={typeof heldSubItem.title === "string" ? heldSubItem.title : heldSubItem.key}
         data-popover-submenu
         data-popover-variant={variant}
         {...subMotion.exitProps}

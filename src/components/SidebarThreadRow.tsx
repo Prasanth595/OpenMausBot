@@ -322,16 +322,16 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const insideRefs = useMemo(() => [actionRef], []);
   const items: PopoverMenuItem[] = [];
   items.push(
-    { key: "copy-link", label: t("task.copyLink"), icon: <Link2 size={16} />, onSelect: copyLink },
-    { key: "rename", label: t("task.renameAria"), icon: <Pencil size={16} />, onSelect: startRename },
+    { key: "copy-link", title: t("task.copyLink"), leading: <Link2 size={16} />, onSelect: copyLink },
+    { key: "rename", title: t("task.renameAria"), leading: <Pencil size={16} />, onSelect: startRename },
   );
   if (onRegenerateTitle) {
     // "Regenerating…" keeps the menu open until the answer lands; a failure
     // keeps it open behind the error so the person can rename by hand.
     items.push({
       key: "regenerate-title",
-      label: regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle"),
-      icon: regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />,
+      title: regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle"),
+      leading: regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />,
       disabled: regenerating,
       busy: regenerating,
       onSelect: regenerateTitle,
@@ -340,13 +340,13 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   if (onMove && folders?.length) {
     items.push({
       key: "move-to-folder",
-      label: t("folder.move"),
-      icon: <FolderInput size={16} />,
+      title: t("folder.move"),
+      leading: <FolderInput size={16} />,
       submenu: [
-        { key: "move-none", label: t("folder.none"), active: !task.projectId, onSelect: () => onMove(task, null) },
+        { key: "move-none", title: t("folder.none"), active: !task.projectId, onSelect: () => onMove(task, null) },
         ...folders.map((folder) => ({
           key: `move-${folder.id}`,
-          label: `${folder.emoji ? `${folder.emoji} ` : ""}${folder.name}`,
+          title: `${folder.emoji ? `${folder.emoji} ` : ""}${folder.name}`,
           active: folder.id === task.projectId,
           onSelect: () => onMove(task, folder.id),
         })),
@@ -356,19 +356,19 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   if (onPin) {
     items.push({
       key: "pin",
-      label: task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
-      icon: task.pinned === true ? <PinOff size={16} /> : <Pin size={16} />,
+      title: task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
+      leading: task.pinned === true ? <PinOff size={16} /> : <Pin size={16} />,
       onSelect: () => onPin(task, task.pinned !== true),
     });
   }
   if (onLink && task.link) {
-    items.push({ key: "remove-link", label: t("task.removeLink"), icon: <Link2Off size={16} />, onSelect: () => onLink(task, null) });
+    items.push({ key: "remove-link", title: t("task.removeLink"), leading: <Link2Off size={16} />, onSelect: () => onLink(task, null) });
   }
   if (onArchive) {
     items.push({
       key: "archive",
-      label: archived ? t("task.unarchive") : t("task.archive"),
-      icon: archived ? <ArchiveRestore size={16} /> : <Archive size={16} />,
+      title: archived ? t("task.unarchive") : t("task.archive"),
+      leading: archived ? <ArchiveRestore size={16} /> : <Archive size={16} />,
       disabled: isWorking(task),
       onSelect: () => onArchive(task, archived ? null : Date.now()),
     });
@@ -376,8 +376,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   if (onSnooze) {
     items.push({
       key: "snooze",
-      label: t("task.snooze"),
-      icon: <Clock size={16} />,
+      title: t("task.snooze"),
+      leading: <Clock size={16} />,
       submenu: [
         ...[
           { label: t("task.snoozeUntilActivity"), at: 0 },
@@ -385,12 +385,12 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
           { label: t("task.snoozeTomorrow"), at: tomorrowNineAm() },
         ].map((preset) => ({
           key: `snooze-${preset.at}`,
-          label: preset.label,
+          title: preset.label,
           disabled: isWorking(task),
           onSelect: () => onSnooze(task, preset.at),
         })),
         ...(snoozed
-          ? [{ key: "snooze-stop", label: t("task.stopSnoozing"), icon: <BellOff size={16} />, separatorBefore: true, onSelect: () => onSnooze(task, null) }]
+          ? [{ key: "snooze-stop", title: t("task.stopSnoozing"), leading: <BellOff size={16} />, separatorBefore: true, onSelect: () => onSnooze(task, null) }]
           : []),
       ],
     });
@@ -398,14 +398,14 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   if (onRefreshPermissions) {
     items.push({
       key: "refresh-permissions",
-      label: t("task.refreshPermissions"),
-      icon: <RefreshCw size={16} />,
+      title: t("task.refreshPermissions"),
+      leading: <RefreshCw size={16} />,
       disabled: isWorking(task),
-      title: t("task.refreshPermissionsHint"),
+      hint: t("task.refreshPermissionsHint"),
       onSelect: () => onRefreshPermissions(task),
     });
   }
-  items.push({ key: "delete", label: t("task.deleteAria"), icon: <Trash2 size={16} />, danger: true, disabled: isWorking(task), onSelect: () => setDeleting(true) });
+  items.push({ key: "delete", title: t("task.deleteAria"), leading: <Trash2 size={16} />, overrideClassNames: { row: "text-danger", leading: "text-danger" }, disabled: isWorking(task), onSelect: () => setDeleting(true) });
   return <>
     <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", current ? "bg-raised" : "hover:bg-raised/50")}>
       {renaming ? <input autoFocus value={draft} maxLength={80} aria-label={t("task.renameAria")}

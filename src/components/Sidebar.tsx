@@ -834,11 +834,11 @@ export function BotContextMenu({
   const items: PopoverMenuItem[] = [];
   if (showThreads) {
     items.push(
-      { key: "new-task", label: t("task.newShort"), icon: <Plus size={16} />, onSelect: () => dispatch({ type: "newTask", botId: bot.id }) },
+      { key: "new-task", title: t("task.newShort"), leading: <Plus size={16} />, onSelect: () => dispatch({ type: "newTask", botId: bot.id }) },
       ...(canChooseFolder
-        ? [{ key: "new-task-folder", label: t("task.folder.new"), icon: <FolderOpen size={16} />, onSelect: () => onNewTaskFolder(bot.id) }]
+        ? [{ key: "new-task-folder", title: t("task.folder.new"), leading: <FolderOpen size={16} />, onSelect: () => onNewTaskFolder(bot.id) }]
         : []),
-      { key: "new-folder", label: t("folder.new"), icon: <FolderPlus size={16} />, onSelect: () => onNewFolder(bot.id) },
+      { key: "new-folder", title: t("folder.new"), leading: <FolderPlus size={16} />, onSelect: () => onNewFolder(bot.id) },
     );
   }
   const openProfile = () => {
@@ -847,56 +847,56 @@ export function BotContextMenu({
   };
   if (remoteClient) {
     items.push(
-      { key: "move-to-section", label: t("sidebar.bot.moveToSection"), icon: <FolderPlus size={16} />, separatorBefore: showThreads, onSelect: () => onMoveToSection(bot.id) },
-      { key: "edit-profile", label: t("sidebar.bot.editProfile"), icon: <Pencil size={16} />, onSelect: openProfile },
-      { key: "copy-conversation-id", label: t("sidebar.copyConversationId"), icon: <ClipboardCopy size={16} />, onSelect: () => { void copyText(bot.threadId); } },
+      { key: "move-to-section", title: t("sidebar.bot.moveToSection"), leading: <FolderPlus size={16} />, separatorBefore: showThreads, onSelect: () => onMoveToSection(bot.id) },
+      { key: "edit-profile", title: t("sidebar.bot.editProfile"), leading: <Pencil size={16} />, onSelect: openProfile },
+      { key: "copy-conversation-id", title: t("sidebar.copyConversationId"), leading: <ClipboardCopy size={16} />, onSelect: () => { void copyText(bot.threadId); } },
     );
   } else {
     items.push(
       {
         key: "pin",
-        label: bot.pinned ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
-        icon: bot.pinned ? <PinOff size={16} /> : <Pin size={16} />,
+        title: bot.pinned ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
+        leading: bot.pinned ? <PinOff size={16} /> : <Pin size={16} />,
         onSelect: () => dispatch({ type: "updateBot", botId: bot.id, patch: { pinned: !bot.pinned } }),
       },
       {
         key: "chief",
-        label: bot.chiefOfStaff ? t("sidebar.bot.removeChief") : t("sidebar.bot.makeChief"),
-        icon: <Crown size={16} className={bot.chiefOfStaff ? "text-accent" : undefined} />,
+        title: bot.chiefOfStaff ? t("sidebar.bot.removeChief") : t("sidebar.bot.makeChief"),
+        leading: <Crown size={16} className={bot.chiefOfStaff ? "text-accent" : undefined} />,
         disabled: !bot.chiefOfStaff && !canCoordinate,
-        title: !bot.chiefOfStaff && !canCoordinate ? t("sidebar.bot.chiefNeedsEngine") : undefined,
+        hint: !bot.chiefOfStaff && !canCoordinate ? t("sidebar.bot.chiefNeedsEngine") : undefined,
         onSelect: () => dispatch({ type: "updateBot", botId: bot.id, patch: { chiefOfStaff: !bot.chiefOfStaff } }),
       },
-      { key: "move-to-section", label: t("sidebar.bot.moveToSection"), icon: <FolderPlus size={16} />, separatorBefore: showThreads, onSelect: () => onMoveToSection(bot.id) },
-      { key: "mark-unread", label: t("sidebar.bot.markUnread"), icon: <BellDot size={16} />, onSelect: () => dispatch({ type: "markUnread", botId: bot.id }) },
+      { key: "move-to-section", title: t("sidebar.bot.moveToSection"), leading: <FolderPlus size={16} />, separatorBefore: showThreads, onSelect: () => onMoveToSection(bot.id) },
+      { key: "mark-unread", title: t("sidebar.bot.markUnread"), leading: <BellDot size={16} />, onSelect: () => dispatch({ type: "markUnread", botId: bot.id }) },
       {
         key: "mark-all-read",
-        label: readingBotId === bot.id ? t("sidebar.bot.markingAllRead") : t("sidebar.bot.markAllRead"),
-        icon: readingBotId === bot.id ? <Loader2 size={16} className="animate-spin" /> : <CheckCheck size={16} />,
+        title: readingBotId === bot.id ? t("sidebar.bot.markingAllRead") : t("sidebar.bot.markAllRead"),
+        leading: readingBotId === bot.id ? <Loader2 size={16} className="animate-spin" /> : <CheckCheck size={16} />,
         disabled: readingBotId !== null || botUnreadThreadIds(bot).length === 0,
         keepOpen: true,
         onSelect: () => { void readAll(bot); },
       },
-      { key: "edit-profile", label: t("sidebar.bot.editProfile"), icon: <Pencil size={16} />, separatorBefore: true, onSelect: openProfile },
-      { key: "duplicate", label: t("sidebar.bot.duplicate"), icon: <Copy size={16} />, onSelect: () => dispatch({ type: "duplicateBot", botId: bot.id }) },
-      { key: "copy-conversation-id", label: t("sidebar.copyConversationId"), icon: <ClipboardCopy size={16} />, separatorBefore: true, onSelect: () => { void copyText(bot.threadId); } },
+      { key: "edit-profile", title: t("sidebar.bot.editProfile"), leading: <Pencil size={16} />, separatorBefore: true, onSelect: openProfile },
+      { key: "duplicate", title: t("sidebar.bot.duplicate"), leading: <Copy size={16} />, onSelect: () => dispatch({ type: "duplicateBot", botId: bot.id }) },
+      { key: "copy-conversation-id", title: t("sidebar.copyConversationId"), leading: <ClipboardCopy size={16} />, separatorBefore: true, onSelect: () => { void copyText(bot.threadId); } },
       {
         key: "archive",
-        label: t("sidebar.bot.archive"),
-        icon: <Archive size={16} />,
+        title: t("sidebar.bot.archive"),
+        leading: <Archive size={16} />,
         separatorBefore: true,
         disabled: archiveBlocked,
-        title: archiveHint,
+        hint: archiveHint,
         onSelect: () => onArchive(bot),
       },
       {
         key: "delete",
-        label: deleting ? t("sidebar.bot.deleteChecking") : t("common.delete"),
-        icon: deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />,
+        title: deleting ? t("sidebar.bot.deleteChecking") : t("common.delete"),
+        leading: deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />,
         disabled: deleting,
         busy: deleting,
-        title: deleting ? t("sidebar.bot.deleteCheckingTitle") : undefined,
-        danger: true,
+        hint: deleting ? t("sidebar.bot.deleteCheckingTitle") : undefined,
+        overrideClassNames: { row: "text-danger", leading: "text-danger" },
         onSelect: () => onDelete(bot),
       },
     );
@@ -904,7 +904,6 @@ export function BotContextMenu({
   if (readError?.botId === bot.id) {
     items.push({
       key: "read-error",
-      label: readError.message,
       render: <p role="alert" className="px-3.5 py-2 text-[12px] text-danger">{readError.message}</p>,
     });
   }

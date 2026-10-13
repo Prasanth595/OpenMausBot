@@ -536,10 +536,11 @@ const moreMenuButton = (tree: RowNode) => {
 
 type MenuItemNode = {
   key: string;
-  label?: ReactNode;
+  title?: ReactNode;
+  content?: ReactNode;
   disabled?: boolean;
   busy?: boolean;
-  title?: string;
+  hint?: string;
   submenu?: MenuItemNode[];
   onSelect?: () => void;
 };
@@ -554,7 +555,7 @@ const menuItems = (tree: RowNode): MenuItemNode[] => {
   });
   return items;
 };
-const menuItem = (tree: RowNode, label: string) => menuItems(tree).find((candidate) => candidate.label === label);
+const menuItem = (tree: RowNode, title: string) => menuItems(tree).find((candidate) => candidate.title === title);
 
 describe("Copy link", () => {
   it("writes the exact canonical link for the row's owner to the clipboard", () => {
@@ -598,7 +599,7 @@ describe("Refresh permissions", () => {
     openMenu(renderRow(task, "scout", true, { onRefreshPermissions }));
     const offered = menuItem(renderRow(task, "scout", false, { onRefreshPermissions }), "Refresh permissions")!;
     expect(offered.disabled).toBe(false);
-    expect(offered.title).toBe("Apply this bot's current approval level and saved approvals to this thread. Other threads stay as they are.");
+    expect(offered.hint).toBe("Apply this bot's current approval level and saved approvals to this thread. Other threads stay as they are.");
     offered.onSelect!();
     expect(onRefreshPermissions).toHaveBeenCalledTimes(1);
 
@@ -618,7 +619,7 @@ describe("Regenerate title", () => {
     openMenu(renderRow(task, "scout"));
     const plain = menuItems(renderRow(task, "scout", false));
     expect(menuItem(renderRow(task, "scout", false), "Rename thread")).toBeDefined();
-    expect(plain.find((item) => item.label === "Regenerate title")).toBeUndefined();
+    expect(plain.find((item) => item.title === "Regenerate title")).toBeUndefined();
 
     const onRegenerateTitle = vi.fn();
     openMenu(renderRow(task, "scout", true, { onRegenerateTitle }));

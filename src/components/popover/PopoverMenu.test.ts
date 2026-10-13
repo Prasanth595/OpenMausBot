@@ -40,19 +40,22 @@ vi.mock("./popover-menu.module.css", () => ({
     subShellBare: "subShellBare",
     subInner: "subInner",
     row: "row",
+    rowFill: "rowFill",
     rowActive: "rowActive",
-    rowDanger: "rowDanger",
     rowOff: "rowOff",
-    rowIcon: "rowIcon",
-    rowIconRoomy: "rowIconRoomy",
-    rowIconActive: "rowIconActive",
-    rowIconDanger: "rowIconDanger",
+    rowLeading: "rowLeading",
+    rowLeadingTone: "rowLeadingTone",
+    rowLeadingRoomy: "rowLeadingRoomy",
+    rowLeadingActive: "rowLeadingActive",
+    rowLeadingMedia: "rowLeadingMedia",
     rowMain: "rowMain",
     rowTitle: "rowTitle",
-    rowSubtitle: "rowSubtitle",
-    rowNote: "rowNote",
-    rowLabel: "rowLabel",
+    rowContent: "rowContent",
+    rowContentTone: "rowContentTone",
+    rowTail: "rowTail",
+    rowTailSlot: "rowTailSlot",
     rowValue: "rowValue",
+    clamp: "clamp",
     dot: "dot",
     dotAccent: "dotAccent",
     dotDanger: "dotDanger",
@@ -79,28 +82,46 @@ const render = (items: PopoverMenuItem[], extra: Record<string, unknown> = {}) =
     }),
   );
 
-it("draws an item's second line and note under its label", () => {
+it("draws a title over its content, clamped to one line by default", () => {
   const html = render([
-    { key: "cloud", label: "Connect your phone", subtitle: "to your Cloud (always on)", onSelect: () => {} },
-    {
-      key: "here",
-      label: "Connect your phone",
-      subtitle: "to this computer",
-      note: "Your Cloud shows here once it is ready.",
-      onSelect: () => {},
-    },
-    { key: "plain", label: "Settings", onSelect: () => {} },
+    { key: "cloud", title: "Connect your phone", content: "to your Cloud (always on)", onSelect: () => {} },
+    { key: "here", title: "Connect your phone", content: "to this computer", lines: { content: -1 }, onSelect: () => {} },
   ]);
-  expect(html).toMatch(/Connect your phone<\/span><span[^>]*>to your Cloud \(always on\)<\/span>/);
-  expect(html).toMatch(/to this computer<\/span><span[^>]*>Your Cloud shows here once it is ready\.<\/span>/);
-  expect(html).toContain('<span class="rowLabel">Settings</span>');
+  expect(html).toMatch(/rowTitle clamp[^>]*>Connect your phone</);
+  expect(html).toMatch(/rowContent rowContentTone clamp[^>]*>to your Cloud \(always on\)</);
+  // -1 wraps freely: the content keeps its tone but carries no clamp class
+  expect(html).toMatch(/rowContent rowContentTone">to this computer</);
+});
+
+it("clamps to the requested count through a style variable", () => {
+  const html = render([{ key: "a", title: "Take turns", content: "a long reason", lines: { title: 2, content: 3 }, onSelect: () => {} }]);
+  expect(html).toContain('style="--row-lines:2"');
+  expect(html).toContain('style="--row-lines:3"');
+});
+
+it("drops a slot when its line count is zero", () => {
+  const html = render([
+    { key: "a", title: "Copy", content: "hidden content", lines: { content: 0 }, onSelect: () => {} },
+    { key: "b", title: "hidden title", content: "kept", lines: { title: 0 }, onSelect: () => {} },
+  ]);
+  expect(html).not.toContain("hidden content");
+  expect(html).not.toContain("hidden title");
+  expect(html).toContain(">kept</span>");
+});
+
+it("keeps value and trailing in the tail band, in order", () => {
+  const html = render([{ key: "a", title: "Account", value: "Pro", trailing: createElement("span", { id: "chip" }), onSelect: () => {} }]);
+  const tail = html.slice(html.indexOf("rowTail"));
+  expect(tail.indexOf("rowValue")).toBeLessThan(tail.indexOf("rowTailSlot"));
+  expect(tail).toContain(">Pro</span>");
+  expect(tail).toContain('id="chip"');
 });
 
 it("draws an item's attention dot on the item itself, in its tone", () => {
   const html = render([
-    { key: "ready", label: "Restart to update", attention: true, attentionTone: "accent", onSelect: () => {} },
-    { key: "failed", label: "Update failed", attention: true, onSelect: () => {} },
-    { key: "plain", label: "Settings", onSelect: () => {} },
+    { key: "ready", title: "Restart to update", attention: true, attentionTone: "accent", onSelect: () => {} },
+    { key: "failed", title: "Update failed", attention: true, onSelect: () => {} },
+    { key: "plain", title: "Settings", onSelect: () => {} },
   ]);
   const item = (label: string) => html.split('role="menuitem"').find((chunk) => chunk.includes(`>${label}</span>`)) ?? "";
   expect(item("Restart to update")).toContain("dotAccent");
@@ -112,8 +133,8 @@ it("marks a submenu parent with a chevron and popup semantics", () => {
   const html = render([
     {
       key: "support",
-      label: "Help and support",
-      submenu: [{ key: "help", label: "Help Center", onSelect: () => {} }],
+      title: "Help and support",
+      submenu: [{ key: "help", title: "Help Center", onSelect: () => {} }],
       onSelect: () => {},
     },
   ]);
@@ -124,8 +145,8 @@ it("marks a submenu parent with a chevron and popup semantics", () => {
 
 it("draws headings and separators without business knowledge", () => {
   const html = render([
-    { key: "a", label: "Copy", onSelect: () => {} },
-    { key: "b", label: "Download", heading: "Share", separatorBefore: true, onSelect: () => {} },
+    { key: "a", title: "Copy", onSelect: () => {} },
+    { key: "b", title: "Download", heading: "Share", separatorBefore: true, onSelect: () => {} },
   ]);
   expect(html).toContain('role="separator"');
   expect(html).toContain(">Share</div>");
@@ -133,13 +154,13 @@ it("draws headings and separators without business knowledge", () => {
 
 it("lets renderItem replace the row while staying keyboard-discoverable", () => {
   const html = render(
-    [{ key: "custom", label: "Custom", onSelect: () => {} }],
+    [{ key: "custom", title: "Custom", onSelect: () => {} }],
     {
       renderItem: (item: PopoverMenuItem) =>
         createElement(
           "button",
           { type: "button", role: "menuitem", "data-menu-key": item.key, className: "my-row" },
-          item.label,
+          item.title,
         ),
     },
   );
@@ -148,19 +169,30 @@ it("lets renderItem replace the row while staying keyboard-discoverable", () => 
   expect(html).not.toContain('class="row"');
 });
 
-it("carries a danger tone, a hint title and radio semantics as item state", () => {
+it("carries a hint, per-slot override classes and radio semantics as item state", () => {
   const html = render([
-    { key: "delete", label: "Delete", danger: true, title: "Delete this bot", icon: createElement("span", { "data-icon": "trash" }), onSelect: () => {} },
-    { key: "turns", label: "Take turns", role: "menuitemradio", checked: false, ariaDisabled: true, onSelect: () => {} },
-    { key: "live", label: "Live", role: "menuitemradio", checked: true, onSelect: () => {} },
+    {
+      key: "delete",
+      title: "Delete",
+      hint: "Delete this bot",
+      leading: createElement("span", { "data-icon": "trash" }),
+      overrideClassNames: { row: "text-danger", leading: "text-danger" },
+      onSelect: () => {},
+    },
+    { key: "turns", title: "Take turns", role: "menuitemradio", checked: false, ariaDisabled: true, onSelect: () => {} },
+    { key: "live", title: "Live", role: "menuitemradio", checked: true, onSelect: () => {} },
   ]);
-  const row = (label: string) => {
-    const start = html.indexOf(`>${label}</span>`);
+  const row = (title: string) => {
+    const start = html.indexOf(`>${title}</span>`);
     return html.slice(html.lastIndexOf("<button", start), html.indexOf("</button>", start) + 9);
   };
   const del = row("Delete");
-  expect(del).toContain("rowDanger");
-  expect(del).toContain("rowIconDanger");
+  // the override replaces the row's fill and the leading paint
+  expect(del).toContain('class="row text-danger"');
+  expect(del).not.toContain("rowFill");
+  expect(del).toContain('class="rowLeading text-danger"');
+  expect(del).not.toContain("rowLeadingTone");
+  expect(del).not.toContain("rowLeadingMedia");
   expect(del).toContain('title="Delete this bot"');
   const turns = row("Take turns");
   expect(turns).toContain('role="menuitemradio"');
@@ -172,14 +204,23 @@ it("carries a danger tone, a hint title and radio semantics as item state", () =
   expect(live).not.toContain('aria-disabled="true"');
 });
 
+it("gives the leading slot its tone and size defaults unless overridden", () => {
+  const html = render([
+    { key: "a", title: "Copy", leading: createElement("span", { "data-icon": "i" }), onSelect: () => {} },
+    { key: "b", title: "Paste", leading: createElement("span", { "data-icon": "i" }), overrideClassNames: { leading: "text-accent" }, onSelect: () => {} },
+  ]);
+  expect(html).toContain('class="rowLeading rowLeadingTone rowLeadingMedia"');
+  expect(html).toContain('class="rowLeading text-accent"');
+});
+
 it("inerts a disabled trigger", () => {
-  const html = render([{ key: "a", label: "Copy", onSelect: () => {} }], { defaultOpen: false, triggerDisabled: true });
+  const html = render([{ key: "a", title: "Copy", onSelect: () => {} }], { defaultOpen: false, triggerDisabled: true });
   expect(html).toContain('disabled=""');
   expect(html).toContain('aria-disabled="true"');
 });
 
 it("headless variant carries no surface chrome", () => {
-  const html = render([{ key: "a", label: "Copy", onSelect: () => {} }], { variant: "headless" });
+  const html = render([{ key: "a", title: "Copy", onSelect: () => {} }], { variant: "headless" });
   expect(html).toContain("data-popover-variant=\"headless\"");
   expect(html).not.toContain("bg-menu");
   expect(html).not.toContain("border-hairline");

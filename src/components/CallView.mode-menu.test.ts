@@ -196,16 +196,18 @@ describe("the call mode menu", () => {
     const items = callModeItems({ mode: "live", onChoose: vi.fn() });
     expect(items.map((item) => item.key)).toEqual(["turns", "live"]);
     expect(items[0]).toMatchObject({ role: "menuitemradio", checked: false });
-    expect(items[0]!.label).toBe("Take turns");
+    expect(items[0]!.title).toBe("Take turns");
     expect(items[1]).toMatchObject({ role: "menuitemradio", checked: true });
-    expect(items[1]!.label).toBe("Live");
+    expect(items[1]!.title).toBe("Live");
+    // the hints are sentences: the content runs unclamped
+    expect(items.map((item) => item.lines?.content)).toEqual([-1, -1]);
   });
 
   it("says where the OpenAI key stays: this computer, or the person's Cloud", () => {
-    expect(String(callModeItems({ mode: "live", onChoose: vi.fn() })[1]!.subtitle)).toContain("The OpenAI key stays on your computer.");
+    expect(String(callModeItems({ mode: "live", onChoose: vi.fn() })[1]!.content)).toContain("The OpenAI key stays on your computer.");
     const cloud = callModeItems({ mode: "live", cloudHome: true, onChoose: vi.fn() });
-    expect(String(cloud[1]!.subtitle)).toContain("The OpenAI key stays on My Cloud.");
-    expect(String(cloud[1]!.subtitle)).not.toContain("stays on your computer");
+    expect(String(cloud[1]!.content)).toContain("The OpenAI key stays on My Cloud.");
+    expect(String(cloud[1]!.content)).not.toContain("stays on your computer");
   });
 
   // Off the Mac's own page, Take turns stays in the menu so the person sees
@@ -219,9 +221,9 @@ describe("the call mode menu", () => {
     // aria-disabled, not disabled: the arrow keys still reach it and its reason
     expect(turns).toMatchObject({ role: "menuitemradio", checked: false, ariaDisabled: true });
     expect(turns!.disabled).toBeUndefined();
-    expect(turns!.label).toBe("Take turns");
-    expect(String(turns!.subtitle)).toContain("Calls where you take turns need the Mac app. They listen with on-device speech recognition, which only the Mac app has.");
-    expect(String(turns!.subtitle)).not.toContain("Listening stays on this computer");
+    expect(turns!.title).toBe("Take turns");
+    expect(String(turns!.content)).toContain("Calls where you take turns need the Mac app. They listen with on-device speech recognition, which only the Mac app has.");
+    expect(String(turns!.content)).not.toContain("Listening stays on this computer");
     expect(live).toMatchObject({ role: "menuitemradio", checked: true });
     expect(live!.ariaDisabled).toBeUndefined();
     // where it can take turns, both modes can be picked

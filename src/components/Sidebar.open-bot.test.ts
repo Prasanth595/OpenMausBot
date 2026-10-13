@@ -96,8 +96,8 @@ describe.each([false, true])("with threads shown: %s", (shown) => {
     // the menu's items carry the handlers its rows run
     const editProfile = (botId: string) => (render(() => BotContextMenu({
       menu: { botId, x: 0, y: 0 }, onClose: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn(), onMoveToSection: vi.fn(), onNewFolder: vi.fn(), onNewTaskFolder: vi.fn(),
-    })).find((node) => Array.isArray(node.props.items))!.props.items as { label?: string; onSelect?: () => void }[])
-      .find((item) => item.label === "Edit Profile")!;
+    })).find((node) => Array.isArray(node.props.items))!.props.items as { title?: string; onSelect?: () => void }[])
+      .find((item) => item.title === "Edit Profile")!;
     editProfile("atlas").onSelect!();
     expect(actions()).toEqual([opened("atlas"), { type: "toggleSettings", open: true }]);
     fixture.dispatch.mockReset();

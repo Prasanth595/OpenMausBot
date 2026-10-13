@@ -195,8 +195,8 @@ export function useUpdateItem(): UpdateEntry | null {
     label,
     item: {
       key: "update",
-      label,
-      icon: <UpdateIcon phase={phase} pending={pending} />,
+      title: label,
+      leading: <UpdateIcon phase={phase} pending={pending} />,
       disabled: updateBusy(phase, pending) || state?.retryable === false,
       // progress is reported on the row itself, so the menu stays put
       keepOpen: true,
@@ -279,10 +279,19 @@ export function phoneMenuItems({
   return [
     ...destinations.map((destination) => ({
       key: destination.id === "cloud" ? "connect-phone-cloud" : "connect-phone",
-      label: t("sidebar.menu.connectPhone"),
-      subtitle: t(destination.subtitleKey),
-      ...(destination.noteKey ? { note: t(destination.noteKey) } : {}),
-      icon: <Smartphone size={18} />,
+      title: t("sidebar.menu.connectPhone"),
+      // The destination is one line under the title; the Cloud's not-ready
+      // note is its own quieter line, so the content runs free of the clamp.
+      content: destination.noteKey ? (
+        <>
+          <span className="block">{t(destination.subtitleKey)}</span>
+          <span className="block text-[11.5px] leading-snug text-ink-tertiary">{t(destination.noteKey)}</span>
+        </>
+      ) : (
+        t(destination.subtitleKey)
+      ),
+      lines: destination.noteKey ? { content: -1 } : undefined,
+      leading: <Smartphone />,
       trailing:
         destination.id === "here" && destination.target === "computer" && connected ? (
           <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-success" />
@@ -291,8 +300,8 @@ export function phoneMenuItems({
     } satisfies PopoverMenuItem)),
     {
       key: "phone-app",
-      label: t("sidebar.menu.getPhoneApp"),
-      icon: <Download size={18} />,
+      title: t("sidebar.menu.getPhoneApp"),
+      leading: <Download />,
       onSelect: onGetApp,
     },
   ];
@@ -329,25 +338,25 @@ export function profileMenuItems({
   onAccount: () => void;
 }): PopoverMenuItem[] {
   const help: PopoverMenuItem[] = [
-    { key: "help", label: t("sidebar.menu.help"), icon: <HelpCircle size={18} />, onSelect: onHelp },
-    { key: "feedback", label: t("sidebar.menu.feedback"), icon: <DiscordIcon size={17} />, onSelect: onFeedback },
+    { key: "help", title: t("sidebar.menu.help"), leading: <HelpCircle />, onSelect: onHelp },
+    { key: "feedback", title: t("sidebar.menu.feedback"), leading: <DiscordIcon />, onSelect: onFeedback },
     {
       key: "shortcuts",
-      label: t("sidebar.menu.shortcuts"),
-      icon: <Keyboard size={18} />,
+      title: t("sidebar.menu.shortcuts"),
+      leading: <Keyboard />,
       trailing: <ShortcutHint id="shortcuts-cheat-sheet" />,
       onSelect: onShortcuts,
     },
-    { key: "about", label: t("sidebar.menu.about"), icon: <Info size={18} />, separatorBefore: true, onSelect: onAbout },
+    { key: "about", title: t("sidebar.menu.about"), leading: <Info />, separatorBefore: true, onSelect: onAbout },
   ];
   return [
-    ...(usage ? [{ key: "usage", label: t("settings.section.usage"), icon: <Gauge size={18} />, onSelect: onUsage }] : []),
+    ...(usage ? [{ key: "usage", title: t("settings.section.usage"), leading: <Gauge />, onSelect: onUsage }] : []),
     ...phone,
-    { key: "support", label: t("sidebar.menu.support"), icon: <LifeBuoy size={18} />, submenu: help, onSelect: () => {} },
-    { key: "settings", label: t("sidebar.menu.settings"), icon: <SettingsIcon size={18} />, onSelect: onSettings },
+    { key: "support", title: t("sidebar.menu.support"), leading: <LifeBuoy />, submenu: help, onSelect: () => {} },
+    { key: "settings", title: t("sidebar.menu.settings"), leading: <SettingsIcon />, onSelect: onSettings },
     ...(update ? [update] : []),
     ...(account
-      ? [{ key: "account", label: account, icon: <CircleUserRound size={18} />, separatorBefore: true, onSelect: onAccount }]
+      ? [{ key: "account", title: account, leading: <CircleUserRound />, separatorBefore: true, onSelect: onAccount }]
       : []),
   ];
 }

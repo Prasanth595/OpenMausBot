@@ -24,71 +24,93 @@
   @apply overflow-x-hidden p-1;
 }
 
-/* A menu row button. Hover and the active/submenu-open state share one
-   fill, so they compose as separate classes; keyboard focus keeps only the
-   global :focus-visible ring, never a fill of its own. */
+/* A menu row button. The top band carries leading | title | value, trailing,
+   the attention dot and the submenu chevron, all aligned with the title's
+   line; content sits under the title in the same column. Hover and the
+   active/submenu-open state share one fill — rowFill is a separate class so
+   a caller's overrideClassNames.row can drop it; keyboard focus keeps only
+   the global :focus-visible ring, never a fill of its own. */
 .row {
-  @apply flex min-h-8 w-full items-center gap-2 rounded-md px-3 py-2 text-start text-sm leading-5 outline-none hover:bg-raised-hover disabled:opacity-60;
+  @apply flex min-h-8 w-full items-start gap-2 rounded-md px-3 py-2 text-start text-sm leading-5 outline-none disabled:opacity-60;
+}
+
+.rowFill {
+  @apply hover:bg-raised-hover;
 }
 
 .rowActive {
   @apply bg-raised-hover;
 }
 
-/* Destructive rows: icon and label carry the tone; hover still fills. */
-.rowDanger {
-  @apply text-danger;
-}
-
 /* Unavailable-but-reachable rows: quiet tone and no hover fill, but still in
    the arrow path so their reason can be read out. Source order after the
-   base row picks these over its own hover fill. */
+   base fill picks these over it. */
 .rowOff {
   @apply text-ink-tertiary hover:bg-transparent;
 }
 
-/* Row icon tone: the default is the quiet tone; roomy menus and the active
-   row speak up. Source order decides, so modifiers come after the base. */
-.rowIcon {
-  @apply flex size-5 shrink-0 items-center justify-center text-ink-secondary;
+/* The leading slot: a fixed 20px band so titles line up whatever the icon
+   size, and the icons inside default to 16px. An overrideClassNames.leading
+   drops the tone and the size default together; the box stays. Source order
+   decides the tone, so modifiers come after the base. */
+.rowLeading {
+  @apply flex size-5 shrink-0 items-center justify-center;
 }
 
-.rowIconRoomy {
+.rowLeadingTone {
+  @apply text-ink-secondary;
+}
+
+.rowLeadingRoomy {
   @apply text-ink;
 }
 
-.rowIconActive {
+.rowLeadingActive {
   @apply text-accent;
 }
 
-.rowIconDanger {
-  @apply text-danger;
+.rowLeadingMedia {
+  @apply [&_svg]:size-4;
 }
 
-/* Two-line rows stack their label over a subtitle and/or note. */
+/* The title column: the title over an optional content line. */
 .rowMain {
   @apply flex min-w-0 flex-1 flex-col;
 }
 
 .rowTitle {
-  @apply truncate;
+  @apply min-w-0;
 }
 
-.rowSubtitle {
-  @apply truncate text-[12px] font-normal leading-4 text-ink-secondary;
+.rowContent {
+  @apply text-[12px] font-normal leading-4;
 }
 
-.rowNote {
-  @apply text-[11.5px] font-normal leading-snug text-ink-tertiary;
+.rowContentTone {
+  @apply text-ink-secondary;
 }
 
-/* Single-line rows let the label take the free space itself. */
-.rowLabel {
-  @apply flex-1 truncate;
+/* The tail band: value, trailing, the attention dot and the chevron, centered
+   on the title's line rather than the row's full height. */
+.rowTail {
+  @apply flex h-5 shrink-0 items-center gap-2;
+}
+
+.rowTailSlot {
+  @apply flex items-center;
 }
 
 .rowValue {
   @apply shrink-0 text-[14px] font-normal tabular-nums leading-5 text-ink-secondary;
+}
+
+/* Title/content line clamp: the limit arrives as a variable (values stay in
+   JS) and -1 renders without this class so the text wraps freely. */
+.clamp {
+  @apply overflow-hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--row-lines, 1);
 }
 
 /* Update/status dot: the base carries the shape, the tone its fill. */

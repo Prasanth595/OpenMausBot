@@ -434,8 +434,10 @@ export function callModeItems({ mode, onChoose, cloudHome = false, turnsUnavaila
     const unavailable = entry.id === "turns" ? turnsUnavailable : null;
     return {
       key: entry.id,
-      label: t(entry.label),
-      subtitle: unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome }),
+      title: t(entry.label),
+      content: unavailable ? `${unavailable.label}. ${unavailable.reason}` : callModeHint(entry.id, { cloudHome }),
+      // The hints are sentences, not labels: let them run as long as they need.
+      lines: { content: -1 },
       role: "menuitemradio",
       checked: mode === entry.id,
       // the current mode keeps its fill: picking is a state, not a hover
