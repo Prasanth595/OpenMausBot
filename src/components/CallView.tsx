@@ -52,6 +52,7 @@ const CALL_ENDPOINT_MS = 850;
  * its help opens upward, away from the bottom edge of the window. */
 export type CallButtonPlacement = "header" | "composer";
 
+/** Call button for a single bot: delegates to the shared call-target button. */
 export function CallButton({ bot, placement = "header" }: { bot: Bot; placement?: CallButtonPlacement }) {
   return (
     <CallTargetButton

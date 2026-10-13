@@ -167,6 +167,7 @@ function roomHeader(config: AppState["config"]) {
   flushSync(() => root.render(createElement(Page, { config, children: createElement(GroupCallButton, { group: room, members: [ada] }) })));
 }
 const callButton = () => container.querySelector<HTMLButtonElement>("[data-call-button]");
+/** Clicks an element synchronously, failing when there is nothing to press. */
 const press = (element: Element | null) => {
   if (!element) throw new Error("nothing to press");
   flushSync(() => (element as HTMLElement).click());

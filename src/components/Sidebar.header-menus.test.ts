@@ -66,6 +66,7 @@ function nodes(value: ReactNode): ReactElement<Props>[] {
     return [child, ...nodes(child.props.children)];
   });
 }
+/** Renders the sidebar with a fresh hook fixture and returns all nodes. */
 function render() {
   fixture.index = 0;
   fixture.effects = [];
@@ -75,6 +76,7 @@ type PlusMenu = { ariaLabel: string; placement?: string; align?: string; items: 
 /** Finds the header's plus menu by its accessible label. */
 const plusMenu = (label = "New or share") => render().find((node) => node.type === PopoverMenu && node.props.ariaLabel === label)! as unknown as ReactElement<PlusMenu>;
 
+/** Visible text of every node in a rendered sidebar tree. */
 const text = (tree: ReactElement<Props>[]) => tree.map((node) => Children.toArray(node.props.children).filter((child) => typeof child === "string").join(" ")).join(" ");
 
 beforeEach(() => {

@@ -72,6 +72,7 @@ interface SectionContextResponse {
   maxBytes: number;
 }
 
+/** Dialog editing a team section's context note within its byte budget. */
 function SectionContextDialog({ section, label, onClose }: { section: string; label: string; onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);

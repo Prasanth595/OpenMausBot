@@ -16,6 +16,7 @@ const row = () => host.querySelector<HTMLElement>(`[${MESSAGE_ROW}]`)!;
 const body = () => host.querySelector<HTMLElement>("p")!;
 const tray = () => host.querySelector<HTMLElement>('[data-testid="message-actions"]')!;
 const shown = () => tray().dataset.shown === "true";
+/** The tray's More menu button that opens the message-action sheet. */
 const more = () => tray().querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
 /** All message-action rows in the open menu sheet. */
 const items = () => [...document.querySelectorAll<HTMLButtonElement>("[role=menuitem]")];
@@ -27,6 +28,7 @@ const pointer = (type: string, target: Element, pointerType: string) =>
 
 let picked: string[] = [];
 
+/** Mounts the message-action tray, optionally forced open. */
 async function render(forceOpen = false) {
   await act(async () => {
     root.render(

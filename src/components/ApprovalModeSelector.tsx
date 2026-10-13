@@ -69,6 +69,7 @@ export function approvalModeOptionsFor(driverKind: string, trustedModesAvailable
     });
 }
 
+/** Reports whether the current mode needs a local desktop to leave through HTTP. */
 export function approvalModeSelectionRequiresLocalDesktop(
   currentMode: ApprovalMode,
   trustedModesAvailable: boolean,

@@ -20,6 +20,7 @@ type Gesture = {
 
 const iconButton = "flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent";
 
+/** One bot card on the team canvas: identity, status, and quick actions. */
 function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
   bot: Bot;
   selected: boolean;

@@ -23,6 +23,7 @@ const dispatch = vi.fn();
 let host: HTMLDivElement;
 let root: Root;
 
+/** Mounts the permissions section for a bot in the test host. */
 function render(bot: Bot, trustedModesAvailable = false) {
   const derived = {
     patch: (patch: object) => dispatch({ type: "updateBot", botId: bot.id, patch }),

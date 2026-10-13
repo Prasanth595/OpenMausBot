@@ -514,6 +514,7 @@ const walk = (node: unknown, visit: (element: RowNode) => void): void => {
   walk(element.props?.children ?? element.children, visit);
 };
 
+/** Reads the visible text out of a rendered row node. */
 const textOf = (node: unknown): string => {
   if (typeof node === "string") return node;
   if (Array.isArray(node)) return node.map(textOf).join("");
@@ -527,6 +528,7 @@ const openMenu = (tree: RowNode) => {
   (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
 };
 
+/** Finds the row's More button by its expandable menu props. */
 const moreMenuButton = (tree: RowNode) => {
   let found: RowNode | undefined;
   walk(tree, (element) => {

@@ -94,6 +94,7 @@ let state: AppState = {
 };
 const dispatch = vi.fn();
 let root: Root;
+/** Flushes a macrotask so pending renders and effects settle. */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 async function draw() {
   const value = { state, dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
@@ -122,6 +123,7 @@ async function menusWith(label: string) {
   }
   return found;
 }
+/** Re-renders after a state change and returns per-row render counts. */
 async function rowRendersAfter(change: (current: AppState) => AppState) {
   renders.botText = renders.userText = renders.toolChip = renders.speak = 0;
   state = change(state);

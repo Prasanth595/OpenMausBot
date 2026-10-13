@@ -966,6 +966,7 @@ export function botConfirmCopy(kind: BotConfirmKind, name: string) {
       };
 }
 
+/** Copy for the delete-everything archived-bots confirmation dialog. */
 export function archivedDeleteAllCopy() {
   return {
     title: t("sidebar.archived.deleteAllTitle"),
@@ -1333,6 +1334,7 @@ export function PinnedCircleThreadSection({
   );
 }
 
+/** Pinned-bot roster: circles in icon density, full rows otherwise. */
 function PinnedBotRoster({
   bots,
   density,
@@ -1631,6 +1633,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   );
 });
 
+/** One archived bot row with restore and permanent-delete actions. */
 export function ArchivedBotRow({
   bot,
   restoring,

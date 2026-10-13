@@ -33,6 +33,7 @@ export const MESSAGE_ROW = "data-message-row";
 const INTERACTIVE = "a, button, input, textarea, select, summary, label, [role=button], [contenteditable=true]";
 const LONG_PRESS_MS = 450;
 
+/** Reports whether the target currently holds keyboard-visible focus. */
 function focusVisible(target: EventTarget | null): boolean {
   try {
     return target instanceof Element && target.matches(":focus-visible");
