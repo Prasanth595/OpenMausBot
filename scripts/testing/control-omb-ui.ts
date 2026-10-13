@@ -225,6 +225,15 @@ async function snapshot(handle: UiHandle, interactive: boolean): Promise<Record<
 
 /** How long `--name` waits for its element to be rendered before giving up. */
 const TARGET_WAIT_MS = 5_000;
+/** A `--name` hit must repeat across consecutive snapshots before it is used:
+ * a portaled menu (the header More menu) appears in the tree a frame before
+ * its sheet finishes positioning, so the first single match can still be
+ * under the transcript when agent-browser hit-tests it. */
+const TARGET_STABLE_POLLS = 2;
+/** How many times `click`/`type` retry after a hit-test failure ("is covered
+ * by …") with a fresh resolve before surfacing the error. */
+const ACTION_ATTEMPTS = 3;
+const ACTION_RETRY_DELAY_MS = 300;
 
 /** `--ref @eN` verbatim, or the one element whose accessible name is `--name`. */
 async function resolveTarget(handle: UiHandle, values: Record<string, unknown>, verb: string): Promise<{ target: string; name?: string }> {
@@ -243,20 +252,87 @@ async function resolveTarget(handle: UiHandle, values: Record<string, unknown>, 
   // named", on four unrelated branches. Ambiguity is not a race, so two
   // matches are still reported the moment they are seen, and a name that
   // never arrives fails with the same error as before, just later.
+  //
+  // A single match is not yet enough: a portaled sheet is in the snapshot a
+  // frame before it finishes positioning (the header More menu opens under
+  // the transcript's day separator for a moment), and clicking that first
+  // sighting fails as "is covered by …". Require the same single match on
+  // consecutive snapshots so the click lands after the sheet settles.
   const deadline = Date.now() + TARGET_WAIT_MS;
   let matches: Array<[string, { name?: unknown; role?: unknown }]> = [];
+  let stableTarget: string | null = null;
+  let stablePolls = 0;
   for (;;) {
     const refs = (await snapshot(handle, false)).refs as Record<string, { name?: unknown; role?: unknown }> | undefined;
     matches = Object.entries(refs ?? {}).filter(([, element]) => element?.name === name);
-    if (matches.length === 1) return { target: `@${matches[0]![0]}`, name };
-    if (matches.length > 1 || Date.now() >= deadline) break;
+    if (matches.length > 1) break;
+    if (matches.length === 1) {
+      const target = `@${matches[0]![0]}`;
+      if (target === stableTarget) {
+        stablePolls += 1;
+      } else {
+        stableTarget = target;
+        stablePolls = 1;
+      }
+      if (stablePolls >= TARGET_STABLE_POLLS) return { target, name };
+    } else {
+      stableTarget = null;
+      stablePolls = 0;
+    }
+    if (Date.now() >= deadline) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  // The sheet never settled on one ref within the budget: fall back to the
+  // latest single match rather than failing a target the page does have. The
+  // click/type retry below still gets its chance at a covered first attempt.
+  if (matches.length === 1) return { target: `@${matches[0]![0]}`, name };
   if (matches.length === 0) throw new ControlOmbError(`no element is named ${JSON.stringify(name)}`, "run `ui snapshot` and use the exact accessible name, or --ref");
   throw new ControlOmbError(
     `${matches.length} elements are named ${JSON.stringify(name)}: ${matches.map(([id, element]) => `@${id} (${String(element.role)})`).join(", ")}`,
     "pass --ref to pick one",
   );
+}
+
+function isHitTestFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /is covered by|covering element|is not visible|is not stable|detached|stale|intercepted|obscur/i.test(message);
+}
+
+/** Click or type, re-resolving a `--name` target when agent-browser reports
+ * the resolved ref is covered. Refs go stale after the page updates (the
+ * hint on every such error), and a menu sheet can still be settling under
+ * the transcript on the first attempt, so one stale/covered attempt is not
+ * proof the element is unusable. A `--ref` has nothing to re-resolve to, so
+ * it retries the same ref after the same pause. */
+async function clickOrType(
+  handle: UiHandle,
+  values: Record<string, unknown>,
+  verb: "click" | "type",
+  text?: string,
+): Promise<{ target: string; name?: string; data: Record<string, unknown> }> {
+  let resolved = await resolveTarget(handle, values, verb);
+  const env = sessionEnv(handle);
+  let attempt = 0;
+  for (;;) {
+    try {
+      const data = await agentBrowser(
+        handle.binary,
+        env,
+        verb === "click" ? ["click", resolved.target] : ["type", resolved.target, text as string],
+      );
+      return { ...resolved, data };
+    } catch (error) {
+      attempt += 1;
+      if (!isHitTestFailure(error) || attempt >= ACTION_ATTEMPTS) throw error;
+      await new Promise((resolve) => setTimeout(resolve, ACTION_RETRY_DELAY_MS));
+      // Fresh refs: the failed attempt's ref may point at a node the page
+      // has since replaced. `--ref` keeps its explicit ref; `--name`
+      // re-resolves (which itself waits for the settled sheet).
+      if (typeof values.name === "string" && values.name) {
+        resolved = await resolveTarget(handle, values, verb);
+      }
+    }
+  }
 }
 
 function parseFlagPatch(raw: unknown): { features: Record<string, boolean | number | string> } {
@@ -343,8 +419,7 @@ export async function runControlOmbUi(args: string[]): Promise<unknown> {
     const text = verb === "type" ? values.text : undefined;
     if (verb === "type" && typeof text !== "string") throw new ControlOmbError("ui type requires --text TEXT");
     await requireLiveSession(handle);
-    const { target, name } = await resolveTarget(handle, values, verb);
-    const data = await agentBrowser(handle.binary, sessionEnv(handle), verb === "click" ? ["click", target] : ["type", target, text as string]);
+    const { target, name, data } = await clickOrType(handle, values, verb, text as string | undefined);
     return { ok: true, target, ...(name ? { name } : {}), ...data };
   }
 
