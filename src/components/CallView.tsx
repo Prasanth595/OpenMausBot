@@ -341,9 +341,9 @@ export function CallTargetButton({
           open={menuOpen}
           onOpenChange={(open) => {
             if (open) {
-              // a mode is picked before a call; the key/help sheets give way
+              // a mode is picked before a call; the start/help sheets give way
               setHelpOpen(false);
-              dismissKeyPrompt(targetId);
+              dismissStartPrompt(targetId);
             }
             setMenuOpen(open);
           }}
