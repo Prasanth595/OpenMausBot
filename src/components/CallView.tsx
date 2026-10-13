@@ -36,7 +36,6 @@ import { usePushToTalk } from "@/lib/push-to-talk";
 import { BotAvatar } from "./Avatar";
 import { navigateThreadMenu } from "./BotProjects";
 import { LiveKeySetup } from "./LiveKeySetup";
-import { LiveProPrompt } from "./ProIntroduction";
 import { liveLineHeldElsewhere } from "./LiveCallBar";
 import { isRoutineApproval, isSkillApproval, pendingApprovals, spokenApprovalPrompt } from "./PendingApproval";
 import { track } from "@/lib/analytics";
@@ -155,9 +154,8 @@ export function CallTargetButton({
   // here. A Live call always asks for the microphone first, so a page that
   // can't have one says so before anyone pastes a key it can't use.
   const keyPopover = canLive && !active && media.needsKey && media.botId === targetId;
-  // The harness answered that Live calls need a Pro plan (it asks for a key
-  // only after that): the Pro card here, where the key form would be.
-  const proPopover = canLive && !active && media.needsPro && media.botId === targetId;
+  // Vopwe trim: no Pro plan, so the Pro card never shows; the key form path is unchanged.
+  const proPopover = false;
   const startPrompt = keyPopover || proPopover;
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -376,17 +374,6 @@ export function CallTargetButton({
             // the press that asked for the key already counted as a call
             onSaved={() => void startLiveCall({ botId: targetId, threadId: liveThreadId })}
           />
-        </div>
-      )}
-
-      {proPopover && (
-        <div
-          ref={proRef}
-          id={proId}
-          tabIndex={-1}
-          className={cn("animate-pop-in absolute right-0 z-30 w-[340px] max-w-[90vw] rounded-xl shadow-2xl outline-none", composer ? "bottom-full mb-1.5" : "top-full mt-1.5")}
-        >
-          <LiveProPrompt />
         </div>
       )}
 

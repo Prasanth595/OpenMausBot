@@ -17,6 +17,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
+  CalendarDays,
   Check,
   CircleUserRound,
   Download,
@@ -26,9 +27,12 @@ import {
   Keyboard,
   LifeBuoy,
   Loader2,
+  Network,
+  Puzzle,
   RefreshCw,
   Settings as SettingsIcon,
   Smartphone,
+  Zap,
 } from "lucide-react";
 
 import { InitialsAvatar } from "./Avatar";
@@ -367,9 +371,33 @@ export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } 
   const name = profileLabel(profile);
   const connectTo = (destination: PhoneDestination) => selectPhoneDestination(destination, { bridge: cloudPhone.bridge, dispatch });
   const remote = window.ogb?.remoteClient?.active === true;
-  // the same rule Settings uses to show its OpenMausBot Cloud page
-  const cloudAccount = !remote && Boolean(window.ogb?.cloudAccount || (window.ogb?.cloudPlan && state.config?.cloudHome === true));
 
+  const navItems: SidebarMenuItem[] = [
+    {
+      key: "routines",
+      label: t("sidebar.nav.routines"),
+      icon: <CalendarDays size={18} />,
+      onSelect: () => dispatch({ type: "showRoutines" }),
+    },
+    {
+      key: "triggers",
+      label: t("sidebar.nav.triggers"),
+      icon: <Zap size={18} />,
+      onSelect: () => dispatch({ type: "toggleTriggers", open: true }),
+    },
+    {
+      key: "apps",
+      label: t("sidebar.nav.apps"),
+      icon: <Puzzle size={18} />,
+      onSelect: () => dispatch({ type: "togglePlugins", open: true }),
+    },
+    {
+      key: "team-map",
+      label: t("sidebar.nav.teamMap"),
+      icon: <Network size={18} />,
+      onSelect: () => dispatch({ type: "showTeamMap" }),
+    },
+  ];
   const items = profileMenuItems({
     phone: phoneMenuItems({
       destinations,
@@ -379,7 +407,8 @@ export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } 
     }),
     usage: !remote,
     update: update?.item ?? null,
-    account: cloudAccount ? t("settings.section.cloudAccount") : null,
+    // Vopwe trim: no Cloud account page, so the account row never shows.
+    account: null,
     onUsage: () => dispatch({ type: "toggleAppSettings", open: true, section: "usage" }),
     onSettings: () => dispatch({ type: "toggleAppSettings" }),
     onShortcuts: () => {
@@ -390,8 +419,13 @@ export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } 
     onAbout: () => setAboutOpen(true),
     onHelp: () => void openExternalLink(HELP_CENTER_URL),
     onFeedback: () => void openExternalLink(FEEDBACK_URL),
-    onAccount: () => dispatch({ type: "toggleAppSettings", open: true, section: "cloudAccount" }),
+    onAccount: () => {},
   });
+  // The moved sidebar places sit with the phone rows, ahead of support.
+  {
+    const at = items.findIndex((item) => item.key === "support");
+    items.splice(at < 0 ? items.length : at, 0, ...navItems);
+  }
   const noteworthy = update && updateNoteworthy(update.phase, update.pending) && !updateHasButton(update.phase);
 
   return (
