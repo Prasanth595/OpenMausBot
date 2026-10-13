@@ -26,6 +26,7 @@
 // and startTurn. Persisted to one JSON file so a restart neither drops a
 // promised wake nor forgets a running goal.
 import { existsSync, readFileSync } from "node:fs";
+import { hasCheckableProof } from "./result-contract.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import type { RowCheck, Superseded } from "./owner-pending-guard.ts";
 import { leadingVocative } from "./owner-channel.ts";
@@ -789,14 +790,23 @@ export function parseGoalInput(body: { goal?: unknown; maxTurns?: unknown; maxHo
 
 export type GoalEndInput = { ok: true; status: GoalEndStatus; detail: string } | { ok: false; error: string };
 
-export function parseGoalEndInput(body: { status?: unknown; detail?: unknown }): GoalEndInput {
+/** A goal ends as completed only with a proof someone can check (a link, a
+ * sent message ID, a PR or issue number, a commit, a quoted command): a goal
+ * closed "em produção" 8 min before the P1 #9512 on the same delivery had
+ * only a detail. */
+export function parseGoalEndInput(body: { status?: unknown; detail?: unknown; proof?: unknown }): GoalEndInput {
   const raw = typeof body.status === "string" ? body.status.trim().replace("_", "-") : "";
   if (raw !== "completed" && raw !== "blocked" && raw !== "needs-input") {
     return { ok: false, error: "status must be completed, blocked or needs_input" };
   }
   const detail = clip(body.detail, GOAL_DETAIL_MAX);
   if (!detail) return { ok: false, error: "detail is required: what was delivered, or exactly what blocks it" };
-  return { ok: true, status: raw, detail };
+  if (raw !== "completed") return { ok: true, status: raw, detail };
+  const proof = clip(body.proof, GOAL_DETAIL_MAX);
+  if (!proof || !hasCheckableProof(proof)) {
+    return { ok: false, error: "proof is required for completed: what someone else can check (a link, the sent message's ID, a PR or issue number, a commit, or the command in backticks with its output). Without one, end as blocked or needs_input." };
+  }
+  return { ok: true, status: raw, detail: `${detail} — prova: ${proof}` };
 }
 
 /** Where a wake is kept: the conversation's one ordinary wake, or its standing watch beside it. */

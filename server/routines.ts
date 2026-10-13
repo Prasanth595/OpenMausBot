@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import { DATA_DIR } from "./config.ts";
 import type { RuntimeEvent } from "./contracts.ts";
+import { declaredResult, resultProblem, ROUTINE_RESULT_CONTRACT, type DeclaredResult } from "./result-contract.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { redactSecretsInText } from "./redact.ts";
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
@@ -189,6 +190,14 @@ export interface RoutineRun {
   error?: string;
   cost?: number | null;
   denials?: string[];
+  /** Its prompt asked for a RESULTADO line (result-contract.ts): only "feito"
+   * with a checkable proof closes it as completed. */
+  resultContract?: boolean;
+  /** What its last answer declared, read from the whole answer (output is clipped). */
+  declared?: DeclaredResult;
+  /** Failed only by its declared result: the turn itself ended, and its
+   * answer stands for whatever reads it (the disk decision). */
+  resultFailed?: boolean;
   createdAt: number;
   seenAt?: number;
 }
@@ -326,6 +335,9 @@ export interface RoutineManagerOptions {
   /** A successful provider turn is intermediate while its peer work or
    * queued continuation still belongs to this detached execution. */
   hasPendingDelegations?: (threadId: string) => boolean;
+  /** Ask every bot run for a RESULTADO line and close it as completed only on
+   * "feito" with a checkable proof (result-contract.ts). */
+  resultContract?: boolean;
 }
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -1342,13 +1354,15 @@ export class RoutineManager {
       // different bot or execution destination.
       if (candidate.botId !== run.botId || candidate.target !== run.target || candidate.runOn !== run.runOn) continue;
       if (candidate.id === run.id) continue;
-      if (candidate.status !== "completed") continue;
+      // a run failed only by its declared result still did its turn: its report carries, marked
+      if (candidate.status !== "completed" && !(candidate.status === "failed" && candidate.resultFailed)) continue;
       if (!candidate.output?.trim()) continue;
       if (!Number.isFinite(finishedOrder(candidate))) continue;
       if (!latest || finishedOrder(candidate) > finishedOrder(latest)) latest = candidate;
     }
     if (!latest) return null;
-    const redacted = redactSecretsInText(latest.output ?? "").trim();
+    const report = latest.status === "failed" && latest.error ? `[${latest.error}]\n${latest.output ?? ""}` : latest.output ?? "";
+    const redacted = redactSecretsInText(report).trim();
     if (!redacted) return null;
     const truncated = redacted.length > CONTINUITY_CHARS;
     return {
@@ -1631,10 +1645,15 @@ export class RoutineManager {
               (message) => this.failThread(task.threadId, message),
             );
           } else {
+            const composed = composeExecutionPrompt(prompt, run.attachments, this.continuityCarry(run));
+            if (this.options.resultContract) {
+              run.resultContract = true;
+              this.save();
+            }
             await this.options.startTurn(
               run.botId,
               task.threadId,
-              composeExecutionPrompt(prompt, run.attachments, this.continuityCarry(run)),
+              this.options.resultContract ? `${composed}\n\n${ROUTINE_RESULT_CONTRACT}` : composed,
               run.runOn ?? "maus",
               triggerSource,
               (message) => this.failThread(task.threadId, message),
@@ -1671,6 +1690,8 @@ export class RoutineManager {
     if (event.type === "turn.started") {
       run.status = "running";
       run.attention = undefined;
+      // each turn declares its own RESULTADO: the one that settles the run is the last turn's
+      run.declared = undefined;
     } else if (event.type === "request.opened") {
       run.status = "waiting";
       run.attention = redactSecretsInText(event.summary).trim().slice(0, 500) || undefined;
@@ -1678,6 +1699,8 @@ export class RoutineManager {
       run.status = "running";
       run.attention = undefined;
     } else if (event.type === "item.completed" && event.itemType === "assistant_text") {
+      // the RESULTADO line ends the answer: read it before the output is clipped
+      run.declared = declaredResult(redactSecretsInText(event.text));
       run.output = redactSecretsInText(event.text).trim().slice(0, 2_000);
     } else if (event.type === "runtime.error") {
       run.error = redactSecretsInText(event.message).slice(0, 500);
@@ -1701,6 +1724,14 @@ export class RoutineManager {
         return cloneRun(run);
       }
       const pending = this.options.hasPendingDelegations?.(event.threadId) === true;
+      // a turn that ended without error is not the work done: the declared RESULTADO decides
+      const problem = !pending && run.resultContract ? resultProblem(run.declared ?? { kind: "missing" }) : null;
+      if (problem) {
+        run.resultFailed = true;
+        this.failRun(run, problem);
+        queueMicrotask(() => void this.tick());
+        return cloneRun(run);
+      }
       run.status = pending ? "waiting" : "completed";
       run.attention = pending ? "Waiting for delegated work to finish" : undefined;
       if (!pending) run.finishedAt = this.now();

@@ -122,12 +122,12 @@ it("keeps giving a goal turns until the bot ends it, then goes quiet", () => fix
   f.save({ turns: [
     { steps: [{ tool: "goal_start", arguments: { goal: "SHIP_9195 to production", max_turns: 5 } }], reply: "Goal accepted" },
     { expectContextIncludes: ["Goal mode — turn 1 of 5", "SHIP_9195 to production"], reply: "Merged the PR" },
-    { expectContextIncludes: ["Goal mode — turn 2 of 5"], steps: [{ tool: "goal_end", arguments: { status: "completed", detail: "deployed and verified" } }], reply: "Shipped" },
+    { expectContextIncludes: ["Goal mode — turn 2 of 5"], steps: [{ tool: "goal_end", arguments: { status: "completed", detail: "deployed and verified", proof: "PR #9400 em produção (tag 61a5d68cd)" } }], reply: "Shipped" },
   ] });
   await f.send("Ship 9195 and don't stop until it is in production.");
   await expect.poll(() => f.turns().length, { timeout: 20_000 }).toBe(3);
   expect(toolResult(f.turns()[0], "goal_start")).toContain("Modo objetivo ligado");
-  await expect.poll(async () => (await f.chips()).some((chip: string) => chip === "Objetivo concluído após 2 turnos — deployed and verified"), { timeout: 10_000 }).toBe(true);
+  await expect.poll(async () => (await f.chips()).some((chip: string) => chip === "Objetivo concluído após 2 turnos — deployed and verified — prova: PR #9400 em produção (tag 61a5d68cd)"), { timeout: 10_000 }).toBe(true);
   // An ended goal starts nothing more (a fourth turn would have no plan and fail).
   await new Promise(resolve => setTimeout(resolve, 1_000));
   expect(f.turns()).toHaveLength(3);
@@ -149,7 +149,7 @@ it("pauses for the person on needs_input and resumes on their answer", () => fix
     { steps: [{ tool: "goal_start", arguments: { goal: "DEPLOY", max_turns: 5 } }], reply: "Goal accepted" },
     { steps: [{ tool: "goal_end", arguments: { status: "needs_input", detail: "staging or production?" } }], reply: "Staging or production?" },
     { expectContextIncludes: ["production please"], reply: "Deploying to production" },
-    { expectContextIncludes: ["Goal mode — turn 2 of 5"], steps: [{ tool: "goal_end", arguments: { status: "completed", detail: "in production" } }], reply: "Done" },
+    { expectContextIncludes: ["Goal mode — turn 2 of 5"], steps: [{ tool: "goal_end", arguments: { status: "completed", detail: "in production", proof: "https://github.com/o/r/pull/9400" } }], reply: "Done" },
   ] });
   await f.send("Deploy it.");
   await expect.poll(async () => (await f.chips()).some((chip: string) => chip.startsWith("Objetivo esperando você")), { timeout: 20_000 }).toBe(true);

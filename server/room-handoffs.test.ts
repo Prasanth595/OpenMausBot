@@ -30,6 +30,18 @@ describe("addressed room request tree", () => {
     expect(hooks.run).toHaveBeenCalledTimes(2);
     expect(engine.nodes.get("turn")?.status).toBe("completed");
   }));
+  it("lets the settle hook fail a request that ended without error, or mark it, with the whole answer", () => fixture(async (engine, hooks) => {
+    const source = { botId: "chief", threadId: "chief-chat" };
+    const long = `${"x".repeat(13_000)}\nRESULTADO: parcial — faltou o aviso`;
+    hooks.run = vi.fn(async () => ({ ok: true, text: long }));
+    hooks.settle = vi.fn((text: string) => (text.endsWith("faltou o aviso") ? { failed: true, text: `Resultado parcial: faltou o aviso\n\n${text}` } : { failed: false, text }));
+    const child = engine.enqueue(source, "turn", undefined, { botId: "builder", threadId: "builder-chat" }, "build", "Build it").node;
+    engine.tick(); await flush();
+    // the hook sees the whole answer, not the 12 000 characters kept
+    expect(hooks.settle).toHaveBeenCalledWith(long, child);
+    expect(child.status).toBe("failed");
+    expect(child.result.startsWith("Resultado parcial: faltou o aviso")).toBe(true);
+  }));
   it("keeps same-room work queued until the current speaker settles", () => fixture(async (engine, hooks) => {
     const child = engine.enqueue(addr("A"), "turn", undefined, { ...addr("A"), botId: "peer" }, "review", "Review it").node;
     engine.tick(); await flush();

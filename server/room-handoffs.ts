@@ -29,6 +29,9 @@ export interface RoomHandoffHooks {
   run(node: RoomHandoff, resumed: boolean, signal: AbortSignal): Promise<{ ok: boolean; text: string }>;
   report(child: RoomHandoff, parent: RoomHandoff): void;
   changed(groupIds: ReadonlySet<string>, directThreadIds: ReadonlySet<string>): void;
+  /** How the whole answer of a turn that ended without error settles its
+   * request: failed, or completed with this text. Absent: completed as is. */
+  settle?(text: string, node: RoomHandoff): { failed: boolean; text: string };
 }
 
 /** A bounded tree of addressed room turns. Waiting for children never holds a
@@ -412,7 +415,11 @@ export class RoomHandoffs {
         n.result = result.text.slice(0, 12_000);
         if (this.children(n.id).length > childCount) n.status = "waiting";
         else if (!result.ok) this.cancelTree(n, n.result || "Room agent failed", "failed");
-        else { n.status = "completed"; this.stampProgress(root); }
+        else {
+          const settled = this.hooks.settle?.(result.text, n) ?? { failed: false, text: n.result };
+          if (settled.failed) this.cancelTree(n, settled.text.slice(0, 12_000), "failed");
+          else { n.result = settled.text.slice(0, 12_000); n.status = "completed"; this.stampProgress(root); }
+        }
         // Close the paused span with the settlement itself: work enqueued
         // before the next periodic tick must be admitted against the aged
         // budget, not the still-open pause's overstated runway.

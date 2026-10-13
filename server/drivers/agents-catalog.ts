@@ -748,13 +748,14 @@ const toolDefinitions = (externalRuntime: boolean) => [
   {
     name: "goal_end",
     description:
-      "End goal mode in this conversation. completed only when the deliverable is verified; blocked when you cannot proceed; needs_input when only the person can decide (their next message resumes the goal). Also say the outcome in your reply.",
+      "End goal mode in this conversation. completed only when the deliverable is verified, with a proof someone can check; blocked when you cannot proceed; needs_input when only the person can decide (their next message resumes the goal). Also say the outcome in your reply.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
       properties: {
         status: { type: "string", enum: ["completed", "blocked", "needs_input"] },
         detail: { type: "string", minLength: 1, maxLength: 500, description: "What was delivered, or exactly what blocks it." },
+        proof: { type: "string", maxLength: 500, description: "Required for completed: what someone else can check — a link, the sent message's ID, a PR or issue number, a commit, or the command in backticks with its output." },
         thread_id: { type: "string", description: "Optional: end the goal of another of your conversations (e.g. the decision it waited for came here)." },
       },
       required: ["status", "detail"],

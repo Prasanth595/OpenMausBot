@@ -87,6 +87,12 @@ describe("input parsing", () => {
     expect(parseGoalEndInput({ status: "needs_input", detail: "which env?" })).toEqual({ ok: true, status: "needs-input", detail: "which env?" });
     expect(parseGoalEndInput({ status: "done", detail: "x" }).ok).toBe(false);
     expect(parseGoalEndInput({ status: "completed" }).ok).toBe(false);
+    // completed needs a proof someone can check, not just a detail
+    expect(parseGoalEndInput({ status: "completed", detail: "entregue" })).toMatchObject({ ok: false, error: expect.stringContaining("proof") });
+    expect(parseGoalEndInput({ status: "completed", detail: "entregue", proof: "tudo certo" }).ok).toBe(false);
+    expect(parseGoalEndInput({ status: "completed", detail: "entregue", proof: "PR #9528 em produção (recibo 61a5d68cd)" })).toEqual({ ok: true, status: "completed", detail: "entregue — prova: PR #9528 em produção (recibo 61a5d68cd)" });
+    // blocked and needs_input carry no proof
+    expect(parseGoalEndInput({ status: "blocked", detail: "o Jev barrou" })).toEqual({ ok: true, status: "blocked", detail: "o Jev barrou" });
   });
 });
 

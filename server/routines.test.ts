@@ -21,7 +21,7 @@ function tempFile() {
   return join(dir, "routines.json");
 }
 
-function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
+function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime(), extra: Partial<RoutineManagerOptions> = {}) {
   let now = start;
   let bot: "ready" | "busy" | "missing" = "ready";
   let goal: "ready" | "busy" | "missing" = "ready";
@@ -84,6 +84,7 @@ function harness(start = new Date(2026, 7, 17, 8, 0, 0).getTime()) {
     onRunFailed: (run) => failed.push(run),
     onRunDeferred: (run) => deferred.push(run),
   };
+  Object.assign(options, extra);
   const manager = new RoutineManager(options);
   return {
     manager,
@@ -2307,6 +2308,75 @@ describe("RoutineManager", () => {
       status: "completed",
       output: "Report shipped.",
       cost: 0.02,
+    });
+  });
+
+  describe("with the result contract (a run is done only on a declared, proved RESULTADO)", () => {
+    const runOnce = async (text: string) => {
+      const h = harness(undefined, { resultContract: true });
+      const routine = h.manager.create({ name: "Revisão do Sentry", prompt: "Revise o Sentry", botId: "maus-3", schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() } });
+      h.setNow(routine.nextRunAt!);
+      await h.manager.tick();
+      const base = { eventId: "event-1", provider: "fake", threadId: "thread-1", createdAt: new Date(h.manager.listRuns()[0]!.startedAt!).toISOString() };
+      h.manager.handleRuntimeEvent({ ...base, type: "item.completed", itemType: "assistant_text", text });
+      h.manager.handleRuntimeEvent({ ...base, type: "turn.completed", ok: true });
+      return h;
+    };
+
+    it("asks for the RESULTADO line in the run's prompt", async () => {
+      const h = await runOnce("x");
+      expect(h.started[0]!.prompt).toContain("Revise o Sentry");
+      expect(h.started[0]!.prompt).toContain("RESULTADO: feito —");
+    });
+
+    it("completes a run that declares done with a checkable proof, read past the clipped output", async () => {
+      const h = await runOnce(`${"Detalhe. ".repeat(400)}\nRESULTADO: feito — comentei https://github.com/o/r/issues/9400#issuecomment-1`);
+      expect(h.manager.listRuns()[0]).toMatchObject({ status: "completed" });
+      expect(h.manager.listRoutines()[0]!.failureStreak).toBeUndefined();
+    });
+
+    it("fails a run that declares partial or not done, and counts it in the failure streak", async () => {
+      const h = await runOnce("A gravação na planilha foi barrada.\nRESULTADO: parcial — a escrita na planilha foi recusada");
+      expect(h.manager.listRuns()[0]).toMatchObject({ status: "failed", error: "Resultado parcial: a escrita na planilha foi recusada" });
+      expect(h.failed).toHaveLength(1);
+      expect(h.manager.listRoutines()[0]!.failureStreak).toBe(1);
+    });
+
+    it("judges the turn that resumes a delegating run by that turn's own line", async () => {
+      let pending = true;
+      const h = harness(undefined, { resultContract: true, hasPendingDelegations: () => pending });
+      const routine = h.manager.create({ name: "Atendimento", prompt: "Cruze o Chat com a planilha", botId: "maus-3", schedule: { type: "once", at: new Date(2026, 7, 17, 8, 1).getTime() } });
+      h.setNow(routine.nextRunAt!);
+      await h.manager.tick();
+      const base = { eventId: "event-1", provider: "fake", threadId: "thread-1", createdAt: new Date(h.manager.listRuns()[0]!.startedAt!).toISOString() };
+      h.manager.handleRuntimeEvent({ ...base, type: "item.completed", itemType: "assistant_text", text: "Pedi ao Chief.\nRESULTADO: feito — https://github.com/o/r/issues/9295" });
+      h.manager.handleRuntimeEvent({ ...base, type: "turn.completed", ok: true });
+      expect(h.manager.listRuns()[0]).toMatchObject({ status: "waiting" });
+      // the teammate answered: the resuming turn says the result, and only it counts
+      pending = false;
+      h.manager.handleRuntimeEvent({ ...base, type: "turn.started" });
+      h.manager.handleRuntimeEvent({ ...base, type: "item.completed", itemType: "assistant_text", text: "A #9295 continua pendente." });
+      h.manager.handleRuntimeEvent({ ...base, type: "turn.completed", ok: true });
+      expect(h.manager.listRuns()[0]).toMatchObject({ status: "failed", error: "Resultado não verificado: a resposta não terminou com a linha RESULTADO" });
+    });
+
+    it("carries a run failed only by its result into the next one, marked", async () => {
+      const h = harness(undefined, { resultContract: true });
+      const routine = h.manager.create({ name: "Disco", prompt: "Meça o disco", botId: "maus-3", continuity: true, schedule: { type: "interval", everyMinutes: 60, anchorAt: new Date(2026, 7, 17, 8, 1).getTime() } });
+      h.setNow(routine.nextRunAt!);
+      await h.manager.tick();
+      const base = { eventId: "event-1", provider: "fake", threadId: "thread-1", createdAt: new Date(h.manager.listRuns()[0]!.startedAt!).toISOString() };
+      h.manager.handleRuntimeEvent({ ...base, type: "item.completed", itemType: "assistant_text", text: "3 pastas paradas.\nRESULTADO: parcial — faltou medir a última" });
+      h.manager.handleRuntimeEvent({ ...base, type: "turn.completed", ok: true });
+      h.setNow(h.manager.listRoutines()[0]!.nextRunAt!);
+      await h.manager.tick();
+      expect(h.started.at(-1)!.prompt).toContain("[Resultado parcial: faltou medir a última]");
+      expect(h.started.at(-1)!.prompt).toContain("3 pastas paradas.");
+    });
+
+    it("never takes a turn that ended without error for work done: no line, or done without proof, is not verified", async () => {
+      expect((await runOnce("Terminei a revisão.")).manager.listRuns()[0]).toMatchObject({ status: "failed", error: "Resultado não verificado: a resposta não terminou com a linha RESULTADO" });
+      expect((await runOnce("RESULTADO: feito — tudo certo")).manager.listRuns()[0]!.error).toContain("sem prova conferível");
     });
   });
 

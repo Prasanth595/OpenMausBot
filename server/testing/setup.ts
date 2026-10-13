@@ -23,6 +23,10 @@ delete process.env.HERMES_HOME;
 // wholesale, and "it is safe because of a line in another file" is not the
 // footing that delete should stand on.
 process.env.OMB_COMPANION_DIR = join(home, ".openmausbot-companion");
+// Fake engines answer without a RESULTADO line: the result contract
+// (server/result-contract.ts) has its own tests, and the e2e that turns it on
+// sets OMB_RESULT_CONTRACT=1 for its server.
+process.env.OMB_RESULT_CONTRACT ??= "0";
 
 // Product code follows navigator.language, which makes English assertions
 // depend on the developer or CI host locale. Keep the shared default stable;
