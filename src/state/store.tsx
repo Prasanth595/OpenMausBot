@@ -2124,6 +2124,8 @@ const StoreContext = createContext<{
   refreshInstances: () => Promise<void>;
   /** Explicit provider/network model discovery. */
   refreshModels: (instanceId: string) => Promise<void>;
+  /** Every engine's catalog in one server pass — the app-open path. */
+  refreshAllModels: () => Promise<void>;
 } | null>(null);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -3190,6 +3192,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     rawDispatch({ type: "instances", instances });
   }, []);
 
+  const refreshAllModels = useCallback(async () => {
+    try {
+      const { instances } = await api("/api/instances/refresh-models", { method: "POST" });
+      rawDispatch({ type: "instances", instances });
+    } catch {
+      /* offline or server down — the existing list stays */
+    }
+  }, []);
+
   // Installing a CLI or signing one in happens in a terminal, outside this
   // window — so the moment the user comes back is exactly when our engine
   // snapshot is most likely stale. Re-probe on focus, throttled so that
@@ -3197,18 +3208,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // The model list should be fresh every time the app opens. Engines are
   // signed in and out in terminals while the app is closed, and the instances
   // snapshot the server streams at open can be hours old — so after the first
-  // snapshot lands, refresh every instance's models once, all at once. The
-  // stale list stays visible until each answer arrives, so opening the app is
-  // never slower for it.
+  // snapshot lands, refresh every instance's models once, in a single request:
+  // asking per instance made the server describe the whole fleet once per
+  // engine. The stale list stays visible until the answer arrives, so opening
+  // the app is never slower for it.
   const modelsRefreshedOnOpen = useRef(false);
   const instanceCount = state.instances.length;
   useEffect(() => {
     if (modelsRefreshedOnOpen.current || instanceCount === 0) return;
     modelsRefreshedOnOpen.current = true;
-    void Promise.allSettled(
-      state.instances.map((instance) => refreshModels(instance.instanceId)),
-    );
-  }, [instanceCount, refreshModels, state.instances]);
+    void refreshAllModels();
+  }, [instanceCount, refreshAllModels]);
 
   const lastFocusProbe = useRef(0);
   useEffect(() => {
@@ -3227,8 +3237,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [botPatchQueue],
   );
   const value = useMemo(
-    () => ({ state, dispatch, flushBotPatches, refreshInstances, refreshModels }),
-    [state, dispatch, flushBotPatches, refreshInstances, refreshModels],
+    () => ({ state, dispatch, flushBotPatches, refreshInstances, refreshModels, refreshAllModels }),
+    [state, dispatch, flushBotPatches, refreshInstances, refreshModels, refreshAllModels],
   );
   return (
     <StoreContext.Provider value={value}>

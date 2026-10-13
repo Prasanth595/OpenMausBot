@@ -208,6 +208,7 @@ import {
 } from "./send-idempotency.ts";
 import { EventBus } from "./harness/bus.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
+import { primeRemoteCatalog, refreshRemoteCatalog, remoteCatalogIsStale } from "./model-catalog-remote.ts";
 import { selectDefaultModelSelection } from "./default-model-selection.ts";
 import { cancelPeerApprovalsFor, cancelPeerApprovalsForThread, dismissStalePeerCards, requestPeerApproval, resolvePeerComms, type ApprovalBus } from "./peer-approval.ts";
 import { peerProvenanceNote, withPeerProvenance } from "./peer-provenance.ts";
@@ -598,6 +599,12 @@ function noteTurnTrigger(threadId: string, auth: RequestAuth): void {
 }
 const providerAuthSessions = new ProviderAuthSessions();
 await registry.load(instanceConfigs(cfg));
+// The GitHub-backed catalog (models.dev) is only ever a fallback for an engine
+// whose own probe comes back empty. Priming reads the cache on disk and the
+// fetch runs in the background, so boot never waits on GitHub and an
+// unreachable host changes nothing about how the fleet starts.
+primeRemoteCatalog();
+if (remoteCatalogIsStale()) void refreshRemoteCatalog().catch(() => {});
 const bundledSkills = loadBundledSkills();
 const availableSkills = () => mergeSkills(bundledSkills, loadUserSkills(join(DATA_DIR, "skills")));
 
@@ -13810,6 +13817,18 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       const state = await providerAuthSessions.status(authStatus[1], auth.kind === "session" ? auth.session.id : "loopback", url.searchParams.get("flowId") ?? "");
       return json(res, 200, { auth: state });
     }
+    // The app-open refresh: every engine's catalog in one pass, then a single
+    // describe(). Fanning out to the per-instance route instead describes the
+    // whole fleet once per engine, so opening an N-engine app spent N×N engine
+    // probes — N refreshes, each re-snapshotting every sibling.
+    if (method === "POST" && path === "/api/instances/refresh-models") {
+      if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {
+        return json(res, 415, { error: "content-type must be application/json" });
+      }
+      await registry.refreshAllModels();
+      return json(res, 200, { instances: await describeInstances() });
+    }
+
     const instanceAction = /^\/api\/instances\/([\w.-]+)\/(refresh-models|install|auth\/start|auth\/complete|auth\/cancel|auth\/sign-out)$/.exec(path);
     if (method === "POST" && instanceAction) {
       if (!String(req.headers["content-type"] ?? "").toLowerCase().startsWith("application/json")) {

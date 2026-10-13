@@ -237,6 +237,18 @@ describe("Claude account HTTP API", () => {
     }
   });
 
+  it("refreshes every engine's catalog in one request instead of one per engine", async () => {
+    const batch = await api("POST", "/api/instances/refresh-models", {});
+    expect(batch.status, JSON.stringify(batch.body)).toBe(200);
+    // The answer is the whole fleet description, same shape as the per-instance
+    // route — a client cannot tell the two apart except by the request it made.
+    expect(batch.body.instances.some((row: any) => row.instanceId === "claude" && row.snapshot.state === "available")).toBe(true);
+    expect((await api("POST", "/api/instances/refresh-models", {}, { "content-type": "text/plain" })).status).toBe(415);
+    // The single-instance action is unchanged, including its 404.
+    expect((await api("POST", "/api/instances/claude/refresh-models", {})).status).toBe(200);
+    expect((await api("POST", "/api/instances/missing/refresh-models", {})).status).toBe(404);
+  });
+
   it("enforces JSON, validation, duplicate-directory and admin-only mutation gates", async () => {
     const target = await addAccount("Validation account");
     for (const [method, path, body] of [
