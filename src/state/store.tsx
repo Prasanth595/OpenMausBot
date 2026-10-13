@@ -1050,7 +1050,8 @@ export interface AppState {
   liveCallLookupSeq: number;
   /** selected chat — a bot id OR a group id */
   selectedId: string;
-  activeView: "chat" | "team-map" | "routines";
+  activeView: "chat" | "team-map" | "routines" | "web-panel";
+  webPanelId?: string; // the pinned web panel shown while activeView is "web-panel"
   routines: Routine[];
   routineRuns: RoutineRun[];
   routinesLoadState: "loading" | "ready" | "error";
@@ -1255,7 +1256,7 @@ export type Action =
   | { type: "sections"; sections: string[] }
   | { type: "sectionDeleted"; section: string; sections: string[] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string; runStatus?: RoutineRunStatusFilter }
-  | { type: "showTeamMap" }
+  | { type: "showTeamMap" } | { type: "showWebPanel"; id: string }
   | { type: "showChat" }
   | { type: "routinesHydrated"; routines: Routine[]; runs: RoutineRun[] }
   | { type: "routinesLoadFailed" }
@@ -1785,9 +1786,10 @@ export function reducer(state: AppState, action: Action): AppState {
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
     case "showTeamMap":
+    case "showWebPanel": // a pinned page replaces the main view exactly like Team map
       return {
         ...state,
-        activeView: "team-map",
+        activeView: action.type === "showWebPanel" ? "web-panel" : "team-map", webPanelId: action.type === "showWebPanel" ? action.id : state.webPanelId,
         settingsOpen: false,
         computerOpen: false,
         inspectorOpen: false,
@@ -3310,7 +3312,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const wrapped: React.Dispatch<Action> = (action) => {
       // Deferred folder creation may select its bot only while it is still
       // the latest navigation intent, even if the person went away and back.
-      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap"].includes(action.type)) selectionRevision++;
+      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showWebPanel"].includes(action.type)) selectionRevision++;
       // Pin before any await or optimistic state change, including legacy
       // callers such as keyboard shortcuts and voice controls.
       action = pinBotThreadAction(action, stateRef.current.bots);

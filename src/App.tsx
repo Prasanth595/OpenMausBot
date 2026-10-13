@@ -41,6 +41,7 @@ import { botShowsUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing";
 import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
 import { ChatNotice } from "@/components/ChatErrorBanner";
+import { WebPanelPage } from "@/components/WebPanelPage";
 
 function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const { state, dispatch } = useStore();
@@ -114,7 +115,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   // the panel hands off to this and back)
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const previousViewRef = useRef(state.activeView);
-  const calendarOriginRef = useRef<"chat" | "team-map">("chat");
+  const calendarOriginRef = useRef<"chat" | "team-map" | "web-panel">("chat");
   const group = state.groups.find((g) => g.id === state.selectedId);
   const bot = group ? undefined : (state.bots.find((b) => b.id === state.selectedId) ?? state.bots[0]);
   // A side panel beside the full sidebar leaves the default 1100px window a
@@ -243,8 +244,12 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       dispatch({ type: "showTeamMap" });
       return;
     }
+    if (calendarOriginRef.current === "web-panel" && state.webPanelId) {
+      dispatch({ type: "showWebPanel", id: state.webPanelId });
+      return;
+    }
     dispatch({ type: "select", id: state.selectedId });
-  }, [dispatch, state.selectedId]);
+  }, [dispatch, state.selectedId, state.webPanelId]);
   const openCalendarRoom = useCallback((id: string) => {
     dispatch({ type: "select", id });
   }, [dispatch]);
@@ -338,6 +343,8 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
       />}
       {state.activeView === "team-map" ? (
         <TeamMapPage />
+      ) : state.activeView === "web-panel" ? (
+        <WebPanelPage />
       ) : state.activeView === "routines" ? (
         <RoutinesPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
       ) : !remoteClient && localVmWorkspaceBotId ? (

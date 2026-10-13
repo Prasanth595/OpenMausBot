@@ -4,12 +4,13 @@
 // hover and a click. Simple mode keeps none of them: scheduling and webhooks
 // are builder tools. Apps sits beside the profile (SidebarAppsButton), except
 // on the avatars-only rail, where it stays a row just above the avatar.
-import { CalendarDays, Network, Puzzle, Zap } from "lucide-react";
+import { CalendarDays, Globe, Network, Puzzle, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { useWebPanels } from "@/lib/web-panel-preferences";
 import { isRoutineProblemRun } from "@/lib/routines";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { useStore } from "@/state/store";
@@ -97,6 +98,7 @@ export function SidebarFooterNav({
 }) {
   const { state, dispatch } = useStore();
   const advanced = useAdvancedMode();
+  const webPanels = useWebPanels();
   const iconsOnly = density === "icons";
   const iconSize = iconsOnly ? 20 : 18;
   const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
@@ -145,6 +147,17 @@ export function SidebarFooterNav({
           onClick={() => dispatch({ type: "showTeamMap" })}
         />
       )}
+      {advanced && webPanels.map((panel) => (
+        <NavRow
+          key={panel.id}
+          id={`web-panel-${panel.id}`}
+          label={panel.name}
+          iconsOnly={iconsOnly}
+          active={state.activeView === "web-panel" && state.webPanelId === panel.id}
+          icon={(active) => <Globe size={iconSize} className={tone(active)} />}
+          onClick={() => dispatch({ type: "showWebPanel", id: panel.id })}
+        />
+      ))}
     </>
   );
 

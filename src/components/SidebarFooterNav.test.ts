@@ -7,9 +7,11 @@ const fixture = vi.hoisted(() => ({
   advanced: false,
   dispatch: vi.fn(),
   state: {} as Record<string, unknown>,
+  panels: [] as { id: string; name: string; url: string }[],
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: () => {} }));
 vi.mock("@/state/store", () => ({ useStore: () => ({ state: fixture.state, dispatch: fixture.dispatch }) }));
+vi.mock("@/lib/web-panel-preferences", () => ({ useWebPanels: () => fixture.panels }));
 import { SidebarAppsButton, SidebarFooterNav } from "./SidebarFooterNav";
 
 type Props = { children?: ReactNode; [key: string]: unknown };
@@ -30,6 +32,7 @@ function render(density: SidebarDensity, extra: { collapsed?: boolean; onToggleC
 beforeEach(() => {
   fixture.advanced = false;
   fixture.dispatch.mockReset();
+  fixture.panels = [];
   fixture.state = { activeView: "chat", routineRuns: [], triggersOpen: false, pluginsOpen: false };
   vi.stubGlobal("window", {});
 });
@@ -66,6 +69,20 @@ describe("sidebar footer places", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showRoutines" });
     (row("triggers").props.onClick as () => void)();
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "toggleTriggers", open: true });
+  });
+
+  it("adds a row per pinned web panel after Team map, in Advanced mode only", () => {
+    fixture.panels = [{ id: "panel-1", name: "Fleet board", url: "http://127.0.0.1:7841/" }];
+    fixture.state = { ...fixture.state, activeView: "web-panel", webPanelId: "panel-1" };
+    expect(render("comfortable").html).toBe("");
+    fixture.advanced = true;
+    const { html, nodes: tree } = render("comfortable");
+    expect(html.indexOf('data-sidebar-nav="web-panel-panel-1"')).toBeGreaterThan(html.indexOf('data-sidebar-nav="team-map"'));
+    expect(html).toContain(">Fleet board</span>");
+    expect(html).toMatch(/aria-current="page"[^>]*>[\s\S]*Fleet board/);
+    const row = tree.find((node) => node.props.id === "web-panel-panel-1" && typeof node.props.onClick === "function")!;
+    (row.props.onClick as () => void)();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showWebPanel", id: "panel-1" });
   });
 
   it("keeps the guided tour's anchors on the rows", () => {
