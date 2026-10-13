@@ -291,7 +291,10 @@ import {
   parseGoalEndInput,
   parseGoalInput,
   parsePromiseInput,
-  prsCited,
+  goalCitedPrs,
+  citedPrsOutcome,
+  NEEDS_INPUT_PR_CHECK_MAX,
+  type CitedPrState,
   lastQuestionAt,
   askCoveredByItem,
   ownerAskAt,
@@ -9125,9 +9128,11 @@ function checkDiskSpace(): void {
   }
 }
 
-/** Goals waiting on the person about a PR: every 10 min, ask gh whether the
- * PR they cite was merged or closed meanwhile; if every one was, the goal
- * is closed as completed with a chip (the question is moot). */
+/** Goals waiting on the person about a PR: every 10 min, ask gh what became
+ * of the PRs their question cites (citedPrsOutcome). All merged: the question
+ * is moot, but merge is not delivery, so the goal resumes and the bot is told
+ * to check the result. One closed without merge: the bot is told once and the
+ * goal keeps waiting. The server never closes the goal as completed here. */
 const needsInputChecks = new Map<string, number>();
 let needsInputRunning = false;
 async function revalidateNeedsInputGoals(): Promise<void> {
@@ -9148,20 +9153,20 @@ async function revalidateNeedsInputGoals(): Promise<void> {
       }
       if (now - (needsInputChecks.get(goal.threadId) ?? 0) < 10 * 60_000) continue;
       needsInputChecks.set(goal.threadId, now);
-      const prs = prsCited(`${goal.detail ?? ""}\n${goal.goal}`).slice(0, 4);
-      if (!prs.length) continue;
-      const states: string[] = [];
+      const prs = goalCitedPrs(`${goal.detail ?? ""}\n${goal.goal}`);
+      if (!prs.length || prs.length > NEEDS_INPUT_PR_CHECK_MAX) continue;
+      const states: CitedPrState[] = [];
       for (const pr of prs) {
         try {
           const out = await execCc("gh", ["pr", "view", String(pr.number), ...(pr.slug ? ["--repo", pr.slug] : []), "--json", "state", "--jq", ".state"], watchCwd(goal.botId, goal.threadId));
-          states.push(`${pr.number}:${out.trim()}`);
-        } catch { states.push(`${pr.number}:?`); }
+          states.push({ number: pr.number, state: out.trim() });
+        } catch { states.push({ number: pr.number, state: "?" }); }
       }
-      if (!states.every((state) => /:(MERGED|CLOSED)$/.test(state))) continue;
-      const detail = `As PRs citadas já foram ${states.map((state) => `#${state.replace(":", " ").replace("MERGED", "mergeada").replace("CLOSED", "fechada")}`).join(", ")} — a pergunta ficou sem objeto; encerrado pelo servidor.`;
-      const done = autonomy.resolveNeedsInput(goal.threadId, detail);
-      if (!done) continue;
-      store.appendMessage(goal.threadId, { role: "bot", kind: "activity", tool: { name: chipText(`Objetivo encerrado: ${detail}`, 240), ok: true } });
+      const outcome = citedPrsOutcome(states);
+      if (!outcome) continue;
+      if (outcome.kind === "merged" ? !autonomy.resumeGoalAfterInput(goal.threadId) : !autonomy.notePrNotice(goal.threadId, outcome.signature)) continue;
+      autonomy.addReport(goal.botId, goal.threadId, outcome.report);
+      store.appendMessage(goal.threadId, { role: "bot", kind: "activity", tool: { name: chipText(outcome.chip, 240), ok: outcome.kind === "merged" } });
       refreshBotRow(goal.botId);
     }
   } finally {

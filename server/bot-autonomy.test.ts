@@ -16,6 +16,8 @@ import {
   parseGoalInput,
   parsePromiseInput,
   prsCited,
+  goalCitedPrs,
+  citedPrsOutcome,
   lastQuestionAt,
   ownerAskAt,
   ownerAsk,
@@ -908,7 +910,7 @@ describe("reports", () => {
 });
 
 describe("a goal waiting on the person about a PR", () => {
-  it("reads the PRs its question cites, and closes it when the question is moot", () => {
+  it("reads the PRs its question cites", () => {
     expect(prsCited("GO para mergear a PR #9303? https://github.com/example-org/example-repo/pull/9286 e pull request 9290")).toEqual([
       { number: 9286, slug: "example-org/example-repo" }, { number: 9303 }, { number: 9290 },
     ]);
@@ -917,9 +919,53 @@ describe("a goal waiting on the person about a PR", () => {
     autonomy.startGoal("chief", "t1", { goal: "merge", maxTurns: 5, maxHours: 2 });
     autonomy.finishGoal("t1", "needs-input", "GO para a PR #9303?");
     expect(autonomy.needsInputGoals().map((goal) => goal.threadId)).toEqual(["t1"]);
-    expect(autonomy.resolveNeedsInput("t1", "PR #9303 mergeada")?.status).toBe("completed");
+    expect(autonomy.resolveNeedsInput("t1", "PR #9303 mergeada", "completed")?.status).toBe("completed");
     expect(autonomy.needsInputGoals()).toEqual([]);
-    expect(autonomy.resolveNeedsInput("t1", "x")).toBeNull();
+    expect(autonomy.resolveNeedsInput("t1", "x", "blocked")).toBeNull();
+  });
+
+  it("also checks the bare #N a question names, which may be the delivery and not the dependency", () => {
+    // cc5c122f: "PR #9300" was only a dependency; the delivery was the bare "#9286"
+    expect(goalCitedPrs("GO para a #9286 depois que a PR #9300 entrar?")).toEqual([{ number: 9300 }, { number: 9286 }]);
+    expect(goalCitedPrs("https://github.com/o/r/pull/9286 e #9286")).toEqual([{ number: 9286, slug: "o/r" }]);
+    // an anchor or a two-digit tag is not a PR
+    expect(goalCitedPrs("veja issues/12#issuecomment-1 e o item #12")).toEqual([]);
+  });
+
+  it("never closes the goal as completed: all merged resumes it to check the result", () => {
+    const outcome = citedPrsOutcome([{ number: 9303, state: "MERGED" }, { number: 9290, state: "MERGED" }]);
+    expect(outcome?.kind).toBe("merged");
+    expect(outcome?.report).toContain("#9303, #9290");
+    expect(outcome?.report).toContain("Merge não é entrega");
+    expect(outcome?.report).toContain("goal_end");
+  });
+
+  it("treats a PR closed without merge as news for the bot, not as an answer", () => {
+    const outcome = citedPrsOutcome([{ number: 9303, state: "MERGED" }, { number: 9290, state: "CLOSED" }]);
+    expect(outcome?.kind).toBe("closed");
+    expect(outcome?.report).toContain("#9290");
+    expect(outcome?.report).toContain("fechada sem merge");
+    expect(outcome?.kind === "closed" && outcome.signature).toBe("9290:CLOSED,9303:MERGED");
+  });
+
+  it("changes nothing while a cited PR is open or its state is unknown", () => {
+    expect(citedPrsOutcome([])).toBeNull();
+    expect(citedPrsOutcome([{ number: 1, state: "MERGED" }, { number: 2, state: "OPEN" }])).toBeNull();
+    expect(citedPrsOutcome([{ number: 1, state: "CLOSED" }, { number: 2, state: "?" }])).toBeNull();
+  });
+
+  it("tells the bot about a closed PR once, while the goal keeps waiting", () => {
+    const autonomy = make();
+    autonomy.startGoal("chief", "t1", { goal: "lote", maxTurns: 5, maxHours: 2 });
+    autonomy.finishGoal("t1", "needs-input", "GO para a PR #9290?");
+    expect(autonomy.notePrNotice("t1", "9290:CLOSED")).toBe(true);
+    expect(autonomy.notePrNotice("t1", "9290:CLOSED")).toBe(false);
+    expect(autonomy.needsInputGoals().map((goal) => goal.threadId)).toEqual(["t1"]);
+    // a different state is news again
+    expect(autonomy.notePrNotice("t1", "9290:CLOSED,9291:MERGED")).toBe(true);
+    // a goal that resumed starts with no notice, and a running goal takes none
+    expect(autonomy.resumeGoalAfterInput("t1")?.prNotice).toBeUndefined();
+    expect(autonomy.notePrNotice("t1", "9290:CLOSED")).toBe(false);
   });
 });
 
