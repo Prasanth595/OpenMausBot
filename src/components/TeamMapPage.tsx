@@ -261,6 +261,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
   );
 }
 
+/** Full-page team map with sections, context editors, and bot-move flows. */
 export function TeamMapPage() {
   const { state, dispatch } = useStore();
   const { dragProps } = useCaptionChrome();

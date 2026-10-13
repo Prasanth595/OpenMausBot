@@ -219,6 +219,7 @@ async function requireLiveSession(handle: UiHandle): Promise<void> {
   }
 }
 
+/** Captures an agent-browser snapshot of the UI session. */
 async function snapshot(handle: UiHandle, interactive: boolean): Promise<Record<string, unknown>> {
   return agentBrowser(handle.binary, sessionEnv(handle), ["snapshot", ...(interactive ? ["-i"] : [])]);
 }
@@ -293,6 +294,7 @@ async function resolveTarget(handle: UiHandle, values: Record<string, unknown>, 
   );
 }
 
+/** Reports whether a UI driver error is a hit-test or stability failure worth retrying. */
 function isHitTestFailure(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
   return /is covered by|covering element|is not visible|is not stable|detached|stale|intercepted|obscur/i.test(message);

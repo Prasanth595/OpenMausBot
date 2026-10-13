@@ -171,6 +171,7 @@ const press = (element: Element | null) => {
   if (!element) throw new Error("nothing to press");
   flushSync(() => (element as HTMLElement).click());
 };
+/** All call-mode radio rows in the open menu sheet. */
 const menuItems = () => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]'));
 const text = () => container.textContent ?? "";
 

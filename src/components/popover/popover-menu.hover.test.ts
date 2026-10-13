@@ -13,6 +13,7 @@ import { describe, expect, it } from "vitest";
 const here = dirname(fileURLToPath(import.meta.url));
 const tailwindRoot = dirname(fileURLToPath(import.meta.resolve("tailwindcss/package.json")));
 
+/** Compiles the popover menu CSS module the way the app build does. */
 async function compiledModule(): Promise<string> {
   const compiler = await compile(readFileSync(join(here, "popover-menu.module.css"), "utf8"), {
     base: here,

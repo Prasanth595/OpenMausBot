@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Message } from "@/state/store";
 import { ExportTranscriptMenu } from "./ExportTranscriptMenu";
 
+/** A minimal bot reply message for export-menu tests. */
 const reply = (): Message => ({ id: "m1", role: "bot", kind: "text", text: "Hello", at: 1 });
 
 let host: HTMLDivElement;
@@ -25,9 +26,13 @@ afterEach(() => {
   delete document.documentElement.dataset.reducedMotion;
 });
 
+/** The export-menu trigger button in the test host. */
 const trigger = () => host.querySelector<HTMLButtonElement>('button[aria-label="Export conversation"]')!;
+/** Text of every row in the open export sheet. */
 const rows = () => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].map((row) => row.textContent ?? "");
+/** The open popover sheet element. */
 const sheet = () => document.querySelector<HTMLElement>("[data-popover]")!;
+/** Mounts the export menu and opens it with a real click. */
 const open = async (messages: Message[]) => {
   act(() => { root.render(createElement(ExportTranscriptMenu, { title: "Launch", messages })); });
   await act(async () => trigger().click());

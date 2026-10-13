@@ -522,6 +522,7 @@ const textOf = (node: unknown): string => {
   return textOf(element.props?.children ?? element.children);
 };
 
+/** Opens the row's More menu by invoking its click handler. */
 const openMenu = (tree: RowNode) => {
   (moreMenuButton(tree)!.props!.onClick as (event: unknown) => void)({ currentTarget: { getBoundingClientRect: () => ({ left: 100, bottom: 200 }) } });
 };
@@ -556,6 +557,7 @@ const menuItems = (tree: RowNode): MenuItemNode[] => {
   });
   return items;
 };
+/** Finds a menu item by title in the row's action menu. */
 const menuItem = (tree: RowNode, title: string) => menuItems(tree).find((candidate) => candidate.title === title);
 
 describe("Copy link", () => {

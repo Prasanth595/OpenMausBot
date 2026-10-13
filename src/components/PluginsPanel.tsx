@@ -316,6 +316,7 @@ export function botsUsingService(bots: Bot[], instances: InstanceInfo[], slug: s
     connectorServiceAccess(bot.connectorTools, slug).level !== "none");
 }
 
+/** Marketplace and connected-apps panel with install, connect, and disconnect flows. */
 export function PluginsPanel() {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;

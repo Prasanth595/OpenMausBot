@@ -768,6 +768,7 @@ function SectionPicker({
   );
 }
 
+/** Context menu for a sidebar bot row: archive, delete, and section moves. */
 export function BotContextMenu({
   menu,
   onClose,
@@ -1361,6 +1362,7 @@ function PinnedBotRoster({
   );
 }
 
+/** Memoized sidebar bot row with threads, rename, and context-menu wiring. */
 export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const { bot, selected, deleting, mascotMotion, reveal, pendingQueued, instances, liveCall, density, quiet, query, dispatch, onMenu, menuOpen = false, menuButtonRef } = props;
   const showThreads = useShowThreads();
@@ -1675,6 +1677,7 @@ export function ArchivedBotRow({
   );
 }
 
+/** Dialog listing archived bots with restore and permanent-delete flows. */
 export function ArchivedBotsPanel({
   bots,
   onClose,
@@ -1867,6 +1870,7 @@ export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetFor
   );
 }
 
+/** Primary navigation sidebar: bots, groups, archived bots, and team menus. */
 export function Sidebar({ open, onClose, collapseToIcons = false }: {
   open: boolean;
   onClose: () => void;

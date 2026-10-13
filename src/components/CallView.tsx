@@ -68,6 +68,7 @@ export function CallButton({ bot, placement = "header" }: { bot: Bot; placement?
   );
 }
 
+/** Call button for any call target: picks a voice when needed, then starts the call. */
 export function CallTargetButton({
   targetId,
   targetName,

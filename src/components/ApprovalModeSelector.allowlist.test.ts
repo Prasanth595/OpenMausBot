@@ -13,10 +13,15 @@ import { ApprovalModeSelector } from "./ApprovalModeSelector";
 let host: HTMLDivElement;
 let root: Root;
 
+/** The open popover menu sheet, if any. */
 const menu = () => document.querySelector<HTMLElement>("[data-popover-menu]");
+/** Text content of the open menu, for order assertions. */
 const menuText = () => menu()?.textContent ?? "";
+/** The approval-mode trigger button in the test host. */
 const trigger = () => host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
+/** All menu rows of the given role in the open sheet. */
 const rows = (role: "menuitem" | "menuitemradio") => [...document.querySelectorAll<HTMLButtonElement>(`[role="${role}"]`)];
+/** Picks a radio row by its leading label text. */
 const pick = (label: string) => flushSync(() => {
   rows("menuitemradio").find((row) => row.textContent?.startsWith(label))!.click();
 });

@@ -30,6 +30,7 @@ const { TeamMapPage } = await import("./TeamMapPage");
 const { TeamCanvas } = await import("./TeamCanvas");
 const { PopoverMenu } = await import("./popover/PopoverMenu");
 
+/** Builds a minimal bot in the given team-map section. */
 const bot = (id: string, name: string, section: string): Bot => ({
   id, threadId: `${id}-thread`, name, title: "", description: "", section, color: "green",
   notifications: true, unread: false, busy: false, messages: [],
@@ -58,8 +59,11 @@ function render(render: () => ReactNode) {
   visit(tree);
   return { html, menus };
 }
+/** Finds a team-map menu by its accessible label. */
 const menuNamed = (menus: ReactElement<MenuProps>[], label: string) => menus.find((element) => element.props.ariaLabel === label)!;
+/** The header Add menu of the team map page. */
 const addMenu = () => menuNamed(render(() => TeamMapPage()).menus, "Add to team map");
+/** Team canvas props with manageable defaults for menu tests. */
 const canvasProps = (overrides: Partial<Parameters<typeof TeamCanvas>[0]> = {}): Parameters<typeof TeamCanvas>[0] => ({
   sections,
   canManage: true,
@@ -71,6 +75,7 @@ const canvasProps = (overrides: Partial<Parameters<typeof TeamCanvas>[0]> = {}):
   isEmpty: () => false,
   ...overrides,
 });
+/** The team tile's overflow menu for the given section. */
 const teamMenu = (section: string, overrides: Partial<Parameters<typeof TeamCanvas>[0]> = {}) =>
   render(() => TeamCanvas(canvasProps(overrides))).menus.find((element) => element.props.ariaLabel === `Manage ${section} team`)!;
 

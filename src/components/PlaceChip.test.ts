@@ -77,6 +77,7 @@ afterEach(() => {
   fixture.computerMcp = true;
 });
 
+/** The place-chip trigger button in the test host. */
 const trigger = () => host.querySelector<HTMLButtonElement>('button[aria-label^="Where this conversation works"]')!;
 /** The open menu's radio rows: whether each is checked, its words and its
  * native tooltip. The words read the row's own column (title, then the
@@ -90,6 +91,7 @@ const rows = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemra
     text: [...(column?.children ?? [])].map((slot) => slot.textContent ?? "").join(" "),
   };
 });
+/** Mounts the chip and opens its place menu with a real click. */
 const open = async (props: Partial<ComponentProps<typeof PlaceChip>> = {}) => {
   act(() => {
     root.render(createElement(PlaceChip, { bot, live: false, onPin: () => {}, ...props }));

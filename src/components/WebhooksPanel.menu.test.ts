@@ -51,6 +51,7 @@ function render() {
   visit(tree);
   return { html, menus };
 }
+/** The webhook panel's overflow menu sheet. */
 const overflowMenu = () => render().menus.find((element) => element.props.ariaLabel === "Webhook actions")!;
 
 beforeEach(() => {

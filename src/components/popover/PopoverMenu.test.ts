@@ -73,6 +73,7 @@ vi.mock("./popover-menu.module.css", () => ({
 import { PopoverMenu, type PopoverMenuHeader, type PopoverMenuItem } from "./PopoverMenu";
 
 // Inline sheet: no portal, no document needed.
+/** Renders a popover menu inline for static-markup assertions. */
 const render = (items: PopoverMenuItem[], extra: Record<string, unknown> = {}) =>
   renderToStaticMarkup(
     createElement(PopoverMenu, {

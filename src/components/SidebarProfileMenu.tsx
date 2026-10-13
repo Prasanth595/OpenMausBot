@@ -361,6 +361,7 @@ export function profileMenuItems({
   ];
 }
 
+/** Profile menu in the sidebar footer: account, phone, updates, and settings. */
 export function SidebarProfileMenu({ iconOnly = false }: { iconOnly?: boolean } = {}) {
   const { state, dispatch } = useStore();
   const phone = useSidebarPhoneStatus();

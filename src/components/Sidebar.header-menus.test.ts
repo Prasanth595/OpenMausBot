@@ -72,6 +72,7 @@ function render() {
   return nodes(Sidebar({ open: false, onClose: () => {} }));
 }
 type PlusMenu = { ariaLabel: string; placement?: string; align?: string; items: Array<{ key: string; title?: string; value?: string; onSelect?: () => void }> };
+/** Finds the header's plus menu by its accessible label. */
 const plusMenu = (label = "New or share") => render().find((node) => node.type === PopoverMenu && node.props.ariaLabel === label)! as unknown as ReactElement<PlusMenu>;
 
 const text = (tree: ReactElement<Props>[]) => tree.map((node) => Children.toArray(node.props.children).filter((child) => typeof child === "string").join(" ")).join(" ");

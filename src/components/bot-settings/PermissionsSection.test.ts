@@ -36,6 +36,7 @@ function render(bot: Bot, trustedModesAvailable = false) {
     children: createElement(PermissionsSection, { bot, derived }),
   })));
 }
+/** Picks an approval level by its leading label text. */
 const choose = (label: string) => {
   flushSync(() => host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
   // The sheet is portalled to the document, outside the mount host.

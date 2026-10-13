@@ -101,7 +101,7 @@ async function draw() {
   flushSync(() => root.render(createElement(BotEditorStore, { value, children })));
   await settle();
 }
-// What a row's more menu offers: open it, read the items, close it again.
+/** What a row's more menu offers: opens it, reads the items, closes it again. */
 async function menuOf(mid: string) {
   const more = document.querySelector<HTMLButtonElement>(`[data-mid="${mid}"] button[aria-haspopup="menu"]`);
   if (!more) return [];
