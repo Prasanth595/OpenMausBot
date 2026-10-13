@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { Children, createElement, isValidElement, type MemoExoticComponent, type MouseEvent, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -15,7 +15,7 @@ vi.mock("@/lib/interface-mode", async (original) => ({
 }));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
-import { BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
+import { BotListItem, botConfirmCopy, botRowProps, currentArchivableBot, type BotRowProps } from "./Sidebar";
 import { endCall } from "@/lib/call";
 import { configureLiveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
 
@@ -50,6 +50,54 @@ describe("BotListItem", () => {
     expect(markup).toContain('aria-label="New folder under Atlas"');
     expect(markup).toContain('aria-label="Actions for Atlas"');
     expect(markup).toContain('aria-haspopup="menu"');
+  });
+
+  /** The row's returned controls, under React's hook dispatcher. */
+  type ActionProps = {
+    children?: ReactNode;
+    "aria-label"?: string;
+    "aria-expanded"?: boolean;
+    onClick?: (event: MouseEvent) => void;
+    ref?: unknown;
+  };
+  function handle(
+    layout: { menuOpen?: boolean; menuButtonRef?: { current: HTMLButtonElement | null }; onMenu?: (menu: unknown) => void } = {},
+  ) {
+    const onMenu = layout.onMenu ?? vi.fn();
+    let tree!: ReactNode;
+    function Capture() {
+      tree = (BotListItem as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type(
+        botRowProps(initialState, vi.fn(), bot(), { density: "comfortable", quiet: false, query: "", onMenu, menuOpen: layout.menuOpen, menuButtonRef: layout.menuButtonRef }),
+      );
+      return null;
+    }
+    renderToStaticMarkup(createElement(Capture));
+    const nodes: ReactElement<ActionProps>[] = [];
+    const visit = (node: ReactNode) => Children.toArray(node).forEach((child) => {
+      if (!isValidElement<ActionProps>(child)) return;
+      nodes.push(child);
+      visit(child.props.children);
+    });
+    visit(tree);
+    return { handle: nodes.find((node) => node.props["aria-label"] === "Actions for Atlas")!, onMenu };
+  }
+
+  it("opens the bot menu from the hover handle", () => {
+    const { handle: actions, onMenu } = handle();
+    expect(actions.props["aria-expanded"]).toBe(false);
+    actions.props.onClick!({ currentTarget: { getBoundingClientRect: () => ({ left: 12, bottom: 34 }) } } as unknown as MouseEvent);
+    expect(onMenu).toHaveBeenCalledWith({ botId: "atlas", x: 12, y: 34 });
+  });
+
+  it("closes the open bot menu from the same handle instead of re-opening it", () => {
+    const menuButtonRef = { current: null };
+    const { handle: actions, onMenu } = handle({ menuOpen: true, menuButtonRef });
+    expect(actions.props["aria-expanded"]).toBe(true);
+    // the open menu counts the handle as inside, so its press is not the
+    // outside press that would close it a moment before this click
+    expect(actions.props.ref).toBe(menuButtonRef);
+    actions.props.onClick!({ currentTarget: { getBoundingClientRect: () => ({ left: 12, bottom: 34 }) } } as unknown as MouseEvent);
+    expect(onMenu).toHaveBeenCalledWith(null);
   });
   const twoThreads = (): Partial<Bot> => ({
     tasks: [{ threadId: "thread-atlas", title: "Current", createdAt: 2 }, { threadId: "thread-earlier", title: "Earlier", createdAt: 1 }],

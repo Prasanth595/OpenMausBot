@@ -1,7 +1,7 @@
 import { track } from "@/lib/analytics";
 import { OrganizationIdentity } from "./OrganizationIdentity";
 import { approvalCardOutcome } from "./ApprovalCard";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   Activity,
@@ -46,7 +46,7 @@ import { BotAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
-import { useHeldMenuMotion, useMenuMotion } from "./MenuMotion";
+import { useHeldMenuMotion } from "./MenuMotion";
 import { lastNonReceipt } from "@/lib/receipts";
 import { activityPreview, botEngine } from "@/lib/failed-turn";
 import { activeLocale, t } from "@/lib/i18n";
@@ -127,7 +127,7 @@ import { UpdateIndicator } from "./UpdateIndicator";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJumpAction, attentionOwnerName, attentionRowStatus, attentionTriggerLabel, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 import { useLiveMedia } from "@/lib/live-call-media";
@@ -137,7 +137,6 @@ import { citationPreviewText } from "@/lib/citations";
 import { plainPreviewText } from "@/lib/plain-preview";
 import { isClientCancellation } from "../../shared/client-cancel";
 import { roomSpeakerIds, roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
-import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useAdvancedMode } from "@/lib/interface-mode";
 
 /** Vertical centre of the macOS traffic lights, in CSS px from the window
@@ -777,6 +776,7 @@ export function BotContextMenu({
   onMoveToSection,
   onNewFolder,
   onNewTaskFolder,
+  openerRef,
 }: {
   menu: MenuState | null;
   onClose: () => void;
@@ -785,6 +785,9 @@ export function BotContextMenu({
   onMoveToSection: (botId: string) => void;
   onNewFolder: (botId: string) => void;
   onNewTaskFolder: (botId: string) => void;
+  /** The row's "…" button, when the caller keeps one: pressing it must reach
+   * its own toggle instead of counting as a press outside the menu. */
+  openerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
@@ -924,6 +927,7 @@ export function BotContextMenu({
       anchor={{ kind: "point", x: point.x, y: point.y }}
       open={menu !== null}
       onOpenChange={(open) => { if (!open) onClose(); }}
+      extraInsideRefs={openerRef ? [openerRef] : undefined}
       focusFirstOnOpen
       restoreFocusOnClose
       zIndex={40}
@@ -1197,7 +1201,14 @@ export interface BotRowProps {
   quiet: boolean;
   query: string;
   dispatch: Dispatch<Action>;
-  onMenu: (menu: MenuState) => void;
+  onMenu: (menu: MenuState | null) => void;
+  /** Whether this row's own "…" menu is the open one: the button toggles it
+   * shut instead of re-opening it where it already sits. */
+  menuOpen?: boolean;
+  /** The "…" button itself. Its press counts as inside the menu, so the
+   * outside-press dismissal cannot close the menu a moment before the click
+   * that follows re-opens it. */
+  menuButtonRef?: RefObject<HTMLButtonElement | null>;
 }
 
 /** One bot row's props from the store state and the sidebar's layout. */
@@ -1205,7 +1216,7 @@ export function botRowProps(
   state: AppState,
   dispatch: Dispatch<Action>,
   bot: Bot,
-  layout: Pick<BotRowProps, "density" | "quiet" | "query" | "onMenu">,
+  layout: Pick<BotRowProps, "density" | "quiet" | "query" | "onMenu"> & Partial<Pick<BotRowProps, "menuOpen" | "menuButtonRef">>,
 ): BotRowProps {
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
   const reveal = state.revealThread;
@@ -1351,7 +1362,7 @@ function PinnedBotRoster({
 }
 
 export const BotListItem = memo(function BotListItem(props: BotRowProps) {
-  const { bot, selected, deleting, mascotMotion, reveal, pendingQueued, instances, liveCall, density, quiet, query, dispatch, onMenu } = props;
+  const { bot, selected, deleting, mascotMotion, reveal, pendingQueued, instances, liveCall, density, quiet, query, dispatch, onMenu, menuOpen = false, menuButtonRef } = props;
   const showThreads = useShowThreads();
   const liveMedia = useLiveMedia();
   const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
@@ -1589,7 +1600,14 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           className="pointer-events-none absolute right-[3.75rem] top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><Plus size={14} /></button>}
         {showThreads && <button type="button" aria-label={t("folder.newNamed", { name: bot.name })} title={t("folder.new")} onClick={() => { setThreadsOpen(true); setCreatingProject(true); }}
           className="pointer-events-none absolute right-8 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><FolderPlus size={14} /></button>}
-        <button type="button" aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
+        <button type="button" ref={menuOpen ? menuButtonRef : undefined} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" aria-expanded={menuOpen}
+          onClick={(event) => {
+            // Pressing the open menu's own button closes it. Re-anchoring
+            // would only look like the menu refused to close.
+            if (menuOpen) { onMenu(null); return; }
+            const rect = event.currentTarget.getBoundingClientRect();
+            onMenu({ botId: bot.id, x: rect.left, y: rect.bottom });
+          }}
           className="pointer-events-none absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><MoreHorizontal size={15} /></button>
       </>}
       {deleting && iconOnly && (
@@ -1876,6 +1894,10 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const [confirm, setConfirm] = useState<{ kind: BotConfirmKind; bot: Bot } | null>(null);
   const cancelConfirm = useCallback(() => setConfirm(null), []);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  /** The row "…" button whose menu is open. Its press counts as inside the
+   * menu, so the outside-press dismissal cannot close it a moment before the
+   * click re-opens it — the button then toggles it shut instead. */
+  const botMenuButton = useRef<HTMLButtonElement | null>(null);
   const [sectionPicker, setSectionPicker] = useState<MenuState | null>(null);
   const [newTeam, setNewTeam] = useState(false);
   const [teamMenu, setTeamMenu] = useState<{ name: string; x: number; y: number } | null>(null);
@@ -1909,8 +1931,6 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
   const deletingRoom = deletingRoomId ? state.groups.find((g) => g.id === deletingRoomId) : undefined;
   const advanced = useAdvancedMode();
-  const [attentionOpen, setAttentionOpen] = useState(false);
-  const attentionMotion = useMenuMotion(attentionOpen);
   const [attentionPinned, setAttentionPinnedState] = useState(() => loadSidebarAttentionPinned());
   const setAttentionPinned = (pinned: boolean) => {
     setAttentionPinnedState(pinned);
@@ -1998,10 +2018,6 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [open, onClose, confirm, deletingRoom]);
-
-  // Each header menu root wraps its trigger and its popover.
-  const attentionMenuRef = useRef<HTMLDivElement>(null);
-  usePopoverDismiss(attentionOpen, attentionMenuRef, () => setAttentionOpen(false));
 
   useEffect(() => {
     if (remoteClient) return;
@@ -2208,11 +2224,42 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   // same rule and order as the sidebar tree, so the bell can never
   // disagree with it.
   const attention = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups);
+  // The bell's menu as data: the pinned band, then a row per thread that
+  // needs the person. Pressing a row jumps to it and closes the menu.
+  const attentionItems: PopoverMenuItem[] = [
+    {
+      key: "band",
+      header: {
+        title: t("attention.title"),
+        content: <button type="button" onClick={() => setAttentionPinned(!attentionPinned)}
+          aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
+          title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
+          className="flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+          {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
+        </button>,
+      },
+    },
+    ...(attention.length === 0
+      ? [{ key: "empty", render: <div className="px-3.5 py-2.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div> }]
+      : attention.map((entry): PopoverMenuItem => {
+          const { Icon, colorClass, label: status } = attentionRowStatus(entry.task);
+          const name = attentionOwnerName(entry);
+          const label = t("attention.item", { title: entry.task.title, name, status });
+          return {
+            key: `${entry.kind}-${entry.kind === "bot" ? entry.botId : entry.groupId}-${entry.task.threadId}`,
+            title: entry.task.title,
+            content: `${name} · ${status}`,
+            leading: <Icon size={15} aria-hidden="true" className={cn("shrink-0", colorClass)} />,
+            hint: label,
+            onSelect: () => dispatch(attentionJumpAction(entry)),
+          };
+        })),
+  ];
   // Every pinned thread across every bot and room — the thread-level twin
   // of the built-in pinned-bots section, which only ever covered whole bots.
   const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
-  const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, quiet: quietRows, query: q, onMenu: setMenu });
+  const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, quiet: quietRows, query: q, onMenu: setMenu, menuOpen: menu?.botId === bot.id, menuButtonRef: botMenuButton });
 
   return (
     <aside
@@ -2324,54 +2371,36 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           >
             <Search size={20} strokeWidth={2} />
           </button>}
-          {advanced && <div ref={attentionMenuRef} className={density === "icons" ? "relative" : "contents"}>
-            <button
-              type="button"
-              onClick={() => setAttentionOpen((o) => !o)}
-              aria-label={attentionTriggerLabel(attention.length)}
-              title={attentionTriggerLabel(attention.length)}
-              className={cn(
-                "relative flex items-center justify-center text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-                density === "icons" ? "size-[46px] shrink-0 rounded-xl" : "size-8 rounded-md",
-              )}
-            >
-              <Activity size={density === "icons" ? 20 : 17} strokeWidth={2} />
+          {advanced && <PopoverMenu
+            items={attentionItems}
+            ariaLabel={attentionTriggerLabel(attention.length)}
+            sheetAriaLabel={t("attention.title")}
+            placement="below"
+            align={density === "icons" ? "start" : "end"}
+            width={density === "compact" ? 240 : 288}
+            zIndex={40}
+            triggerTitle={attentionTriggerLabel(attention.length)}
+            // The pin rides the band's own line, as it does on the docked panel.
+            renderHeader={(header, defaults) => (
+              <div data-popover-header className={cn(defaults.className, "flex items-center gap-1")}>
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{header.title}</span>
+                {header.content}
+              </div>
+            )}
+            triggerClassName={cn(
+              "relative flex items-center justify-center text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+              density === "icons" ? "size-[46px] shrink-0 rounded-xl" : "size-8 rounded-md",
+            )}
+            trigger={() => <>
+              <Activity size={density === "icons" ? 20 : 17} strokeWidth={2} aria-hidden="true" />
               {attention.length > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[9.5px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
               )}
               {attentionHasRunningWork(attention) && (
                 <span data-header-activity="" className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-success" aria-hidden="true" />
               )}
-            </button>
-            {attentionMotion.shown && (
-              <>
-                <div className={cn(
-                  "absolute top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
-                  density === "icons" ? "left-0" : "right-0",
-                  density === "icons" ? "w-72" : density === "compact" ? "w-60 md:w-[min(240px,calc(var(--sidebar-width)_-_32px))]" : "w-72 md:w-[min(288px,calc(var(--sidebar-width)_-_32px))]",
-                  attentionMotion.className,
-                )} {...attentionMotion.exitProps}>
-                  <div className="flex items-center gap-1 pb-1 pl-3.5 pr-2 pt-1.5">
-                    <span className="flex-1 text-[13px] font-medium text-ink">{t("attention.title")}</span>
-                    <button
-                      type="button"
-                      onClick={() => setAttentionPinned(!attentionPinned)}
-                      aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                      title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                      className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                    >
-                      {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
-                    </button>
-                  </div>
-                  {attention.length === 0 ? (
-                    <div className="px-3.5 py-2.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div>
-                  ) : (
-                    <AttentionThreadRows entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch(attentionJumpAction(entry)); }} />
-                  )}
-                </div>
-              </>
-            )}
-          </div>}
+            </>}
+          />}
           {/* The + menu is the profile menu's sibling: a trigger Popover owns
               (so the dialog it can open gets its button back), anchored to
               the button itself instead of to the header cluster. */}
@@ -2695,6 +2724,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       <BotContextMenu
           menu={menu}
           onClose={() => setMenu(null)}
+          openerRef={botMenuButton}
           onArchive={requestArchive}
           onDelete={(bot) => setConfirm({ kind: "delete", bot })}
           onMoveToSection={(botId) => {
