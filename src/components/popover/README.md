@@ -94,7 +94,7 @@ Submenu, header band, and disabled rows:
 
 ```tsx
 items={[
-  { key: "group", header: { title: "Modes", content: <a href="...">Learn more</a> } } },
+  { key: "group", header: { title: "Modes", content: <a href="...">Learn more</a> } },
   { key: "more", title: "More", submenu: [{ key: "sub", title: "Sub action" }] },
   { key: "off", title: "Off", disabled: true, hint: "Why unavailable" },
 ]}
