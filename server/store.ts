@@ -23,7 +23,7 @@ import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
-import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk } from "../shared/approval-mode.ts";
+import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
@@ -190,6 +190,8 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
       detail: out.goalRun.detail ? redactSecretsInText(out.goalRun.detail) : undefined,
     };
   }
+  // A Live call's title is the bot engine's own words about the call.
+  if (out.call?.title) out.call = { ...out.call, title: redactSecretsInText(out.call.title) };
   if (out.card) {
     const card = { ...out.card } as OptionCardData & { summary?: string };
     card.title = redactSecretsInText(card.title);
@@ -317,6 +319,14 @@ function redactBotAuthored<T extends Omit<Message, "id" | "at"> & { at?: number 
       label: redactSecretsInText(out.secret.label),
       description: redactSecretsInText(out.secret.description),
       error: out.secret.error ? redactSecretsInText(out.secret.error) : undefined,
+    };
+  }
+  if (out.signIn) {
+    // The bot's own words: a model can paste a secret into a reason too.
+    out.signIn = {
+      ...out.signIn,
+      reason: out.signIn.reason ? redactSecretsInText(out.signIn.reason) : undefined,
+      error: out.signIn.error ? redactSecretsInText(out.signIn.error) : undefined,
     };
   }
   return out;
@@ -621,6 +631,16 @@ export function roomResponders<T extends { id: string; name: string; hidden?: bo
   return [];
 }
 
+/** Drop holds and held messages of bots that are no longer room members. */
+export function pruneRoomHolds(group: Pick<GroupRecord, "memberIds" | "holds" | "heldMessages">): void {
+  for (const key of ["holds", "heldMessages"] as const) {
+    const map = group[key];
+    if (!map) continue;
+    const kept = Object.fromEntries(Object.entries(map).filter(([botId]) => group.memberIds.includes(botId)));
+    if (Object.keys(kept).length !== Object.keys(map).length) (group as Record<typeof key, unknown>)[key] = kept;
+  }
+}
+
 /** A hidden routine execution is not a conversation the person can open. */
 function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string }): boolean {
   return Boolean(task.unread) && !task.routineRunId;
@@ -821,6 +841,20 @@ export class Store {
         botsMigrated = true;
       }
     }
+    // Early builds of durable provider-tool grants saved them only on the
+    // task that raised the approval card. The UI promised a standing bot
+    // grant, so recover those exact app-issued keys into the bot defaults;
+    // never promote ordinary task/session grants such as shell commands.
+    for (const b of this.bots) {
+      const taskProviderGrants = (b.tasks ?? []).flatMap((task) =>
+        (task.alwaysAllow ?? []).filter((key) => key.startsWith("provider-tool:")),
+      );
+      if (!taskProviderGrants.length) continue;
+      const migrated = [...new Set([...(b.alwaysAllow ?? []), ...taskProviderGrants])].slice(0, 200);
+      if (JSON.stringify(migrated) === JSON.stringify(b.alwaysAllow ?? [])) continue;
+      b.alwaysAllow = migrated;
+      botsMigrated = true;
+    }
     const botIds = new Set(this.bots.map((b) => b.id));
     for (const g of this.groups) {
       g.busyBotId = null;
@@ -835,6 +869,13 @@ export class Store {
       const normalized = normalizeGroupDefaultResponder(g.defaultResponder, g.memberIds, Boolean(g.dm));
       if (JSON.stringify(normalized) !== JSON.stringify(g.defaultResponder)) groupsMigrated = true;
       g.defaultResponder = normalized;
+      // Holds survive a restart (a stopped bot stays stopped); a member who
+      // left while the server was down takes its hold with it.
+      if (g.holds !== undefined || g.heldMessages !== undefined) {
+        const before = JSON.stringify([g.holds, g.heldMessages]);
+        pruneRoomHolds(g);
+        if (JSON.stringify([g.holds, g.heldMessages]) !== before) groupsMigrated = true;
+      }
       // Bot-to-bot channels intentionally remain one canonical thread.
       if (g.dm) {
         if (g.tasks !== undefined) {
@@ -1287,7 +1328,7 @@ export class Store {
     );
   }
 
-  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "lastReadMessageId" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "audienceFloor" | "installedPackage" | "turnTimeoutMinutes">>): GroupRecord | null {
+  patchGroup(id: string, patch: Partial<Pick<GroupRecord, "name" | "memberIds" | "defaultResponder" | "bulletin" | "unread" | "lastReadMessageId" | "busyBotId" | "cwd" | "pinnedMessageId" | "section" | "setupCompletedAt" | "setupSkippedAt" | "audienceFloor" | "installedPackage" | "turnTimeoutMinutes" | "holds" | "heldMessages">>): GroupRecord | null {
     const group = this.group(id);
     if (!group) return null;
     if (Object.prototype.hasOwnProperty.call(patch, "section")) {
@@ -1316,6 +1357,8 @@ export class Store {
       group.memberIds,
       Boolean(group.dm),
     );
+    // A member who left the room takes its hold and held messages with it.
+    if (Object.prototype.hasOwnProperty.call(patch, "memberIds")) pruneRoomHolds(group);
     this.saveGroups();
     this.emit({ type: "group", groupId: group.id });
     return group;
@@ -2826,11 +2869,16 @@ export class Store {
     return moved;
   }
 
-  /** One durable write: never leave only part of a bot's threads updated. */
-  setAllThreadApprovalMode(botId: string, mode: "full" | "ask"): BotRecord | null {
+  /** One approval level for the bot and every one of its threads, in one
+   * durable write: never leave only part of a bot's threads updated. Full
+   * also drops standing approvals ("Always allow"), which decide nothing
+   * there; at every other level they still decide, so the bot's and each
+   * thread's stay as the person granted them. Custom never comes here: it
+   * belongs to one bot's engine and the desktop's own two-phase grant. */
+  setAllThreadApprovalMode(botId: string, mode: Exclude<ApprovalMode, "custom">): BotRecord | null {
     const bot = this.bot(botId);
     if (!bot) return null;
-    const patch = { approvalMode: mode, autoApprove: false, alwaysAllow: [] };
+    const patch = { approvalMode: mode, autoApprove: mode === "auto", ...(mode === "full" ? { alwaysAllow: [] } : {}) };
     const tasks = (bot.tasks ?? []).map(task => ({ ...task, ...patch }));
     const next = { ...bot, ...patch, approvalGrant: undefined, tasks };
     this.saveBots(this.bots.map(candidate => candidate === bot ? next : candidate));

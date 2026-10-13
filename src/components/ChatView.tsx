@@ -33,6 +33,7 @@ import { localSystemVoiceActive } from "@/lib/local-voice";
 import { computerStartLine } from "@/lib/computer-start";
 import { useCaptionChrome, useDesktopCapabilities } from "@/components/DesktopCapabilities";
 import { contextChip, contextDetail, contextShare, costCaption, formatUsd, hasFiniteCost, lastTurnDetail, usageChip, usageDetail } from "@/lib/usage";
+import { keepWarmLine } from "@/lib/cache-keepwarm";
 import {
   api,
   currentTaskBot,
@@ -47,6 +48,8 @@ import {
   type InstanceInfo,
   type Message,
   type AppState,
+  awayFromMainThread,
+  openBot,
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
 import { CHATGPT_USAGE_URL } from "./ChatGptPlanStatus";
@@ -69,6 +72,7 @@ import { showToolCallsEnabled, skillAuthoringEnabled } from "@/lib/feature-flags
 import { normalizeState, stateForBot } from "@/lib/mascot";
 import { peerLine, peerRequest, type PeerLine } from "@/lib/peer-message";
 import { showWorkingDots } from "@/lib/turn-tail";
+import { lastNonReceipt } from "@/lib/receipts";
 import { liveActivityPhrases } from "@/lib/live-activity";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { VoiceNoteBubble, type VoiceNoteAttachment } from "./VoiceNoteBubble";
@@ -78,6 +82,8 @@ import { VerifyCard } from "./VerifyCard";
 import { askText, runSkill, runSteps, runSummary, showRun, skillPrompt } from "@/lib/verify-steps";
 import { useShowRunCard } from "@/lib/run-card-preferences";
 import { sendsMessage, useSendKey } from "@/lib/send-key";
+import { useColorUserBubbles } from "@/lib/user-bubble-preference";
+import { userBubbleStyle } from "@/lib/user-bubble-tone";
 import { ToolActivity } from "./ToolActivity";
 import { DataResultChip } from "./DataResultChip";
 import { ThreadRefText } from "./ThreadRefs";
@@ -86,11 +92,14 @@ import { ApprovalCard } from "./ApprovalCard";
 import { QuestionCard } from "./QuestionCard";
 import { Composer } from "./Composer";
 import { ChatErrorBanner, ChatNotice } from "./ChatErrorBanner";
+import { ThreadContextWarning } from "./ContextWarning";
 import { ChatFindBar } from "./ChatFindBar";
 import { ReplyQuote } from "./ReplyQuote";
 import { ConnectorCard } from "./ConnectorCard";
 import { SecretRequestCard } from "./SecretRequestCard";
+import { SignInRequestCard } from "./SignInRequestCard";
 import { hasRoutineExecutionTask, RoutineRunCard } from "./RoutineRunCard";
+import { CallRecordRow } from "./CallRecordRow";
 import { AttachmentGallery, collectMessageFiles, replyAttachmentGroup, splitMessageAttachments } from "./AttachmentGallery";
 import { ScreenFrame } from "./ScreenFrame";
 import { CompactionChip, DigestChip } from "./DigestChip";
@@ -159,6 +168,8 @@ interface ChatRows {
   localVoice: boolean;
   /** Editing, regenerating and switching versions wait for the turn. */
   busy: boolean;
+  /** Older messages remain on the server, beyond the page the thread holds. */
+  hasMore: boolean;
   /** Every bot, for who wrote a relayed line or sits across a bot⇄bot chip. */
   bots: readonly Bot[];
   /** Every other bot, for @mentions. */
@@ -168,6 +179,8 @@ interface ChatRows {
   showToolCalls: boolean;
   /** Rows show catalog strings, so a language change re-renders them. */
   locale: string;
+  /** Set when the person's messages take this bot's color. Absent leaves the skin bubble. */
+  bubbleStyle?: ReturnType<typeof userBubbleStyle>;
   dispatch: Dispatch<Action>;
   /** Whether a message is on the branch shown now (citation links). */
   onBranch: (messageId: string) => boolean;
@@ -417,10 +430,12 @@ function BubbleEditor({
   initial,
   onCancel,
   onSubmit,
+  bubbleStyle,
 }: {
   initial: string;
   onCancel: () => void;
   onSubmit: (text: string) => void;
+  bubbleStyle?: ReturnType<typeof userBubbleStyle>;
 }) {
   const [draft, setDraft] = useState(initial);
   const sendKey = useSendKey();
@@ -435,7 +450,7 @@ function BubbleEditor({
     if (draft.trim()) onSubmit(draft.trim());
   };
   return (
-    <div className="w-full max-w-[min(42rem,78%)] rounded-2xl border border-hairline/40 bg-bubble-user px-4 py-3">
+    <div className={cn("w-full max-w-[min(42rem,78%)] rounded-2xl border border-hairline/40 bg-bubble-user px-4 py-3", bubbleStyle && "user-bubble-colored")} style={bubbleStyle}>
       <textarea
         ref={ref}
         dir="auto"
@@ -503,7 +518,7 @@ const Bubble = memo(function Bubble({
   replyTarget?: Message;
   onReply: (message: Message) => void;
 }) {
-  const { botId, threadId, botName, voiceId, tts, localVoice, busy, mentionPeers, focus, dispatch, onBranch } = useChatRows();
+  const { botId, threadId, botName, voiceId, tts, localVoice, busy, mentionPeers, focus, dispatch, onBranch, bubbleStyle } = useChatRows();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   // A user-role line another bot delivered (ask_bot, delegate_bot,
   // start_thread) is that bot speaking, not the person: it takes the
@@ -568,7 +583,7 @@ const Bubble = memo(function Bubble({
   if (user && editing && !webhookView && !hasAttachments) {
     return (
       <div className="flex w-full justify-end">
-        <BubbleEditor initial={text} onCancel={onCancelEdit} onSubmit={(edited) => onSubmitEdit(message.id, edited)} />
+        <BubbleEditor initial={text} bubbleStyle={bubbleStyle} onCancel={onCancelEdit} onSubmit={(edited) => onSubmitEdit(message.id, edited)} />
       </div>
     );
   }
@@ -613,9 +628,10 @@ const Bubble = memo(function Bubble({
               : attachmentsOnly
                 ? "text-ink"
                 : user
-                  ? "bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink"
+                  ? cn("bg-bubble-user px-4 py-2.5 whitespace-pre-wrap text-ink", bubbleStyle && "user-bubble-colored")
                   : "bg-card px-4 py-2.5 text-ink",
           )}
+          style={user && !webhookView && !attachmentsOnly ? bubbleStyle : undefined}
           title={new Date(message.at).toLocaleString()}
         >
           {replyTarget && (
@@ -908,7 +924,7 @@ const MessagesList = memo(function MessagesList({
   onRegenerate: () => void;
   onReply: (message: Message) => void;
 }) {
-  const { botId, threadId, botName, focus, showToolCalls, locale } = useChatRows();
+  const { botId, threadId, botName, busy, hasMore, focus, showToolCalls, locale } = useChatRows();
   // Finished tool chips become compact runs; settled assistant narration
   // becomes one reversible turn row while the terminal answer stays visible.
   // The locale refreshes the turn labels when the language changes.
@@ -994,6 +1010,8 @@ const MessagesList = memo(function MessagesList({
           switch (m.kind) {
             case "secret":
               return m.secret ? <SecretRequestCard botId={botId} threadId={threadId} message={m} /> : null;
+            case "signin":
+              return m.signIn ? <SignInRequestCard botId={botId} botName={botName} threadId={threadId} message={m} /> : null;
             case "connector":
               return m.connector ? <ConnectorCard botId={botId} threadId={threadId} message={m} /> : null;
             case "options": {
@@ -1019,6 +1037,9 @@ const MessagesList = memo(function MessagesList({
             }
             case "routine.run":
               return <RoutineRunRow message={m} botId={botId} />;
+            case "call":
+              // a finished Live call's record; its spoken lines stay inline
+              return m.call ? <CallRecordRow message={m} transcript={transcript} botName={botName} busy={busy} hasMore={hasMore} /> : null;
             case "activity": {
               // a Data receipt first: its title is a person's words, never a status or error marker
               if (m.dataResult) return <DataResultChip message={m} />;
@@ -1257,9 +1278,12 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const branch = useRef(messages);
   branch.current = messages;
   const onBranch = useCallback((messageId: string) => branch.current.some((m) => m.id === messageId), []);
+  const colorMine = useColorUserBubbles();
+  const bubbleStyle = useMemo(() => (colorMine ? userBubbleStyle(bot.color) : undefined), [colorMine, bot.color]);
+  const hasMore = Boolean(bot.hasMore);
   const rows = useMemo<ChatRows>(
-    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch }),
-    [bot.id, bot.threadId, bot.name, bot.voice, tts, localVoice, busy, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch],
+    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle }),
+    [bot.id, bot.threadId, bot.name, bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle],
   );
   // Where this conversation works, for the place icon on screen and page tools.
   const place = effectivePlace(bot, bot.tasks?.find((task) => task.threadId === bot.threadId));
@@ -1290,7 +1314,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
 
   // Mascot while the turn works. Streaming stays invisible — when the reply
   // is finished, the whole bubble pops in above the mascot.
-  const lastMessage = messages.at(-1);
+  // The working line reads the last real message: a finished call's record
+  // (and a turn's receipts) can trail a turn that is still working.
+  const lastMessage = lastNonReceipt(messages);
   const toolInFlight = lastMessage?.kind === "activity" && lastMessage.tool?.ok === undefined;
   const activity = liveActivityPhrases(lastMessage);
   const waiting = Boolean(
@@ -1465,6 +1491,19 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               hears when the bot starts working. */}
           <span role="status" className="sr-only" data-chathead-status>{bot.busy ? t("sidebar.preview.working") : ""}</span>
           {!bot.busy && bot.waitingForTeammates && <span className="truncate text-[12px] text-ink-secondary" role="status">Teammates working</span>}
+          {/* Threads hidden: a side thread is a visit (a notification, a chip
+              or an activity row opened it). One click goes back to the bot's
+              own conversation, so a stray click never strands the person. */}
+          {awayFromMainThread(profile, showThreads) && (
+            <button
+              type="button"
+              data-chathead-back
+              onClick={() => openBot(dispatch, profile, false)}
+              className="shrink-0 whitespace-nowrap rounded-full bg-raised px-2.5 py-0.5 text-[12px] font-medium text-ink-secondary hover:bg-raised-hover hover:text-ink"
+            >
+              {t("chat.backToMainThread")}
+            </button>
+          )}
         </div>
         <div
           data-chathead-controls
@@ -1487,6 +1526,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               <span className="@max-4xl/chathead:hidden">{t("chat.stop")}</span>
             </button>
           )}
+          <ThreadContextWarning bot={bot} messages={messages} />
           {!remoteClient && <ModelPicker key={bot.threadId} bot={bot} threadId={bot.threadId} />}
           {/* below md the sidebar (and its Live call pill) is hidden */}
           <LiveCallChip currentBotId={bot.id} onOpen={(botId, threadId) => openThread(dispatch, { botId, threadId }, state, showThreads)} />
@@ -1718,7 +1758,8 @@ export function NewConversationInstead({ onNew }: { onNew: () => void }) {
  * the engine reports one, else new tokens — with the full breakdown as the
  * tooltip. Null while the thread has no usage yet. */
 function usageSummary(bot: Bot, instances: AppState["instances"]): { short: string; detail: string; tone?: "danger" | "warning" } | null {
-  const usage = bot.tasks?.find((t) => t.threadId === bot.threadId)?.usage;
+  const task = bot.tasks?.find((t) => t.threadId === bot.threadId);
+  const usage = task?.usage;
   if (!usage || !usageChip(usage)) return null;
   const billing = instances.find((i) => i.instanceId === bot.modelSelection.instanceId)?.snapshot.billing;
   const share = contextShare(usage);
@@ -1731,6 +1772,7 @@ function usageSummary(bot: Bot, instances: AppState["instances"]): { short: stri
     // model re-reading what it already saw — say so, or the figure reads as
     // a bug (issue #527); past 80% of the window the fix is a new thread
     share?.tone === "danger" ? t("chat.usage.contextNudge") : null,
+    keepWarmLine(task?.cacheKeepWarm),
     hasFiniteCost(usage.costUsd) ? `${formatUsd(usage.costUsd)} ${costCaption(billing)}` : null,
   ]
     .filter(Boolean)

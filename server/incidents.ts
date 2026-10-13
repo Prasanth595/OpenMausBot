@@ -5,7 +5,7 @@
 // from a phone, by opening the desktop and reading every thread. The team
 // already has a role for exactly this — the Chief coordinates the section —
 // so an incident is delivered to the Chief as a turn of its own, with a
-// link to the thread and the means to act (retry_thread, delegate_bot), and
+// link to the thread and the means to act (retry_thread, coordinate_bots), and
 // the person reads one place: the Chief's "Team incidents" thread.
 //
 // The policy here is pure so it can be read and tested on its own; the
@@ -163,7 +163,7 @@ export function incidentText(incident: Incident, count: IncidentCount): string {
     ? [
       "Decide, in this order:",
       "1. If the cause is something only the person can fix — a sign-in, a missing credential, an unanswered question, a setting — say so here in one or two plain sentences and stop.",
-      `2. Otherwise call retry_thread with bot_id "${incident.bot.id}" and thread_id "${incident.threadId}" to resume that thread where it stopped; use delegate_bot with a corrected brief instead when the request itself needs to change.`,
+      `2. Otherwise call retry_thread with bot_id "${incident.bot.id}" and thread_id "${incident.threadId}" to resume that thread where it stopped; use coordinate_bots with a corrected brief instead when the request itself needs to change.`,
       "3. Report in one or two sentences what failed and what you did. Never retry the same thread more than twice.",
     ].join("\n")
     : "Retries for that thread are used up. Do not retry it again: say in one or two plain sentences what is blocking and what the person should do, then stop.");

@@ -41,16 +41,23 @@ export function isStatusActivity(message: Message): boolean {
   return statusActivity(message) !== null;
 }
 
-/** A step that may be folded away: finished, a real tool, and not a
- * bot⇄bot or opened-thread chip (those are navigation, not work) or a
- * failed turn (that renders as an error). A step still running stays out,
- * so live progress is never hidden behind a fold. */
-function foldable(message: Message): boolean {
+/** A tool the bot ran: an activity row with a tool, whether it is running,
+ * finished or failed. Not a bot⇄bot or opened-thread chip (those are
+ * navigation, not work), a status row, or a failed turn (that renders as an
+ * error). One definition for every reader that must agree on what a step
+ * is: the fold below and a call's record (call-record.ts). */
+export function isToolStep(message: Message): message is Message & { tool: NonNullable<Message["tool"]> } {
   const tool = message.tool;
   if (message.kind !== "activity" || !tool) return false;
   if (message.comm || message.threadRef || message.dataResult || isStatusActivity(message)) return false;
-  if (tool.ok !== true) return false;
   return failedTurnCause(tool.name) === null;
+}
+
+/** A step that may be folded away: a tool step that finished. A step still
+ * running stays out, so live progress is never hidden behind a fold, and so
+ * does one that failed. */
+function foldable(message: Message): boolean {
+  return isToolStep(message) && message.tool.ok === true;
 }
 
 type TurnFold = Extract<TranscriptItem, { kind: "turn" }>;
@@ -107,6 +114,27 @@ function assistantTurnFolds(messages: Message[]): {
   });
 
   return { byAnchorId, hiddenIds };
+}
+
+/** A room's settled turns, folded under their final message: in a room
+ * every member's working notes would otherwise read as one reply each.
+ * Keyed by the final (terminal) message, which stays in the transcript and
+ * carries the fold above it; the notes are left out of the room's rows. */
+export function roomTurnFolds(messages: Message[]): {
+  byTerminalId: Map<string, TurnFold>;
+  hiddenIds: Set<string>;
+} {
+  const { byAnchorId, hiddenIds } = assistantTurnFolds(messages);
+  const terminals = new Map<string, string>();
+  for (const message of messages) {
+    if (message.role === "bot" && message.kind === "text" && message.turnId && message.turnTerminal) terminals.set(message.turnId, message.id);
+  }
+  const byTerminalId = new Map<string, TurnFold>();
+  for (const fold of byAnchorId.values()) {
+    const terminalId = terminals.get(fold.turnId);
+    if (terminalId) byTerminalId.set(terminalId, fold);
+  }
+  return { byTerminalId, hiddenIds };
 }
 
 function group(messages: Message[], foldAssistantTurns: boolean): TranscriptItem[] {
