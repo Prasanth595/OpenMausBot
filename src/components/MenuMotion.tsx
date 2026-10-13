@@ -23,6 +23,7 @@ export const MENU_ROW_IN_MS = 250;
 export const MENU_ROW_OUT_MS = 120;
 export const MENU_ROW_OUT_LEAD_MS = 50;
 
+/** Reports whether motion should be skipped for reduced-motion preferences. */
 export function isReducedMotion(): boolean {
   if (typeof document === "undefined") return false;
   if (document.documentElement.dataset.reducedMotion === "true") return true;

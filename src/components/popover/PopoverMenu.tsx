@@ -187,6 +187,7 @@ export interface PopoverMenuProps {
 // so the arrows can reach them and read their reason out.
 const MENU_ROWS =
   ':scope > div > [role="menuitem"]:not(:disabled), :scope > div > [role="menuitemradio"]:not(:disabled)';
+/** Collects the rows arrow keys can land on inside a menu element. */
 const menuEnabledRows = (menu: HTMLElement | null) => (menu ? [...menu.querySelectorAll<HTMLElement>(MENU_ROWS)] : []);
 
 const SUBMENU_QUERY = MENU_ROWS;
@@ -207,6 +208,7 @@ function menuTabStops(menu: HTMLElement): HTMLElement[] | null {
 
 const NO_OUTSIDE_REFS: Array<RefObject<HTMLElement | null>> = [];
 
+/** Default menu row: styled button with leading, title/content, and tail slots. */
 function DefaultRow({
   item,
   roomy,
@@ -330,6 +332,7 @@ function DefaultRow({
   );
 }
 
+/** Header band rendered above a group of rows. */
 function HeaderBand({
   header,
   inSubmenu,
@@ -349,6 +352,7 @@ function HeaderBand({
   );
 }
 
+/** Renders menu items with per-row stagger slots for the open/close motion. */
 function MenuRows({
   items,
   roomy,
@@ -429,6 +433,9 @@ function MenuRows({
   );
 }
 
+/** Generic menu composed on the Popover shell. Items arrive purely through
+ * props — no store, no i18n, no network here. Supports one submenu level,
+ * keyboard navigation and headless/styled surfaces. */
 export function PopoverMenu({
   items,
   ariaLabel,

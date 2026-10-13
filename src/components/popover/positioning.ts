@@ -42,6 +42,7 @@ export const SUBMENU_OPEN_DELAY_MS = 200;
  * close it. After the window, clicking the row toggles as usual. */
 export const SUBMENU_CONFIRM_MS = 400;
 
+/** Clamps a coordinate into the closed range from min to max. */
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
@@ -215,6 +216,7 @@ export function nextMenuIndex(key: string, current: number, count: number): numb
   }
 }
 
+/** Reports whether an element lays out right-to-left per computed style. */
 export function isRtlElement(element: Element | null): boolean {
   return (
     typeof getComputedStyle === "function" && element != null && getComputedStyle(element).direction === "rtl"

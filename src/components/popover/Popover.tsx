@@ -57,6 +57,9 @@ function firstFocusTarget(sheet: HTMLElement): HTMLElement | null {
   );
 }
 
+/** Normalizes the hover `leave` dismissal option into an enabled flag plus
+ * open/close delays. `true` opts into the default hover timings, a missing or
+ * `false` value disables hover dismissal, and an object overrides either delay. */
 function leaveDelays(leave: PopoverDismissOptions["leave"]): {  enabled: boolean;
   openDelay: number;
   closeDelay: number;
@@ -75,6 +78,9 @@ function leaveDelays(leave: PopoverDismissOptions["leave"]): {  enabled: boolean
 const DEFAULT_ANCHOR = { kind: "trigger" } as const;
 const NO_EXTRA_REFS: Array<{ current: HTMLElement | null }> = [];
 
+/** Generic floating shell: trigger- or point-anchored, portal or inline,
+ * headless or styled. It knows nothing about menus — PopoverMenu composes on
+ * top of it. Business state never lives here; everything arrives via props. */
 export function Popover({
   ariaLabel,
   sheetAriaLabel,
