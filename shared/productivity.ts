@@ -136,9 +136,11 @@ export function bucketStarts(from: number, to: number, granularity: Granularity)
 
 export interface ReportPeriod { from: number; to: number }
 
-/** The preset windows the screen offers: the last 48 h, the last 30 or 90
- * days, the last 12 months — each ending with the current (partial) bucket. */
-export const PERIOD_PRESETS: Record<Granularity, readonly number[]> = { hour: [48], day: [30, 90], month: [12] };
+/** The preset windows the screen offers: the last day (24 h) or 48 h, the
+ * last week (7 days), fortnight (15 days), 30 or 90 days, the last 12 months —
+ * each ending with the current (partial) bucket. The first of each grouping
+ * is its default. */
+export const PERIOD_PRESETS: Record<Granularity, readonly number[]> = { hour: [48, 24], day: [30, 90, 7, 15], month: [12] };
 export const MAX_BUCKETS: Record<Granularity, number> = { hour: 24 * 14, day: 366, month: 36 };
 
 /** The last `count` buckets up to now, the current one included. */
@@ -189,8 +191,10 @@ export function parseReportBound(value: string, end: boolean): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
-/** The period a request names, or why not. Without from/to: the default
- * preset (48 h, 30 days, 12 months). `days` picks the 90-day preset. */
+/** The period a request names, or why not. Without from/to: `count` picks
+ * one of the grouping's PERIOD_PRESETS (24 or 48 h; 7, 15, 30 or 90 days;
+ * 12 months), and any other count falls back to its default (48 h, 30 days,
+ * 12 months). */
 export function resolveReportPeriod(input: { granularity: Granularity; from?: string | null; to?: string | null; count?: number | null; now: number }): { period: ReportPeriod } | { error: string } {
   const { granularity, now } = input;
   if (!input.from && !input.to) {

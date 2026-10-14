@@ -11648,7 +11648,10 @@
       "attach.folderFilesAria": "863488df4613e1e2d6abaeef1448e70d7847e1d691b73e8d79c04b7ff945c632",
       "attach.folderTruncated": "09c6b3fbaabd5d0dd8fde0c76e7678c43f656ce03962e1216f121bf78aeb8b22",
       "attention.titleCount": "4de61f6bfe208e596768216656af3663c6e1657859dac40c9b9dec66e7133cd1",
-      "mcp.auth.pasteBackHint": "0dbfd2f815d9251f0d5a5b628c00c79d5479b9a012fdf859bf34e21ebe15b866"
+      "mcp.auth.pasteBackHint": "0dbfd2f815d9251f0d5a5b628c00c79d5479b9a012fdf859bf34e21ebe15b866",
+      "report.preset.hour24": "926c889a56c684d7f6d50c5f15dd7b57079c9264ce9a1c0eb4055c1cd5b635fd",
+      "report.preset.day7": "f50b7a5adc2e24b15593405d325f7833165a59703d0c9194d915d921fac8734e",
+      "report.preset.day15": "b5fef8643058feb5c1cf4c4d9bc0af9d3cfe2210325d7ec4c669ce1cc05fe84f"
     },
     "zh": {
       "pro.getPro": "12657108fe5682e937f179e5f394191b99fad614dbb3bf8759376d5da35d4992",

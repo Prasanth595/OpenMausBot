@@ -677,7 +677,9 @@ export function buildProductivityReport(input: ReportInputs): ProductivityReport
     period,
     previous,
     kpis: kpisFor(input, index, period.from, period.to),
-    previousKpis: kpisFor(input, index, previous.from, previous.to),
+    // a period still under way (its last bucket runs until now) is compared with the same
+    // elapsed span of the one before, not the whole: at 09:00 a steady week is not "−14%"
+    previousKpis: kpisFor(input, index, previous.from, Math.min(previous.to, previous.from + Math.max(0, Math.min(period.to, now) - period.from))),
     buckets,
     releases: releaseRows(input, index, period.from, period.to),
     backlog: backlogOf(input),

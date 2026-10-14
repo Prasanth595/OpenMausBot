@@ -18,7 +18,7 @@ import {
   minutesSince, periodLabel, reportHeading, reportPath, summaryLines, zonedToday,
   type Comparison, type ComparisonKind, type Granularity, type Polarity, type ProductivityReport, type ReportBucket, type ReportGoals, type ReportQuery, type Tone,
 } from "@/lib/productivity";
-import { EXPORT_MAX_AGE_MS, GOAL_KEYS, beforeRepo, closedMonth, compareKpi, exportReadiness, goalStatus, releaseComparable, releaseCountParts, type ExportBlocker, type GoalKey, type ReportRelease } from "../../shared/productivity";
+import { EXPORT_MAX_AGE_MS, GOAL_KEYS, PERIOD_PRESETS, beforeRepo, closedMonth, compareKpi, exportReadiness, goalStatus, releaseComparable, releaseCountParts, type ExportBlocker, type GoalKey, type ReportRelease } from "../../shared/productivity";
 import { BarChart, LineChart, unknownAt, type ChartSeries } from "./ReportCharts";
 
 const QUERY_KEY = "omb-report-query";
@@ -45,11 +45,16 @@ function saveQuery(query: ReportQuery): void {
 
 // ── period bar ──────────────────────────────────────────────────────────────
 
-const PRESETS: Record<Granularity, Array<{ count: number; label: LocaleKey }>> = {
-  hour: [{ count: 48, label: "report.preset.hour48" }],
-  day: [{ count: 30, label: "report.preset.day30" }, { count: 90, label: "report.preset.day90" }],
+// shortest first; each grouping still opens with the window it always had (PERIOD_PRESETS[g][0])
+const PRESETS: Record<Granularity, Array<{ count: number; label: LocaleKey; granularity?: Granularity }>> = {
+  hour: [{ count: 24, label: "report.preset.hour24" }, { count: 48, label: "report.preset.hour48" }],
+  // day, week and fortnight side by side where the screen opens; the last day is grouped by hour
+  // (one daily bar would say nothing), so choosing it here switches the grouping
+  day: [{ count: 24, granularity: "hour", label: "report.preset.hour24" }, { count: 7, label: "report.preset.day7" }, { count: 15, label: "report.preset.day15" }, { count: 30, label: "report.preset.day30" }, { count: 90, label: "report.preset.day90" }],
   month: [{ count: 12, label: "report.preset.month12" }],
 };
+const defaultCount = (granularity: Granularity) => PERIOD_PRESETS[granularity][0]!;
+const presetValue = (preset: { count: number; granularity?: Granularity }) => (preset.granularity ? `${preset.granularity}:${preset.count}` : String(preset.count));
 
 export function PeriodBar({ query, onChange, report }: { query: ReportQuery; onChange: (query: ReportQuery) => void; report: ProductivityReport | null }) {
   const name = useId();
@@ -73,7 +78,7 @@ export function PeriodBar({ query, onChange, report }: { query: ReportQuery; onC
               query.granularity === granularity ? "bg-raised font-medium text-ink" : "text-ink-secondary hover:text-ink",
             )}>
               <input type="radio" name={name} value={granularity} checked={query.granularity === granularity} className="sr-only"
-                onChange={() => onChange({ granularity, count: PRESETS[granularity][0]!.count })} />
+                onChange={() => onChange({ granularity, count: defaultCount(granularity) })} />
               {t(`report.granularity.${granularity}` as LocaleKey)}
             </label>
           ))}
@@ -81,15 +86,18 @@ export function PeriodBar({ query, onChange, report }: { query: ReportQuery; onC
       </fieldset>
       <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-secondary">
         {t("report.window")}
-        <select value={isClosed ? "closed" : custom ? "custom" : String(query.count ?? PRESETS[query.granularity][0]!.count)}
+        <select value={isClosed ? "closed" : custom ? "custom" : String(query.count ?? defaultCount(query.granularity))}
           onChange={(event) => {
             const value = event.target.value;
             if (value === "closed") onChange({ granularity: query.granularity, from: closed.from, to: closed.to });
             else if (value === "custom") onChange({ granularity: query.granularity, from: normalize(report ? new Date(report.period.from).toISOString().slice(0, 10) : today), to: normalize(today) });
-            else onChange({ granularity: query.granularity, count: Number(value) });
+            else {
+              const [granularity, count] = value.includes(":") ? value.split(":") as [Granularity, string] : [query.granularity, value];
+              onChange({ granularity, count: Number(count) });
+            }
           }}
           className="h-9 rounded-lg border border-hairline/60 bg-panel px-2.5 text-[13px] font-normal text-ink">
-          {PRESETS[query.granularity].map((preset) => <option key={preset.count} value={preset.count}>{t(preset.label)}</option>)}
+          {PRESETS[query.granularity].map((preset) => <option key={presetValue(preset)} value={presetValue(preset)}>{t(preset.label)}</option>)}
           {query.granularity !== "hour" && <option value="closed">{t("report.preset.closedMonth")}</option>}
           <option value="custom">{t("report.preset.custom")}</option>
         </select>

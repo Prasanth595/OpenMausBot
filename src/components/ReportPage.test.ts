@@ -14,7 +14,7 @@ import { buildProductivityReport } from "../../server/productivity-report";
 import { executiveSummary } from "../../server/productivity-export";
 import { brt, CLIENT_NAME, scenario } from "../../server/testing/productivity-fixture";
 import { compareKpi, type ProductivityReport, type ReportGoals } from "../../shared/productivity";
-import { DeltaLine, ExportMenu, KpiCard, ReleasesTable, ReportView } from "./ReportPage";
+import { DeltaLine, ExportMenu, KpiCard, PeriodBar, ReleasesTable, ReportView } from "./ReportPage";
 import { niceScale } from "./ReportCharts";
 
 function report(period = { from: brt("2026-09-28T00:00:00"), to: brt("2026-10-03T00:00:00") }, goals: ReportGoals = {}): ProductivityReport {
@@ -269,5 +269,32 @@ describe("pieces", () => {
     expect(niceScale(223)).toEqual({ ceiling: 250, step: 50 });
     expect(niceScale(5)).toEqual({ ceiling: 5, step: 1 });
     expect(niceScale(13)).toEqual({ ceiling: 15, step: 5 });
+  });
+});
+
+describe("the period bar", () => {
+  const options = (html: string) => [...html.matchAll(/<option[^>]*value="([^"]+)"[^>]*>([^<]+)<\/option>/g)].map((match) => `${match[1]}:${match[2]}`);
+
+  it("offers the last day, week and fortnight next to the longer windows, shortest first", () => {
+    const day = renderToStaticMarkup(createElement(PeriodBar, { query: { granularity: "day", count: 15 }, onChange: () => undefined, report: null }));
+    // where the screen opens (grouped by day) the last day is offered too, switching the grouping to hours
+    expect(options(day)).toEqual(["hour:24:Last day (24 hours)", "7:Last week (7 days)", "15:Last fortnight (15 days)", "30:Last 30 days", "90:Last 90 days", "closed:Last closed month", "custom:Custom period…"]);
+    expect(day).toMatch(/<option[^>]*value="15"[^>]*selected=""/);
+    const hour = renderToStaticMarkup(createElement(PeriodBar, { query: { granularity: "hour", count: 24 }, onChange: () => undefined, report: null }));
+    expect(options(hour).slice(0, 2)).toEqual(["24:Last day (24 hours)", "48:Last 48 hours"]);
+  });
+
+  it("says them in pt-BR", () => {
+    setLocale("pt-BR");
+    const day = text(renderToStaticMarkup(createElement(PeriodBar, { query: { granularity: "day", count: 7 }, onChange: () => undefined, report: null })));
+    expect(day).toContain("Último dia (24 horas)");
+    expect(day).toContain("Última semana (7 dias)");
+    expect(day).toContain("Última quinzena (15 dias)");
+  });
+
+  it("keeps each grouping's default window: 48 hours, 30 days, 12 months", () => {
+    const changes: unknown[] = [];
+    const bar = renderToStaticMarkup(createElement(PeriodBar, { query: { granularity: "day" }, onChange: (query) => changes.push(query), report: null }));
+    expect(bar).toMatch(/<option[^>]*value="30"[^>]*selected=""/);
   });
 });

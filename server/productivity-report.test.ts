@@ -5,7 +5,7 @@
 // DORA, the backlog at each bucket's end, coverage gaps, the bots' local effort
 // only where it was recorded, and the time a report takes on a real-size cache.
 import { describe, expect, it } from "vitest";
-import { bucketStarts } from "../shared/productivity.ts";
+import { bucketStarts, presetPeriod } from "../shared/productivity.ts";
 import type { GhIssue, GhPr } from "./productivity-github.ts";
 import { buildProductivityReport, buildTimeline, businessDays, coveredBusinessDays, issuesOfPr, releasePairs, weekendMs } from "./productivity-report.ts";
 import { brt, HOUR, run, scenario, sha } from "./testing/productivity-fixture.ts";
@@ -161,6 +161,19 @@ describe("KPIs", () => {
     const usage = [...base.usage, { at: new Date(brt("2026-10-01T15:00:00")).toISOString(), botId: "eng", botName: "Eng PRODEV", input: 10, output: 1, costUsd: 1.2 }];
     const many = buildProductivityReport({ ...base, runs, usage, granularity: "month", period: { from: brt("2026-09-01T00:00:00"), to: brt("2026-11-01T00:00:00") } }).kpis;
     expect(many).toMatchObject({ deliveriesInUsageDays: 6, costEngineeringUsd: 1.2, costOperationsUsd: 0.75, costPerDelivery: 0.2 });
+  });
+
+  it("compares a period still under way with the same elapsed span of the one before, so a steady pace shows no change", () => {
+    // one release a day at 15:00; on Tuesday 13/10 at 09:00 the week so far holds 6 of them, and so must the week before at that point
+    const base = scenario();
+    const days = Array.from({ length: 14 }, (_, i) => new Date(Date.UTC(2026, 8, 29 + i)).toISOString().slice(0, 10));
+    const runs = days.map((day, i) => run(`d${String(i).padStart(2, "0")}`, "released", `${day}T15:00:00`, { sha: (i + 1).toString(16).padStart(40, "0") }));
+    const now = brt("2026-10-13T09:00:00");
+    const week = buildProductivityReport({ ...base, now, runs, logCoverage: { from: brt("2026-09-01T00:00:00"), to: now }, granularity: "day", period: presetPeriod("day", 7, now) });
+    expect(week.kpis.deliveries).toBe(6);
+    expect(week.previousKpis.deliveries).toBe(6);
+    // the previous period itself is still the whole week before, for its title
+    expect(week.previous).toEqual({ from: brt("2026-09-30T00:00:00"), to: brt("2026-10-07T00:00:00") });
   });
 
   it("knows when the repository was created (no comparison against a period before it)", () => {
