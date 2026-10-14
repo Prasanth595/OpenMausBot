@@ -86,7 +86,7 @@ export const CLOUD_HOME_PLACE = "the user's My Cloud, their always-on OpenMausBo
 
 export function cloudHomePrompt(sharedComputerTools: boolean): string {
   return ` You run on ${CLOUD_HOME_PLACE}.` + (sharedComputerTools
-    ? " If they ask for something on their own Mac or PC, check list_shared_computers: a Mac they lend to My Cloud is reachable through shared_computer, within the folders and apps it allows. If none is lent and online, say so in one sentence: they can turn on Let My Cloud use this Mac under Settings → MausBot Cloud in the desktop app on that Mac."
+    ? " If they ask for something on their own Mac or PC, check list_shared_computers: a computer they lend to My Cloud is reachable through shared_computer, within the folders and apps it allows. If none is lent and online, say so in one sentence: they can turn on Let My Cloud use this computer under Settings → MausBot Cloud in the desktop app on that computer."
     : " You cannot see or use their Mac or PC, its screen or its files from here. If they ask for something on it, say so in one sentence.")
     + " Offer what works here: the built-in browser and their cloud computer, a desktop in the cloud. Call it their cloud computer, as the app does. Never ask them to set up this computer or a Local VM; neither exists here.";
 }
@@ -97,7 +97,9 @@ export const COMPOSIO_PROMPT =
 export function composioSystemPrompt(grants: Record<string, ConnectorToolGrant> | undefined): string {
   if (grants === undefined) return COMPOSIO_PROMPT;
   const services = Object.keys(grants);
-  if (services.length === 0) return "";
+  if (services.length === 0) {
+    return " No connected apps are assigned to this bot. If a task needs one, or an app's sign-in has expired, call COMPOSIO_MANAGE_CONNECTIONS to show the user a card that connects it, and ask them to allow that app for this bot in OpenMausBot.";
+  }
   const named = services.map(connectorServiceLabel).join(", ");
   return ` The user's connected apps assigned to this bot (${named}) are reachable through the composio tools — find the right one with COMPOSIO_SEARCH_TOOLS, read its arguments with COMPOSIO_GET_TOOL_SCHEMAS, then run it with COMPOSIO_MULTI_EXECUTE_TOOL. Only the tools this bot was granted will run; when a needed tool is refused, tell the user and ask them to grant it in OpenMausBot. Reach for the granted services before telling the user you have no access.`;
 }
@@ -116,6 +118,15 @@ export function customMcpPrompt(names: string[]): string {
 }
 export const CREDENTIAL_PROMPT =
   " If a supported API key is missing for the service actually needed, use request_credential to create a secure credential request. Before requesting a computer-provider key, inspect the configured targets with select_computer; an existing self-hosted VPS does not need Boat credentials. Do not request a different provider's key merely because a task mentions cloud. A freshly QR-paired mobile app or the desktop app can show the secure entry card. Never claim it opened unless the request succeeded, and never ask the user to paste credentials into chat.";
+/** Ten minutes stays inside the 20-minute turn stall watchdog, which sees nothing while a command runs. */
+export const BASH_MAX_TIMEOUT_MS = 600_000;
+const LONG_COMMANDS_TEXT =
+  ` Long-running shell commands: a shell call is stopped after a default limit (2 minutes for a Bash call) and the output of a stopped command is lost. Before running anything that can take more than a minute, such as transcription (whisper), ffmpeg or ffprobe over long media, renders, large builds or big file transfers, either pass a longer per-call timeout (Bash takes \`timeout\` in milliseconds, up to ${BASH_MAX_TIMEOUT_MS}) or start it detached with its output in a file (\`nohup <command> > /tmp/<job>.log 2>&1 &\`) and check that file in later calls. Never scan the whole disk with \`find /\` or similar: search by name with \`mdfind -name\` on macOS, or search a specific folder such as your workspace or home with a depth limit. If a command times out, do not rerun it the same way.`;
+const VM_LONG_COMMANDS_TEXT =
+  " In your Local VM, vm_exec takes `timeout_seconds` instead (default 60, at most 300); start anything longer detached the same way, inside the VM, and check its log with later vm_exec calls.";
+export function longCommandsPrompt(computer: ComputerPromptKind | null): string {
+  return LONG_COMMANDS_TEXT + (computer === "vm-private" || computer === "vm-shared" ? VM_LONG_COMMANDS_TEXT : "");
+}
 export const THREADS_PROMPT =
   " A thread is one conversation with its own history and its own run; a bot can have several running at once, and the person sees them as rows under that bot. Use start_thread to open one on yourself for separate work; to hand a teammate a job in a fresh thread of its own, use coordinate_bots with thread \"new\". Use list_threads to see how the ones you opened are going. When you mention a thread to the person, write its title as #Title so it links. Do not use a ticket comment, a note, or a room post as a stand-in for a thread.";
 export const WIDGET_PROMPT =

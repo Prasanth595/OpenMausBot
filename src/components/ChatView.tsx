@@ -52,8 +52,8 @@ import {
   openBot,
 } from "@/state/store";
 import { EngineSetup } from "./EngineSetup";
-import { CHATGPT_USAGE_URL } from "./ChatGptPlanStatus";
-import { openExternalLink } from "@/lib/app-links";
+import { CHATGPT_USAGE_URL, ManageUsageLink } from "./ChatGptPlanStatus";
+import { CODEX_USAGE_URL, codexUsageLimitReached } from "../../shared/codex-usage-limit";
 import { ClaudeUpdatePrompt } from "./ClaudeUpdatePrompt";
 import { MacCuaRecoveryActions } from "./MacCuaRecoveryActions";
 import { macCuaPermissionMessage, missingMacCuaPermissions } from "@/lib/mac-cua-permissions";
@@ -159,7 +159,7 @@ interface ChatRows {
   busy: boolean;
   hasMore: boolean;
   bots: readonly Bot[];
-  mentionPeers: readonly Bot[];
+  mentionPeers: readonly Bot[]; mentionPerson: { profileName?: string };
   focus: AppState["focusMessage"];
   showToolCalls: boolean;
   locale: string;
@@ -246,6 +246,7 @@ export function ErrorRow({
     ? macCuaPermissionMessage(currentPermissions)
     : null;
   const headline = macCuaReason ?? plainHeadline ?? message;
+  const usageUrl = message.includes("subscription_sharing_usage_limit_exceeded") ? CHATGPT_USAGE_URL : codexUsageLimitReached(message) ? CODEX_USAGE_URL : null;
   return (
     <div className="flex justify-start">
       <div className="w-fit max-w-[min(42rem,78%)] rounded-xl border border-danger/30 bg-danger/10 px-3.5 py-2.5 text-[13.5px] text-danger">
@@ -256,10 +257,8 @@ export function ErrorRow({
         {headline !== message && <details className="mt-2 text-[12px] text-ink-secondary"><summary className="cursor-pointer">{macCuaReason ? t("computer.mac.permission.driverDetail") : t("chat.error.details")}</summary><p className="mt-1 break-words">{message}</p></details>}
         {macCuaReason &&
           <MacCuaRecoveryActions reason={message} />}
-        {message.includes("subscription_sharing_usage_limit_exceeded") ? (
-          <a href={CHATGPT_USAGE_URL} target="_blank" rel="noopener noreferrer" className="ui-button ui-button-md mt-2 border-transparent bg-ink text-app hover:brightness-110" onClick={(event) => {
-            if (window.ogb?.openExternal) { event.preventDefault(); void openExternalLink(CHATGPT_USAGE_URL); }
-          }}>{t("engineSetup.chatgpt.manageUsage")}</a>
+        {usageUrl ? (
+          <ManageUsageLink href={usageUrl} className="ui-button ui-button-md mt-2 border-transparent bg-ink text-app hover:brightness-110" />
         ) : claudeUpdateInstance ? (
           <ClaudeUpdatePrompt instance={claudeUpdateInstance} onRetry={onRetry} />
         ) : isProviderSafetyBlock(message) ? (
@@ -437,7 +436,7 @@ const Bubble = memo(function Bubble({
   replyTarget?: Message;
   onReply: (message: Message) => void;
 }) {
-  const { botId, threadId, botName, voiceId, tts, localVoice, busy, mentionPeers, focus, dispatch, onBranch, bubbleStyle } = useChatRows();
+  const { botId, threadId, botName, voiceId, tts, localVoice, busy, mentionPeers, mentionPerson, focus, dispatch, onBranch, bubbleStyle } = useChatRows();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const peer = peerLine(message) ?? peerRequest(message, botId);
   const user = message.role === "user" && !peer;
@@ -623,7 +622,7 @@ const Bubble = memo(function Bubble({
               {viewRaw && text ? (
                 <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={botId} data-citation-thread={threadId}><RawMarkdownView text={text} /></div>
               ) : text ? (
-                <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={botId} data-citation-thread={threadId}><ChatMarkdown text={text} mentionPeers={mentionPeers} message={{ threadId, messageId: message.id }} delivered={group?.delivered} /></div>
+                <div data-citation-source={message.id} data-citation-owner-type="bot" data-citation-owner={botId} data-citation-thread={threadId}><ChatMarkdown text={text} mentionPeers={mentionPeers} mentionPerson={mentionPerson} message={{ threadId, messageId: message.id }} delivered={group?.delivered} /></div>
               ) : null}
               {group && <AttachmentGallery images={group.images} files={group.files} message={{ threadId, messageId: message.id }} eager={eagerAttachments} beneath />}
             </MessageBoundary>
@@ -900,7 +899,7 @@ const MessagesList = memo(function MessagesList({
             case "routine.run":
               return <RoutineRunRow message={m} botId={botId} />;
             case "call":
-              return m.call ? <CallRecordRow message={m} transcript={transcript} botName={botName} busy={busy} hasMore={hasMore} /> : null;
+              return m.call ? <CallRecordRow message={m} transcript={transcript} botName={botName} threadId={threadId} busy={busy} hasMore={hasMore} /> : null;
             case "activity": {
               if (m.dataResult) return <DataResultChip message={m} />;
               if (isStatusActivity(m)) return <StatusActivityRow message={m} />;
@@ -1106,8 +1105,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const bubbleStyle = useMemo(() => (colorMine ? userBubbleStyle(bot.color) : undefined), [colorMine, bot.color]);
   const hasMore = Boolean(bot.hasMore);
   const rows = useMemo<ChatRows>(
-    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle }),
-    [bot.id, bot.threadId, bot.name, bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle],
+    () => ({ botId: bot.id, threadId: bot.threadId, botName: bot.name, voiceId: bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, mentionPerson: { profileName: state.config?.profile?.name }, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle }),
+    [bot.id, bot.threadId, bot.name, bot.voice, tts, localVoice, busy, hasMore, bots, mentionPeers, state.config?.profile?.name, focus, showToolCalls, locale, dispatch, onBranch, bubbleStyle],
   );
   const place = effectivePlace(bot, bot.tasks?.find((task) => task.threadId === bot.threadId));
 
@@ -1435,17 +1434,6 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
 
       <TranscriptAnnouncer threadKey={transcriptKey} snapshot={announcement} />
 
-      {!following && (
-        <button
-          onClick={jumpToLatest}
-          aria-label={t("chat.jumpToLatestAria")}
-          className="animate-pop-in absolute left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-hairline/40 bg-raised px-3 py-1.5 text-[12.5px] text-ink shadow-lg hover:bg-raised-hover"
-          style={{ bottom: composerDock.height }}
-        >
-          <ArrowDown size={13} /> {t("chat.jumpToLatest")}
-        </button>
-      )}
-
       <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2]">
       {lastRunStep && showRun(recordedRun) && showRunCard && runDismissed.get(transcriptKey) !== lastRunStep.id && (
         <div className="flex justify-end px-5 pb-2">
@@ -1460,6 +1448,17 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               composerDockRef.current?.querySelector("textarea")?.focus();
             }}
           />
+        </div>
+      )}
+      {!following && (
+        <div className="relative">
+          <button
+            onClick={jumpToLatest}
+            aria-label={t("chat.jumpToLatestAria")}
+            className="animate-pop-in pointer-events-auto absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-hairline/40 bg-raised px-3 py-1.5 text-[12.5px] text-ink shadow-lg hover:bg-raised-hover"
+          >
+            <ArrowDown size={13} /> {t("chat.jumpToLatest")}
+          </button>
         </div>
       )}
       <LiveCallBar bot={bot} />

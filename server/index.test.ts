@@ -11323,6 +11323,12 @@ describe("harness HTTP API", () => {
       expect(connectorLinkRequests).toHaveLength(before + 3);
       expect((await api("POST", card, { threadId: "wrong-thread" })).status).toBe(404);
       expect(connectorLinkRequests).toHaveLength(before + 3);
+      const labelled = await api("POST", card, { threadId: bot.threadId, alias: " personal " });
+      expect(labelled.status).toBe(200);
+      expect(connectorLinkRequests.at(-1)).toEqual({ toolkit: "slack", alias: "personal" });
+      const relabelled = (await api("GET", `/api/threads/${bot.threadId}/messages`)).body.messages.find((message: any) => message.id === messageIds[0]);
+      expect(relabelled.connector).toMatchObject({ alias: "personal", status: "authorizing" });
+      expect((await api("POST", card, { threadId: bot.threadId, alias: "x".repeat(65) })).status).toBe(400);
     } finally {
       connectorAccounts = [];
       await api("DELETE", `/api/bots/${bot.id}`);
@@ -12150,6 +12156,35 @@ describe("bot memory API", () => {
       const ownHits = ((await own.json()) as { hits: Array<Record<string, unknown>> }).hits;
       expect(ownHits[0]).toMatchObject({ current: true, crossed: false });
       expect(await roomActivity()).toHaveLength(1);
+
+      expect((await api("POST", `/api/groups/${room.id}/messages`, { text: "The deploy checklist was signed off" })).status).toBe(202);
+      await api("POST", `/api/groups/${room.id}/interrupt`, {});
+      const roomHits = ((await (await searchFrom(privateThreadId, "deploy checklist signed")).json()) as { hits: Array<Record<string, unknown>> }).hits;
+      expect(roomHits[0]).toMatchObject({ threadId: roomThreadId, room: "Ops" });
+      const roomRead = await fetch(
+        `${BASE}/api/internal/session-read?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(privateThreadId)}&threadId=${encodeURIComponent(roomThreadId)}&messageId=${encodeURIComponent(String(roomHits[0]!.messageId))}`,
+        { headers: { authorization: `Bearer ${await mintTestCapability(BASE, bot.id, privateThreadId)}` } },
+      );
+      expect(roomRead.status).toBe(200);
+      expect(await roomRead.json()).toMatchObject({ text: "The deploy checklist was signed off", crossed: false });
+
+      const otherRoom = (await api("POST", "/api/groups", { name: "Launch", memberIds: [bot.id] })).body.group;
+      try {
+        const otherThreadId = otherRoom.threadId as string;
+        const fromOther = ((await (await searchFrom(otherThreadId, "deploy checklist signed")).json()) as { hits: Array<Record<string, unknown>> }).hits;
+        expect(fromOther[0]).toMatchObject({ threadId: roomThreadId, crossed: false });
+        const across = await fetch(
+          `${BASE}/api/internal/session-read?fromBotId=${encodeURIComponent(bot.id)}&fromThreadId=${encodeURIComponent(otherThreadId)}&threadId=${encodeURIComponent(roomThreadId)}&messageId=${encodeURIComponent(String(fromOther[0]!.messageId))}`,
+          { headers: { authorization: `Bearer ${await mintTestCapability(BASE, bot.id, otherThreadId)}` } },
+        );
+        expect(across.status).toBe(200);
+        expect(await across.json()).toMatchObject({ crossed: false });
+        const otherDump = await api("GET", `/api/threads/${otherThreadId}/export?format=json`);
+        expect(((otherDump.body.messages ?? []) as Array<{ kind?: string; tool?: { name?: string } }>)
+          .filter((message) => message.kind === "activity" && /recalled/.test(message.tool?.name ?? ""))).toEqual([]);
+      } finally {
+        await api("DELETE", `/api/groups/${otherRoom.id}`);
+      }
     } finally {
       await api("POST", `/api/bots/${bot.id}/interrupt`);
       await api("DELETE", `/api/groups/${room.id}`);
