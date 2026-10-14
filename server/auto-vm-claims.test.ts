@@ -34,16 +34,12 @@ describe("startAutoVmClaim", () => {
     table.set("t1", slot(claim));
     startAutoVmClaim(table, "t1", "gen-1");
     await table.get("t1")!.begin;
-    // The slot the GET gate reads must survive the rejection: deleting it
-    // would fall through to held:false and the bridge would forward screen
-    // calls onto a VM this turn never claimed.
     expect(table.has("t1")).toBe(true);
     expect(table.get("t1")!.failed).toBe(true);
     expect(table.get("t1")!.owner.generation).toBe("gen-1");
     startAutoVmClaim(table, "t1", "gen-1");
     startAutoVmClaim(table, "t1", "gen-1");
     expect(claim).toHaveBeenCalledExactlyOnceWith();
-    // Settle GC still clears it, and the next generation starts fresh.
     table.delete("t1");
     const next = vi.fn(async () => undefined);
     table.set("t1", slot(next, "gen-2"));
@@ -108,11 +104,9 @@ describe("startAutoVmClaim", () => {
     });
     startAutoVmClaim(table, "t1", "gen-1");
     await table.get("t1")!.begin;
-    expect(onRejected).toHaveBeenCalledExactlyOnceWith("the Local VM died");
-    // The hook rides the fire-once claim, so a later gate poll can never
-    // surface a second terminal error for the same rejection.
+    expect(onRejected).toHaveBeenCalledExactlyOnceWith("the Local VM died", expect.objectContaining({ message: "the Local VM died" }));
     startAutoVmClaim(table, "t1", "gen-1");
-    expect(onRejected).toHaveBeenCalledExactlyOnceWith("the Local VM died");
+    expect(onRejected).toHaveBeenCalledExactlyOnceWith("the Local VM died", expect.objectContaining({ message: "the Local VM died" }));
   });
 
   it("never fires the rejection hook for a claim that lands", async () => {

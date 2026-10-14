@@ -2,8 +2,7 @@ import { createElement, type EffectCallback } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, expect, it, vi } from "vitest";
 
-// Connect your phone on this computer: the phone flow reveals itself once the
-// companion's state is read, once per request. React's hooks are replayed by hand.
+// React's hooks are replayed by hand.
 const f = vi.hoisted(() => ({ values: [] as unknown[], index: 0, effects: [] as EffectCallback[], revealed: [] as unknown[], state: null as object | null }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
@@ -51,6 +50,17 @@ it("a plain visit reveals nothing", () => {
   f.values[0] = { current: { id: "flow" } };
   render(0);
   expect(f.revealed).toEqual([]);
+});
+
+it("keeps browser access separately off until granted, including old sidecar snapshots", () => {
+  for (const browserControlAccess of [undefined, false, true]) {
+    f.state = { enabled: true, devices: [{ id: "phone-1", name: "Ada", lastSeenAt: Date.now(), cloudDesktopAccess: true, browserControlAccess }], port: 8810 };
+    const markup = renderToStaticMarkup(createElement(() => CompanionSection({})));
+    const browser = markup.match(/<button[^>]*aria-label="Browser control access for Ada"[^>]*>/)?.[0];
+    const computer = markup.match(/<button[^>]*aria-label="Computer view access for Ada"[^>]*>/)?.[0];
+    expect(browser).toContain(`aria-checked="${browserControlAccess === true}"`);
+    expect(computer).toContain('aria-checked="true"');
+  }
 });
 
 it("reveals again after Settings went elsewhere and came back on a new request", () => {

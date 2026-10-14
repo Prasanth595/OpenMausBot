@@ -9,6 +9,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -33,16 +34,13 @@ import {
   skillsSystemPrompt,
   stageSkillWrite,
   syncSkillLinks,
+  undoSkillWrite,
 } from "./skills.ts";
 import { parseSkillSource } from "./skill-fetch.ts";
 import { buildSystemPrompt } from "./system-prompt.ts";
 import { workspaceDir } from "./workspace.ts";
 
-// skills.ts resolves storage through workspaceDir(botId) → DATA_DIR, which
-// reads OMB_DATA_DIR at import time — so point the suite at a scratch dir
-// via vitest's per-file process env before importing. Simpler: use a unique
-// botId per test; workspaces land under the real DATA_DIR's scratch when
-// OMB_DATA_DIR is set by the harness. Here we isolate by botId.
+// skills.ts reads OMB_DATA_DIR at import time, so tests isolate by a unique botId each.
 const SKILL = (name: string, description = "Reviews a PR the way this team reviews PRs.") =>
   `---\nname: ${name}\ndescription: ${description}\n---\n\n# ${name}\n\nDo the thing.\n`;
 
@@ -61,7 +59,7 @@ let bot: string;
 
 beforeEach(() => {
   scratch = mkdtempSync(join(tmpdir(), "omb-skills-"));
-  process.env.OMB_TEST_UNUSED = scratch; // keep cleanup symmetrical
+  process.env.OMB_TEST_UNUSED = scratch;
   bot = `test-bot-${Math.random().toString(36).slice(2, 10)}`;
 });
 
@@ -195,6 +193,12 @@ describe("parseSkillMd", () => {
     expect("error" in parseSkillMd("---\nname: ok\n---\nbody")).toBe(true);
     expect("error" in parseSkillMd(SKILL("ok", "x".repeat(1025)))).toBe(true);
   });
+
+  it("reads a SKILL.md saved with a byte order mark", () => {
+    const parsed = parseSkillMd(`\uFEFF${SKILL("code-review")}`);
+    expect(parsed).toMatchObject({ name: "code-review", description: expect.stringContaining("Reviews") });
+    if (!("error" in parsed)) expect(parsed.body).toContain("Do the thing.");
+  });
 });
 
 describe("scanSkillText", () => {
@@ -213,7 +217,6 @@ describe("install → review → enable lifecycle", () => {
     ]);
     expect(installed).toMatchObject({ name: "code-review", enabled: false });
     expect(installed).toMatchObject({ editable: false });
-    // disabled: invisible to the prompt
     expect(skillsSystemPrompt(bot)).toBe("");
 
     const enabled = setSkillEnabled(bot, "code-review", true);
@@ -222,16 +225,29 @@ describe("install → review → enable lifecycle", () => {
     expect(prompt).toContain("- code-review:");
     expect(prompt).toContain("never override");
 
-    // native discovery links exist for each CLI family, pointing at the store
     for (const dir of [".claude/skills", ".agents/skills", ".grok/skills"]) {
       const path = join(workspaceDir(bot), dir, "code-review");
       expect(existsSync(path), `${dir} link should exist`).toBe(true);
       expect(lstatSync(path).isSymbolicLink()).toBe(true);
     }
 
-    // disable removes it from prompt and links
     setSkillEnabled(bot, "code-review", false);
     expect(skillsSystemPrompt(bot)).toBe("");
+  });
+
+  it("rewrites the managed-link record only when the set of links changes", () => {
+    installSkill(bot, "src", [{ path: "SKILL.md", content: SKILL("steady-links") }]);
+    setSkillEnabled(bot, "steady-links", true);
+    const record = join(DATA_DIR, "skill-state", bot, "managed-links.json");
+    const saved = statSync(record).ino;
+
+    syncSkillLinks(bot);
+    syncSkillLinks(bot);
+    expect(statSync(record).ino).toBe(saved);
+
+    setSkillEnabled(bot, "steady-links", false);
+    expect(statSync(record).ino).not.toBe(saved);
+    expect(JSON.parse(readFileSync(record, "utf8"))).toEqual([]);
   });
 
   it("stores only the reviewed SKILL.md and reports every supporting file", () => {
@@ -319,12 +335,10 @@ describe("install → review → enable lifecycle", () => {
     const userTarget = join(scratch, "replacement");
     mkdirSync(userTarget, { recursive: true });
     const replaced = join(root, ".claude", "skills", "link-safety");
-    // Node 24 on macOS reports a directory symlink as EISDIR unless recursive
-    // removal is enabled; rm still unlinks the symlink without following it.
+    // Node 24 on macOS reports a directory symlink as EISDIR unless recursive removal is on; rm still only unlinks it.
     rmSync(replaced, { recursive: true, force: true });
     symlinkSync(userTarget, replaced, process.platform === "win32" ? "junction" : "dir");
 
-    // The other two app links now point at a missing target and are broken.
     rmSync(join(root, "skills", "link-safety"), { recursive: true, force: true });
     expect(skillsSystemPrompt(bot)).toBe("");
     expect(realpathSync(replaced)).toBe(realpathSync(userTarget));
@@ -377,8 +391,6 @@ describe("install → review → enable lifecycle", () => {
     rmSync(skillsRoot, { recursive: true, force: true });
     symlinkSync(outsideRoot, skillsRoot, process.platform === "win32" ? "junction" : "dir");
 
-    // Before reconciliation, each app-created link now reaches the unreviewed
-    // replacement through the unchanged workspace/skills/<name> target.
     for (const dir of [".claude/skills", ".agents/skills", ".grok/skills"]) {
       expect(realpathSync(join(root, dir, "root-replaced"))).toBe(realpathSync(outsideSkill));
     }
@@ -982,7 +994,6 @@ describe("staged skill writes", () => {
     expect(JSON.parse(readFileSync(securePath, "utf8"))).toEqual({ writes: {} });
     expect(existsSync(legacyPath)).toBe(false);
 
-    // Recreating workspace state cannot override the protected migration marker.
     writeFileSync(legacyPath, JSON.stringify({ writes: { legacy: { name: "legacy-stage" } } }));
     expect(listStagedSkillWrites(bot)).toEqual([]);
   });
@@ -1039,7 +1050,6 @@ describe("staged skill writes", () => {
     const applied = applySkillWriteWithReceipt(bot, staged, () => { throw new Error("receipt write failed"); });
     expect(applied).toMatchObject({ result: { name: "full-receipt", enabled: true }, settlementPending: true });
     expect(listSkills(bot)).toMatchObject([{ name: "full-receipt", enabled: true }]);
-    // Recover the same durable operation, never create a second skill.
     expect(applySkillWriteWithReceipt(bot, staged, () => {})).toMatchObject({ result: { name: "full-receipt" } });
     expect(listStagedSkillWrites(bot)).toEqual([]);
   });
@@ -1113,8 +1123,7 @@ describe("staged skill writes", () => {
       }),
     ).toThrow("simulated card write failure");
 
-    // A proposal card is durable and has no expiry. Simulate a long delay
-    // before another proposal is staged; the manifest token must still replay.
+    // A proposal card has no expiry: simulate a long delay before another proposal is staged.
     const stagedStorePath = join(DATA_DIR, "skill-state", bot, "staged.json");
     const stagedStore = JSON.parse(readFileSync(stagedStorePath, "utf8"));
     stagedStore.writes[staged.id].createdAt = "2020-01-01T00:00:00.000Z";
@@ -1184,5 +1193,46 @@ describe("parseSkillSource", () => {
     expect("error" in parseSkillSource("https://evil.example/skill.md")).toBe(true);
     expect("error" in parseSkillSource("")).toBe(true);
     expect("error" in parseSkillSource("https://skills.sh/only-an-owner")).toBe(true);
+  });
+});
+
+describe("undo of a skill a bot wrote without a person", () => {
+  const write = (action: "create" | "update", instructions: string) => {
+    const staged = stageSkillWrite(bot, {
+      action,
+      ...(action === "update" ? { targetName: "own-skill" } : {}),
+      files: [{ path: "SKILL.md", content: SKILL("own-skill", instructions) }],
+    });
+    if ("error" in staged) throw new Error(staged.error);
+    const previous = action === "update" ? readSkillFile(bot, "own-skill") : null;
+    const source = listSkills(bot).find((skill) => skill.name === "own-skill")?.source;
+    const applied = applySkillWriteWithReceipt(bot, staged, () => {});
+    if ("error" in applied) throw new Error(applied.error);
+    return { stagedId: staged.id, name: "own-skill", action, ...(previous && source ? { previous: { skillMd: previous, source } } : {}) };
+  };
+
+  it("removes a created skill, once", () => {
+    const created = write("create", "First version.");
+    expect(undoSkillWrite(bot, created)).toEqual({ undone: true });
+    expect(listSkills(bot).some((skill) => skill.name === "own-skill")).toBe(false);
+    expect(undoSkillWrite(bot, created)).toEqual({ stale: true });
+  });
+
+  it("puts an updated skill's previous SKILL.md back while it is unchanged since", () => {
+    write("create", "First version.");
+    const original = readSkillFile(bot, "own-skill");
+    const updated = write("update", "Second version.");
+    expect(undoSkillWrite(bot, updated)).toEqual({ undone: true });
+    expect(readSkillFile(bot, "own-skill")).toBe(original);
+    expect(listSkills(bot).find((skill) => skill.name === "own-skill")).toMatchObject({ enabled: true, description: "First version." });
+    expect(listStagedSkillWrites(bot)).toEqual([]);
+    expect(undoSkillWrite(bot, updated)).toEqual({ stale: true });
+  });
+
+  it("refuses a create's Undo once the skill was updated since", () => {
+    const created = write("create", "First version.");
+    write("update", "Second version.");
+    expect(undoSkillWrite(bot, created)).toEqual({ stale: true });
+    expect(readSkillFile(bot, "own-skill")).toContain("Second version.");
   });
 });

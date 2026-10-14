@@ -1,7 +1,5 @@
-// SKILL.md reading shared by the server skill store, the package format and
-// the renderer. Pure text only: no filesystem, no Node globals, so the same
-// rules validate a skill wherever it is read (server/skills.ts re-exports
-// these under their historical names).
+// SKILL.md reading for the server skill store, the package format and the
+// renderer. Pure text, so the same rules validate a skill wherever it is read.
 
 /** Spec rule: lowercase alphanumerics with single hyphens, 1-64 chars,
  * folder name must equal it. The regex IS the traversal gate — no dots, no
@@ -43,6 +41,8 @@ export function parseSkillTags(raw: string | undefined): string[] | undefined {
  * every skill the spec's own examples show, and a parser that cannot
  * evaluate anchors or tags cannot be surprised by them. */
 export function parseSkillMd(raw: string): ParsedSkill | { error: string } {
+  // A byte order mark (Notepad, PowerShell) would hide the opening ---.
+  if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1);
   const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
   if (!match) return { error: "SKILL.md has no YAML frontmatter (--- block) at the top" };
   const fields: Record<string, string> = {};

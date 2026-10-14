@@ -1,15 +1,15 @@
-// The approval box: what the bot wants to do, and three ways to answer.
-//
-// Deliberately not the lettered A/B/C list the onboarding card uses — an
-// approval is a decision about one concrete action, so it shows the tool
-// and the actual command/path in monospace, and the choices carry their
-// own behavior instead of being matched by their label text.
-import { Check, ShieldCheck, X } from "lucide-react";
-import { type Bot, type Message, type OptionCardData } from "@/state/store";
+import { useState } from "react";
+import { Check, ShieldCheck, Undo2, X } from "lucide-react";
+import { api, ApiError, type Bot, type Message, type OptionCardData } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t, tFromServer } from "@/lib/i18n";
 import type { LocaleKey } from "@/locales";
 import { SkillRequestPreview } from "@/components/SkillRequestPreview";
+import { composioActionPhrase, outboundSummary } from "@/lib/approval-summary";
+import { niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
+import { cronScheduleLabel } from "../../shared/cron-label";
+import { PROFILE_REQUEST_FIELDS, type ProfileRequestField } from "../../shared/profile-request";
+import type { RoutineRequestSchedule } from "../../shared/routine-request";
 
 interface ToolLabels {
   [tool: string]: LocaleKey;
@@ -29,27 +29,48 @@ const SKILL_SETTLED_LABEL = {
   update: "approval.status.skillUpdated",
 } as const;
 
-/** What a settled approval card says happened, or undefined while it is
- * still open. The card's own status line and the sidebar row both read this,
- * so a chat that ends on the card never says one thing in each place. */
+const ROUTINE_APPLIED_LINE = {
+  create: "approval.applied.routine.create",
+  update: "approval.applied.routine.update",
+  pause: "approval.applied.routine.pause",
+  resume: "approval.applied.routine.resume",
+  run_now: "approval.applied.routine.runNow",
+  delete: "approval.applied.routine.delete",
+} as const;
+
+const SKILL_APPLIED_LINE = {
+  create: "approval.applied.skill.create",
+  update: "approval.applied.skill.update",
+} as const;
+
+const PROFILE_FIELD_LABEL: Record<ProfileRequestField, LocaleKey> = {
+  name: "approval.applied.field.name",
+  title: "approval.applied.field.title",
+  description: "approval.applied.field.description",
+  soul: "approval.applied.field.soul",
+  cwd: "approval.applied.field.cwd",
+  notifications: "approval.applied.field.notifications",
+  speakReplies: "approval.applied.field.speakReplies",
+};
+
 export function approvalCardOutcome(card: OptionCardData): string | undefined {
   if (card.expired === true) return t("approval.status.expired");
   if (!card.answered) return undefined;
-  const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.teamSetupRequest);
-  if (card.answered !== "allow") return isProposal ? t("approval.status.cancelled") : t("approval.status.denied");
+  if (card.undone === true) return t("approval.status.undone");
+  const isProposal = Boolean(card.routineRequest || card.skillRequest || card.profileRequest || card.modelRequest || card.teamSetupRequest);
+  if (card.answered !== "allow") return card.teamSetupRequest?.suggestion ? t("approval.status.notNow") : isProposal ? t("approval.status.cancelled") : t("approval.status.denied");
   if (card.teamSetupRequest) return card.teamSetupRequest.deletion ? "Bot deleted" : "Team setup applied";
   const routineAction = card.routineRequest?.operation.action;
   if (routineAction) return t(ROUTINE_SETTLED_LABEL[routineAction]);
   const skillAction = card.skillRequest?.action;
   if (skillAction) return t(SKILL_SETTLED_LABEL[skillAction]);
   if (card.profileRequest) return t("approval.status.profileUpdated");
+  if (card.modelRequest) return t("approval.status.modelChanged");
   if (card.routineRequest) return t("approval.status.routineConfirmed");
   if (card.skillRequest) return t("approval.status.skillConfirmed");
   return t("approval.status.allowed");
 }
 
-/** The tool's own name is noise to a human: mcp__ogb__computer_batch is
- * "computer batch", Bash is "run a command". */
 export function toolLabel(tool?: string): string {
   if (!tool) return t("approval.tool.takeAction");
   const bare = tool.replace(/^mcp__[^_]+__/, "").replace(/_/g, " ");
@@ -65,13 +86,8 @@ export function toolLabel(tool?: string): string {
     stage_skill: "approval.tool.enableSkill",
     update_skill: "approval.tool.updateSkill",
     update_profile: "approval.tool.updateProfile",
-    // An ACP driver can know the protocol's toolCall kind but not the
-    // tool's name, and sends the kind as the card's tool
-    // (server/drivers/acp/core.ts). Kinds are not verb phrases —
-    // "wants to other" reads as broken — so map every kind it can send
-    // to a real phrase. "shell" is its name for execute; "tool" is its
-    // fallback when an agent sends no kind at all — an unclassified call,
-    // so it reads differently from "other", the agent's own generic kind.
+    // ACP drivers may send the protocol's toolCall kind as the tool, so every kind maps to a phrase ("shell" is
+    // execute; "tool" is no kind at all).
     shell: "approval.tool.runCommand",
     edit: "approval.tool.editFile",
     read: "approval.tool.readFile",
@@ -82,22 +98,155 @@ export function toolLabel(tool?: string): string {
     tool: "approval.tool.useTool",
   };
   const key = nice[tool];
-  return key ? t(key) : bare;
+  if (key) return t(key);
+  return composioActionPhrase(tool.replace(/^mcp__[^_]+__/, "")) ?? bare;
+}
+
+function plainWhen(schedule: RoutineRequestSchedule): string {
+  if (schedule.type === "once") {
+    return new Date(schedule.at).toDateString() === new Date().toDateString()
+      ? t("approval.applied.today", { time: niceTime(schedule.at) })
+      : `${niceDate(schedule.at)}, ${niceTime(schedule.at)}`;
+  }
+  if (schedule.type === "cron") {
+    const label = cronScheduleLabel(schedule);
+    return label.startsWith("Cron ") ? "" : label;
+  }
+  if (schedule.type === "interval") return scheduleLabel({ ...schedule, anchorAt: schedule.anchorAt ?? 0 });
+  return scheduleLabel(schedule);
+}
+
+export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean } | undefined {
+  const routine = card.routineRequest;
+  if (routine) {
+    const operation = routine.operation;
+    const undo = routine.undo;
+    const when = undo?.schedule && operation.action !== "pause" && operation.action !== "delete" && operation.action !== "run_now"
+      ? plainWhen(undo.schedule)
+      : "";
+    const title = [
+      undo?.name ?? (operation.action === "create" ? operation.routine.name : ""),
+      operation.forBot ? t("approval.applied.forBot", { target: `@${operation.forBot.name}` }) : "",
+    ].filter(Boolean).join(" · ") + (when ? `, ${when}` : "");
+    const canUndo = operation.action === "create" ? Boolean(routine.resultId)
+      : operation.action === "update" ? Boolean(undo?.before && undo.appliedUpdatedAt !== undefined)
+        : operation.action === "pause" || operation.action === "resume" ? undo?.appliedUpdatedAt !== undefined
+          : operation.action === "delete" ? Boolean(undo?.before)
+            : false;
+    return { line: t(ROUTINE_APPLIED_LINE[operation.action], { name, title }), canUndo };
+  }
+  const skill = card.skillRequest;
+  if (skill) {
+    return {
+      line: t(SKILL_APPLIED_LINE[skill.action], { name, title: skill.name }),
+      canUndo: skill.action === "create" || Boolean(skill.previous),
+    };
+  }
+  const profile = card.profileRequest;
+  if (profile) {
+    const title = PROFILE_REQUEST_FIELDS.filter((field) => profile.changes[field] !== undefined)
+      .map((field) => t(PROFILE_FIELD_LABEL[field])).join(", ");
+    const line = profile.targetBotId === profile.botId
+      ? t("approval.applied.profileOwn", { name, title })
+      : t("approval.applied.profileOther", { name, target: `@${profile.targetName}`, title });
+    return { line, canUndo: Boolean(profile.undo) };
+  }
+  const model = card.modelRequest;
+  if (model) {
+    const title = model.selection.model;
+    const line = model.targetBotId === model.botId
+      ? t("approval.applied.modelOwn", { name, title })
+      : t("approval.applied.modelOther", { name, target: `@${model.targetName}`, title });
+    return { line, canUndo: true };
+  }
+  return undefined;
+}
+
+function AppliedChangeLine({
+  card,
+  name,
+  threadId,
+  summary,
+}: {
+  card: OptionCardData;
+  name: string;
+  threadId?: string;
+  summary: { line: string; canUndo: boolean };
+}) {
+  const [open, setOpen] = useState(false);
+  const [undoing, setUndoing] = useState(false);
+  const [error, setError] = useState<string>();
+  const undone = card.undone === true;
+  const undo = () => {
+    if (!threadId || !card.requestId || undoing) return;
+    setUndoing(true);
+    setError(undefined);
+    api(`/api/threads/${threadId}/undo`, { method: "POST", body: JSON.stringify({ requestId: card.requestId }) })
+      .catch((failure: unknown) => {
+        setError(failure instanceof ApiError && failure.body?.code === "changed-since"
+          ? t("approval.applied.changedSince")
+          : t("approval.applied.undoFailed", { error: failure instanceof Error ? failure.message : String(failure) }));
+      })
+      .finally(() => setUndoing(false));
+  };
+  return (
+    <div className="w-full max-w-[840px] text-[13px] text-ink-secondary" data-applied-change={name}>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        {undone ? <Undo2 size={14} className="shrink-0" /> : <Check size={14} className="shrink-0 text-success" />}
+        <span className="min-w-0 break-words">
+          {summary.line}
+          {undone && <span> · {t("approval.applied.undone")}</span>}
+        </span>
+        {!undone && summary.canUndo && threadId && (
+          <button
+            type="button"
+            onClick={undo}
+            disabled={undoing}
+            className="rounded-md px-1.5 py-0.5 font-medium text-accent hover:bg-inset disabled:opacity-60"
+          >
+            {undoing ? t("approval.applied.undoing") : t("approval.applied.undo")}
+          </button>
+        )}
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+          className="rounded-md px-1.5 py-0.5 text-ink-tertiary hover:bg-inset hover:text-ink-secondary"
+        >
+          {open ? t("approval.applied.hideDetails") : t("approval.applied.details")}
+        </button>
+      </div>
+      {error && <div role="alert" className="mt-1 text-[12.5px] text-warning">{error}</div>}
+      {open && (
+        <pre
+          tabIndex={0}
+          aria-label={t("approval.aria.appliedDetails")}
+          className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-inset px-3 py-2 font-mono text-[12.5px] leading-relaxed text-ink"
+        >
+          {card.subtitle}
+        </pre>
+      )}
+    </div>
+  );
 }
 
 export function ApprovalCard({
   bot,
   message,
+  threadId,
 }: {
-  /** who is asking, for the "Name wants to …" line */
-  bot?: Bot;
+  bot?: Pick<Bot, "name">;
   message: Message;
+  threadId?: string;
 }) {
   const card = message.card;
   if (!card) return null;
+  const applied = card.autoApplied === true && card.answered === "allow" && !card.held
+    ? appliedChange(card, bot?.name ?? t("approval.someone"))
+    : undefined;
+  if (applied) return <AppliedChangeLine card={card} name={bot?.name ?? t("approval.someone")} threadId={threadId} summary={applied} />;
   const settled = card.answered;
   const expired = card.expired === true;
-  // decided by voice on a Live call rather than tapped
   const byVoice = card.answeredBy?.via === "call" ? <span className="text-ink-tertiary">· {t("approval.status.byVoice")}</span> : null;
   const isRoutineRequest = Boolean(card.routineRequest);
   const isSkillRequest = Boolean(card.skillRequest);
@@ -107,6 +256,7 @@ export function ApprovalCard({
   const skillAction = card.skillRequest?.action;
   const heldNote = tFromServer(card.heldCode, card.held);
   const outcome = approvalCardOutcome(card);
+  const outbound = outboundSummary(card);
   const displayTool = isRoutineRequest
     ? routineAction === "create" ? "schedule_routine" : "manage_routine"
     : isSkillRequest
@@ -114,10 +264,6 @@ export function ApprovalCard({
     : isProfileRequest
       ? "update_profile"
     : card.tool;
-  // A cross-bot profile card is shown in the PROPOSER's thread, so
-  // "wants to update its profile" (fine for a bot editing itself) would
-  // silently claim the proposer's own profile is changing. Name the actual
-  // target whenever it differs from the proposer.
   const profileHeader = isProfileRequest && card.profileRequest
     ? card.profileRequest.targetBotId === card.profileRequest.botId
       ? t("approval.card.profileWantsToOwn", { name: bot?.name ?? t("approval.someone") })
@@ -137,7 +283,7 @@ export function ApprovalCard({
     >
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-[15px] font-semibold text-ink">
-          {isTeamSetup ? card.title : profileHeader ?? (
+          {isTeamSetup ? card.title : outbound ? outbound.headline : profileHeader ?? (
             <>
               {bot
                 ? t("approval.card.namedWantsTo", { name: bot.name, action: toolLabel(displayTool) })
@@ -145,10 +291,10 @@ export function ApprovalCard({
             </>
           )}
         </div>
-        {displayTool && !isTeamSetup && <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{displayTool}</span>}
+        {displayTool && !isTeamSetup && !outbound && <span className="shrink-0 font-mono text-[11px] text-ink-secondary">{displayTool}</span>}
       </div>
+      {outbound?.summary && <div className="mt-0.5 text-[13px] text-ink-secondary">{outbound.summary}</div>}
 
-      {/* what, exactly */}
       <pre
         tabIndex={0}
         aria-label={
@@ -173,8 +319,6 @@ export function ApprovalCard({
         </div>
       )}
 
-      {/* The decision lives in the composer (one place to answer, and it
-          can't be scrolled past); here we only record what happened. */}
       <div className="mt-3 flex items-center gap-1.5 text-[13px] text-ink-secondary">
         {outcome ? (
           <>
