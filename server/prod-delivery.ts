@@ -376,6 +376,8 @@ export interface ReleaseRecord {
   result: string;
   /** The commit production ran before this release (result.env PREVIOUS_COMMIT). */
   previousCommit?: string;
+  /** When its post-release check finished (ISO): the release was live by then. */
+  finishedAt?: string;
   /** When it went live (ISO), when the receipt is this commit's. */
   deployedAt?: string;
   /** What it published ("worker:agenda", "pages:nuria-kb-pages"), when the receipt is this commit's. */
@@ -404,7 +406,8 @@ export function releaseRecordFrom(resultEnv: string | null, receiptEnv: string |
   const deployedAt = receipt?.DEPLOYED_AT && !Number.isNaN(Date.parse(receipt.DEPLOYED_AT)) ? receipt.DEPLOYED_AT : undefined;
   const targets = receipt?.REMOTE_TARGETS ? [...new Set(receipt.REMOTE_TARGETS.split(",").map((each) => each.trim().split(":").slice(0, 2).join(":")).filter((each) => each.includes(":")))] : undefined;
   const previous = result?.PREVIOUS_COMMIT && /^[0-9a-f]{40}$/.test(result.PREVIOUS_COMMIT) ? result.PREVIOUS_COMMIT : undefined;
-  return { result: result?.RESULT ?? NO_POST_RELEASE, ...(previous ? { previousCommit: previous } : {}), ...(deployedAt ? { deployedAt } : {}), ...(targets?.length ? { targets } : {}) };
+  const finishedAt = result?.FINISHED_AT && !Number.isNaN(Date.parse(result.FINISHED_AT)) ? result.FINISHED_AT : undefined;
+  return { result: result?.RESULT ?? NO_POST_RELEASE, ...(finishedAt ? { finishedAt } : {}), ...(previous ? { previousCommit: previous } : {}), ...(deployedAt ? { deployedAt } : {}), ...(targets?.length ? { targets } : {}) };
 }
 
 /** The corridor's record of `sha` in its .deploy-history `dir`: the commit's
@@ -470,8 +473,9 @@ export async function watchProductionDelivery(sessions: readonly DeliverySession
     const archived = session.status === "archived";
     if (archived && !(session.delivery?.slug && Object.values(session.delivery.prs).some(recentlyAnnounced))) continue;
     if (!session.delivery) {
-      // "PRs #9329 e #9330" too: a plural report used to start no delivery at all
-      if (!/\/pull\/|\b(?:PRs?|pull requests?)\s*#\d/i.test(session.lastReport ?? "")) continue;
+      // "PRs #9329 e #9330" too: a plural report used to start no delivery at all; a PR
+      // handed over to the session (claimedPrs) is followed even when its report names none
+      if (!session.claimedPrs?.length && !/\/pull\/|\b(?:PRs?|pull requests?)\s*#\d/i.test(session.lastReport ?? "")) continue;
       session.delivery = { prs: {} };
     }
     const delivery = session.delivery;
@@ -757,6 +761,10 @@ export async function archiveBlockers(session: DeliverySession, deps: Pick<Deliv
     try {
       const status = (await deps.gh(["api", `repos/${slug}/compare/${mergeSha}...${tagSha}`, "--jq", ".status"])).trim();
       if (status !== "ahead" && status !== "identical") blockers.push(`a PR #${number} foi mergeada mas ainda não está em ${PRODUCTION_TAG}`);
+      // in the tag but not announced yet (announced ones were skipped above): archived now, the
+      // announcement would never come (14/10: #9555 archived ~5 min after the tag, before the pass).
+      // Only a PR the delivery pass follows is promised one; another keeps the old rule.
+      else if (known) blockers.push(`a PR #${number} está em ${PRODUCTION_TAG}, mas o servidor ainda não a anunciou em produção (o anúncio sai na próxima passada, a cada 10 min)`);
     } catch {
       unknown.push(`PR #${number} (produção)`);
     }

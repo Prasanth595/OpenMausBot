@@ -13,7 +13,7 @@
 const OPTIONS = [
   "- `RESULTADO: feito — <prova>`: a prova é algo que outra pessoa consegue conferir (link, ID da mensagem enviada, número da PR ou da issue, commit, o id do item em \"Precisa de você\" como o149, ou o comando entre crases com a saída que mostra o efeito).",
   "- `RESULTADO: nada a fazer — <o que você conferiu e como>`: a passada conferiu e não havia trabalho (vigia, medição, revisão sem novidade).",
-  "- `RESULTADO: em andamento — <o que falta e o que vai retomar>`: o trabalho segue em outro lugar (gate, release, sessão) e voltará.",
+  "- `RESULTADO: em andamento — <onde segue (PR, sessão ou link) e o que vai retomar>`: o trabalho segue em outro lugar e voltará; sem dizer onde, ninguém consegue acompanhar e conta como não verificado.",
   "- `RESULTADO: parcial — <o que faltou e por quê>`",
   "- `RESULTADO: não feito — <motivo>`",
 ];
@@ -23,7 +23,7 @@ export const ROUTINE_RESULT_CONTRACT = [
   "Ao terminar, a última linha da sua resposta precisa ser uma destas, exatamente neste formato:",
   ...OPTIONS,
   "Se a sua parte está feita e o resto é decisão do dono, use feito com o id do item em \"Precisa de você\" como prova.",
-  "O servidor só conta a execução como concluída com feito e uma prova conferível, ou com nada a fazer ou em andamento dizendo o que foi conferido; sem a linha, ela fica como não verificada.",
+  "O servidor só conta a execução como concluída com feito e uma prova conferível, com nada a fazer dizendo o que foi conferido, ou com em andamento dizendo onde segue; sem a linha, ela fica como não verificada.",
 ].join("\n");
 
 /** Added to a teammate's request. */
@@ -56,12 +56,19 @@ export function declaredResult(text: string): DeclaredResult {
     const detail = (match[2] ?? "").trim().slice(0, 500);
     if (verdict === "feito") return { kind: hasCheckableProof(detail) ? "done" : "unproven", detail };
     if (verdict === "nada a fazer") return { kind: detail ? "nothing" : "unproven", detail };
-    if (verdict === "em andamento") return { kind: detail ? "ongoing" : "unproven", detail };
+    // in progress names where it goes on (a PR, a session, a link): otherwise nothing can follow it up
+    if (verdict === "em andamento") return { kind: namesWhereItGoesOn(detail) ? "ongoing" : "unproven", detail };
     if (verdict.startsWith("parcial")) return { kind: "partial", detail };
     if (verdict === "consulta") return { kind: "consult", detail };
     return { kind: "not-done", detail };
   }
   return { kind: "missing" };
+}
+
+/** Where in-progress work goes on: a checkable reference, a PR or an issue
+ * by number (with or without "#"), or a named session ("sessão 9283"). */
+export function namesWhereItGoesOn(text: string): boolean {
+  return hasCheckableProof(text) || /\b(?:PRs?|pull requests?|issues?)\s*#?\d{2,7}\b/i.test(text) || /\bsess(?:ão|ao|ion)\s+[\w-]{3,}/iu.test(text);
 }
 
 /** A proof someone else can check: a link, a PR/issue number, a commit, an
@@ -110,4 +117,12 @@ export function settleHandoff(text: string): { failed: boolean; text: string } {
   if (declared.kind === "not-done") return { failed: true, text: `${resultProblem(declared)}\n\n${text}` };
   const note = declared.kind === "ongoing" ? `Em andamento: ${declared.detail}` : resultProblem(declared);
   return { failed: false, text: note ? `[Servidor: ${note}]\n${text}` : text };
+}
+
+/** How a request settles, by who answered it: a teammate's answer (a node
+ * with a parent) is judged by its line; the requester's own synthesis (the
+ * root, which answers the person) and a room member's reply (rooms do not
+ * hand members the contract yet) settle as they are. */
+export function settleHandoffNode(text: string, node: { parentId?: string; groupId?: string }): { failed: boolean; text: string } {
+  return !node.parentId || node.groupId ? { failed: false, text } : settleHandoff(text);
 }

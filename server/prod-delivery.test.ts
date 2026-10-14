@@ -161,11 +161,11 @@ describe("proof of production, from the release corridor's own record", () => {
   const RECEIPT = `RECEIPT_VERSION=2\nCOMMIT=${TAG}\nENV=production\nDEPLOYED_AT=2026-10-13T05:38:30Z\nREMOTE_TARGET_COUNT=2\nREMOTE_TARGETS=pages:nuria-kb-pages:f2d1a3b0,worker:agenda:67ecc3f3\nPURGE_RESULT=success\n`;
 
   it("reads the post-release verdict of the very commit, and the receipt's time and targets only when the receipt is that commit's", () => {
-    expect(releaseRecordFrom(RESULT, RECEIPT, TAG)).toEqual({ result: "healthy", deployedAt: "2026-10-13T05:38:30Z", targets: ["pages:nuria-kb-pages", "worker:agenda"] });
+    expect(releaseRecordFrom(RESULT, RECEIPT, TAG)).toEqual({ result: "healthy", finishedAt: "2026-10-13T05:44:29Z", deployedAt: "2026-10-13T05:38:30Z", targets: ["pages:nuria-kb-pages", "worker:agenda"] });
     // the receipt is a later release's: the verdict stands, its time and targets are not this commit's
-    expect(releaseRecordFrom(RESULT, RECEIPT.replaceAll(TAG, "d".repeat(40)), TAG)).toEqual({ result: "healthy" });
-    expect(releaseRecordFrom(RESULT, null, TAG)).toEqual({ result: "healthy" });
-    expect(releaseRecordFrom(`${RESULT}PREVIOUS_COMMIT=${"9".repeat(40)}\n`, null, TAG)).toEqual({ result: "healthy", previousCommit: "9".repeat(40) });
+    expect(releaseRecordFrom(RESULT, RECEIPT.replaceAll(TAG, "d".repeat(40)), TAG)).toEqual({ result: "healthy", finishedAt: "2026-10-13T05:44:29Z" });
+    expect(releaseRecordFrom(RESULT, null, TAG)).toEqual({ result: "healthy", finishedAt: "2026-10-13T05:44:29Z" });
+    expect(releaseRecordFrom(`${RESULT}PREVIOUS_COMMIT=${"9".repeat(40)}\n`, null, TAG)).toEqual({ result: "healthy", finishedAt: "2026-10-13T05:44:29Z", previousCommit: "9".repeat(40) });
     // a receipt with no post-release result: published, health not verified
     expect(releaseRecordFrom(null, RECEIPT, TAG)).toMatchObject({ result: "sem-verificacao", deployedAt: "2026-10-13T05:38:30Z" });
     // nothing of this very commit: the corridor did not release it
@@ -237,9 +237,9 @@ describe("proof of production, from the release corridor's own record", () => {
       mkdirSync(join(dir, "post-release", NEXT), { recursive: true });
       writeFileSync(join(dir, "post-release", TAG, "result.env"), RESULT);
       writeFileSync(join(dir, "deploy-receipt-production.env"), RECEIPT.replaceAll(TAG, NEXT));
-      expect(await readReleaseRecord(dir, TAG)).toEqual({ result: "healthy" });
+      expect(await readReleaseRecord(dir, TAG)).toEqual({ result: "healthy", finishedAt: "2026-10-13T05:44:29Z" });
       writeFileSync(join(dir, "post-release", NEXT, "previous-receipt.env"), RECEIPT);
-      expect(await readReleaseRecord(dir, TAG)).toEqual({ result: "healthy", deployedAt: "2026-10-13T05:38:30Z", targets: ["pages:nuria-kb-pages", "worker:agenda"] });
+      expect(await readReleaseRecord(dir, TAG)).toEqual({ result: "healthy", finishedAt: "2026-10-13T05:44:29Z", deployedAt: "2026-10-13T05:38:30Z", targets: ["pages:nuria-kb-pages", "worker:agenda"] });
       expect(await readReleaseRecord(dir, "0".repeat(40))).toBeNull();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -327,6 +327,14 @@ describe("proof of production, from the release corridor's own record", () => {
     expect(f.reports).toHaveLength(1);
   });
 
+  it("follows a PR handed over to a session even when its report names no PR", async () => {
+    // a session told to take over a PR (claimedPrs) used to get no delivery, so it was never announced
+    const f = fakeDeps();
+    const s = { ...session(), lastReport: "Assumi a correção.", claimedPrs: [9400] };
+    await watchProductionDelivery([s], f.deps, newDeliveryCache());
+    expect(s.delivery?.prs["9400"]?.reportedAt).toBeDefined();
+  });
+
   it("keeps a session with a held PR from being archived", async () => {
     const held = { ...session(), delivery: { slug: SLUG, prs: { "9400": { url: "u", number: 9400, state: "merged" as const, mergeSha: MERGE, owned: "branch" as const, heldAt: "no-record", heldWhy: "sem release registrado pelo corredor para cccccccc" } } } as CcDelivery };
     const { blockers } = await archiveBlockers(held, fakeDeps().deps);
@@ -381,8 +389,15 @@ describe("archiving before delivery", () => {
     expect((await archiveBlockers(session(), open.deps)).blockers).toEqual(["a PR #9400 ainda está aberta"]);
     const behind = fakeDeps({ compare: "diverged" });
     expect((await archiveBlockers(session(), behind.deps)).blockers).toEqual(["a PR #9400 foi mergeada mas ainda não está em nuria-production-deployed"]);
+    // a PR the server follows, in the tag but not yet announced: archiving now would drop the announcement (14/10: #9555)
     const shipped = fakeDeps({ compare: "ahead" });
+    const followed = { ...session(), delivery: { slug: SLUG, prs: { "9400": { url: "u", number: 9400, state: "merged" as const, mergeSha: MERGE, owned: "branch" as const } } } as CcDelivery };
+    expect(await archiveBlockers(followed, shipped.deps)).toEqual({ blockers: ["a PR #9400 está em nuria-production-deployed, mas o servidor ainda não a anunciou em produção (o anúncio sai na próxima passada, a cada 10 min)"], unknown: [] });
+    // one it does not follow yet is not promised an announcement
     expect(await archiveBlockers(session(), shipped.deps)).toEqual({ blockers: [], unknown: [] });
+    // announced: nothing holds it
+    const announced = { ...session(), delivery: { slug: SLUG, prs: { "9400": { url: "u", number: 9400, state: "merged" as const, mergeSha: MERGE, owned: "branch" as const, reportedAt: 1, productionTag: TAG } } } as CcDelivery };
+    expect(await archiveBlockers(announced, shipped.deps)).toEqual({ blockers: [], unknown: [] });
     const closed = fakeDeps({ state: "CLOSED" });
     expect((await archiveBlockers(session(), closed.deps)).blockers).toEqual([]);
     const noTag = fakeDeps({ tag: null });

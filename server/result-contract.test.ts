@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { declaredResult, hasCheckableProof, resultProblem, ROUTINE_RESULT_CONTRACT, HANDOFF_RESULT_CONTRACT, settleHandoff } from "./result-contract.ts";
+import { declaredResult, hasCheckableProof, resultProblem, ROUTINE_RESULT_CONTRACT, HANDOFF_RESULT_CONTRACT, settleHandoff, settleHandoffNode } from "./result-contract.ts";
 
 describe("the result a turn declares", () => {
   it("reads the last RESULTADO line: done with proof, partial, not done", () => {
@@ -44,6 +44,10 @@ describe("the result a turn declares", () => {
   it("closes a quiet pass and work that goes on elsewhere when they say what was checked", () => {
     expect(declaredResult("RESULTADO: nada a fazer — `df -h /` mostra 33 GiB livres")).toEqual({ kind: "nothing", detail: "`df -h /` mostra 33 GiB livres" });
     expect(declaredResult("RESULTADO: em andamento — gate da #9534 rodando; retomo quando terminar")).toMatchObject({ kind: "ongoing" });
+    // in progress says where it goes on (a PR, a session, a link), or nothing can follow it: not verified
+    expect(declaredResult("RESULTADO: em andamento — gate rodando; retomo quando terminar").kind).toBe("unproven");
+    expect(declaredResult("RESULTADO: em andamento — gate rodando na sessão 9283").kind).toBe("ongoing");
+    expect(declaredResult("RESULTADO: em andamento — aguardando o gate da PR 9534").kind).toBe("ongoing");
     expect(declaredResult("RESULTADO: nada a fazer").kind).toBe("unproven");
     expect(resultProblem({ kind: "nothing", detail: "x" })).toBeNull();
   });
@@ -64,7 +68,7 @@ describe("how a teammate's answer settles a request", () => {
 
   it("hands a partial or in-progress answer back as news for the requester, not as a failure", () => {
     expect(settleHandoff("RESULTADO: parcial — faltou o aviso")).toEqual({ failed: false, text: "[Servidor: Resultado parcial: faltou o aviso]\nRESULTADO: parcial — faltou o aviso" });
-    expect(settleHandoff("RESULTADO: em andamento — gate rodando").text.startsWith("[Servidor: Em andamento: gate rodando]")).toBe(true);
+    expect(settleHandoff("RESULTADO: em andamento — gate da #9534 rodando").text.startsWith("[Servidor: Em andamento: gate da #9534 rodando]")).toBe(true);
   });
 
   it("completes done with proof and a consultation as they are", () => {
@@ -76,5 +80,14 @@ describe("how a teammate's answer settles a request", () => {
     const settled = settleHandoff("Feito, tudo certo.");
     expect(settled.failed).toBe(false);
     expect(settled.text).toBe("[Servidor: Resultado não verificado: a resposta não terminou com a linha RESULTADO]\nFeito, tudo certo.");
+  });
+});
+
+describe("which requests are judged", () => {
+  it("judges a teammate's answer, not the requester's own synthesis nor a room member's reply", () => {
+    // the requester's synthesis (no parent) answers the person, not a requester: 12 of 12 were marked "not verified" for nothing
+    expect(settleHandoffNode("Pronto, resumo para o dono.", { parentId: undefined })).toEqual({ failed: false, text: "Pronto, resumo para o dono." });
+    expect(settleHandoffNode("Feito.", { parentId: "root", groupId: "room-1" })).toEqual({ failed: false, text: "Feito." });
+    expect(settleHandoffNode("Feito.", { parentId: "root" }).text.startsWith("[Servidor: Resultado não verificado")).toBe(true);
   });
 });

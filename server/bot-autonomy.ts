@@ -788,7 +788,7 @@ export function parseGoalInput(body: { goal?: unknown; maxTurns?: unknown; maxHo
   return { ok: true, goal, maxTurns, maxHours };
 }
 
-export type GoalEndInput = { ok: true; status: GoalEndStatus; detail: string } | { ok: false; error: string };
+export type GoalEndInput = { ok: true; status: GoalEndStatus; detail: string; proof?: string } | { ok: false; error: string };
 
 /** A goal ends as completed only with a proof someone can check (a link, a
  * sent message ID, a PR or issue number, a commit, a quoted command): a goal
@@ -806,7 +806,40 @@ export function parseGoalEndInput(body: { status?: unknown; detail?: unknown; pr
   if (!proof || !hasCheckableProof(proof)) {
     return { ok: false, error: "proof is required for completed: what someone else can check (a link, the sent message's ID, a PR or issue number, a commit, or the command in backticks with its output). Without one, end as blocked or needs_input." };
   }
-  return { ok: true, status: raw, detail: `${detail} — prova: ${proof}` };
+  return { ok: true, status: raw, detail: `${detail} — prova: ${proof}`, proof };
+}
+
+/** A goal about delivering to production: its own text pairs a delivery verb
+ * (levar, subir, publicar, entregar, deploy…) with production. "Triar o 503
+ * em produção" or "investigar o deploy que falhou" are not deliveries. */
+const DELIVERY_VERB = /\b(?:lev(?:ar|e|o)|sub(?:ir|a|o)|publi(?:car|que|co)|entreg(?:ar|ue|o)|coloc(?:ar|que|o)|cheg(?:ar|ue)|liber(?:ar|e)|ship|deploy|release)\b/i;
+const PRODUCTION_WORD = /produ[cç][aã]o|\bproduction\b|\bprod\b/i;
+export function productionGoal(goalText: string): boolean {
+  return DELIVERY_VERB.test(goalText) && PRODUCTION_WORD.test(goalText);
+}
+
+/** Why a goal about delivering to production cannot end as completed with
+ * this proof, or null. A PR number alone is not production (a goal was closed
+ * "em produção" 8 min before the P1 #9512). Every PR the goal names must have
+ * been announced in production by the server ("em produção desde", which needs
+ * the corridor's record and the merge in the tag). A goal that names no PR may
+ * cite PRs of its own, all announced, or the full commit (40 characters) of a
+ * release the corridor certified after the goal started: the tag still on an
+ * older release proves nothing about it. The caller passes what it found. */
+export function productionGoalProblem(input: { goalText: string; goalStartedAt: number; proof: string; announcedPrs: ReadonlySet<number>; certifiedReleases: ReadonlyMap<string, number> }): string | null {
+  if (!productionGoal(input.goalText)) return null;
+  const guide = "Se ainda não chegou, espere o anúncio, ou encerre como blocked ou needs_input dizendo o que falta.";
+  const goalPrs = goalCitedPrs(input.goalText).map((pr) => pr.number);
+  if (goalPrs.length) {
+    const missing = goalPrs.filter((number) => !input.announcedPrs.has(number));
+    if (!missing.length) return null;
+    return `a meta fala em produção: toda PR que ela cita precisa ter sido anunciada em produção pelo servidor (o chip "em produção desde"). ${missing.map((number) => `#${number}`).join(", ")} ainda não ${missing.length > 1 ? "foram anunciadas" : "foi anunciada"}. ${guide}`;
+  }
+  const proofPrs = goalCitedPrs(input.proof).map((pr) => pr.number);
+  if (proofPrs.length && proofPrs.every((number) => input.announcedPrs.has(number))) return null;
+  const shas = [...input.proof.matchAll(/\b[0-9a-f]{40}\b/g)].map((match) => match[0]);
+  if (shas.some((sha) => (input.certifiedReleases.get(sha) ?? -Infinity) > input.goalStartedAt)) return null;
+  return `a meta fala em produção: a prova precisa citar PRs que o servidor já anunciou em produção (o chip "em produção desde"), ou o commit completo (40 caracteres) de um release que o corredor certificou depois que a meta começou. ${guide}`;
 }
 
 /** Where a wake is kept: the conversation's one ordinary wake, or its standing watch beside it. */

@@ -17,6 +17,7 @@ import {
   parsePromiseInput,
   prsCited,
   goalCitedPrs,
+  productionGoalProblem,
   citedPrsOutcome,
   lastQuestionAt,
   ownerAskAt,
@@ -90,7 +91,7 @@ describe("input parsing", () => {
     // completed needs a proof someone can check, not just a detail
     expect(parseGoalEndInput({ status: "completed", detail: "entregue" })).toMatchObject({ ok: false, error: expect.stringContaining("proof") });
     expect(parseGoalEndInput({ status: "completed", detail: "entregue", proof: "tudo certo" }).ok).toBe(false);
-    expect(parseGoalEndInput({ status: "completed", detail: "entregue", proof: "PR #9528 em produção (recibo 61a5d68cd)" })).toEqual({ ok: true, status: "completed", detail: "entregue — prova: PR #9528 em produção (recibo 61a5d68cd)" });
+    expect(parseGoalEndInput({ status: "completed", detail: "entregue", proof: "PR #9528 em produção (recibo 61a5d68cd)" })).toEqual({ ok: true, status: "completed", detail: "entregue — prova: PR #9528 em produção (recibo 61a5d68cd)", proof: "PR #9528 em produção (recibo 61a5d68cd)" });
     // blocked and needs_input carry no proof
     expect(parseGoalEndInput({ status: "blocked", detail: "o Jev barrou" })).toEqual({ ok: true, status: "blocked", detail: "o Jev barrou" });
   });
@@ -997,6 +998,37 @@ describe("a goal waiting on the person about a PR", () => {
     // a goal that resumed starts with no notice, and a running goal takes none
     expect(autonomy.resumeGoalAfterInput("t1")?.prNotice).toBeUndefined();
     expect(autonomy.notePrNotice("t1", "9290:CLOSED")).toBe(false);
+  });
+});
+
+describe("a goal about production, ended as completed", () => {
+  const SHA = "2e0e7c42584b46be220a46030a14308fac1df688";
+  const STARTED = Date.UTC(2026, 9, 13, 12, 0);
+  const none = { announcedPrs: new Set<number>(), certifiedReleases: new Map<string, number>() };
+
+  it("needs every PR the goal names announced in production by the server, not just a PR number", () => {
+    // a goal closed "em produção" 8 min before the P1 #9512, with only a detail
+    const goal = "Levar a PR #9555 até produção";
+    expect(productionGoalProblem({ goalText: goal, goalStartedAt: STARTED, proof: "PR #9555 mergeada", ...none })).toContain("#9555 ainda não foi anunciada");
+    expect(productionGoalProblem({ goalText: goal, goalStartedAt: STARTED, proof: "PR #9555 mergeada", ...none, announcedPrs: new Set([9555]) })).toBeNull();
+    // another PR already announced is no proof for this one, nor is a certified release
+    expect(productionGoalProblem({ goalText: "Levar a PR #9600 até produção", goalStartedAt: STARTED, proof: "PR #9600 mergeada; a dependência #9556 já está em produção", ...none, announcedPrs: new Set([9556]) })).toContain("#9600");
+    expect(productionGoalProblem({ goalText: "Levar a PR #9600 até produção", goalStartedAt: STARTED, proof: `tag ${SHA}`, ...none, certifiedReleases: new Map([[SHA, STARTED + 60_000]]) })).toContain("#9600");
+  });
+
+  it("takes, for a goal that names no PR, a release the corridor certified after the goal started", () => {
+    const goal = "Publicar a correção do widget em produção";
+    // the tag still pointing at a release older than the goal proves nothing about it
+    expect(productionGoalProblem({ goalText: goal, goalStartedAt: STARTED, proof: `tag ${SHA}`, ...none, certifiedReleases: new Map([[SHA, STARTED - 3_600_000]]) })).not.toBeNull();
+    expect(productionGoalProblem({ goalText: goal, goalStartedAt: STARTED, proof: `release ${SHA}`, ...none, certifiedReleases: new Map([[SHA, STARTED + 60_000]]) })).toBeNull();
+    // a short commit cannot be checked against the corridor's records
+    expect(productionGoalProblem({ goalText: goal, goalStartedAt: STARTED, proof: "release 2e0e7c42", ...none, certifiedReleases: new Map([[SHA, STARTED + 60_000]]) })).not.toBeNull();
+  });
+
+  it("only judges goals whose own text is about delivering to production", () => {
+    for (const goal of ["Revisar o texto do artigo 9430", "Triar o 503 em produção do PIPERUN e comentar na #9337", "Investigar por que o deploy do widget falhou"]) {
+      expect(productionGoalProblem({ goalText: goal, goalStartedAt: STARTED, proof: "comentário publicado #9430", ...none })).toBeNull();
+    }
   });
 });
 
