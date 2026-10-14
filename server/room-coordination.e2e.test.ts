@@ -249,7 +249,7 @@ it.each(["rename", "delete"])("withholds an in-flight result after team %s and r
   // removes its old identity, then puts the same bot under the reused name.
   const move = (section: string) => request(`/api/bots/${f.target.id}`, { method: "PATCH", headers: { Origin: f.session.info.url },
     body: JSON.stringify({ section }) }, f.session.info.url);
-  await move("Parking");
+  await move("A");
   await f.api("/api/sidebar-sections?section=Engineering", mode === "rename" ? { name: "Renamed" } : {}, mode === "rename" ? "PATCH" : "DELETE");
   await f.api("/api/sidebar-sections", { name: "Engineering" });
   await move("Engineering");
