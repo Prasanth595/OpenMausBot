@@ -1,6 +1,29 @@
 import { readdirSync, readFileSync } from "node:fs";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { FAILED_TURN_MAX_CHARS, failedTurnCause, failedTurnTool } from "./failed-turn";
+
+/** Only an activity's name encodes a failed-turn row. The CLI may print the
+ * same prefix to stderr without writing a row or imposing its length limit. */
+function handWrittenNames(source: string): string[] {
+  const file = ts.createSourceFile("writer.ts", source, ts.ScriptTarget.Latest, true);
+  const found: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isPropertyAssignment(node) &&
+        (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) && node.name.text === "name") {
+      const inspect = (value: ts.Node) => {
+        if ((ts.isStringLiteralLike(value) || ts.isTemplateHead(value)) && value.text.startsWith("error: ")) {
+          found.push(node.getText(file));
+        }
+        ts.forEachChild(value, inspect);
+      };
+      inspect(node.initializer);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
+}
 
 describe("a failed turn's row", () => {
   it("reads back exactly what was written", () => {
@@ -36,9 +59,22 @@ describe("a failed turn's row", () => {
     const dir = new URL("../server/", import.meta.url);
     const handWritten = readdirSync(dir, { recursive: true, encoding: "utf8" })
       .filter((file) => file.endsWith(".ts") && !file.endsWith(".test.ts") && !file.includes("testing"))
-      .flatMap((file) => readFileSync(new URL(file, dir), "utf8").split("\n")
-        .filter((line) => /["'`]error: /.test(line))
-        .map((line) => `${file}: ${line.trim()}`));
+      .flatMap((file) => handWrittenNames(readFileSync(new URL(file, dir), "utf8"))
+        .map((name) => `${file}: ${name}`));
     expect(handWritten).toEqual([]);
+  });
+
+  it("detects hand-written row names, including multiline and concatenated names", () => {
+    for (const source of [
+      'const tool = { name: "error: lost", ok: false };',
+      'const tool = { "name":\n `error: ${cause}`, ok: false };',
+      'const tool = { name: "error: " + cause, ok: false };',
+    ]) expect(handWrittenNames(source)).toHaveLength(1);
+  });
+
+  it("allows terminal diagnostics and the shared row formatter", () => {
+    expect(handWrittenNames('io.err(redactSecretsInText(`error: ${error.message}`));')).toEqual([]);
+    expect(handWrittenNames('const tool = failedTurnTool(cause);')).toEqual([]);
+    expect(handWrittenNames('const tool = { name: "Bash", output: "error: command failed" };')).toEqual([]);
   });
 });
