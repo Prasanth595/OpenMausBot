@@ -73,43 +73,52 @@ export function createEscalationNotify(deps: EscalationNotifyDeps) {
       tellThePerson();
       return "person";
     }
-    const escalations = store.tasks(onDuty.id).find((candidate) => candidate.title === ESCALATIONS_THREAD_TITLE && !candidate.archivedAt)
-      ?? store.createTask(onDuty.id, ESCALATIONS_THREAD_TITLE, false, undefined, { botId: onDuty.id, name: onDuty.name, at: Date.now() });
-    // no thread to carry the notice, or the gated thread is the escalations
-    // thread itself: the person is next
-    if (!escalations || escalations.threadId === threadId) {
+    // Delivery is advisory: this runs inside the approval-card path and the
+    // turn.completed fold, and a failed notice must never break the gate or
+    // the turn's own settlement — fall back to the person's notification.
+    try {
+      const escalations = store.tasks(onDuty.id).find((candidate) => candidate.title === ESCALATIONS_THREAD_TITLE && !candidate.archivedAt)
+        ?? store.createTask(onDuty.id, ESCALATIONS_THREAD_TITLE, false, undefined, { botId: onDuty.id, name: onDuty.name, at: Date.now() });
+      // no thread to carry the notice, or the gated thread is the escalations
+      // thread itself: the person is next
+      if (!escalations || escalations.threadId === threadId) {
+        tellThePerson();
+        return "person";
+      }
+      store.appendMessage(escalations.threadId, {
+        role: "bot",
+        kind: "activity",
+        tool: { name: escalationChip(escalation), ok: false },
+        threadRef: { botId: bot.id, threadId, title: task?.title ?? (group ? group.name : `${bot.name}'s conversation`) },
+      });
+      const text = escalationText(escalation, count);
+      // the notice carries the parked bot's name as its provenance, and marks
+      // itself a harness report about that thread exactly as an incident does
+      // (turnAnswers, incidentRefused) — the queue never refuses it, and it
+      // makes the Chief's computer optional
+      const peerAsk = { botId: bot.id, name: bot.name, unattended: true,
+        incident: { threadId, ...(input.alreadyNotified ? { notified: true } : {}) } };
+      // the escalations thread is reused, so the previous notice may still be
+      // running there: this one waits in that thread's queue and drains when
+      // the Chief is free, never refused
+      const decision = admit("incident", {}, {
+        threadBusy: deps.threadBusy(onDuty.id, escalations.threadId),
+        atCapacity: deps.botAtThreadCapacity(onDuty.id),
+        groupTurn: Boolean(deps.activeGroupTurnForBot(onDuty.id)),
+      });
+      if (decision.action === "queue") {
+        queueSteeredMessage(onDuty.id, escalations.threadId, text, { reason: decision.reason, unattended: true, peerAsk });
+        return "chief";
+      }
+      void deps.startTurn(onDuty.id, text, { threadId: escalations.threadId, unattended: true, peerAsk }).catch((error) => {
+        deps.incidentRefused(onDuty, escalations.threadId, [peerAsk], error instanceof Error ? error.message : String(error));
+      });
+      return "chief";
+    } catch (error) {
+      console.error(`escalation notice for ${bot.name} could not reach ${onDuty.name}:`, error);
       tellThePerson();
       return "person";
     }
-    store.appendMessage(escalations.threadId, {
-      role: "bot",
-      kind: "activity",
-      tool: { name: escalationChip(escalation), ok: false },
-      threadRef: { botId: bot.id, threadId, title: task?.title ?? (group ? group.name : `${bot.name}'s conversation`) },
-    });
-    const text = escalationText(escalation, count);
-    // the notice carries the parked bot's name as its provenance, and marks
-    // itself a harness report about that thread exactly as an incident does
-    // (turnAnswers, incidentRefused) — the queue never refuses it, and it
-    // makes the Chief's computer optional
-    const peerAsk = { botId: bot.id, name: bot.name, unattended: true,
-      incident: { threadId, ...(input.alreadyNotified ? { notified: true } : {}) } };
-    // the escalations thread is reused, so the previous notice may still be
-    // running there: this one waits in that thread's queue and drains when
-    // the Chief is free, never refused
-    const decision = admit("incident", {}, {
-      threadBusy: deps.threadBusy(onDuty.id, escalations.threadId),
-      atCapacity: deps.botAtThreadCapacity(onDuty.id),
-      groupTurn: Boolean(deps.activeGroupTurnForBot(onDuty.id)),
-    });
-    if (decision.action === "queue") {
-      queueSteeredMessage(onDuty.id, escalations.threadId, text, { reason: decision.reason, unattended: true, peerAsk });
-      return "chief";
-    }
-    void deps.startTurn(onDuty.id, text, { threadId: escalations.threadId, unattended: true, peerAsk }).catch((error) => {
-      deps.incidentRefused(onDuty, escalations.threadId, [peerAsk], error instanceof Error ? error.message : String(error));
-    });
-    return "chief";
   }
 
   /** A healthy teammate turn that ends parked on NEEDS INPUT is the

@@ -139,7 +139,6 @@ export function requestPeerApproval(
     // The card must exist before the entry, so a timeout or an answer can always settle it.
     const card = pushApprovalCard(bus, from, target, message, action, requestId, sourceThreadId);
     announceCard(bus, from, card, sourceThreadId);
-    bus.onPeerApprovalPending?.(from, target, action, sourceThreadId, message);
     const timer = setTimeout(() => {
       const pending = pendingComms.get(requestId);
       if (!pending) return;
@@ -158,6 +157,14 @@ export function requestPeerApproval(
       messageId: card.id,
       bus,
     });
+    // The pending entry and its timer are in place, so the card settles on
+    // timeout or answer no matter what the notice hook does; a throw here
+    // must not strand an open card.
+    try {
+      bus.onPeerApprovalPending?.(from, target, action, sourceThreadId, message);
+    } catch (error) {
+      console.error("peer approval: the escalation notice failed:", error);
+    }
   });
 }
 

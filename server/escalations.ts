@@ -141,7 +141,7 @@ export function escalationText(escalation: Escalation, count: EscalationCount): 
     "This notice informs; it assigns nothing, and the gate stays a person's to lift. Decide, in this order:",
     "1. If the gate has already lifted by the time you read this — the card answered, the question answered — say so here in one plain sentence and stop.",
     "2. Otherwise tell the person, in one or two plain sentences, what is being asked of them and where to answer it, then stop. Never answer a gate in the person's place and never approve a contact for a teammate.",
-    "3. Report in one sentence what you told the person. Do not assign the gated thread other work; when the person lifts the gate, the thread continues on its own.",
+    "3. Report in one sentence what you told the person. Do not assign the gated thread other work; lifting the gate does not resume the stopped turn, so tell the person to follow up in that thread if the teammate must continue.",
   );
   return lines.join("\n");
 }

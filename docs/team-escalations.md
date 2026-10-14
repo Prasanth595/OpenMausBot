@@ -34,8 +34,9 @@ see), OpenMausBot:
    otherwise it tells the person, in one or two plain sentences, what is
    being asked and where to answer it, then stops. **The notice assigns
    nothing.** The Chief never answers a gate in the person's place and
-   never approves a contact for a teammate; the gated thread continues on
-   its own once the person lifts the gate.
+   never approves a contact for a teammate; lifting a gate does not resume
+   the stopped turn, so the person follows up in the gated thread when the
+   teammate must continue.
 
 A notice that finds the Chief busy waits in the escalations thread's queue
 and runs the moment the Chief is free, together with any others that
