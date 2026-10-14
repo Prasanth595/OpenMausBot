@@ -8,6 +8,7 @@
 //   FAKE_ACP_MODE  happy (default) | image | empty-reply | reasoning-only | exit-early | fail-after-text | hang
 //     | hang-initialize | unkeyed-tool | no-auth | auth-required | permission | question
 //     | ask-question-unsupported (a mid-prompt cursor/ask_question request the driver must answer -32601)
+//     | grok-ask-user-question (a mid-prompt _x.ai/ask_user_question the driver must surface and answer)
 //     | interleave (message, tool, message, tool, message) | no-session-config (set_mode/set_model answer -32601)
 //     | ask-peer | delegate-peer | chief-delegate | create-peer (coordinate_bots through the injected agents
 //       MCP; FAKE_ACP_REDELEGATE_FILE, FAKE_ACP_TASKID_FILE; a hand-off result wake gets a fixed line)
@@ -1155,6 +1156,25 @@ function handle(msg: any) {
           id: pendingAskQuestionId,
           method: "cursor/ask_question",
           params: { questions: [{ question: "Which color?", options: ["Blue", "Green"] }] },
+        });
+        return;
+      }
+      if (mode === "grok-ask-user-question") {
+        pendingAskQuestionId = 9400;
+        onAskQuestionAnswered = () => {
+          out({ jsonrpc: "2.0", method: "session/update", params: { update: { sessionUpdate: "agent_message_chunk", content: { text: "answered the grok question" } } } });
+          complete();
+        };
+        out({
+          jsonrpc: "2.0",
+          id: pendingAskQuestionId,
+          method: "_x.ai/ask_user_question",
+          params: {
+            sessionId: msg.params?.sessionId,
+            toolCallId: "call_grok_ask_1",
+            questions: [{ question: "Ship the fix?", options: [{ label: "Ship it", description: "merge now" }, { label: "Hold" }], multiSelect: false }],
+            mode: "default",
+          },
         });
         return;
       }

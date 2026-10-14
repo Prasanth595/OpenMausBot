@@ -22,6 +22,7 @@ import { removeTempDir } from "../../testing/cleanup.ts";
 import { startFakeHttpMcp } from "../../testing/fake-http-mcp-server.ts";
 import * as procs from "../../procs.ts";
 import * as quietStatus from "./quiet-status.ts";
+import { formatQuestionAnswers } from "../../../shared/ask-question.ts";
 
 const FAKE_CLI = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "testing", "fake-acp-cli.ts");
 
@@ -1026,6 +1027,45 @@ describe("ACP turns (fake CLI)", () => {
     });
     const done = await recorder.until((e) => e.type === "turn.completed");
     expect(done).toMatchObject({ ok: true });
+  });
+
+  it("surfaces grok's ext ask_user_question and answers with accepted labels", async () => {
+    await create(GrokAgentDriver, "grok-ask-user-question");
+    await instance.adapter.sendTurn({ threadId: "t-grok-ask", text: "go", cwd: scratch });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    expect(opened).toMatchObject({
+      requestType: "question",
+      questions: [{ question: "Ship the fix?", options: [{ label: "Ship it", description: "merge now" }, { label: "Hold" }] }],
+    });
+    if (!("requestId" in opened) || typeof opened.requestId !== "string") throw new Error("request.opened carried no requestId");
+    const requestId = opened.requestId;
+    expect(await instance.adapter.respondToRequest("t-grok-ask", requestId, {
+      behavior: "answer",
+      message: formatQuestionAnswers([{ question: "Ship the fix?", options: [] }], [["Ship it"]]),
+    })).toBe("answered");
+    const done = await recorder.until((e) => e.type === "turn.completed");
+    expect(done).toMatchObject({ ok: true });
+    const reply = readFileSync(join(NATIVE_DIR, "t-grok-ask.ndjson"), "utf8")
+      .trim().split("\n")
+      .map((line) => JSON.parse(line) as { dir?: string; msg?: { id?: number; result?: unknown } })
+      .filter((entry) => entry.dir === "out" && entry.msg?.id === 9400).at(-1);
+    expect(reply?.msg?.result).toEqual({ outcome: "accepted", answers: { "Ship the fix?": ["Ship it"] } });
+  });
+
+  it("cancels grok's ext ask_user_question with outcome cancelled, not an error", async () => {
+    await create(GrokAgentDriver, "grok-ask-user-question");
+    await instance.adapter.sendTurn({ threadId: "t-grok-ask-cancel", text: "go", cwd: scratch });
+    const opened = await recorder.until((e) => e.type === "request.opened");
+    if (!("requestId" in opened) || typeof opened.requestId !== "string") throw new Error("request.opened carried no requestId");
+    const requestId = opened.requestId;
+    expect(await instance.adapter.respondToRequest("t-grok-ask-cancel", requestId, { behavior: "deny" })).toBe("rejected");
+    await recorder.until((e) => e.type === "turn.completed");
+    const reply = readFileSync(join(NATIVE_DIR, "t-grok-ask-cancel.ndjson"), "utf8")
+      .trim().split("\n")
+      .map((line) => JSON.parse(line) as { dir?: string; msg?: { id?: number; result?: unknown; error?: unknown } })
+      .filter((entry) => entry.dir === "out" && entry.msg?.id === 9400).at(-1);
+    expect(reply?.msg?.result).toEqual({ outcome: "cancelled" });
+    expect(reply?.msg?.error).toBeUndefined();
   });
 
   it.each([

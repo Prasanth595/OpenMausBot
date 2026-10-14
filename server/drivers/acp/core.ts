@@ -53,7 +53,7 @@ import type {
 import { newEventId, newId, TurnNotStartedError } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
-import { MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
+import { askQuestionSummary, MAX_CUSTOM_ANSWER, MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion, questionChoices } from "../../../shared/ask-question.ts";
 
 import { appendNative } from "../native.ts";
 import { acpPermissionCommand, permissionLaunchCwd } from "../permission-command.ts";
@@ -203,6 +203,9 @@ export interface AcpSupport {
   resolveModelsOnCreate?: boolean;
   /** Native-protocol log label, e.g. "grok.acp". */
   nativeSource: string;
+  /** A private ask-the-person reverse-request this CLI sends instead of session/request_permission
+   *  (grok-build's x.ai ext_method). */
+  extAskUserQuestion?: { method: string };
   /** Whether models behind this CLI can consume a referenced image. */
   images?: boolean;
   /** Narrow compatibility exception for a CLI with verified native image
@@ -959,10 +962,91 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
           }
         };
 
+        // grok-build asks the person through an x.ai ext_method reverse-request instead of
+        // session/request_permission: full questions with labeled options, answered
+        // {outcome:"accepted",answers} or {outcome:"cancelled"} — a cancel is a normal
+        // outcome for the tool, never an error.
+        const handleExtAskUserQuestion = (msg: { id?: unknown; params?: unknown }, current: AcpTurn) => {
+          current.state.startupActivity = true;
+          current.flushAssistantText();
+          const raw = msg.params;
+          // The gateway-wrapped form nests the real payload one level under params.
+          const params = raw !== null && typeof raw === "object" && "method" in raw && typeof raw.method === "string"
+            && "params" in raw && typeof raw.params === "object" && raw.params !== null
+            ? raw.params
+            : raw;
+          const askQuestions = parseAskQuestions(params);
+          if (!askQuestions) {
+            emit({
+              ...base(threadId, current.turnId),
+              type: "runtime.error",
+              message: `${support.displayName} sent a question OpenMausBot could not parse — cancelling it instead of guessing`,
+            });
+            send({ jsonrpc: "2.0", id: msg.id, result: { outcome: "cancelled" } });
+            return;
+          }
+          const requestId = newId();
+          const cancel = () => send({ jsonrpc: "2.0", id: msg.id, result: { outcome: "cancelled" } });
+          const finish: AcpAskFinish = (behavior, _source = "user", message) => {
+            if (!current.asks.delete(requestId)) return "unavailable";
+            clearTimeout(timer);
+            if (behavior !== "answer" && behavior !== "allow") {
+              cancel();
+              emit({ ...base(threadId, current.turnId), type: "request.resolved", requestId, behavior: "deny", source: "system" });
+              return "rejected";
+            }
+            const byQuestion = questionAnswersByQuestion(message ?? "", askQuestions);
+            const answers: Record<string, string[]> = {};
+            const annotations: Record<string, { notes: string }> = {};
+            for (const question of askQuestions) {
+              const picked = byQuestion[question.question];
+              if (!picked) continue;
+              // grok-build takes option labels back; other text rides the freeform "Other" slot.
+              if (question.options.some((option) => option.label === picked)) answers[question.question] = [picked];
+              else {
+                answers[question.question] = ["Other"];
+                annotations[question.question] = { notes: picked.slice(0, MAX_CUSTOM_ANSWER) };
+              }
+            }
+            if (!Object.keys(answers).length) {
+              emit({ ...base(threadId, current.turnId), type: "runtime.error", message: QUESTION_NO_MATCH_NOTE });
+              cancel();
+              emit({ ...base(threadId, current.turnId), type: "request.resolved", requestId, behavior: "deny", source: "system" });
+              return "rejected";
+            }
+            send({
+              jsonrpc: "2.0",
+              id: msg.id,
+              result: { outcome: "accepted", answers, ...(Object.keys(annotations).length ? { annotations } : {}) },
+            });
+            emit({ ...base(threadId, current.turnId), type: "request.resolved", requestId, behavior: "answer", source: "user" });
+            return "answered";
+          };
+          const timer = setTimeout(() => {
+            emit({ ...base(threadId, current.turnId), type: "runtime.error", message: DENY_TIMEOUT_NOTE });
+            finish("cancel", "timeout");
+          }, 15 * 60_000);
+          timer.unref?.();
+          current.asks.set(requestId, finish);
+          emit({
+            ...base(threadId, current.turnId),
+            type: "request.opened",
+            requestId,
+            requestType: "question",
+            tool: "question",
+            summary: askQuestionSummary(askQuestions),
+            choices: questionChoices(askQuestions),
+            questions: askQuestions,
+          });
+        };
         const handleServerRequest = (msg: any, current: AcpTurn) => {
           current.state.startupActivity = true;
           if (msg.method === "fs/read_text_file" || msg.method === "fs/write_text_file") {
             void handleClientFileRequest(msg);
+            return;
+          }
+          if (support.extAskUserQuestion && msg.method === support.extAskUserQuestion.method) {
+            handleExtAskUserQuestion(msg, current);
             return;
           }
           if (msg.method !== "session/request_permission") {
@@ -1241,9 +1325,14 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               const current = session.current;
               if (!current) {
               // Between turns nothing is brokered; the agent must never block on an unanswered request.
-                send(msg.method === "session/request_permission"
-                  ? { jsonrpc: "2.0", id: msg.id, result: { outcome: { outcome: "cancelled" } } }
-                  : { jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
+              if (msg.method === "session/request_permission") {
+                send({ jsonrpc: "2.0", id: msg.id, result: { outcome: { outcome: "cancelled" } } });
+              } else if (support.extAskUserQuestion && msg.method === support.extAskUserQuestion.method) {
+                // grok-build reads a cancelled ask as a normal path, not an error.
+                send({ jsonrpc: "2.0", id: msg.id, result: { outcome: "cancelled" } });
+              } else {
+                send({ jsonrpc: "2.0", id: msg.id, error: { code: -32601, message: "method not found" } });
+              }
               } else {
                 handleServerRequest(msg, current);
               }

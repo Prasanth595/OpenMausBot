@@ -336,6 +336,10 @@ const support: AcpSupport = {
   effortLevels: ["low", "medium", "high"],
   defaultCli: "grok",
   nativeSource: "grok.acp",
+  // grok-build asks the person through an x.ai ext_method reverse-request
+  // (xai-org/grok-build, crates/codegen/xai-grok-tools .../ask_user_question),
+  // not session/request_permission.
+  extAskUserQuestion: { method: "_x.ai/ask_user_question" },
   loginNote: "Grok is not signed in to your grok.com account — choose Sign in to Grok in engine setup",
 
   // No Windows one-liner: the installer is a POSIX shell script.
