@@ -237,9 +237,9 @@ import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./dri
 import { readMessageText, recallMessages, recentMessages, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
-import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentRequest, incidentText, type Incident, type IncidentKind } from "./incidents.ts";
-import { ESCALATIONS_THREAD_TITLE, EscalationLedger, escalationChip, escalationDeliverable, escalationText, NEEDS_INPUT_GATE, peerApprovalGate, RAISED_GATE, type Escalation, type EscalationKind } from "./escalations.ts";
-import { needsInputQuestion } from "./runtime-coordinator.ts";
+import { createIncidentNotify } from "./host/incident-notify.ts";
+import { createEscalationNotify } from "./host/escalation-notify.ts";
+import { createEscalateRoutes } from "./routes/escalate.ts";
 
 const SESSION_READ_MAX_CHARS = 8_000;
 import { promptWithReply, transcriptText } from "./replies.ts";
@@ -5787,7 +5787,7 @@ const watchdog = new TurnWatchdog({
       tool: failedTurnTool(STALL_CAUSE),
     });
     if (bot && routineRun?.target !== "bot") {
-      reportIncident({ kind: "stalled", bot, threadId: turn.threadId, detail: STALL_CAUSE });
+      incidentNotify.reportIncident({ kind: "stalled", bot, threadId: turn.threadId, detail: STALL_CAUSE });
     }
     settleDirectFollowup(stalledGeneration, { ok: false, text: stalled });
     turnUsage.delete(turn.threadId);
@@ -7152,6 +7152,10 @@ async function localVmInventoryPayload() {
   return { instances, maxInstances: localVmMaxInstances(cfg), available: true, problem: null };
 }
 
+// Incidents and escalation notices: wiring in server/host/, policy in server/incidents.ts and server/escalations.ts.
+const incidentNotify = createIncidentNotify({ store, notify, coordinator, threadBusy, botAtThreadCapacity, activeGroupTurnForBot, startTurn });
+const escalationNotify = createEscalationNotify({ store, notify, threadBusy, botAtThreadCapacity, activeGroupTurnForBot, startTurn, incidentRefused: incidentNotify.incidentRefused });
+
 bus.subscribe((event: RuntimeEvent) => {
   if (shouldIgnoreProviderEvent(event)) return;
   const localVmTarget = localVmThreadTargets.get(event.threadId);
@@ -7623,25 +7627,9 @@ bus.subscribe((event: RuntimeEvent) => {
       const capContinues = !event.ok && turnStops.read(event.threadId, completedTurnId)?.handoffPath !== undefined;
       if (!event.ok && !stopped && !lazyClaimAlreadyReported && !computerParked && !capContinues && !routines?.runForThread(event.threadId)) {
         const broken = bot ?? (speaker ? store.bot(speaker.botId) : undefined);
-        if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: turnFailureCause(event) ?? "the run ended without a result" });
+        if (broken) incidentNotify.reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: turnFailureCause(event) ?? "the run ended without a result" });
       }
-      // A healthy teammate turn that ends parked on NEEDS INPUT is the
-      // Chief's to carry to the person: the question waits in that thread
-      // and nothing else says so anywhere (a direct thread's NEEDS INPUT
-      // line buzzes nobody). The bot's own question is the reason the
-      // notice quotes. Group turns have a speaker, not `bot`, so a room's
-      // question stays in the room.
-      if (event.ok && bot && !stopped && completedTurnId) {
-        const finalText = store.activePath(event.threadId)
-          .findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === completedTurnId)?.text;
-        const question = finalText === undefined ? undefined : needsInputQuestion(finalText);
-        if (question !== undefined) {
-          reportEscalation({
-            kind: "needs-input", bot, threadId: event.threadId, gate: NEEDS_INPUT_GATE, reason: question,
-            alreadyNotified: false,
-          });
-        }
-      }
+      escalationNotify.needsInputTurnEnded(event, bot, stopped, completedTurnId);
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
       const lastContext = turnContext.get(event.threadId);
@@ -7882,16 +7870,6 @@ function runtimeWorkPending(threadId: string): boolean {
         && coordinator.children(root.id).some(child => child.reply !== "none" && child.createdAt >= (root.startedAt ?? 0)))));
 }
 
-const incidentLedger = new IncidentLedger();
-
-function incidentContext(threadId: string): { lastRequest: string | null; lastReply: string | null } {
-  const messages = store.messagesFor(threadId);
-  return {
-    lastRequest: incidentRequest(messages),
-    lastReply: messages.findLast((message) => message.role === "bot" && message.kind === "text" && message.text)?.text ?? null,
-  };
-}
-
 function turnAnswers(threadId: string, opts?: {
   cardContinuation?: boolean; requestMessageId?: string; coordination?: { id: string };
   userMessage?: Message; excludeMessageIds?: string[]; peerAsk?: Message["peerAsk"];
@@ -7918,179 +7896,7 @@ function turnAnswers(threadId: string, opts?: {
   };
 }
 
-function incidentRefused(chief: BotRecord, incidentsThreadId: string, asks: ReadonlyArray<Message["peerAsk"]>, why: string): void {
-  const refused = `the incident could not reach ${chief.name} — ${why}`;
-  store.appendMessage(incidentsThreadId, { role: "bot", kind: "activity", tool: failedTurnTool(refused) });
-  const lines = store.messagesFor(incidentsThreadId);
-  for (const ask of asks) {
-    if (!ask?.incident || ask.incident.notified) continue;
-    const bot = store.bot(ask.botId);
-    if (!bot) continue;
-    const { threadId } = ask.incident;
-    const chip = lines.findLast(line => line.kind === "activity" && line.tool?.ok === false && line.threadRef?.threadId === threadId)?.tool?.name;
-    const group = store.groupByThread(threadId);
-    notify(buildNotification("incident", bot, threadId, chip ?? refused, {
-      avatarUrl: bot.avatarUrl,
-      ...(group ? { group: { id: group.id, name: group.name } } : {}),
-    }));
-  }
-}
-
-function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string }): void {
-  const { bot, threadId } = input;
-  const task = store.taskByThread(bot.id, threadId);
-  if (coordinator.assignerOf(threadId)) return;
-  const group = store.groupByThread(threadId);
-  const incident: Incident = {
-    kind: input.kind,
-    bot,
-    threadId,
-    title: task?.title ?? null,
-    room: group?.name ?? null,
-    detail: redactSecretsInText(input.detail),
-    ...incidentContext(threadId),
-  };
-  const count = incidentLedger.note(threadId);
-  if (count.muted) return;
-  const chief = chiefForBot(store.bots, bot);
-  const alreadyNotified = input.kind === "could-not-start" || input.kind === "routine-failed";
-  const tellThePerson = () => {
-    if (alreadyNotified) return;
-    notify(buildNotification("incident", bot, threadId, incidentChip(incident), {
-      avatarUrl: bot.avatarUrl,
-      ...(group ? { group: { id: group.id, name: group.name } } : {}),
-    }));
-  };
-  if (!chief) {
-    tellThePerson();
-    return;
-  }
-  const incidents = store.tasks(chief.id).find((candidate) => candidate.title === INCIDENTS_THREAD_TITLE && !candidate.archivedAt)
-    ?? store.createTask(chief.id, INCIDENTS_THREAD_TITLE, false, undefined, { botId: chief.id, name: chief.name, at: Date.now() });
-  if (!incidents || incidents.threadId === threadId) {
-    tellThePerson();
-    return;
-  }
-  store.appendMessage(incidents.threadId, {
-    role: "bot",
-    kind: "activity",
-    tool: { name: incidentChip(incident), ok: false },
-    threadRef: { botId: bot.id, threadId, title: task?.title ?? (group ? group.name : `${bot.name}'s conversation`) },
-  });
-  const text = incidentText(incident, count);
-  const peerAsk = { botId: bot.id, name: bot.name, unattended: true,
-    incident: { threadId, ...(alreadyNotified ? { notified: true } : {}) } };
-  const decision = admit("incident", {}, {
-    threadBusy: threadBusy(chief.id, incidents.threadId),
-    atCapacity: botAtThreadCapacity(chief.id),
-    groupTurn: Boolean(activeGroupTurnForBot(chief.id)),
-  });
-  if (decision.action === "queue") {
-    queueSteeredMessage(chief.id, incidents.threadId, text, { reason: decision.reason, unattended: true, peerAsk });
-    return;
-  }
-  void startTurn(chief.id, text, { threadId: incidents.threadId, unattended: true, peerAsk }).catch((error) => {
-    incidentRefused(chief, incidents.threadId, [peerAsk], error instanceof Error ? error.message : String(error));
-  });
-}
-
-// ── escalations: a parked run reaches the Chief of Staff ─────────────────
-// The mirror of incidents for the runs that did not fail: a teammate parked
-// on a gate only a person can lift — a peer-comm approval card waiting in
-// its thread, a turn that ended on NEEDS INPUT, or a flag it raised itself.
-// The gate already says so where it waits; what was missing was the Chief,
-// who coordinates the section, hearing about it in one place. The notice
-// informs and assigns nothing: the person still lifts the gate. Policy in
-// server/escalations.ts.
-const escalationLedger = new EscalationLedger();
-
-/** Raise one gate to whoever should carry it to the person: the Chief's
- * turn when there is one that may see this bot, else a notification of the
- * person's own. `alreadyNotified` is whether the gate's own surface already
- * buzzed the person (an approval card does; a NEEDS INPUT line does not) —
- * the no-Chief fallback stays silent then, and a refused turn never buzzes
- * twice. */
-function reportEscalation(input: {
-  kind: EscalationKind; bot: BotRecord; threadId: string; gate: string; reason: string; alreadyNotified: boolean;
-}): "chief" | "person" | "muted" {
-  const { bot, threadId } = input;
-  const task = store.taskByThread(bot.id, threadId);
-  const group = store.groupByThread(threadId);
-  const escalation: Escalation = {
-    kind: input.kind,
-    bot,
-    threadId,
-    title: task?.title ?? null,
-    room: group?.name ?? null,
-    gate: input.gate,
-    reason: redactSecretsInText(input.reason),
-  };
-  const count = escalationLedger.note(threadId);
-  // a bot that keeps parking on gates is looping; the gate's own surface
-  // (the card, the question) already tells the person
-  if (count.muted) return "muted";
-  const chief = chiefForBot(store.bots, bot);
-  // the same reach retry_thread demands: an escalation never widens what
-  // the Chief may see, and a Chief has no Chief — its own gates are the
-  // person's to hear about
-  const onDuty = chief && escalationDeliverable(chief, bot) ? chief : null;
-  const tellThePerson = () => {
-    if (input.alreadyNotified) return;
-    notify(buildNotification("incident", bot, threadId, escalationChip(escalation), {
-      avatarUrl: bot.avatarUrl,
-      ...(group ? { group: { id: group.id, name: group.name } } : {}),
-    }));
-  };
-  if (!onDuty) {
-    tellThePerson();
-    return "person";
-  }
-  const escalations = store.tasks(onDuty.id).find((candidate) => candidate.title === ESCALATIONS_THREAD_TITLE && !candidate.archivedAt)
-    ?? store.createTask(onDuty.id, ESCALATIONS_THREAD_TITLE, false, undefined, { botId: onDuty.id, name: onDuty.name, at: Date.now() });
-  // no thread to carry the notice, or the gated thread is the escalations
-  // thread itself: the person is next
-  if (!escalations || escalations.threadId === threadId) {
-    tellThePerson();
-    return "person";
-  }
-  store.appendMessage(escalations.threadId, {
-    role: "bot",
-    kind: "activity",
-    tool: { name: escalationChip(escalation), ok: false },
-    threadRef: { botId: bot.id, threadId, title: task?.title ?? (group ? group.name : `${bot.name}'s conversation`) },
-  });
-  const text = escalationText(escalation, count);
-  // the notice carries the parked bot's name as its provenance, and marks
-  // itself a harness report about that thread exactly as an incident does
-  // (turnAnswers, incidentRefused) — the queue never refuses it, and it
-  // makes the Chief's computer optional
-  const peerAsk = { botId: bot.id, name: bot.name, unattended: true,
-    incident: { threadId, ...(input.alreadyNotified ? { notified: true } : {}) } };
-  // the escalations thread is reused, so the previous notice may still be
-  // running there: this one waits in that thread's queue and drains when
-  // the Chief is free, never refused
-  const decision = admit("incident", {}, {
-    threadBusy: threadBusy(onDuty.id, escalations.threadId),
-    atCapacity: botAtThreadCapacity(onDuty.id),
-    groupTurn: Boolean(activeGroupTurnForBot(onDuty.id)),
-  });
-  if (decision.action === "queue") {
-    queueSteeredMessage(onDuty.id, escalations.threadId, text, { reason: decision.reason, unattended: true, peerAsk });
-    return "chief";
-  }
-  void startTurn(onDuty.id, text, { threadId: escalations.threadId, unattended: true, peerAsk }).catch((error) => {
-    incidentRefused(onDuty, escalations.threadId, [peerAsk], error instanceof Error ? error.message : String(error));
-  });
-  return "chief";
-}
-
-// Provider-native sessions only know about messages produced inside their
-// own turns. A delegated result is appended later by the harness, so mark the
-// source task with a persisted, impossible-to-resume owner. Its next turn
-// will replay the active branch once before replacing this marker with the
-// real provider instance id. A unique suffix also closes the setup race: if
-// another result arrives while that replay is launching, the newer marker is
-// left intact for one more replay instead of being accidentally consumed.
+// Provider sessions only know their own turns' messages, so a harness-appended result marks the task for one replay; the unique suffix keeps a newer marker through a racing replay.
 const EXTERNAL_CONTEXT_MARKER_PREFIX = "__openmaus_external_context__:";
 
 function isExternalContextMarker(value: string | undefined): boolean {
@@ -8257,7 +8063,7 @@ function drainQueuedSendsNow() {
       }).catch((err) => {
         const why = err instanceof Error ? err.message : String(err);
         const chief = head.peerAsk?.incident ? store.bot(botId) : null;
-        if (chief) incidentRefused(chief, threadId, store.activePath(threadId).filter(line => excludeIds.includes(line.id)).map(line => line.peerAsk), why);
+        if (chief) incidentNotify.incidentRefused(chief, threadId, store.activePath(threadId).filter(line => excludeIds.includes(line.id)).map(line => line.peerAsk), why);
         else store.appendMessage(threadId, {
           role: "bot", kind: "activity",
           tool: failedTurnTool(`queued message could not start — ${why}`),
@@ -9248,7 +9054,7 @@ async function startTurn(
         });
         if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
           notify(buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }));
-          reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
+          incidentNotify.reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
           // Claude settles the interrupt below as exit_before_result; the completion fold must not report it a second time.
           resourceOwner.lazyClaimFailureReported = true;
         }
@@ -9769,7 +9575,7 @@ async function startTurn(
         notify(
           buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
         );
-        reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
+        incidentNotify.reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
       }
       store.setTaskActivity(bot.id, threadId, "idle");
       directTurnBots.delete(threadId);
@@ -10073,7 +9879,7 @@ routines = new RoutineManager({
     const detail = run.error ? `${run.routineName}: ${run.error}` : run.routineName;
     const notificationBot = routineSourceOwner(run)?.bot ?? bot;
     notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
-    reportIncident({ kind: "routine-failed", bot, threadId: run.threadId ?? bot.threadId, detail });
+    incidentNotify.reportIncident({ kind: "routine-failed", bot, threadId: run.threadId ?? bot.threadId, detail });
   },
   onRunDeferred: (run) => {
     const bot = store.bot(run.botId);
@@ -11015,28 +10821,8 @@ function roomRoutingInput(
 const roomPostBudgets = new Map<string, RoomPostBudget>();
 const ROOM_POST_MAX_CHARS = 4_000;
 
-// approval bus: peer-approval.ts only needs to push cards and broadcast
-// them — its pending map lives in the module so the two respond endpoints
-// can call resolvePeerComms without holding a reference back to here. The
-// pending hook is the first escalation trigger: a card that lands and waits
-// is a gate the Chief hears about at once (the card's own banner already
-// buzzed the person, so the notice never buzzes twice).
-const approvalBus: ApprovalBus = {
-  store,
-  broadcast,
-  notify,
-  autoApply: fullAccessForSource,
-  onPeerApprovalPending: (from, target, action, sourceThreadId, message) => {
-    reportEscalation({
-      kind: "peer-approval",
-      bot: from,
-      threadId: sourceThreadId,
-      gate: peerApprovalGate(action, target.name),
-      reason: message,
-      alreadyNotified: true,
-    });
-  },
-};
+// approval bus: peer-approval.ts pushes cards and broadcasts them; its pending map stays in the module. The pending hook routes a landed card to the escalation notices.
+const approvalBus: ApprovalBus = { store, broadcast, notify, autoApply: fullAccessForSource, onPeerApprovalPending: escalationNotify.onPeerApprovalPending };
 
 // Peer approvals live only in memory: settle every peer card still open on disk, or it locks the composer forever.
 {
@@ -14065,6 +13851,9 @@ const cloudMoveRoutes = createCloudMoveRoutes({
 
 // `workspaceAccess` is assigned at boot, after this line: read it per request.
 ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") }));
+ROUTES.push(createEscalateRoutes({ authorize: authorizedInternalCapability, isActive: internalCapabilityIsActive, bot: (id) => store.bot(id) ?? undefined,
+  externalBlocked: (capability, method, path) => capability.generation === EXTERNAL_RUNTIME_GENERATION && !externalRuntimeMayCall(method, path),
+  reportEscalation: escalationNotify.reportEscalation }));
 const orgInstallStatuses = () => orgLibrary?.installStatuses() ?? new Map();
 ROUTES.push(createBotPresetRoutes({ presets: presetStore, orgStatuses: orgInstallStatuses }));
 // `routines` is assigned at boot, so it is read per request.
@@ -16084,7 +15873,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           return json(res, 409, { error: "that thread is still running — wait for it to settle before retrying" });
         }
         // A thread that finished a run since it was last reported has nothing to resume: resuming would redo finished work.
-        const reportedAt = incidentLedger.lastAt(threadId);
+        const reportedAt = incidentNotify.incidentLedger.lastAt(threadId);
         if (reportedAt !== undefined && store.activePath(threadId).some(line => line.turnSucceeded === true && line.at > reportedAt)) {
           return json(res, 409, { error: "that thread has finished a run since it was reported — there is nothing to retry; read what it did before deciding anything else" });
         }
@@ -16104,52 +15893,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         return json(res, 200, { started: true, message: `${target.name}'s thread #${task.title} is running again. Its result stays in that thread; you are not woken for it — check later with list_threads or session_search if you need to.` });
       }
-      // raise_escalation: a bot parks itself on a gate only a person can
-      // lift and says so (server/escalations.ts). The flag does not
-      // interrupt the turn — the bot still owns its reply — so the answer
-      // tells it to finish what it can and wait; the Chief's (or the
-      // person's) notice is the deliverable, and a Chief's own flag is the
-      // person's to hear.
-      if (method === "POST" && path === "/api/internal/escalate") {
-        const body = await readInternalBody();
-        const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 500) : "";
-        if (!reason) {
-          return json(res, 400, { error: "raise_escalation needs reason: one line saying what you need from the person and why your work is parked on it" });
-        }
-        requireActiveInternalCapability();
-        const outcome = reportEscalation({
-          kind: "raised",
-          bot: internalSender,
-          threadId: internalCapability.threadId,
-          gate: RAISED_GATE,
-          reason,
-          alreadyNotified: false,
-        });
-        if (outcome === "muted") {
-          return json(res, 429, { error: "this conversation has already raised several escalations in the last hour; the person was told about the first ones. Finish your turn and wait — do not keep flagging the same gate." });
-        }
-        return json(res, 200, {
-          escalated: true,
-          message: outcome === "chief"
-            ? "your Chief of Staff was told in its Team escalations thread. Say plainly that you stopped at this gate and why, then end your turn and wait; do not retry the gated work until the person lifts the gate."
-            : "the person was told directly. Say plainly that you stopped at this gate and why, then end your turn and wait; do not retry the gated work until the person lifts the gate.",
-        });
-      }
-      // post_to_room: a bot puts ONE message into a room it belongs to,
-      // without a turn being started for anyone. Everything about it is a
-      // deliberate non-event:
-      //
-      //   role "bot", never "user". A user-role append is what the composer
-      //   writes, and it re-enters responder selection — one tool call would
-      //   become a round of real turns, which is the notification storm this
-      //   whole surface exists to avoid.
-      //
-      //   no startGroupTurn and no queue kick. The post lands, the room is
-      //   marked unread, the person reads it when they look. A bot wanting a
-      //   reply has coordinate_bots, which is accounted for.
-      //
-      //   membership from the record, never from the argument: the argument
-      //   only says which room to look up.
+      // post_to_room appends role "bot", never "user" (which would start a round of real turns), starts no turn, and takes membership from the record.
       if (method === "POST" && path === "/api/internal/post-to-room") {
         const body = await readInternalBody();
         const from = internalSender;

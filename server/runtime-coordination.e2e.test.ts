@@ -177,6 +177,7 @@ it("S2 parks a teammate on NEEDS INPUT, carries the person's answer into her nex
   const brief = "S2-BRIEF: tag the release in the repository and report the tag.";
   f.script(f.clive.id,
     { key: "C0", match: ["S2-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: brief } }], reply: "C0: Mira is tagging it." },
+    { key: "CE1", match: ["[Escalation notice", "which repository?"], reply: "CE1: the person was told to answer Mira's question." },
     { key: "C1", match: [SETTLED, REPORT_FROM_MIRA], reply: "S2-FINAL: the release is tagged." });
   f.script(f.mira.id,
     { key: "M2", match: ["S2-BRIEF", "The person answered"], reply: "S2-RESULT: tagged v1.2.0 in the main repository." },
@@ -192,7 +193,7 @@ it("S2 parks a teammate on NEEDS INPUT, carries the person's answer into her nex
   expect(work).not.toBe(f.mira.activeTaskId);
   await expect.poll(async () => (await f.chips(job, "needs your input")).length, { timeout: 15_000 }).toBeGreaterThanOrEqual(1);
   expect((await f.chips(job, "needs your input")).some((message: any) => chipText(message).includes("which repository?"))).toBe(true);
-  expect(f.turns(f.clive.id).map((record: any) => record.planKey)).toEqual(["C0"]);
+  await expect.poll(() => f.turns(f.clive.id).map((record: any) => record.planKey), { timeout: 15_000 }).toEqual(["C0", "CE1"]);
   expect(f.roots()[0].status).toBe("waiting");
 
   await f.say(f.mira.id, work, "the main one");
@@ -204,7 +205,7 @@ it("S2 parks a teammate on NEEDS INPUT, carries the person's answer into her nex
   await f.final(job, "S2-FINAL", 45_000);
   await expect.poll(() => f.roots()[0]?.status, { timeout: 15_000 }).toBe("completed");
   expect(f.turns(f.mira.id).map((record: any) => record.planKey)).toEqual(["M1", "M2"]);
-  expect(f.turns(f.clive.id).map((record: any) => [record.planKey, record.resumed])).toEqual([["C0", false], ["C1", true]]);
+  expect(f.turns(f.clive.id).map((record: any) => [record.planKey, record.resumed])).toEqual([["C0", false], ["CE1", false], ["C1", true]]);
   expect(f.told(f.turn("C1"))).toContain(REPORT_FROM_MIRA);
   expect(f.told(f.turn("C1"))).toContain("S2-RESULT: tagged v1.2.0");
   expect(f.children()[0]).toMatchObject({ status: "completed", outcome: "done", executions: 2 });
@@ -217,7 +218,8 @@ it("S2 parks a teammate on NEEDS INPUT, carries the person's answer into her nex
 it("S2b keeps one question chip across a restart and names the parked thread as waiting on the person", () => scenario(async (f) => {
   const brief = "S2B-BRIEF: tag the release in the repository and report the tag.";
   f.script(f.clive.id,
-    { key: "C0", match: ["S2B-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: brief } }], reply: "C0: Mira is tagging it." });
+    { key: "C0", match: ["S2B-JOB"], steps: [{ arguments: { bot_ids: [f.mira.id], message: brief } }], reply: "C0: Mira is tagging it." },
+    { key: "CE1", match: ["[Escalation notice", "which repository?"], reply: "CE1: the person was told to answer Mira's question." });
   f.script(f.mira.id, { key: "M1", match: ["S2B-BRIEF"], reply: "I can tag it once I know where.\nNEEDS INPUT: which repository?" });
   const job = f.clive.activeTaskId;
   await f.say(f.clive.id, job, "S2B-JOB: have Mira tag the release and own the result.");
@@ -230,6 +232,8 @@ it("S2b keeps one question chip across a restart and names the parked thread as 
     .find((bot) => bot.id === botId)?.tasks.find((task: any) => task.threadId === threadId)?.unread === true;
   expect((await f.api("POST", `/api/bots/${f.clive.id}/read`, { threadId: job })).status).toBe(200);
   expect((await f.api("POST", `/api/bots/${f.mira.id}/read`, { threadId: work })).status).toBe(200);
+  await expect.poll(() => Boolean(f.turn("CE1")), { timeout: 15_000 }).toBe(true);
+
   await f.restart("SIGTERM");
   await expect.poll(() => f.eventsOf(parked.id).some((event: any) => event.kind === "restart_reconciled"), { timeout: 15_000 }).toBe(true);
   await f.settle(500);
