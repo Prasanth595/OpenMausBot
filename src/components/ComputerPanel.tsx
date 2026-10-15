@@ -344,11 +344,18 @@ export function ComputerPanel({
   const [storedPanelView, setPanelView] = useState<ComputerPanelView>(() => readComputerPanelView(bot.id));
   const requestedDataResult = state.dataResultFocus?.botId === bot.id ? state.dataResultFocus : undefined;
   const [dataRequest, setDataRequest] = useState<{ id: string; requestId: number }>();
-  const panelView: ComputerPanelView = advanced
-    ? storedPanelView === "files" ? "computer" : storedPanelView
-    : storedPanelView === "routines" || storedPanelView === "android" ? "computer" : storedPanelView;
   const androidStatus = useAndroidUsbDevices();
   const androidConnected = androidStatus.devices.length > 0;
+  // A failed or unavailable adb reports an empty device list too, so only a
+  // finished check with no failure reason can prove there is no device.
+  const androidStatusUsable = androidStatus.scanned !== false
+    && androidStatus.reasonCode !== "adb-unavailable"
+    && androidStatus.reasonCode !== "adb-failed";
+  const panelView: ComputerPanelView = advanced
+    ? storedPanelView === "files" || (storedPanelView === "android" && !androidConnected)
+      ? "computer"
+      : storedPanelView
+    : storedPanelView === "routines" || storedPanelView === "android" ? "computer" : storedPanelView;
   const browserAvailableHere = browserAvailable(state.config);
   const browserEnabled = builtInBrowserEnabled(state.config) && bot.browser !== false
     && (browserAvailableHere || state.config?.browserEngine?.installable === true);
@@ -445,11 +452,12 @@ export function ComputerPanel({
   }, [bot.id]);
 
   useEffect(() => {
-    if (!androidConnected && panelView === "android") {
+    if (!androidStatusUsable) return;
+    if (!androidConnected && storedPanelView === "android") {
       setPanelView("computer");
       writeComputerPanelView(bot.id, "computer");
     }
-  }, [androidConnected, bot.id, panelView]);
+  }, [androidConnected, androidStatusUsable, bot.id, storedPanelView]);
   useEffect(() => {
     vmReadinessAttempts.current = 0;
   }, [bot.id, bot.computer]);
