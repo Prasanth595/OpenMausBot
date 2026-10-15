@@ -1632,6 +1632,7 @@
   "composer.queued.steerImagesHeld": "Pictures can't be steered into this bot's running turn. Your message will be sent as the next turn.",
   "composer.queued.regionOne": "1 queued message",
   "composer.queued.regionMany": "{count} queued messages",
+  "composer.queued.replaced": "Cleared queue: {count}",
   "composer.queued.list": "Queued messages",
   "composer.queued.capacity": "Queued — starts when this bot has a free thread slot.",
   "composer.queued.groupTurn": "Queued — this bot's room turn runs one at a time; it starts when that finishes.",

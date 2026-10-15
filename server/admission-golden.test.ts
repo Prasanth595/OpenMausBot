@@ -8,6 +8,7 @@ describe("admission golden tables", () => {
   it("direct-busy: steers plain text into a capable engine, parks everything else", () => {
     const plain = { carriesImages: false, pendingComputerSelection: false, engineCanSteer: true };
     expect(admit("direct-busy", plain)).toEqual({ action: "steer" });
+    expect(admit("direct-busy", { ...plain, queueOnly: true })).toEqual({ action: "queue" });
     expect(admit("direct-busy", { ...plain, carriesImages: true })).toEqual({ action: "queue", blockedBy: "images" });
     expect(admit("direct-busy", { ...plain, pendingComputerSelection: true })).toEqual({ action: "queue" });
     expect(admit("direct-busy", { ...plain, engineCanSteer: false })).toEqual({ action: "queue" });

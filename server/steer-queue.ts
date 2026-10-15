@@ -254,9 +254,9 @@ export function cancelSteeredMessage(botId: string, messageId: string, expectedT
 }
 
 /** The entry leaves first, so a racing settle cannot also dispatch these words; the caller must restore or settle it. */
-export function holdSteeredQueue(botId: string, threadId: string, queueId: string): HeldSteerQueue | null {
+export function holdSteeredQueue(botId: string, threadId: string, queueId?: string): HeldSteerQueue | null {
   const entry = queues.get(threadId);
-  if (!entry || entry.botId !== botId || !entry.items.some((item) => item.messageId === queueId)) return null;
+  if (!entry || entry.botId !== botId || (queueId && !entry.items.some((item) => item.messageId === queueId))) return null;
   queues.delete(threadId);
   changed();
   return { botId, threadId, items: entry.items };
@@ -272,8 +272,8 @@ export function restoreHeldSteeredQueue(held: HeldSteerQueue): void {
   changed();
 }
 
-export function settleHeldSteeredQueue(held: HeldSteerQueue): void {
-  settleChatFollowups(held.items.map((item) => item.messageId), null);
+export function settleHeldSteeredQueue(held: HeldSteerQueue, cancelled = false): void {
+  settleChatFollowups(held.items.map((item) => item.messageId), cancelled ? "cancelled" : null);
 }
 
 export function _queuedCount(threadId: string): number {

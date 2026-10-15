@@ -55,7 +55,7 @@ export interface BotMessageRouteDeps {
   acceptDirectSend(
     input: {
       botId: string; threadId: string; text: string; sendId?: string; replyTo?: Message; sender?: ResolvedSender;
-      trigger: UsageTrigger; dataContext?: DataContext; personPresent: boolean;
+      trigger: UsageTrigger; dataContext?: DataContext; personPresent: boolean; queueOnly?: boolean; clearQueuedOnSteer?: boolean;
     },
     guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
   ): Promise<DirectSendReceipt>;
@@ -218,6 +218,8 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
       try {
         const receipt = await acceptDirectSend({
           botId: bot.id, threadId, text, sendId, replyTo, sender, trigger, dataContext,
+          queueOnly: !guarded && body.queueOnly === true,
+          clearQueuedOnSteer: !guarded && body.clearQueuedOnSteer === true,
           // The bot's own shell reaches this route on a headless server (loopback is the owner), so only a
           // paired session or the desktop capability proves a person and lifts the webhook block.
           personPresent: auth.kind === "session" || DESKTOP_MANAGED,

@@ -68,8 +68,6 @@ import { useThreadRefs } from "./ThreadRefs";
 import {
   QueuedComposerMessages,
   composerCanSteerQueuedMessages,
-  doubleEnterSteerWindowExpiresAt,
-  doubleEnterSteersQueue,
 } from "./ComposerQueuedMessages";
 import { skillAuthoringEnabled } from "@/lib/feature-flags";
 import { mentionChoicesForQuery, mentionQueryAt, mentionRowDescription } from "@/lib/mentions";
@@ -386,6 +384,13 @@ export function Composer({
 
   const pendingCount = (state.pendingQueued[threadId] ?? []).length;
   const queuedMessages = state.pendingQueued[threadId] ?? [];
+  const [clearedCount, setClearedCount] = useState(0);
+  useEffect(() => setClearedCount(0), [threadId]);
+  useEffect(() => {
+    if (!clearedCount) return;
+    const timeout = window.setTimeout(() => setClearedCount(0), 6000);
+    return () => window.clearTimeout(timeout);
+  }, [clearedCount]);
   const canSteerQueued = composerCanSteerQueuedMessages(
     busy,
     locked,
@@ -433,18 +438,6 @@ export function Composer({
     if (group) dispatch({ type: "cancelGroupQueued", groupId: group.id, threadId, queueId, onCancelled });
     else if (bot) dispatch({ type: "cancelQueued", botId: bot.id, threadId, queueId, onCancelled });
   };
-  const steerAgainUntilRef = useRef(0);
-  const prevPendingCountRef = useRef(pendingCount);
-  useEffect(() => {
-    const expiresAt = doubleEnterSteerWindowExpiresAt(
-      prevPendingCountRef.current,
-      pendingCount,
-      busy,
-      canSteer,
-    );
-    if (expiresAt !== null) steerAgainUntilRef.current = expiresAt;
-    prevPendingCountRef.current = pendingCount;
-  }, [pendingCount, busy, canSteer]);
   useEffect(() => {
     if (!busy || pendingCount === 0) {
       setSteering(false);
@@ -542,10 +535,10 @@ export function Composer({
     if (group) {
       dispatch({ type: "sendGroup", groupId: group.id, mode: failedMode, ...retry });
     } else if (bot) {
-      dispatch({ type: "send", botId: bot.id, ...retry });
+      dispatch({ type: "send", botId: bot.id, queueOnly: true, ...retry });
     }
   };
-  const send = () => {
+  const send = (steer = false) => {
     if (locked || attachmentPending) return;
     if (
       attachments.some((attachment) => attachment.kind === "image") &&
@@ -579,6 +572,7 @@ export function Composer({
         replyToId: replyTo?.id,
         threadId,
         mode: effectiveChannelMode,
+        steerOnQueue: steer && busy && canSteer && effectiveChannelMode === "chat" && pendingCount === 0 && attachments.length === 0,
         onError: () => restoreDraft(sentDraft),
       });
       track("message_sent", { room: true, mode: effectiveChannelMode, queued: busy });
@@ -590,10 +584,15 @@ export function Composer({
         sendId: sentDraft.sendId,
         replyToId: replyTo?.id,
         threadId,
+        queueOnly: !steer,
+        clearQueuedOnSteer: steer && busy,
+        onQueueCleared: (count) => {
+          if (draftIdRef.current === sentDraft.draftId) setClearedCount(count);
+        },
         dataContext,
         onError: () => restoreDraft(sentDraft),
       });
-      track("message_sent", { driver: bot.modelSelection?.instanceId, queued: busy && !canSteer });
+      track("message_sent", { driver: bot.modelSelection?.instanceId, queued: busy && !steer });
     }
     setText("");
     setAttachments([]);
@@ -871,6 +870,9 @@ export function Composer({
           }}
           onEdit={locked ? undefined : editQueued}
         />
+        {clearedCount > 0 && <p role="status" className="px-3 pb-1 text-xs text-ink-secondary">
+          {t("composer.queued.replaced", { count: clearedCount })}
+        </p>}
         <div className="relative">
           <div
             aria-hidden
@@ -988,7 +990,7 @@ export function Composer({
                 );
                 return;
               }
-              if (e.key === "Enter" || e.key === "Tab") {
+              if ((e.key === "Enter" && !e.ctrlKey && !e.metaKey) || e.key === "Tab") {
                 e.preventDefault();
                 pickCommand(commandCandidates[highlight]);
                 return;
@@ -1006,7 +1008,7 @@ export function Composer({
                 setHighlight((h) => (h + delta + candidates.length) % candidates.length);
                 return;
               }
-              if (e.key === "Enter" || e.key === "Tab") {
+              if ((e.key === "Enter" && !e.ctrlKey && !e.metaKey) || e.key === "Tab") {
                 e.preventDefault();
                 pickMention(candidates[highlight]);
                 return;
@@ -1030,15 +1032,7 @@ export function Composer({
             }
             if (sendsMessage(e.nativeEvent, sendKey)) {
               e.preventDefault();
-              if (
-                canSteer &&
-                doubleEnterSteersQueue(steerAgainUntilRef.current, Date.now(), pendingCount, hasContent)
-              ) {
-                steerAgainUntilRef.current = 0;
-                steerQueued();
-                return;
-              }
-              send();
+              send(e.ctrlKey);
             }
             if (e.key === "Escape" && recording) setRecording(false);
           }}
@@ -1057,10 +1051,6 @@ export function Composer({
               ? t("composer.placeholder.listening")
               : replyTo && !busy
               ? t("composer.placeholder.reply")
-              : busy && canSteer
-                ? pendingCount > 0
-                  ? t("composer.placeholder.steerQueued", { name: busyName, key: sendLabel })
-                  : t("composer.placeholder.steer", { name: busyName, key: sendLabel })
               : busy
                 ? group
                   ? t("composer.placeholder.queueGroup", { name: busyName, key: sendLabel })
@@ -1106,21 +1096,13 @@ export function Composer({
         {bot && !group && <CallButton bot={bot} placement="composer" />}
         {hasContent && !locked && (
           <button
-            onClick={send}
+            onClick={() => send()}
             disabled={attachmentPending}
             aria-label={
-              busy && canSteer
-                  ? t("composer.send.steer")
-                  : busy
-                    ? t("composer.send.queue")
-                    : t("composer.send.message")
+              busy ? t("composer.send.queue") : t("composer.send.message")
             }
             title={
-              busy && canSteer
-                  ? t("composer.send.steer")
-                  : busy
-                    ? t("composer.send.queueHint")
-                    : `${t("chat.send")} (${sendLabel})`
+              busy ? t("composer.send.queueHint") : `${t("chat.send")} (${sendLabel})`
             }
             className={cn(
               "flex size-8 shrink-0 items-center justify-center rounded-full text-white",

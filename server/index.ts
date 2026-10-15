@@ -255,13 +255,16 @@ import { admit } from "./admission.ts";
 import {
   drainSteeredMessages,
   hasQueuedSteeredMessages,
+  holdSteeredQueue,
   isSteeredMessageQueued,
   onSteeredQueueChange,
   queuedSteerSnapshot,
   queuedSteeredMessage,
   queuedThreadPosition,
   queueSteeredMessage,
+  restoreHeldSteeredQueue,
   restoreSteeredMessages,
+  settleHeldSteeredQueue,
 } from "./steer-queue.ts";
 import {
   drainChannelMessages,
@@ -7932,7 +7935,7 @@ async function startOrQueueDirectMessage(botId: string, threadId: string, text: 
 }
 
 type DirectSendReceipt =
-  | { ok: true; threadId: string; message: Message; steered?: true }
+  | { ok: true; threadId: string; message: Message; steered?: true; clearedQueueIds?: string[] }
   | { ok: true; queued: true; queueId: string; threadId: string; reason?: SteerQueueReason };
 
 class DirectSendRefused extends Error {
@@ -7970,10 +7973,12 @@ async function acceptDirectSend(
     callId?: string;
     dataContext?: DataContext;
     personPresent: boolean;
+    queueOnly?: boolean;
+    clearQueuedOnSteer?: boolean;
   },
   guardedStart?: (currentAtStart: BotRecord) => Promise<DirectSendReceipt>,
 ): Promise<DirectSendReceipt> {
-  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent } = input;
+  const { botId, threadId, text, sendId, replyTo, sender, trigger, via, callId, dataContext, personPresent, queueOnly, clearQueuedOnSteer } = input;
   const refused = directSendRefusal(botId, threadId);
   if (refused) throw refused;
   return sendSequencer.run(
@@ -8028,63 +8033,86 @@ async function acceptDirectSend(
         const carriesImages = steerInput.images.length > 0;
         const steerTarget = handoffs.current(threadId);
         const busyAdmission = admit("direct-busy", {
+          queueOnly,
           carriesImages,
           engineCanSteerImages: engineSteersImages(instance),
           pendingComputerSelection: Boolean(computerSelectionTurns.get(threadId)?.selected),
           engineCanSteer: Boolean(instance?.adapter.capabilities.queueing && instance.adapter.steer),
         });
-        if (busyAdmission.action === "steer" && instance?.adapter.steer) {
-          const prompt = promptWithReply(promptWithDataContext(steerInput.text, dataContext), replyTo, cfg.profile?.name?.trim() || "User");
-          steered = await (steerInput.images.length > 0
-            ? instance.adapter.steer(threadId, prompt, steerInput.images)
-            : instance.adapter.steer(threadId, prompt))
-            .catch((): SteerOutcome => "indeterminate");
-        }
-        // steer() awaits the adapter: re-check ownership before appending, or a late acknowledgement writes into a task the bot no longer owns.
-        const current = store.projectBotForTask(botId, threadId);
-        if (!current) throw Object.assign(new Error("no such bot"), { status: 404 });
-        if (!store.taskByThread(botId, threadId)) {
-          throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
-        }
-        const delivered = steered !== "refused";
-        if (delivered) {
-          if (steered === "steered" && !current.busy) {
-            throw Object.assign(
-              new Error("the running turn ended before the steered message could be recorded"),
-              { status: 409 },
-            );
+        let held = clearQueuedOnSteer && busyAdmission.action === "steer"
+          ? holdSteeredQueue(botId, threadId)
+          : null;
+        let cleared = false;
+        try {
+          if (busyAdmission.action === "steer" && instance?.adapter.steer) {
+            const prompt = promptWithReply(promptWithDataContext(steerInput.text, dataContext), replyTo, cfg.profile?.name?.trim() || "User");
+            steered = await (steerInput.images.length > 0
+              ? instance.adapter.steer(threadId, prompt, steerInput.images)
+              : instance.adapter.steer(threadId, prompt))
+              .catch((): SteerOutcome => "indeterminate");
           }
-          // "indeterminate" is recorded too: the words may already be in a turn, and a resend could run them twice.
-          if (personPresent) clearUnattended(threadId);
-          const message = store.appendMessage(threadId, {
-            role: "user",
-            kind: "text",
-            text,
+          // steer() awaits the adapter: re-check ownership before appending, or a late acknowledgement writes into a task the bot no longer owns.
+          const current = store.projectBotForTask(botId, threadId);
+          if (!current) throw Object.assign(new Error("no such bot"), { status: 404 });
+          if (!store.taskByThread(botId, threadId)) {
+            throw Object.assign(new Error("the target task no longer exists"), { status: 409 });
+          }
+          const delivered = steered !== "refused";
+          if (delivered) {
+            if (steered === "steered" && !current.busy) {
+              throw Object.assign(
+                new Error("the running turn ended before the steered message could be recorded"),
+                { status: 409 },
+              );
+            }
+            // "indeterminate" is recorded too: the words may already be in a turn, and a resend could run them twice.
+            if (personPresent) clearUnattended(threadId);
+            const message = store.appendMessage(threadId, {
+              role: "user",
+              kind: "text",
+              text,
+              replyToId: replyTo?.id,
+              sendId,
+              ...(dataContext ? { dataContext } : {}),
+              steered: true,
+              sender,
+              ...spokenLineFields(via, callId),
+            });
+            store.setTaskAskedAt(botId, threadId, message.at);
+            handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
+            if (held) {
+              settleHeldSteeredQueue(held, true);
+              cleared = true;
+            }
+            return { ok: true as const, steered: true as const, threadId, message,
+              ...(held ? { clearedQueueIds: held.items.map((item) => item.messageId) } : {}) };
+          }
+          if (!current.busy) {
+            if (held) {
+              restoreHeldSteeredQueue(held);
+              held = null;
+              drainQueuedSends();
+            }
+            return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext);
+          }
+          const queued = queueSteeredMessage(current.id, threadId, text, {
             replyToId: replyTo?.id,
             sendId,
-            ...(dataContext ? { dataContext } : {}),
-            steered: true,
+            dataContext,
+            prompt: promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
             sender,
-            ...spokenLineFields(via, callId),
+            trigger,
+            via,
+            callId,
           });
-          store.setTaskAskedAt(botId, threadId, message.at);
-          handoffs.steered(threadId, steerTarget, instance?.instanceId, message.id);
-          return { ok: true as const, steered: true as const, threadId, message };
+          return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
+        } finally {
+          if (held && !cleared) {
+            restoreHeldSteeredQueue(held);
+            const after = store.projectBotForTask(botId, threadId);
+            if (!after?.busy) drainQueuedSends();
+          }
         }
-        if (!current.busy) {
-          return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext);
-        }
-        const queued = queueSteeredMessage(current.id, threadId, text, {
-          replyToId: replyTo?.id,
-          sendId,
-          dataContext,
-          prompt: promptWithReply(promptWithDataContext(text, dataContext), replyTo, cfg.profile?.name?.trim() || "User"),
-          sender,
-          trigger,
-          via,
-          callId,
-        });
-        return { ok: true as const, queued: true as const, queueId: queued.id, threadId };
       }
       return startOrQueueDirectMessage(botId, threadId, text, replyTo, sendId, sender, trigger, via, callId, dataContext);
     },

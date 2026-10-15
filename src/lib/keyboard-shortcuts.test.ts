@@ -60,6 +60,13 @@ describe("keyboard-shortcuts", () => {
     expect(items.find((item) => item.id === "live-call-hang-up")).toMatchObject({ macKeys: ["⌘", "⇧", "H"], winKeys: ["Ctrl", "Shift", "H"] });
   });
 
+  it("lists queue, steer, and newline composer keys", () => {
+    const items = SHORTCUT_GROUPS.flatMap((group) => group.items);
+    expect(items.find((item) => item.id === "send-message")?.winKeys).toEqual(["Enter"]);
+    expect(items.find((item) => item.id === "steer-message")?.winKeys).toEqual(["Ctrl", "Enter"]);
+    expect(items.find((item) => item.id === "new-line")?.winKeys).toEqual(["Shift", "Enter"]);
+  });
+
   it("draws the send and new-line rows from the send key choice", () => {
     const row = (groups: readonly typeof SHORTCUT_GROUPS[number][], id: string) => groups.flatMap((group) => group.items).find((item) => item.id === id)!;
     expect(shortcutGroupsFor("enter")).toBe(SHORTCUT_GROUPS);
@@ -73,7 +80,7 @@ describe("keyboard-shortcuts", () => {
     expect(row(mod, "new-line")).toMatchObject({ macKeys: ["Return"], winKeys: ["Enter"] });
     for (const groups of [shift, mod]) {
       expect(row(groups, "save-bulletin")).toBe(row(SHORTCUT_GROUPS, "save-bulletin"));
-      expect(row(groups, "send-message").description).toBe("Send message");
+      expect(row(groups, "send-message").description).toBe(row(SHORTCUT_GROUPS, "send-message").description);
       expect(groups.map((group) => group.items.map((item) => item.id))).toEqual(SHORTCUT_GROUPS.map((group) => group.items.map((item) => item.id)));
     }
   });

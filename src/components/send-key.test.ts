@@ -126,10 +126,10 @@ describe.each(SEND_KEYS)("in %s mode", (mode) => {
     expect(sends()).toEqual([expect.objectContaining({ type: "send", botId: "bot", text: "first" })]);
     type(textarea(), "second");
     expect(press(textarea(), { metaKey: true }).defaultPrevented).toBe(true);
-    expect(sends().at(-1)).toEqual(expect.objectContaining({ type: "send", text: "second" }));
+    expect(sends().at(-1)).toEqual(expect.objectContaining({ type: "send", text: "second", queueOnly: true }));
     type(textarea(), "third");
     expect(press(textarea(), { ctrlKey: true, shiftKey: true }).defaultPrevented).toBe(true);
-    expect(sends().at(-1)).toEqual(expect.objectContaining({ type: "send", text: "third" }));
+    expect(sends().at(-1)).toEqual(expect.objectContaining({ type: "send", text: "third", queueOnly: false }));
   });
 
   it("a room's composer follows the same key", () => {
@@ -193,6 +193,15 @@ describe("an input method in the composer's menus", () => {
     expect(sends()).toEqual([]);
   });
 
+  it("Shift+Enter picks the mention instead of sending the half-typed name", () => {
+    setSendKey("shift-enter");
+    render(createElement(Composer, { group: room, members: [{ ...bot, name: "山田" }] }));
+    type(textarea(), "@山田");
+    expect(press(textarea(), { shiftKey: true }).defaultPrevented).toBe(true);
+    expect(textarea().value).toBe("@山田 ");
+    expect(sends()).toEqual([]);
+  });
+
   it("leaves it to the input method in the command menu too", () => {
     render(createElement(Composer, { group: room, members: [bot] }));
     type(textarea(), "/go");
@@ -219,7 +228,7 @@ describe("the send key in hints", () => {
 
     type(textarea(), "");
     render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
-    expect(textarea().placeholder).toBe("Pepper is working — Ctrl+Enter sends this into the running turn");
+    expect(textarea().placeholder).toBe("Pepper is working — sends when this turn finishes");
     render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [{ ...bot, modelSelection: { instanceId: "none", model: "x" } }] }));
     expect(textarea().placeholder).toBe("Pepper is working — Ctrl+Enter queues your message");
   });
@@ -229,8 +238,8 @@ describe("the send key in hints", () => {
     setSendKey("mod-enter");
     setLocale("ja");
     try {
-      render(createElement(Composer, { bot: { ...bot, busy: true, tasks: [{ ...bot.tasks![0]!, busy: true }] } }));
-      expect(textarea().placeholder).toBe("Pepper が作業中です — Ctrl+Enter で実行中のターンに送ります");
+      render(createElement(Composer, { group: { ...room, busyBotId: "bot" }, members: [{ ...bot, modelSelection: { instanceId: "none", model: "x" } }] }));
+      expect(textarea().placeholder).toBe("Pepper が作業中です — Ctrl+Enter でメッセージを順番待ちにします");
     } finally {
       setLocale("en");
     }
