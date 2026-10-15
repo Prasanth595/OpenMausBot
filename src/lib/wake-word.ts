@@ -1,21 +1,21 @@
-// The "Astra" wake word.
+// The "Luna" wake word.
 //
 // Porcupine runs ON-DEVICE in a worker: raw mic frames go in, and the only
 // thing that comes out is "the phrase was heard". No audio leaves the
-// machine, nothing is transcribed here. Hearing "Astra" starts one
+// machine, nothing is transcribed here. Hearing "Luna" starts one
 // voice-dictation session (voice-dictation.ts); when the speaker finishes
 // (the local silence watchdog), the transcript lands in the composer via
 // appendComposerDraft, the same path the Verify card's Save button uses — it
 // updates a mounted composer live and survives the composer being unmounted.
 //
 // Suspension rules (mirroring the call view's half-duplex rule):
-//   - while the bot SPEAKS (TTS), detection pauses — Astra must never wake
+//   - while the bot SPEAKS (TTS), detection pauses — Luna must never wake
 //     on her own voice;
 //   - while a CALL is up, detection pauses — the call owns the mic;
 //   - while dictation itself is live, the controller stands down until the
 //     transcript lands.
 //
-// The keyword model is trained at runtime from the phrase "Astra" via
+// The keyword model is trained at runtime from the phrase "Luna" via
 // Porcupine's Console API (trainWakeWordFromPhrase) and cached in
 // IndexedDB, so the only credential needed is a free Picovoice AccessKey,
 // entered once in Settings → Connections. If that key is absent or training
@@ -27,8 +27,8 @@ import { WebVoiceProcessor } from "@picovoice/web-voice-processor";
 import { appendComposerDraft } from "./drafts";
 import { createVoiceDictationSession } from "./voice-dictation";
 
-export const WAKE_PHRASE = "Astra";
-const KEYWORD_CACHE_PATH = "astra_keyword";
+export const WAKE_PHRASE = "Luna";
+const KEYWORD_CACHE_PATH = "luna_keyword";
 
 export interface WakeWordCallbacks {
   onDetected: () => void;
@@ -61,7 +61,7 @@ export class WakeWordController {
     return this.detectorActive;
   }
 
-  /** Build the engine (training "Astra" on first use; cached in IndexedDB
+  /** Build the engine (training "Luna" on first use; cached in IndexedDB
    * afterwards). Throws with a user-readable message on failure. */
   async prepare(accessKey: string): Promise<void> {
     if (this.worker) return;

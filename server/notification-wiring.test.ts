@@ -34,7 +34,7 @@ interface RoutineBody {
   name: string;
   prompt: string;
   botId: string;
-  runOn: "astra";
+  runOn: "maus";
   schedule: { type: "once"; at: number };
 }
 
@@ -55,9 +55,9 @@ posixOnly("routine failure notification wiring", () => {
   beforeAll(async () => {
     chmodSync(FAKE_CLI, 0o755);
     home = mkdtempSync(join(tmpdir(), "omb-notifications-e2e-"));
-    mkdirSync(join(home, ".astra"), { recursive: true });
+    mkdirSync(join(home, ".openmausbot"), { recursive: true });
     writeFileSync(
-      join(home, ".astra", "config.json"),
+      join(home, ".openmausbot", "config.json"),
       JSON.stringify({
         instances: {
           grok: {
@@ -76,8 +76,8 @@ posixOnly("routine failure notification wiring", () => {
     const env: NodeJS.ProcessEnv = {
       HOME: home,
       USERPROFILE: home,
-      ASTRA_PORT: String(PORT),
-      ASTRA_WEBHOOK_PORT: String(WEBHOOK_PORT),
+      OMB_PORT: String(PORT),
+      OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
     };
     if (process.env.PATH) env.PATH = process.env.PATH;
     if (process.env.SystemRoot) env.SystemRoot = process.env.SystemRoot;
@@ -126,7 +126,7 @@ posixOnly("routine failure notification wiring", () => {
         name: "Broken nightly report",
         prompt: "Prepare the report",
         botId: bot.id,
-        runOn: "astra",
+        runOn: "maus",
         schedule: { type: "once", at: Date.now() + 60_000 },
       });
       expect(created.status).toBe(201);

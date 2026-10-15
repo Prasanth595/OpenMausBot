@@ -8,7 +8,7 @@
  * app restart without asking the model to interpret the request again.
  */
 
-export type RoutineRequestRunOn = "astra" | "cloud";
+export type RoutineRequestRunOn = "maus" | "cloud";
 
 export interface RoutineRequestIntervalWindow {
   start: string;

@@ -292,7 +292,7 @@ function LocalVmPane({
       if (bridge) await bridge.close(contextId).catch(() => {});
       if (!alive || !botId) return;
       if (!bridge) {
-        setError("The two-desktop workspace requires the Astra desktop app.");
+        setError("The two-desktop workspace requires the OpenMausBot desktop app.");
         return;
       }
       try {
@@ -343,7 +343,7 @@ function LocalVmPane({
         setError(
           cause instanceof Error && cause.message === "layout-unavailable"
             ? "The viewer area is not laid out yet. Retry after resizing the window."
-            : "Astra could not connect this Local VM viewer.",
+            : "OpenMausBot could not connect this Local VM viewer.",
         );
       }
     };
@@ -366,7 +366,7 @@ function LocalVmPane({
     if (!bridge || !bounds || !nativeState.open) return;
     void bridge
       .layout([{ contextId, bounds, visible: !obscured }])
-      .catch(() => setError("Astra could not position this Local VM viewer."));
+      .catch(() => setError("OpenMausBot could not position this Local VM viewer."));
   }, [contextId, nativeState.open, obscured]);
 
   useEffect(() => {
@@ -654,7 +654,7 @@ export function LocalVmWorkspace({
       setControlledBotId(null);
       return true;
     } catch {
-      setControlError("Astra could not hand control back. The workspace stayed open.");
+      setControlError("OpenMausBot could not hand control back. The workspace stayed open.");
       return false;
     } finally {
       controlBusyRef.current = false;

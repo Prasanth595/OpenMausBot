@@ -104,7 +104,7 @@ final class ProfileRoutinePolicyTests: XCTestCase {
             name: "Brief",
             prompt: "Summarize",
             botId: "bot-1",
-            runOn: "astra",
+            runOn: "maus",
             enabled: false,
             schedule: schedule,
             durationMinutes: 30,

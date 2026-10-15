@@ -10,8 +10,8 @@ function makeBot(overrides: Partial<Bot> = {}): Bot {
   return {
     id: "bot-1",
     threadId: "thread-1",
-    name: "Astra",
-    title: "Astra",
+    name: "Maus",
+    title: "Maus",
     description: "",
     notifications: false,
     color: "green",

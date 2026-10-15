@@ -1,10 +1,10 @@
-// Generated from the Blob Studio export of the mascot (AstraMascotios/AstraAvatar.tsx;
+// Generated from the Blob Studio export of the mascot (MausMascotios/MausAvatar.tsx;
 // the same tables ship in src/components/CursorAvatar.tsx) — do not hand-edit. 25 expressions × 2 eye rings × 48 points, a mouth per expression,
 // and per-state pools, cadences, blink rhythm and body motion. Same numbers as
 // the desktop, which is the whole point.
 import CoreGraphics
 
-enum AstraState: String, CaseIterable {
+enum MausState: String, CaseIterable {
     /// States whose motion carries information — a turn in progress. Faces in
     /// lists animate only for these; a resting bot earns a resting face.
     var showsActivity: Bool {
@@ -56,7 +56,7 @@ enum AstraState: String, CaseIterable {
     case poweringDown = "powering-down"
 }
 
-struct AstraBodyMotion {
+struct MausBodyMotion {
     var bob: (CGFloat, CGFloat)? = nil
     var sway: (CGFloat, CGFloat)? = nil
     var pulse: (CGFloat, CGFloat)? = nil
@@ -68,7 +68,7 @@ struct AstraBodyMotion {
     var settle: CGFloat? = nil
 }
 
-enum AstraFaceData {
+enum MausFaceData {
     static let faceBox: CGFloat = 228.541
     static let faceCentre = CGPoint(x: 120, y: 122.5)
     static let mouthStroke: CGFloat = 7.5
@@ -402,7 +402,7 @@ enum AstraFaceData {
     /// [halfWidth, curve, gap, skew]
     static func mouth(_ expression: Int) -> [CGFloat] { Array(mouthsFlat[(expression * 4)..<(expression * 4 + 4)]) }
 
-    static let pools: [AstraState: [Int]] = [
+    static let pools: [MausState: [Int]] = [
         .sleeping: [22, 13, 4],
         .waking: [13],
         .idle: [6, 0, 8],
@@ -445,7 +445,7 @@ enum AstraFaceData {
         .poweringDown: [22, 13],
     ]
     /// How long a state holds an expression, ms.
-    static let expressionCadence: [AstraState: (CGFloat, CGFloat)] = [
+    static let expressionCadence: [MausState: (CGFloat, CGFloat)] = [
         .sleeping: (6000, 10000),
         .waking: (800, 800),
         .idle: (9000, 16000),
@@ -488,7 +488,7 @@ enum AstraFaceData {
         .poweringDown: (6000, 9000),
     ]
     /// Blink cadence, ms; absent = never blinks.
-    static let blink: [AstraState: (CGFloat, CGFloat)] = [
+    static let blink: [MausState: (CGFloat, CGFloat)] = [
         .idle: (6000, 14000),
         .listening: (3000, 7000),
         .thinking: (3500, 7000),
@@ -513,46 +513,46 @@ enum AstraFaceData {
         .notifying: (2000, 4000),
         .dragging: (2200, 4500),
     ]
-    static let motion: [AstraState: AstraBodyMotion] = [
-        .sleeping: AstraBodyMotion(pulse: (0.028, 4600), tilt: 2),
-        .waking: AstraBodyMotion(pulse: (0.03, 2200), enter: (0.92, 700)),
-        .idle: AstraBodyMotion(pulse: (0.014, 3600)),
-        .listening: AstraBodyMotion(bob: (2, 2600), pulse: (0.012, 2600)),
-        .thinking: AstraBodyMotion(sway: (1.6, 3000), pulse: (0.01, 3000)),
-        .searching: AstraBodyMotion(bob: (3, 1400), sway: (2.2, 1400)),
-        .working: AstraBodyMotion(bob: (2.5, 900), squash: 0.22),
-        .excited: AstraBodyMotion(bob: (9, 520), sway: (3, 1040), squash: 0.35),
-        .surprised: AstraBodyMotion(jitter: (0.8, 120), enter: (1.14, 340)),
-        .suspicious: AstraBodyMotion(sway: (2.4, 2600), tilt: -3),
-        .angry: AstraBodyMotion(jitter: (1.3, 95), tilt: 2),
-        .drowsy: AstraBodyMotion(pulse: (0.026, 5000), tilt: 3),
-        .happy: AstraBodyMotion(bob: (5, 820), squash: 0.28),
-        .curious: AstraBodyMotion(sway: (3.4, 1900), tilt: -4),
-        .confused: AstraBodyMotion(sway: (3, 2200)),
-        .bored: AstraBodyMotion(pulse: (0.016, 5200), tilt: 2),
-        .proud: AstraBodyMotion(bob: (1.6, 2400), pulse: (0.02, 2400)),
-        .shy: AstraBodyMotion(pulse: (0.016, 3000), tilt: 4),
-        .sad: AstraBodyMotion(pulse: (0.02, 4600), tilt: 3),
-        .laughing: AstraBodyMotion(bob: (7, 430), squash: 0.4),
-        .scared: AstraBodyMotion(jitter: (2.2, 75)),
-        .playful: AstraBodyMotion(bob: (6, 620), sway: (5, 1240), squash: 0.3),
-        .celebrate: AstraBodyMotion(bob: (10, 480), sway: (4, 960), squash: 0.35),
-        .orbit: AstraBodyMotion(circle: (6, 3200)),
-        .radar: AstraBodyMotion(sway: (6, 2400), pulse: (0.012, 2400)),
-        .progress: AstraBodyMotion(pulse: (0.022, 1600)),
-        .thinkingDots: AstraBodyMotion(),
-        .spawning: AstraBodyMotion(pulse: (0.014, 3600), enter: (0.02, 820)),
-        .humming: AstraBodyMotion(pulse: (0.016, 2800)),
-        .loading: AstraBodyMotion(sway: (2.2, 1500), pulse: (0.012, 1500)),
-        .dictating: AstraBodyMotion(bob: (2, 2000)),
-        .sending: AstraBodyMotion(),
-        .receiving: AstraBodyMotion(),
-        .uploading: AstraBodyMotion(bob: (3, 1000)),
-        .writing: AstraBodyMotion(bob: (1.6, 1100)),
-        .notifying: AstraBodyMotion(bob: (4, 700), sway: (2.5, 700)),
-        .alerting: AstraBodyMotion(jitter: (2.6, 85)),
-        .bouncing: AstraBodyMotion(bob: (12, 560), squash: 0.45),
-        .dragging: AstraBodyMotion(sway: (2, 900), tilt: -6),
-        .poweringDown: AstraBodyMotion(tilt: 4, settle: 0.05),
+    static let motion: [MausState: MausBodyMotion] = [
+        .sleeping: MausBodyMotion(pulse: (0.028, 4600), tilt: 2),
+        .waking: MausBodyMotion(pulse: (0.03, 2200), enter: (0.92, 700)),
+        .idle: MausBodyMotion(pulse: (0.014, 3600)),
+        .listening: MausBodyMotion(bob: (2, 2600), pulse: (0.012, 2600)),
+        .thinking: MausBodyMotion(sway: (1.6, 3000), pulse: (0.01, 3000)),
+        .searching: MausBodyMotion(bob: (3, 1400), sway: (2.2, 1400)),
+        .working: MausBodyMotion(bob: (2.5, 900), squash: 0.22),
+        .excited: MausBodyMotion(bob: (9, 520), sway: (3, 1040), squash: 0.35),
+        .surprised: MausBodyMotion(jitter: (0.8, 120), enter: (1.14, 340)),
+        .suspicious: MausBodyMotion(sway: (2.4, 2600), tilt: -3),
+        .angry: MausBodyMotion(jitter: (1.3, 95), tilt: 2),
+        .drowsy: MausBodyMotion(pulse: (0.026, 5000), tilt: 3),
+        .happy: MausBodyMotion(bob: (5, 820), squash: 0.28),
+        .curious: MausBodyMotion(sway: (3.4, 1900), tilt: -4),
+        .confused: MausBodyMotion(sway: (3, 2200)),
+        .bored: MausBodyMotion(pulse: (0.016, 5200), tilt: 2),
+        .proud: MausBodyMotion(bob: (1.6, 2400), pulse: (0.02, 2400)),
+        .shy: MausBodyMotion(pulse: (0.016, 3000), tilt: 4),
+        .sad: MausBodyMotion(pulse: (0.02, 4600), tilt: 3),
+        .laughing: MausBodyMotion(bob: (7, 430), squash: 0.4),
+        .scared: MausBodyMotion(jitter: (2.2, 75)),
+        .playful: MausBodyMotion(bob: (6, 620), sway: (5, 1240), squash: 0.3),
+        .celebrate: MausBodyMotion(bob: (10, 480), sway: (4, 960), squash: 0.35),
+        .orbit: MausBodyMotion(circle: (6, 3200)),
+        .radar: MausBodyMotion(sway: (6, 2400), pulse: (0.012, 2400)),
+        .progress: MausBodyMotion(pulse: (0.022, 1600)),
+        .thinkingDots: MausBodyMotion(),
+        .spawning: MausBodyMotion(pulse: (0.014, 3600), enter: (0.02, 820)),
+        .humming: MausBodyMotion(pulse: (0.016, 2800)),
+        .loading: MausBodyMotion(sway: (2.2, 1500), pulse: (0.012, 1500)),
+        .dictating: MausBodyMotion(bob: (2, 2000)),
+        .sending: MausBodyMotion(),
+        .receiving: MausBodyMotion(),
+        .uploading: MausBodyMotion(bob: (3, 1000)),
+        .writing: MausBodyMotion(bob: (1.6, 1100)),
+        .notifying: MausBodyMotion(bob: (4, 700), sway: (2.5, 700)),
+        .alerting: MausBodyMotion(jitter: (2.6, 85)),
+        .bouncing: MausBodyMotion(bob: (12, 560), squash: 0.45),
+        .dragging: MausBodyMotion(sway: (2, 900), tilt: -6),
+        .poweringDown: MausBodyMotion(tilt: 4, settle: 0.05),
     ]
 }

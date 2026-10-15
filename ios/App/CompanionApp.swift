@@ -39,7 +39,7 @@ struct CompanionApp: App {
                 // on the App, not here, so the connection survives.
                 .id(language)
                 .onAppear {
-                    AstraSharedInbox.removeDirectories(olderThan: 60 * 60)
+                    OpenMausSharedInbox.removeDirectories(olderThan: 60 * 60)
                     session.connect()
                     liveActivities.attach(to: session)
                 }
@@ -47,7 +47,7 @@ struct CompanionApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     switch phase {
                     case .active:
-                        AstraSharedInbox.removeDirectories(olderThan: 60 * 60)
+                        OpenMausSharedInbox.removeDirectories(olderThan: 60 * 60)
                         session.connect()
                         Task { await session.refreshNotificationAuthorization() }
                     case .background: session.linger()

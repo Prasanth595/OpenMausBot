@@ -17,6 +17,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "astra-android"
+rootProject.name = "openmausbot-android"
 include(":core")
 include(":app")

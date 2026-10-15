@@ -13,9 +13,9 @@
 // the card sits centred over the dimmed window.
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { AstraAvatar } from "@/components/Avatar";
+import { MausAvatar } from "@/components/Avatar";
 import { cn } from "@/lib/cn";
-import type { AstraState } from "@/lib/mascot";
+import type { MausState } from "@/lib/mascot";
 import { reducedMotion } from "@/lib/onboarding";
 
 const PAD = 8;
@@ -69,7 +69,7 @@ export function Spotlight({
 }: {
   anchor: string | null;
   placement: "above" | "below" | "right";
-  mascot?: AstraState;
+  mascot?: MausState;
   children: ReactNode;
   /** "Step 2 of 6", shown small under the text. */
   progress?: string;
@@ -231,7 +231,7 @@ export function Spotlight({
           )}
         >
           <div className="shrink-0 drop-shadow-[0_6px_14px_rgba(0,0,0,0.35)]">
-            <AstraAvatar
+            <MausAvatar
               color="green"
               state={mascot}
               size={38}

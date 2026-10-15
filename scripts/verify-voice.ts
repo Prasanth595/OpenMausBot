@@ -10,7 +10,7 @@
 //   4. the section convention as the voice sees it: `/api/tts/prepare`
 //      speaks a reply's lead and never the detail under its headings.
 // Launches its own fake-engine server; the user's app and data are untouched.
-import { launchVerificationServer } from "./control-astra.ts";
+import { launchVerificationServer } from "./control-omb.ts";
 
 const fixture = await launchVerificationServer();
 try {

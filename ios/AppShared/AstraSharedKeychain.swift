@@ -6,8 +6,8 @@ import Security
 /// The access group is deliberately explicit on every operation. Omitting
 /// `kSecAttrAccessGroup` silently selects each target's private default group,
 /// which would make a token saved by the app invisible to the share extension.
-enum AstraSharedKeychain {
-    private static let service = "com.astra.companion.token"
+enum OpenMausSharedKeychain {
+    private static let service = "com.openmausbot.companion.token"
 
     static func save(_ token: String, for connectionID: String) throws {
         let accessGroup = try requiredAccessGroup()
@@ -28,7 +28,7 @@ enum AstraSharedKeychain {
 
     @discardableResult
     static func remove(_ connectionID: String) -> Bool {
-        guard let accessGroup = AstraSharedConfiguration.keychainAccessGroup else {
+        guard let accessGroup = OpenMausSharedConfiguration.keychainAccessGroup else {
             return false
         }
         return remove(connectionID, accessGroup: accessGroup)
@@ -56,7 +56,7 @@ enum AstraSharedKeychain {
     @discardableResult
     static func removeIncludingLegacyItem(_ connectionID: String) -> Bool {
         let sharedRemoved = remove(connectionID)
-        guard let legacyGroup = AstraSharedConfiguration.legacyAppKeychainAccessGroup else {
+        guard let legacyGroup = OpenMausSharedConfiguration.legacyAppKeychainAccessGroup else {
             return false
         }
         let legacyRemoved = remove(connectionID, accessGroup: legacyGroup)
@@ -64,15 +64,15 @@ enum AstraSharedKeychain {
     }
 
     private static func requiredAccessGroup() throws -> String {
-        guard let accessGroup = AstraSharedConfiguration.keychainAccessGroup else {
-            throw AstraSharedKeychainError.configurationMissing
+        guard let accessGroup = OpenMausSharedConfiguration.keychainAccessGroup else {
+            throw OpenMausSharedKeychainError.configurationMissing
         }
         return accessGroup
     }
 
     private static func requiredLegacyAccessGroup() throws -> String {
-        guard let accessGroup = AstraSharedConfiguration.legacyAppKeychainAccessGroup else {
-            throw AstraSharedKeychainError.configurationMissing
+        guard let accessGroup = OpenMausSharedConfiguration.legacyAppKeychainAccessGroup else {
+            throw OpenMausSharedKeychainError.configurationMissing
         }
         return accessGroup
     }
@@ -118,7 +118,7 @@ enum AstraSharedKeychain {
             }
         }
         guard status == errSecSuccess else {
-            throw AstraSharedKeychainError.security(status)
+            throw OpenMausSharedKeychainError.security(status)
         }
     }
 
@@ -133,11 +133,11 @@ enum AstraSharedKeychain {
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess else {
-            throw AstraSharedKeychainError.security(status)
+            throw OpenMausSharedKeychainError.security(status)
         }
         guard let data = item as? Data,
               let token = String(data: data, encoding: .utf8) else {
-            throw AstraSharedKeychainError.security(errSecDecode)
+            throw OpenMausSharedKeychainError.security(errSecDecode)
         }
         return token
     }
@@ -153,7 +153,7 @@ enum AstraSharedKeychain {
     }
 }
 
-enum AstraSharedKeychainError: LocalizedError {
+enum OpenMausSharedKeychainError: LocalizedError {
     case configurationMissing
     case security(OSStatus)
 

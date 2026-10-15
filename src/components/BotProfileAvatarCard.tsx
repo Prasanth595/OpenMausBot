@@ -6,10 +6,10 @@ import { imageAttachmentFromFile } from "@/lib/composer-attachments";
 import { cn } from "@/lib/cn";
 import {
   PICKABLE_STATES,
-  ASTRA_COLORS,
-  ASTRA_COLOR_NAMES,
-  type AstraMotion,
-  type AstraState,
+  MAUS_COLORS,
+  MAUS_COLOR_NAMES,
+  type MausMotion,
+  type MausState,
 } from "@/lib/mascot";
 import {
   BOT_AVATAR_CROPS,
@@ -17,7 +17,7 @@ import {
   type BotAvatarCrop,
 } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
-import { BotAvatar, AstraAvatar } from "./Avatar";
+import { BotAvatar, MausAvatar } from "./Avatar";
 import { AvatarImageGenerator } from "./AvatarImageGenerator";
 
 type AvatarPatch = Partial<
@@ -38,8 +38,8 @@ export function BotProfileAvatarCard({
   onPatch,
 }: {
   bot: Bot;
-  activeState: AstraState;
-  mascotMotion: { kind: Exclude<AstraMotion, "none">; nonce: number } | null;
+  activeState: MausState;
+  mascotMotion: { kind: Exclude<MausMotion, "none">; nonce: number } | null;
   onPatch: (patch: AvatarPatch) => void;
 }) {
   const { flushBotPatches } = useStore();
@@ -208,7 +208,7 @@ export function BotProfileAvatarCard({
                   title={expression}
                   aria-label={`Use ${expression} expression`}
                 >
-                  <AstraAvatar color={bot.color} bodyId={bot.mascotBody ?? undefined} state={expression} size={42} animated={false} />
+                  <MausAvatar color={bot.color} bodyId={bot.mascotBody ?? undefined} state={expression} size={42} animated={false} />
                 </button>
               ))}
             </div>
@@ -217,7 +217,7 @@ export function BotProfileAvatarCard({
               Color
             </div>
             <div className="flex flex-wrap gap-2.5">
-              {ASTRA_COLOR_NAMES.map((color) => (
+              {MAUS_COLOR_NAMES.map((color) => (
                 <button
                   key={color}
                   type="button"
@@ -228,7 +228,7 @@ export function BotProfileAvatarCard({
                     "size-10 rounded-full border-2 border-transparent transition-transform hover:scale-110 disabled:opacity-50",
                     bot.color === color && "ring-2 ring-accent-border ring-offset-2 ring-offset-card",
                   )}
-                  style={{ backgroundColor: ASTRA_COLORS[color] }}
+                  style={{ backgroundColor: MAUS_COLORS[color] }}
                   title={color}
                   aria-label={`Use ${color} mascot color`}
                 />
@@ -254,7 +254,7 @@ export function BotProfileAvatarCard({
                       : "text-ink-secondary hover:bg-control/60",
                   )}
                 >
-                  <AstraAvatar color={bot.color} bodyId={id} size={34} animated={false} trackPointer={false} />
+                  <MausAvatar color={bot.color} bodyId={id} size={34} animated={false} trackPointer={false} />
                 </button>
               ))}
             </div>

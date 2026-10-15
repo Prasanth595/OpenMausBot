@@ -2,25 +2,25 @@ import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
   EYE_SCALE,
-  AstraAvatar,
+  MausAvatar,
   MOUTH_WEIGHT,
-  type AstraAvatarHandle,
+  type MausAvatarHandle,
 } from "@/components/Avatar";
 import {
-  ASTRA_COLOR_NAMES,
-  ASTRA_COLORS,
-  ASTRA_MOTIONS,
+  MAUS_COLOR_NAMES,
+  MAUS_COLORS,
+  MAUS_MOTIONS,
   PICKABLE_STATES,
   STATE_GROUPS,
-  type AstraColor,
-  type AstraMotion,
-  type AstraState,
+  type MausColor,
+  type MausMotion,
+  type MausState,
 } from "@/lib/mascot";
 import { EXPRESSION_COUNT } from "@/components/CursorAvatar";
 import "./styles.css";
 import "./mascot-preview.css";
 
-interface ScenarioLabels extends Partial<Record<AstraState, string>> {}
+interface ScenarioLabels extends Partial<Record<MausState, string>> {}
 
 const SCENARIOS: ScenarioLabels = {
   idle: "General / admin",
@@ -48,9 +48,9 @@ const MOTION_SCENARIOS = {
   blink: "New reply",
   surprise: "Unread update",
   failure: "Action failed",
-} satisfies Record<Exclude<AstraMotion, "none">, string>;
+} satisfies Record<Exclude<MausMotion, "none">, string>;
 
-const MOTION_COLORS: AstraColor[] = [
+const MOTION_COLORS: MausColor[] = [
   "green", "blue", "purple", "red", "cyan", "orange",
   "teal", "green", "pink", "yellow", "coral", "red",
 ];
@@ -96,16 +96,16 @@ function Tuner({
 }: {
   tuning: Tuning;
   setTuning: (t: Tuning) => void;
-  state: AstraState;
-  setState: (s: AstraState) => void;
+  state: MausState;
+  setState: (s: MausState) => void;
   expression: number | undefined;
   setExpression: (e: number | undefined) => void;
-  color: AstraColor;
-  setColor: (c: AstraColor) => void;
+  color: MausColor;
+  setColor: (c: MausColor) => void;
   forward: boolean;
   setForward: (v: boolean) => void;
 }) {
-  const handle = useRef<AstraAvatarHandle>(null);
+  const handle = useRef<MausAvatarHandle>(null);
   const changed = (Object.keys(DEFAULTS) as (keyof Tuning)[]).filter(
     (k) => tuning[k] !== DEFAULTS[k],
   );
@@ -113,7 +113,7 @@ function Tuner({
   return (
     <section className="tuner">
       <div className="tuner-stage">
-        <AstraAvatar
+        <MausAvatar
           ref={handle}
           color={color}
           state={state}
@@ -177,14 +177,14 @@ function Tuner({
 
           <h3>Colour</h3>
           <div className="chips">
-            {ASTRA_COLOR_NAMES.map((c) => (
+            {MAUS_COLOR_NAMES.map((c) => (
               <button
                 key={c}
                 type="button"
                 className={c === color ? "on" : ""}
                 onClick={() => setColor(c)}
               >
-                <span className="swatch" style={{ background: ASTRA_COLORS[c] }} />
+                <span className="swatch" style={{ background: MAUS_COLORS[c] }} />
                 {c}
               </button>
             ))}
@@ -243,17 +243,17 @@ function MotionCard({
   replayAll,
   color,
 }: {
-  motion: Exclude<AstraMotion, "none">;
+  motion: Exclude<MausMotion, "none">;
   index: number;
   replayAll: number;
-  color: AstraColor;
+  color: MausColor;
 }) {
   const [replayOne, setReplayOne] = useState(0);
 
   return (
     <article className="motion-card">
       <div className="motion-stage">
-        <AstraAvatar
+        <MausAvatar
           color={color ?? MOTION_COLORS[index]}
           state="idle"
           size={172}
@@ -279,9 +279,9 @@ function MotionCard({
 function Preview() {
   const [replayAll, setReplayAll] = useState(0);
   const [tuning, setTuning] = useState<Tuning>(DEFAULTS);
-  const [state, setState] = useState<AstraState>("idle");
+  const [state, setState] = useState<MausState>("idle");
   const [expression, setExpression] = useState<number | undefined>(undefined);
-  const [color, setColor] = useState<AstraColor>("green");
+  const [color, setColor] = useState<MausColor>("green");
   const [forward, setForward] = useState(true);
 
   useEffect(() => {
@@ -294,7 +294,7 @@ function Preview() {
       <header className="preview-header">
         <div>
           <p className="eyebrow">Morphing face engine · 25 expressions · 39 states</p>
-          <h1>Astra motion library</h1>
+          <h1>Maus motion library</h1>
           <p className="intro">
             The app&rsquo;s lit body with the face engine behind it. Expressions morph on a
             spring, blink on each state&rsquo;s own rhythm, and the eyes wrap around an implied
@@ -321,7 +321,7 @@ function Preview() {
       />
 
       <section className="motion-grid" aria-label="Mascot motion library">
-        {ASTRA_MOTIONS.map((motion, index) => (
+        {MAUS_MOTIONS.map((motion, index) => (
           <MotionCard
             key={motion}
             motion={motion}
@@ -338,7 +338,7 @@ function Preview() {
             <p className="eyebrow">Identity system · 100 combinations</p>
             <h2 id="expression-heading">Colors and states</h2>
           </div>
-          <p>Move your pointer over any Astra to test the responsive eyes.</p>
+          <p>Move your pointer over any Maus to test the responsive eyes.</p>
         </div>
 
         <div className="matrix-wrap">
@@ -351,16 +351,16 @@ function Preview() {
               </div>
             ))}
 
-            {ASTRA_COLOR_NAMES.map((c) => (
+            {MAUS_COLOR_NAMES.map((c) => (
               <div className="matrix-row" key={c}>
                 <div className="row-label">
-                  <span className="swatch" style={{ background: ASTRA_COLORS[c] }} />
+                  <span className="swatch" style={{ background: MAUS_COLORS[c] }} />
                   <strong>{c}</strong>
-                  <code>{ASTRA_COLORS[c]}</code>
+                  <code>{MAUS_COLORS[c]}</code>
                 </div>
                 {PICKABLE_STATES.map((s) => (
                   <div className="mascot-cell" key={`${c}-${s}`}>
-                    <AstraAvatar color={c} state={s} size={86} label={`${c} ${s} maus`} />
+                    <MausAvatar color={c} state={s} size={86} label={`${c} ${s} maus`} />
                   </div>
                 ))}
               </div>

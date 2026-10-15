@@ -14,7 +14,7 @@ import {
   type ReactNode,
 } from "react";
 import type { CloudBackend, EffortLevel } from "../../server/contracts.ts";
-import type { AstraColor, AstraMotion } from "@/lib/mascot";
+import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
@@ -57,7 +57,7 @@ function trimRoutineRuns(runs: readonly RoutineRun[]): RoutineRun[] {
   });
 }
 
-export type { AstraColor } from "@/lib/mascot";
+export type { MausColor } from "@/lib/mascot";
 export type { RoutineRunCardData } from "../../shared/routine-run";
 
 export interface OptionCardData {
@@ -153,11 +153,11 @@ export interface Message {
   /** Stable client identity for at-most-once chat POST retries. */
   sendId?: string;
   /** rooms: which member said this (sender attribution). */
-  from?: { botId: string; name: string; color: AstraColor };
+  from?: { botId: string; name: string; color: MausColor };
   /** emoji reactions; by = "user" or a member botId. */
   reactions?: Array<{ emoji: string; by: string }>;
   /** comm chips: "Messaged @X" linking to the bot⇄bot channel. */
-  comm?: { groupId: string; withBotId: string; withName: string; withColor: AstraColor };
+  comm?: { groupId: string; withBotId: string; withName: string; withColor: MausColor };
   /** thread chips: "Opened thread #Title on Bot" linking to that thread */
   threadRef?: { botId: string; threadId: string; title: string };
   /** sent while the bot was mid-turn; auto-sends when the turn settles.
@@ -285,7 +285,7 @@ export interface Bot {
   /** The SOUL.md mirror on disk differs from the record; the Soul editor offers apply/discard. */
   soulDrift?: boolean;
   notifications: boolean;
-  color: AstraColor;
+  color: MausColor;
   mascotExpression?: string | null;
   /** Which body the bot wears. Unknown/absent values fall back to the cursor. */
   mascotBody?: MascotBodyId | null;
@@ -674,7 +674,7 @@ export interface AppState {
   mascotMotion: {
     botId: string;
     nonce: number;
-    kind: Exclude<AstraMotion, "none">;
+    kind: Exclude<MausMotion, "none">;
   } | null;
   /** Queued follow-up lines waiting for drain; keyed by threadId.
    * Each entry is identified by the server queueId, not by text. */
@@ -1003,7 +1003,7 @@ function updateBot(state: AppState, botId: string, fn: (b: Bot) => Bot): AppStat
 function withMascotMotion(
   state: AppState,
   botId: string,
-  kind: Exclude<AstraMotion, "none">,
+  kind: Exclude<MausMotion, "none">,
 ): AppState {
   return {
     ...state,

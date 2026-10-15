@@ -7,9 +7,7 @@ export function packageUrlFromDeepLink(rawValue) {
   } catch {
     return null;
   }
-  // The scheme was "openmausbot" before the Astra rename; old shared
-  // install links keep working alongside the new registration.
-  if ((link.protocol !== "astra:" && link.protocol !== "openmausbot:") || link.hostname !== "install") return null;
+  if (link.protocol !== "openmausbot:" || link.hostname !== "install") return null;
   const rawPackage = link.searchParams.get("url");
   if (!rawPackage) return null;
   let packageUrl;

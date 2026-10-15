@@ -6,21 +6,21 @@
 import Foundation
 import CompanionCore
 
-extension AstraState {
+extension MausState {
     /// The desktop's legacy names, kept so an older bot record still resolves.
-    private static let legacy: [String: AstraState] = [
+    private static let legacy: [String: MausState] = [
         "deadpan": .idle, "friendly": .happy, "focused": .working, "thinking": .thinking,
         "excited": .excited, "sleepy": .drowsy, "surprised": .surprised, "skeptical": .suspicious,
         "worried": .scared, "mischievous": .playful,
     ]
 
     /// Resolves any stored value — current, legacy or junk — to a real state.
-    static func normalize(_ value: String?) -> AstraState? {
+    static func normalize(_ value: String?) -> MausState? {
         guard let value, !value.isEmpty else { return nil }
-        return AstraState(rawValue: value) ?? legacy[value]
+        return MausState(rawValue: value) ?? legacy[value]
     }
 
-    static func forBot(_ bot: Bot, last: Message?) -> AstraState {
+    static func forBot(_ bot: Bot, last: Message?) -> MausState {
         if let pinned = normalize(bot.mascotExpression) { return pinned }
 
         if last?.kind == .activity, last?.tool?.ok == false { return .alerting }
@@ -48,7 +48,7 @@ extension AstraState {
 
     /// The face for a chat as a whole: a bot's own, a room's is "happy" —
     /// which is what the desktop draws for room avatars.
-    static func forChat(_ chat: Chat, in state: CompanionState) -> AstraState {
+    static func forChat(_ chat: Chat, in state: CompanionState) -> MausState {
         switch chat {
         case let .bot(bot): return forBot(bot, last: state.visibleTranscript(forThread: bot.threadId).last)
         case .room: return .happy

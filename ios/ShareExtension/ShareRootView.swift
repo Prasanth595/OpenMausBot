@@ -48,7 +48,7 @@ struct ShareRootView: View {
             .accessibilityLabel(model.phase == .sending ? "Cancel sending" : "Cancel")
 
             VStack(alignment: .leading, spacing: 2) {
-                Text("Send to Astra")
+                Text("Send to OpenMausBot")
                     .font(.headline)
                 Text(headerSubtitle)
                     .font(.caption)

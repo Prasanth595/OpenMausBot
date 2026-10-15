@@ -15,7 +15,7 @@ struct BotActivityAttributes: ActivityAttributes {
     /// Retained to decode existing activities. Routing uses ContentState.
     var threadId: String
     var name: String
-    /// AstraPalette colour name.
+    /// MausPalette colour name.
     var color: String
 }
 

@@ -43,7 +43,7 @@ private final class RoutineRequestStub: URLProtocol {
     {
       "routine": {
         "id":"routine-1","name":"Pulse","prompt":"Check status","botId":"bot-1",
-        "runOn":"astra","enabled":true,
+        "runOn":"maus","enabled":true,
         "schedule":{"type":"interval","everyMinutes":5,"anchorAt":1788384600000},
         "durationMinutes":30,"timeoutMinutes":30,
         "nextRunAt":1788384900000,"createdAt":1,"updatedAt":1

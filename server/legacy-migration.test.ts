@@ -1,5 +1,5 @@
 // A user upgrading from the pre-rename data dir (~/.opengrokbot) must find
-// everything in ~/.astra after the first boot. Anything that touches
+// everything in ~/.openmausbot after the first boot. Anything that touches
 // the new dir before ensureDirs() runs would make that rename a no-op and
 // boot the user into an empty workspace — this test pins the order.
 import { spawn, type ChildProcess } from "node:child_process";
@@ -13,14 +13,16 @@ import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(SERVER_DIR, "..");
+const PORT = 18800 + Math.floor(Math.random() * 10_000);
+const WEBHOOK_PORT = 39000 + Math.floor(Math.random() * 10_000);
 
 let home: string;
 let child: ChildProcess;
+let stderr = "";
 
-/** Boots the server with `legacyName` pre-seeded in an isolated home. */
-async function bootWithLegacyDir(legacyName: string) {
-  const bootHome = mkdtempSync(join(tmpdir(), "omb-legacy-test-"));
-  const legacy = join(bootHome, legacyName);
+beforeAll(async () => {
+  home = mkdtempSync(join(tmpdir(), "omb-legacy-test-"));
+  const legacy = join(home, ".opengrokbot");
   mkdirSync(legacy, { recursive: true });
   // A non-product shadow keeps startup deterministic: an empty map selects
   // the user's full default engine fleet, whose installed CLI probes are not
@@ -29,38 +31,31 @@ async function bootWithLegacyDir(legacyName: string) {
     instances: { fixture: { driver: "migration-test-shadow" } },
   }));
   writeFileSync(join(legacy, "keep-me.txt"), "carried over");
-  const port = 18800 + Math.floor(Math.random() * 10_000);
-  const webhookPort = 39000 + Math.floor(Math.random() * 10_000);
-  const booted = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
+  child = spawn(process.execPath, [join(SERVER_DIR, "index.ts")], {
     cwd: ROOT,
     env: {
       ...(process.env.PATH ? { PATH: process.env.PATH } : {}),
       ...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
-      HOME: bootHome,
-      USERPROFILE: bootHome,
-      ASTRA_PORT: String(port),
-      ASTRA_WEBHOOK_PORT: String(webhookPort),
-      ASTRA_BROWSER_CONNECTION: join(bootHome, "browser-test-connection.json"),
+      HOME: home,
+      USERPROFILE: home,
+      OMB_PORT: String(PORT),
+      OMB_WEBHOOK_PORT: String(WEBHOOK_PORT),
+      OMB_BROWSER_CONNECTION: join(home, "browser-test-connection.json"),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  let bootedStderr = "";
-  booted.stderr?.on("data", (chunk) => (bootedStderr += String(chunk)));
+  child.stderr?.on("data", (chunk) => (stderr += String(chunk)));
   const deadline = Date.now() + 20_000;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/health`);
-      if (res.ok) return { home: bootHome, child: booted, stderr: bootedStderr };
+      const res = await fetch(`http://127.0.0.1:${PORT}/api/health`);
+      if (res.ok) return;
     } catch {
       /* not up yet */
     }
     await new Promise((r) => setTimeout(r, 100));
   }
-  throw new Error(`server did not start:\n${bootedStderr}`);
-}
-
-beforeAll(async () => {
-  ({ home, child } = await bootWithLegacyDir(".opengrokbot"));
+  throw new Error(`server did not start:\n${stderr}`);
 }, 30_000);
 
 afterAll(async () => {
@@ -70,22 +65,9 @@ afterAll(async () => {
 
 describe("legacy data dir", () => {
   it("is renamed to the new name on first boot, with its contents and a fresh environment id", () => {
-    const fresh = join(home, ".astra");
+    const fresh = join(home, ".openmausbot");
     expect(existsSync(join(home, ".opengrokbot"))).toBe(false);
     expect(readFileSync(join(fresh, "keep-me.txt"), "utf8")).toBe("carried over");
     expect(readFileSync(join(fresh, "environment-id"), "utf8").trim()).toMatch(/^[0-9a-f-]{36}$/);
   });
-
-  it("migrates the OpenMausBot data dir the same way", async () => {
-    const { home: mausHome, child: mausChild } = await bootWithLegacyDir(".openmausbot");
-    try {
-      const fresh = join(mausHome, ".astra");
-      expect(existsSync(join(mausHome, ".openmausbot"))).toBe(false);
-      expect(readFileSync(join(fresh, "keep-me.txt"), "utf8")).toBe("carried over");
-      expect(readFileSync(join(fresh, "environment-id"), "utf8").trim()).toMatch(/^[0-9a-f-]{36}$/);
-    } finally {
-      await waitForExit(mausChild, { signal: "SIGTERM" });
-      await removeTempDir(mausHome);
-    }
-  }, 30_000);
 });

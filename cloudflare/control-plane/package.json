@@ -1,5 +1,5 @@
 {
-  "name": "@astra/control-plane",
+  "name": "@openmausbot/control-plane",
   "private": true,
   "version": "0.0.0",
   "type": "module",

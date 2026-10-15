@@ -1,19 +1,19 @@
 // The bot's face — the same body and the same face placement the desktop draws.
 //
-// The body is whichever one the bot wears: `AstraBodies` in `CompanionCore` is
+// The body is whichever one the bot wears: `MausBodies` in `CompanionCore` is
 // the phone's half of the generated catalog that also bakes
 // `shared/mascot-bodies.ts`, so the two renderers cannot drift the way
 // desktop's 0.74 face scale and the phone's 0.84 already did once. Parsing and
-// placing a body is `CompanionCore.AstraSilhouette`; this file is the drawing.
+// placing a body is `CompanionCore.MausSilhouette`; this file is the drawing.
 //
 // What is NOT ported from the desktop: nothing of the face itself. The 25
 // expressions, blinking, gaze tracking and motion are all here, in
-// `AstraFaceEngine` — same tables, same numbers, same face.
+// `MausFaceEngine` — same tables, same numbers, same face.
 import CompanionCore
 import SwiftUI
 
-enum AstraPalette {
-    /// src/lib/mascot.ts — ASTRA_COLORS
+enum MausPalette {
+    /// src/lib/mascot.ts — MAUS_COLORS
     private static let hex: [String: String] = [
         "green": "#009957",
         "blue": "#377FE6",
@@ -36,16 +36,16 @@ enum AstraPalette {
 /// The viewport half of the silhouette: how the face box lands in a rect.
 ///
 /// The body itself — the path data, the parser and the per-body cache — moved
-/// to `CompanionCore.AstraSilhouette`, where `swift test` can reach it. What
-/// stays here is what depends on `AstraFaceData`, which is app-side artwork.
-extension AstraSilhouette {
+/// to `CompanionCore.MausSilhouette`, where `swift test` can reach it. What
+/// stays here is what depends on `MausFaceData`, which is app-side artwork.
+extension MausSilhouette {
     /// The face box with the desktop's 15-unit margin around it (its viewBox
     /// is `-15 -15 258.541 258.541`) — room for the body to bob and sway.
     static let margin: CGFloat = 15
 
     /// The transform that puts the margined face box into `rect`.
     static func fit(_ rect: CGRect) -> CGAffineTransform {
-        let side = AstraFaceData.faceBox + margin * 2
+        let side = MausFaceData.faceBox + margin * 2
         let k = min(rect.width, rect.height) / side
         return CGAffineTransform(translationX: margin, y: margin)
             .concatenating(CGAffineTransform(scaleX: k, y: k))
@@ -57,19 +57,19 @@ extension AstraSilhouette {
 }
 
 /// A bot, at whatever size the row needs — and alive, exactly the way it is
-/// on the desktop. `AstraFaceEngine` is a port of the frame loop in
-/// `AstraMascotios/AstraAvatar.tsx`: a state picks a pool of expressions and
+/// on the desktop. `MausFaceEngine` is a port of the frame loop in
+/// `MausMascotios/MausAvatar.tsx`: a state picks a pool of expressions and
 /// drifts through them on its cadence, a spring morphs the eyes and mouth
 /// between them, it blinks on its own rhythm, and the body bobs, sways,
 /// breathes or jitters per state. Same data, same numbers, same face.
-struct AstraAvatar: View {
+struct MausAvatar: View {
     let color: String
     var size: CGFloat = 52
     /// Which body from the catalog to draw. Anything unrecognised — an older
     /// bot with no choice recorded, a newer desktop's body this build has not
     /// shipped yet — falls back to the shipped `cursor`.
-    var bodyId: String? = AstraSilhouette.defaultBody
-    var state: AstraState = .idle
+    var bodyId: String? = MausSilhouette.defaultBody
+    var state: MausState = .idle
     /// Animation is OPT-IN: a mounted face costs a 30fps Canvas redraw, and a
     /// roster of them once pegged the app (and SimRenderServer) all night.
     /// Pass true only where motion carries meaning — a busy bot, an open
@@ -80,7 +80,7 @@ struct AstraAvatar: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.scenePhase) private var scenePhase
-    @State private var engine = AstraFaceEngine()
+    @State private var engine = MausFaceEngine()
 
     var body: some View {
         // Even an opted-in face stops when the app is not active: nothing is
@@ -101,18 +101,18 @@ struct AstraAvatar: View {
 /// The resting face for a state, drawn once and still. For places the
 /// engine cannot run — a widget, a Live Activity — where the system renders
 /// a snapshot and the face can only change between updates.
-struct AstraFaceStill: View {
+struct MausFaceStill: View {
     let color: String
-    var state: AstraState = .idle
+    var state: MausState = .idle
     var size: CGFloat = 52
-    var bodyId: String? = AstraSilhouette.defaultBody
+    var bodyId: String? = MausSilhouette.defaultBody
     var comets: Bool = false
     /// The clock for the comets' phase; a different date is a different frame.
     var at: Date = Date()
 
     var body: some View {
         Canvas { context, canvasSize in
-            let engine = AstraFaceEngine()
+            let engine = MausFaceEngine()
             engine.setState(state, now: Date(timeIntervalSinceReferenceDate: 0))
             engine.draw(in: &context, size: canvasSize, color: color, bodyId: bodyId, bodyMotion: false, comets: comets, at: at)
         }
@@ -123,15 +123,15 @@ struct AstraFaceStill: View {
 
 /// The face, frame by frame. One per drawn mascot; holds the morph in
 /// progress, the blink, and when the next expression or blink is due.
-final class AstraFaceEngine {
-    private(set) var state: AstraState = .idle
+final class MausFaceEngine {
+    private(set) var state: MausState = .idle
     private var expression = 0
-    private var currentRings: [[CGPoint]] = [AstraFaceData.ring(0, eye: 0), AstraFaceData.ring(0, eye: 1)]
-    private var targetRings: [[CGPoint]] = [AstraFaceData.ring(0, eye: 0), AstraFaceData.ring(0, eye: 1)]
-    private var currentMouth = AstraFaceData.mouth(0)
-    private var targetMouth = AstraFaceData.mouth(0)
-    private var currentGaze = AstraFaceData.gaze(0)
-    private var targetGaze = AstraFaceData.gaze(0)
+    private var currentRings: [[CGPoint]] = [MausFaceData.ring(0, eye: 0), MausFaceData.ring(0, eye: 1)]
+    private var targetRings: [[CGPoint]] = [MausFaceData.ring(0, eye: 0), MausFaceData.ring(0, eye: 1)]
+    private var currentMouth = MausFaceData.mouth(0)
+    private var targetMouth = MausFaceData.mouth(0)
+    private var currentGaze = MausFaceData.gaze(0)
+    private var targetGaze = MausFaceData.gaze(0)
     private var morph: CGFloat = 1
     private var velocity: CGFloat = 0
     private var blinkStart: Date?
@@ -147,15 +147,15 @@ final class AstraFaceEngine {
     /// Spring stiffness for the morph, the desktop's default.
     private let spring: CGFloat = 7
 
-    func setState(_ new: AstraState, now: Date) {
+    func setState(_ new: MausState, now: Date) {
         guard !started || new != state else { return }
         started = true
         state = new
         stateStart = now
-        select(AstraFaceData.pools[new]?.first ?? 0)
+        select(MausFaceData.pools[new]?.first ?? 0)
         if last == nil { morph = 1; velocity = 0 } // first frame: rest on it, no morph in
-        nextExpressionAt = schedule(AstraFaceData.expressionCadence[new], from: now)
-        nextBlinkAt = schedule(AstraFaceData.blink[new], from: now)
+        nextExpressionAt = schedule(MausFaceData.expressionCadence[new], from: now)
+        nextBlinkAt = schedule(MausFaceData.blink[new], from: now)
     }
 
     private func schedule(_ range: (CGFloat, CGFloat)?, from now: Date) -> Date? {
@@ -165,14 +165,14 @@ final class AstraFaceEngine {
     }
 
     private func select(_ index: Int) {
-        let i = ((index % AstraFaceData.expressionCount) + AstraFaceData.expressionCount) % AstraFaceData.expressionCount
+        let i = ((index % MausFaceData.expressionCount) + MausFaceData.expressionCount) % MausFaceData.expressionCount
         if i == expression && morph >= 1 { return }
         currentRings = displayedRings()
         currentMouth = displayedMouth()
         currentGaze = displayedGaze()
-        targetRings = [AstraFaceData.ring(i, eye: 0), AstraFaceData.ring(i, eye: 1)]
-        targetMouth = AstraFaceData.mouth(i)
-        targetGaze = AstraFaceData.gaze(i)
+        targetRings = [MausFaceData.ring(i, eye: 0), MausFaceData.ring(i, eye: 1)]
+        targetMouth = MausFaceData.mouth(i)
+        targetGaze = MausFaceData.gaze(i)
         expression = i
         morph = 0
         velocity = 0
@@ -188,14 +188,14 @@ final class AstraFaceEngine {
         if !morph.isFinite { morph = 1; velocity = 0 }
 
         if let due = nextExpressionAt, now >= due {
-            let pool = AstraFaceData.pools[state] ?? [0]
+            let pool = MausFaceData.pools[state] ?? [0]
             let alternatives = pool.filter { $0 != expression }
             select(alternatives.randomElement() ?? pool[0])
-            nextExpressionAt = schedule(AstraFaceData.expressionCadence[state], from: now)
+            nextExpressionAt = schedule(MausFaceData.expressionCadence[state], from: now)
         }
         if let due = nextBlinkAt, now >= due {
             blinkStart = now
-            nextBlinkAt = schedule(AstraFaceData.blink[state], from: now)
+            nextBlinkAt = schedule(MausFaceData.blink[state], from: now)
         }
     }
 
@@ -218,7 +218,7 @@ final class AstraFaceEngine {
         let bodyScale: CGFloat
     }
 
-    static let cometTrails: [AstraState: CometSpec] = [
+    static let cometTrails: [MausState: CometSpec] = [
         .orbit: CometSpec(count: 6, period: 3000, radius: 105, width: 5, span: 2.5, bodyScale: 0.72),
         .radar: CometSpec(count: 4, period: 2400, radius: 106, width: 4.5, span: 2.1, bodyScale: 0.72),
         .progress: CometSpec(count: 5, period: 2000, radius: 104, width: 4.8, span: 2.3, bodyScale: 0.74),
@@ -352,12 +352,12 @@ final class AstraFaceEngine {
     /// face is doing — the island's "something is happening" — in addition to
     /// the states that carry their own. `at` is the clock; pass a fixed date
     /// for a still frame.
-    func draw(in context: inout GraphicsContext, size: CGSize, color: String, bodyId: String? = AstraSilhouette.defaultBody, bodyMotion: Bool, comets: Bool = false, at now: Date = Date()) {
+    func draw(in context: inout GraphicsContext, size: CGSize, color: String, bodyId: String? = MausSilhouette.defaultBody, bodyMotion: Bool, comets: Bool = false, at now: Date = Date()) {
         let rect = CGRect(origin: .zero, size: size)
-        context.concatenate(AstraSilhouette.fit(rect))
+        context.concatenate(MausSilhouette.fit(rect))
         let elapsed = CGFloat(now.timeIntervalSince(stateStart) * 1000)
         let spec = Self.cometTrails[state] ?? (comets ? Self.cometTrails[.orbit] : nil)
-        let centre = CGPoint(x: AstraFaceData.faceBox / 2, y: AstraFaceData.faceBox / 2)
+        let centre = CGPoint(x: MausFaceData.faceBox / 2, y: MausFaceData.faceBox / 2)
 
         let pieces = spec.map { self.comets($0, elapsed: elapsed, centre: centre, strength: 1) } ?? []
         for piece in pieces where !piece.front { context.fill(piece.path, with: piece.shading) }
@@ -371,7 +371,7 @@ final class AstraFaceEngine {
             bodyContext.translateBy(x: -centre.x, y: -centre.y)
         }
         if bodyMotion {
-            bodyContext.concatenate(bodyTransform(AstraFaceData.motion[state] ?? AstraBodyMotion(), elapsed: elapsed))
+            bodyContext.concatenate(bodyTransform(MausFaceData.motion[state] ?? MausBodyMotion(), elapsed: elapsed))
         }
         drawBody(in: &bodyContext, color: color, bodyId: bodyId, now: now)
 
@@ -381,14 +381,14 @@ final class AstraFaceEngine {
     private func drawBody(in context: inout GraphicsContext, color: String, bodyId: String?, now: Date) {
         // Wrapping the cached `CGPath` is a retain, not a re-parse: the body
         // is parsed and placed once per id, inside `CompanionCore`.
-        let body = Path(AstraSilhouette.inFaceBox(bodyId))
-        let a = AstraSilhouette.anchor(bodyId)
+        let body = Path(MausSilhouette.inFaceBox(bodyId))
+        let a = MausSilhouette.anchor(bodyId)
 
         // The gradient runs corner to corner of the body's own bounds,
         // which is the only place that lookup is still needed.
-        let bounds = AstraSilhouette.faceBoxBounds(bodyId)
+        let bounds = MausSilhouette.faceBoxBounds(bodyId)
         context.fill(body, with: .linearGradient(
-            Gradient(stops: AstraPalette.gradientStops(color)),
+            Gradient(stops: MausPalette.gradientStops(color)),
             startPoint: CGPoint(x: bounds.maxX, y: bounds.minY),
             endPoint: CGPoint(x: bounds.minX, y: bounds.maxY)
         ))
@@ -397,7 +397,7 @@ final class AstraFaceEngine {
         context.clip(to: body)
         context.translateBy(x: a.x, y: a.y)
         context.scaleBy(x: a.scale, y: a.scale)
-        context.translateBy(x: -AstraFaceData.faceCentre.x, y: -AstraFaceData.faceCentre.y)
+        context.translateBy(x: -MausFaceData.faceCentre.x, y: -MausFaceData.faceCentre.y)
 
         let gaze = displayedGaze()
         let ox = gaze.x * lookAround, oy = gaze.y * lookAround
@@ -421,14 +421,14 @@ final class AstraFaceEngine {
         context.stroke(
             Self.mouthPath(frame, spec),
             with: .color(.white),
-            style: StrokeStyle(lineWidth: AstraFaceData.mouthStroke, lineCap: .round)
+            style: StrokeStyle(lineWidth: MausFaceData.mouthStroke, lineCap: .round)
         )
     }
 
     /// The desktop's `bodyTransform`, in face-box units, elapsed in ms.
-    private func bodyTransform(_ m: AstraBodyMotion, elapsed: CGFloat) -> CGAffineTransform {
-        let centre = AstraFaceData.faceBox / 2
-        let ground = AstraFaceData.faceBox
+    private func bodyTransform(_ m: MausBodyMotion, elapsed: CGFloat) -> CGAffineTransform {
+        let centre = MausFaceData.faceBox / 2
+        let ground = MausFaceData.faceBox
         func wave(_ period: CGFloat, _ phase: CGFloat = 0) -> CGFloat { sin(elapsed / period * .pi * 2 + phase) }
         var dx: CGFloat = 0, dy: CGFloat = 0
         var rotation = m.tilt ?? 0
@@ -560,7 +560,7 @@ struct ProfileAvatar: View {
 
     var body: some View {
         Circle()
-            .fill(AstraPalette.color("green"))
+            .fill(MausPalette.color("green"))
             .frame(width: size, height: size)
             .overlay {
                 Text(initial)
@@ -574,7 +574,7 @@ struct ProfileAvatar: View {
     }
 }
 
-extension AstraPalette {
+extension MausPalette {
     /// The gradient as raw stops, for `Canvas`, which cannot take a
     /// `LinearGradient` directly.
     static func gradientStops(_ name: String) -> [Gradient.Stop] {

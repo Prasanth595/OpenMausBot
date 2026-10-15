@@ -16,7 +16,7 @@ import {
 } from "./managed-companion-tunnel.mjs";
 
 const TOKEN = `eyJ${"a".repeat(120)}=`;
-const ENDPOINT = "https://c-installation.astra.com";
+const ENDPOINT = "https://c-installation.openmausbot.com";
 const BINARY = "/trusted/cloudflared";
 const GUARDIAN = "/trusted/managed-companion-guardian.mjs";
 const RUNTIME = "/trusted/electron";
@@ -25,7 +25,7 @@ const ORIGIN_TARGET =
     ? {
         pid: 31337,
         socketPath:
-          "\\\\.\\pipe\\astra-companion-origin-31337-12345678-1234-1234-1234-123456789abc",
+          "\\\\.\\pipe\\openmausbot-companion-origin-31337-12345678-1234-1234-1234-123456789abc",
       }
     : { pid: 31337, socketPath: "/tmp/omb-companion-origin-test/origin.sock" };
 const temporaryDirectories = [];
@@ -67,7 +67,7 @@ function fakeChild(pid = 4242) {
 function healthyResponse() {
   return {
     ok: true,
-    text: async () => JSON.stringify({ app: "astra" }),
+    text: async () => JSON.stringify({ app: "openmausbot" }),
   };
 }
 
@@ -156,7 +156,7 @@ describe("cloudflared binary resolution", () => {
     const resourcesPath = path.join(
       path.parse(process.cwd()).root,
       "Applications",
-      "Astra",
+      "OpenMausBot",
       "Contents",
       "Resources",
     );
@@ -187,7 +187,7 @@ describe("cloudflared binary resolution", () => {
         appPath: "/checkout",
         platform: "linux",
         arch: "x64",
-        environment: { ASTRA_CLOUDFLARED_PATH: "./untrusted-cloudflared" },
+        environment: { OMB_CLOUDFLARED_PATH: "./untrusted-cloudflared" },
         exists: () => true,
       }),
     ).toBeNull();

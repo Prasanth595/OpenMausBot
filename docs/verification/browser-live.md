@@ -4,8 +4,8 @@ Use installed native engine and Chrome binaries explicitly; the fixture never
 uses the operator's browser profiles, OMB home, provider logins, or API keys.
 
 ```sh
-ASTRA_VERIFY_BROWSER_BINARY=/absolute/path/to/agent-browser \
-ASTRA_VERIFY_BROWSER_CHROME=/absolute/path/to/chrome-headless-shell \
+OMB_VERIFY_BROWSER_BINARY=/absolute/path/to/agent-browser \
+OMB_VERIFY_BROWSER_CHROME=/absolute/path/to/chrome-headless-shell \
 node --experimental-strip-types scripts/verify-browser-live.ts
 ```
 

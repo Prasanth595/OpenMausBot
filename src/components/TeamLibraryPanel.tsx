@@ -26,7 +26,7 @@ import { createPortal } from "react-dom";
 
 import { MAX_TEAM_BACKUP_BYTES, TEAM_BACKUP_EXCLUSIONS } from "../../shared/team-backup";
 import { takeImportName } from "../../shared/import-name";
-const COMMUNITY_TEAMS_REPOSITORY = "https://github.com/milind-soni/astra-teams";
+const COMMUNITY_TEAMS_REPOSITORY = "https://github.com/milind-soni/openmausbot-teams";
 
 interface TeamCatalogEntry {
   slug: string;

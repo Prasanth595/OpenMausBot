@@ -4,7 +4,7 @@
 // the built-in SAPI/`say` engines, which work everywhere but sound robotic —
 // Piper is the offline engine you pick when the voice should sound human.
 //
-// The engine and voice models live in ~/.astra/piper (engine binary at
+// The engine and voice models live in ~/.openmausbot/piper (engine binary at
 // the root, voices/ beside it). Nothing here downloads or updates anything at
 // runtime; provisioning is a documented manual step and the provider simply
 // never appears as an option when the engine is absent.

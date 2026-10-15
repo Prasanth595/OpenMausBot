@@ -23,8 +23,8 @@
         path="__androidx_security_crypto_encrypted_prefs__.xml" />
     <exclude
         domain="sharedpref"
-        path="astra.permissions.xml" />
+        path="openmaus.permissions.xml" />
     <exclude
         domain="sharedpref"
-        path="astra.onboarding.xml" />
+        path="openmaus.onboarding.xml" />
 </full-backup-content>

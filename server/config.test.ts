@@ -55,9 +55,9 @@ describe("configuration boundaries", () => {
     expect(parseStoredConfig({ imageGen: { key: "legacy" } }).imageGen).toEqual({ key: "legacy" });
     expect(() => parseConfigPatch({ imageGen: { provider: "unknown" } })).toThrow("provider");
     expect(() => parseConfigPatch({ imageGen: { customUrl: "https://user:secret@router.example/v1" } })).toThrow("customUrl");
-    const childEnv = { ASTRA_CUSTOM_IMAGE_KEY: "must-not-reach-bot" };
+    const childEnv = { OMB_CUSTOM_IMAGE_KEY: "must-not-reach-bot" };
     stripWorkspaceCredentialEnv(childEnv);
-    expect(childEnv).not.toHaveProperty("ASTRA_CUSTOM_IMAGE_KEY");
+    expect(childEnv).not.toHaveProperty("OMB_CUSTOM_IMAGE_KEY");
   });
   it("persists a custom domain but excludes it from generic config patches", () => {
     expect(parseStoredConfig({ customDomain: "https://bots.example.com" })).toEqual({ customDomain: "https://bots.example.com" });
@@ -848,8 +848,8 @@ describe("credential env preference", () => {
     process.env.XAI_API_KEY = "env-xai";
     process.env.BOX_TOKEN = "env-box";
     process.env.OPENCODE_API_KEY = "env-ocg";
-    process.env.ASTRA_TTS_KEY = "env-tts";
-    process.env.ASTRA_OPENAI_IMAGE_KEY = "env-image";
+    process.env.OMB_TTS_KEY = "env-tts";
+    process.env.OMB_OPENAI_IMAGE_KEY = "env-image";
     const cfg = loadConfig();
     expect(cfg.xai).toEqual({ key: "env-xai", url: "https://api.example.test/v1" });
     expect(cfg.box).toEqual({ token: "env-box" });
@@ -1016,7 +1016,7 @@ describe("credential env preference", () => {
     expect(process.env.XAI_API_KEY).toBe("just-saved");
     expect(process.env.COMPOSIO_API_KEY).toBe("ak_just_saved");
     expect(process.env.BOX_TOKEN).toBeUndefined();
-    expect(process.env.ASTRA_TTS_KEY).toBeUndefined();
+    expect(process.env.OMB_TTS_KEY).toBeUndefined();
   });
 
   it("syncCredentialEnv keeps model and provider env in step with a save", () => {
@@ -1065,10 +1065,10 @@ describe("workspace credential env strip", () => {
     // consumed in-process (Computer driver / voice module), never by a CLI
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("FREELLMAPI_API_KEY");
     expect(WORKSPACE_CREDENTIAL_ENV).toContain("BOX_TOKEN");
-    expect(WORKSPACE_CREDENTIAL_ENV).toContain("ASTRA_TTS_KEY");
-    expect(WORKSPACE_CREDENTIAL_ENV).toContain("ASTRA_OPENAI_IMAGE_KEY");
-    expect(WORKSPACE_CREDENTIAL_ENV).toContain("ASTRA_BROWSER_CONNECTION");
-    expect(WORKSPACE_CREDENTIAL_ENV).toContain("ASTRA_USER_DATA");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_TTS_KEY");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_OPENAI_IMAGE_KEY");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_BROWSER_CONNECTION");
+    expect(WORKSPACE_CREDENTIAL_ENV).toContain("OMB_USER_DATA");
   });
 });
 
