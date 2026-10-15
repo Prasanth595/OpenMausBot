@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, Group, Message } from "@/state/store";
+import { ZAP_DOT_COLORS } from "../../shared/zap-dot-appearance";
 
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
@@ -60,8 +61,10 @@ describe("room speaker names", () => {
     expect(html).toContain('class="text-[11px] font-medium bot-identity" data-bot-color="blue"');
     expect(html).toContain(">Ada<");
     expect(html).toContain(">Kai<");
-    expect(html).toContain("var(--identity-blue)");
-    expect(html).toContain("var(--identity-orange)");
+    expect(html).toContain(ZAP_DOT_COLORS.blue.toLowerCase());
+    expect(html).toContain(ZAP_DOT_COLORS.orange.toLowerCase());
+    expect(html).toContain('data-zap-seed="ada"');
+    expect(html).toContain('data-zap-seed="kai"');
     expect(html).not.toContain('data-bot-color="blue">still me');
     expect(html).toContain("bg-bubble-user");
     expect(html).not.toContain("user-bubble-colored");
