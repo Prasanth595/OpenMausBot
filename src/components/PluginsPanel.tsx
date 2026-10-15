@@ -680,9 +680,7 @@ export function PluginsPanel() {
             ))}
             {moreCategories.length > 0 && (
               <PopoverMenu
-                placement="below"
-                align="end"
-                ariaLabel={t("apps.moreCategories")}
+                placement="below" align="end" ariaLabel={t("apps.moreCategories")}
                 items={moreCategories.map((name) => ({ key: name, title: name, active: category === name, onSelect: () => pickCategory(name) }))}
                 trigger={({ open }) => (
                   <span className={cn(pill, pillTone(filter === "all" && categoryInMore), open && !categoryInMore && "bg-raised-hover text-ink")}>
