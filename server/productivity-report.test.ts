@@ -15,6 +15,15 @@ const monthReport = () => {
   return buildProductivityReport({ ...base, granularity: "month", period: { from: brt("2026-09-01T00:00:00"), to: brt("2026-11-01T00:00:00") } });
 };
 
+describe("issues per bucket (report-fixes)", () => {
+  it("count only the done ones, as the \"Issues resolvidas\" card does: the chart's bars add up to the card", () => {
+    const k = monthReport();
+    const bars = k.buckets.reduce((sum, bucket) => sum + bucket.closedIssues, 0);
+    expect(k.kpis.closedNotPlanned).toBeGreaterThan(0);
+    expect(bars).toBe(k.kpis.closedIssues - k.kpis.closedNotPlanned);
+  });
+});
+
 describe("release timeline", () => {
   it("attributes merges to the release whose range holds their commit; issues only by explicit reference and only when closed (INSP-V r1 #3)", () => {
     const timeline = buildTimeline(scenario());
@@ -84,7 +93,7 @@ describe("month buckets (São Paulo)", () => {
 
   it("counts deliveries, merges and closures by their own dates; unknown contents are flagged", () => {
     expect(september).toMatchObject({ deliveredPrs: 1, unknownContentReleases: 1, mergedPrs: 1, closedIssues: 1, closedBugs: 1, failedReleases: 0 });
-    expect(october).toMatchObject({ deliveredPrs: 3, unknownContentReleases: 0, mergedPrs: 4, closedIssues: 2, closedBugs: 0, failedReleases: 2 });
+    expect(october).toMatchObject({ deliveredPrs: 3, unknownContentReleases: 0, mergedPrs: 4, closedIssues: 1, closedBugs: 0, failedReleases: 2 }); // the one closed as not planned stays out (report-fixes)
   });
 
   it("knows where no release source existed, and where the bots were not recorded (unknown, not zero)", () => {

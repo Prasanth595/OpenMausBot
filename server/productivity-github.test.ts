@@ -4,7 +4,7 @@
 // old deployments and paginated compares. Only reads are ever asked for.
 import { describe, expect, it } from "vitest";
 import {
-  emptyGhCache, explicitReferences, GH_CACHE_VERSION, isCarrier, issuePriority, issueType, migrateGhCache, parseGate, parsePr, RATE_FLOOR, RateLimited,
+  emptyGhCache, explicitReferences, ghEnv, ghErrorMessage, GH_CACHE_VERSION, isCarrier, issuePriority, issueType, migrateGhCache, parseGate, parsePr, RATE_FLOOR, RateLimited,
   readCompare, readDeployments, readTagSha, syncCompares, syncGithub, type GhRunner, type SyncProgress,
 } from "./productivity-github.ts";
 
@@ -247,5 +247,19 @@ describe("REST reads", () => {
     expect(await syncCompares({ gh, cache, pairs: [{ base: "a", head: "b" }] })).toBe(1);
     expect(cache.compares["a...b"]).toEqual(["m1"]);
     expect(await syncCompares({ gh, cache, pairs: [{ base: "a", head: "b" }] })).toBe(0);
+  });
+});
+
+describe("running gh (report-fixes: \"spawn gh ENOENT\" from an app opened in the Finder)", () => {
+  it("runs gh on the augmented PATH, not the bare one the Finder gives", () => {
+    const env = ghEnv({ PATH: "/usr/bin:/bin:/usr/sbin:/sbin", HOME: "/Users/x" }, "/opt/homebrew/bin:/usr/bin:/bin");
+    expect(env).toMatchObject({ PATH: "/opt/homebrew/bin:/usr/bin:/bin", HOME: "/Users/x", GH_PROMPT_DISABLED: "1", NO_COLOR: "1" });
+  });
+
+  it("says gh is missing in words, and keeps gh's own words otherwise", () => {
+    const missing = Object.assign(new Error("spawn gh ENOENT"), { code: "ENOENT" });
+    expect(ghErrorMessage(missing, "")).toMatch(/GitHub CLI \(gh\) not found/);
+    expect(ghErrorMessage(Object.assign(new Error("Command failed"), { code: 1 }), "HTTP 401: Bad credentials\n")).toBe("HTTP 401: Bad credentials");
+    expect(ghErrorMessage(new Error("Command failed: gh api"), "")).toBe("Command failed: gh api");
   });
 });

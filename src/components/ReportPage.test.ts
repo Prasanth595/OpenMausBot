@@ -14,7 +14,7 @@ import { buildProductivityReport } from "../../server/productivity-report";
 import { executiveSummary } from "../../server/productivity-export";
 import { brt, CLIENT_NAME, scenario } from "../../server/testing/productivity-fixture";
 import { compareKpi, type ProductivityReport, type ReportGoals } from "../../shared/productivity";
-import { DeltaLine, ExportMenu, KpiCard, PeriodBar, ReleasesTable, ReportView } from "./ReportPage";
+import { customStart, DeltaLine, ExportMenu, KpiCard, PeriodBar, ReleasesTable, ReportView, sanitizeQuery } from "./ReportPage";
 import { niceScale } from "./ReportCharts";
 
 function report(period = { from: brt("2026-09-28T00:00:00"), to: brt("2026-10-03T00:00:00") }, goals: ReportGoals = {}): ProductivityReport {
@@ -296,5 +296,30 @@ describe("the period bar", () => {
     const changes: unknown[] = [];
     const bar = renderToStaticMarkup(createElement(PeriodBar, { query: { granularity: "day" }, onChange: (query) => changes.push(query), report: null }));
     expect(bar).toMatch(/<option[^>]*value="30"[^>]*selected=""/);
+  });
+});
+
+describe("period filters (report-fixes)", () => {
+  it("drops a saved window this screen no longer offers, so the select and the data agree", () => {
+    expect(sanitizeQuery({ granularity: "day", count: 60 })).toEqual({ granularity: "day", count: 30 });
+    expect(sanitizeQuery({ granularity: "day", count: 24 })).toEqual({ granularity: "day", count: 30 }); // 24 is the hour grouping's
+    expect(sanitizeQuery({ granularity: "hour", count: 24 })).toEqual({ granularity: "hour", count: 24 });
+    expect(sanitizeQuery({ granularity: "day", count: 15 })).toEqual({ granularity: "day", count: 15 });
+    expect(sanitizeQuery({ granularity: "month" })).toEqual({ granularity: "month", count: 12 });
+    expect(sanitizeQuery({ granularity: "week", count: 4 })).toEqual({ granularity: "day", count: 30 });
+    expect(sanitizeQuery(null)).toEqual({ granularity: "day", count: 30 });
+  });
+
+  it("keeps a saved range only with both ends as dates of its grouping, in order", () => {
+    expect(sanitizeQuery({ granularity: "day", from: "2026-10-01", to: "2026-10-10" })).toEqual({ granularity: "day", from: "2026-10-01", to: "2026-10-10" });
+    expect(sanitizeQuery({ granularity: "month", from: "2026-07", to: "2026-09" })).toEqual({ granularity: "month", from: "2026-07", to: "2026-09" });
+    expect(sanitizeQuery({ granularity: "day", from: "2026-10-10", to: "2026-10-01", count: 7 })).toEqual({ granularity: "day", count: 7 });
+    expect(sanitizeQuery({ granularity: "day", from: "ontem", to: "2026-10-01" })).toEqual({ granularity: "day", count: 30 });
+  });
+
+  it("opens \"Personalizado\" on the São Paulo day the period starts, not the UTC one", () => {
+    // the last 48 hours starting 13/10 21:00 in São Paulo is 14/10 00:00 UTC
+    expect(customStart(brt("2026-10-13T21:00:00"))).toBe("2026-10-13");
+    expect(customStart(brt("2026-09-16T00:00:00"))).toBe("2026-09-16");
   });
 });
