@@ -10,8 +10,6 @@ import {
   Box,
   Check,
   Cloud,
-  Database,
-  FolderOpen,
   Sparkles,
   Globe,
   Hand,
@@ -21,12 +19,13 @@ import {
   Moon,
   Power,
   Settings,
-  Smartphone,
   X,
 } from "lucide-react";
 import { api, ApiError, currentTaskBot, useStore, type Bot, type ConfigStatus } from "@/state/store";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { ComputerFilesPane } from "./ComputerFilesPane";
+import { ComputerPanelTabList, computerPanelTabs, PANEL_TABS_ID } from "./ComputerPanelTabs";
+import { TabGroup, TabPanel, TabPanels } from "./tabs";
 import { effectivePlace, isComputerPlace, placeLabelKey, placeOffered } from "@/lib/place";
 import type { CloudBackend } from "../../shared/wire";
 import { ApiKeyRow } from "./ApiKeys";
@@ -161,6 +160,7 @@ function readPanelWidth(): number {
   return PANEL_DEFAULT_WIDTH;
 }
 
+/** Right-side computer panel: tab bar, screen preview, and place controls. */
 export function ComputerPanel({
   bot: profileBot,
   onOpenVmWorkspace,
@@ -344,11 +344,26 @@ export function ComputerPanel({
   const [storedPanelView, setPanelView] = useState<ComputerPanelView>(() => readComputerPanelView(bot.id));
   const requestedDataResult = state.dataResultFocus?.botId === bot.id ? state.dataResultFocus : undefined;
   const [dataRequest, setDataRequest] = useState<{ id: string; requestId: number }>();
-  const panelView: ComputerPanelView = advanced
-    ? storedPanelView === "files" ? "computer" : storedPanelView
-    : storedPanelView === "routines" || storedPanelView === "android" ? "computer" : storedPanelView;
   const androidStatus = useAndroidUsbDevices();
   const androidConnected = androidStatus.devices.length > 0;
+  // Discovery starts empty and fills asynchronously, and a failed or missing
+  // adb resolves to an empty list too: only a check with no failure reason
+  // establishes "no device". The render normalization below stays transient
+  // (it recovers when a device appears); the persist effect further down must
+  // wait for this flag so neither the initial empty list nor an adb failure
+  // writes off the stored "android" view. The no-bridge case carries no
+  // reason code and keeps its previous fallback behavior.
+  const androidStatusUsable = androidStatus.scanned !== false
+    && androidStatus.reasonCode !== "adb-unavailable"
+    && androidStatus.reasonCode !== "adb-failed";
+  // An unplugged Android tab disappears from `panelTabs`; normalize during
+  // render so `Tabs` always has an active tab and `aria-labelledby` never
+  // references a nonexistent `...-android` ID. The effect below persists it.
+  const panelView: ComputerPanelView = advanced
+    ? storedPanelView === "files" || (storedPanelView === "android" && !androidConnected)
+      ? "computer"
+      : storedPanelView
+    : storedPanelView === "routines" || storedPanelView === "android" ? "computer" : storedPanelView;
   const browserAvailableHere = browserAvailable(state.config);
   const browserEnabled = builtInBrowserEnabled(state.config) && bot.browser !== false
     && (browserAvailableHere || state.config?.browserEngine?.installable === true);
@@ -445,11 +460,14 @@ export function ComputerPanel({
   }, [bot.id]);
 
   useEffect(() => {
-    if (!androidConnected && panelView === "android") {
+    // The stored "android" view survives until a check actually succeeds:
+    // see androidStatusUsable above.
+    if (!androidStatusUsable) return;
+    if (!androidConnected && storedPanelView === "android") {
       setPanelView("computer");
       writeComputerPanelView(bot.id, "computer");
     }
-  }, [androidConnected, bot.id, panelView]);
+  }, [androidConnected, androidStatusUsable, bot.id, storedPanelView]);
   useEffect(() => {
     vmReadinessAttempts.current = 0;
   }, [bot.id, bot.computer]);
@@ -1257,11 +1275,25 @@ export function ComputerPanel({
   const heldPin = liveTask?.surface && !liveTask.surfaceAuto && profileBot.computer !== "off"
     && liveTask.surface !== profileBot.computer ? liveTask.surface : undefined;
 
-  const tabClass = (active: boolean) => cn(
-    "flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[12.5px] transition-colors @max-[28rem]/paneltabs:[&>svg]:hidden @max-[22rem]/paneltabs:px-2",
-    active ? "bg-raised text-ink shadow-sm" : "text-ink-secondary hover:text-ink",
-  );
-
+  // The header tab bar is the generic <Tabs>: this panel declares the tabs,
+  // the active one and its display rules; movement and styling live there.
+  const panelTabs = computerPanelTabs({
+    advanced,
+    androidConnected,
+    computerLive: placeLive && isComputerPlace(livePlace),
+    browserLive: placeLive && livePlace === "browser",
+  });
+  /** Re-pressing the active tab fires `onInput` only, so the Browser error
+   *  reset lives here; `onChange` only moves selection. */
+  const handlePanelTabInput = (next: ComputerPanelView) => {
+    // Opening the browser tab clears a stale panel error like the old
+    // per-tab click handler did; every other tab keeps it.
+    if (next === "browser") setError(null);
+  };
+  /** Applies a header tab change. */
+  const handlePanelTabChange = (next: ComputerPanelView) => {
+    selectPanelView(next);
+  };
   const emptyState = {
     checking: t("computer.phase.checking"),
     starting: cloudBackend === "vps" ? t("computer.phase.starting") : cloudView.line,
@@ -1309,9 +1341,13 @@ export function ComputerPanel({
         onPointerCancel={onResizeEnd}
         className="absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize hover:bg-accent/40 focus-visible:bg-accent/60 max-md:hidden"
       />
+      {/* Header: tabs centred as a segmented control; gear and close pinned to the edges. */}
       {/* ml-1.5 keeps the drag region clear of the resize handle: a later drag region in the DOM wins. */}
-      <div {...dragProps} className={cn("@container/paneltabs ml-1.5 py-3 pl-2.5 pr-4", padClass)}>
-        <div className="relative flex min-h-7 items-center justify-center">
+      {/* The group renders no element of its own: it wraps the bar and, below
+          it, the views the bar selects. */}
+      <TabGroup id={PANEL_TABS_ID} value={panelView} onChange={handlePanelTabChange} onInput={handlePanelTabInput}>
+      <div {...dragProps} className={cn("ml-1.5 py-3 pl-2.5 pr-4", padClass)}>
+        <div className="relative flex min-h-7 items-center justify-center px-9">
           {advanced && (
             <button
               onClick={() => {
@@ -1324,66 +1360,7 @@ export function ComputerPanel({
               <Settings size={18} />
             </button>
           )}
-          <div className="mx-9 flex min-w-0 gap-0.5 overflow-x-auto rounded-full bg-inset p-0.5 [scrollbar-width:none]" data-tour="computer-tabs" data-testid="computer-tabs" aria-label="Bot panel view">
-            <button
-              onClick={() => selectPanelView("computer")}
-              aria-pressed={panelView === "computer"}
-              className={tabClass(panelView === "computer")}
-            >
-              <Monitor size={13} /> {t("computer.tab.computer")}
-              {placeLive && isComputerPlace(livePlace) && <span className="size-1.5 animate-pulse rounded-full bg-success" role="img" aria-label={t("place.live")} data-testid="computer-tab-live" />}
-            </button>
-            {advanced && (
-            <button
-              type="button"
-              onClick={() => selectPanelView("routines")}
-              aria-pressed={panelView === "routines"}
-              className={tabClass(panelView === "routines")}
-            ><CalendarClock size={13} />{t("computer.tab.routines")}</button>
-            )}
-            {advanced && androidConnected && (
-            <button
-              onClick={() => selectPanelView("android")}
-              aria-pressed={panelView === "android"}
-              className={tabClass(panelView === "android")}
-            >
-              <Smartphone size={13} /> {t("computer.tab.android")}
-            </button>
-            )}
-            {(
-            <button
-              data-tour="computer-browser"
-              onClick={() => {
-                setError(null);
-                selectPanelView("browser");
-              }}
-              aria-pressed={panelView === "browser"}
-              className={tabClass(panelView === "browser")}
-            >
-              <Globe size={13} /> {t("computer.tab.browser")}
-              {placeLive && livePlace === "browser" && <span className="size-1.5 animate-pulse rounded-full bg-success" role="img" aria-label={t("place.live")} data-testid="browser-tab-live" />}
-            </button>
-            )}
-            <button
-              type="button"
-              data-tour="computer-data"
-              onClick={() => selectPanelView("data")}
-              aria-pressed={panelView === "data"}
-              className={tabClass(panelView === "data")}
-            >
-              <Database size={13} /> {t("computer.tab.data")}
-            </button>
-            {!advanced && (
-            <button
-              type="button"
-              onClick={() => selectPanelView("files")}
-              aria-pressed={panelView === "files"}
-              className={tabClass(panelView === "files")}
-            >
-              <FolderOpen size={13} /> {t("computer.tab.files")}
-            </button>
-            )}
-          </div>
+          <ComputerPanelTabList>{panelTabs}</ComputerPanelTabList>
           <button
             onClick={() => dispatch({ type: "toggleComputer", open: false })}
             className="absolute right-0 top-1/2 -translate-y-1/2 rounded-md p-1 text-ink-secondary hover:bg-control hover:text-ink"
@@ -1395,11 +1372,12 @@ export function ComputerPanel({
         </div>
       </div>
 
-      {panelView === "routines" ? (
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
-          <RoutinesSection key={bot.id} bot={bot} routines={botRoutines} runs={state.routineRuns} defaultRunOn={cloudRoutineReady ? "cloud" : "maus"} />
-        </div>
-      ) : panelView === "browser" && browserEnabled ? (
+      <TabPanels className="flex min-h-0 flex-1 flex-col">
+      <TabPanel value="routines" className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
+        <RoutinesSection key={bot.id} bot={bot} routines={botRoutines} runs={state.routineRuns} defaultRunOn={cloudRoutineReady ? "cloud" : "maus"} />
+      </TabPanel>
+      <TabPanel value="browser" className="flex min-h-0 flex-1 flex-col">
+      {browserEnabled ? (
         <div className="flex min-h-0 flex-1 flex-col px-4 pb-4">
           {browserSwitchRow}
           {signInHelp?.place === "browser" && <div className="-mt-1 mb-3">{signInBanner()}</div>}
@@ -1410,7 +1388,7 @@ export function ComputerPanel({
             </div>
           )}
         </div>
-      ) : panelView === "browser" ? (
+      ) : (
         <div className="flex-1 overflow-y-auto px-5 pb-5" data-testid="browser-off">
           {browserSwitchRow}
           <div className="mt-2 flex flex-col items-center gap-3 rounded-xl bg-card px-6 py-8 text-center">
@@ -1426,20 +1404,20 @@ export function ComputerPanel({
             )}
           </div>
         </div>
-      ) : panelView === "data" ? (
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          <Suspense fallback={<div className="flex flex-1 items-center justify-center text-[13px] text-ink-secondary" role="status">{t("data.loading")}</div>}>
-            <DataPanel key={bot.id} bot={bot} requestedCard={dataRequest} />
-          </Suspense>
-        </div>
-      ) : panelView === "files" ? (
+      )}
+      </TabPanel>
+      <TabPanel value="data" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <Suspense fallback={<div className="flex flex-1 items-center justify-center text-[13px] text-ink-secondary" role="status">{t("data.loading")}</div>}>
+          <DataPanel key={bot.id} bot={bot} requestedCard={dataRequest} />
+        </Suspense>
+      </TabPanel>
+      <TabPanel value="files" className="flex min-h-0 flex-1 flex-col">
         <ComputerFilesPane bot={bot} />
-      ) : panelView === "android" && androidConnected ? (
-        <div className="flex-1 overflow-y-auto px-4 pt-2">
-          <AndroidDevicePanel status={androidStatus} />
-        </div>
-      ) : (
-      <div className="flex-1 overflow-y-auto px-5 pb-5">
+      </TabPanel>
+      <TabPanel value="android" className="flex-1 overflow-y-auto px-4 pt-2">
+        <AndroidDevicePanel status={androidStatus} />
+      </TabPanel>
+      <TabPanel value="computer" className="flex-1 overflow-y-auto px-5 pb-5">
           <div className="mb-1.5 mt-2 flex items-center justify-between text-[13px] text-ink-secondary">
             <span>{t("computer.screenOf", { name: bot.name })}</span>
             {currentTeamComputer && <span className="text-[11px]">{autoView.short}</span>}
@@ -1936,8 +1914,9 @@ export function ComputerPanel({
             )}
           </div>
         )}
-      </div>
-      )}
+      </TabPanel>
+      </TabPanels>
+      </TabGroup>
 
     </aside>
     <LocalComputerAutoWarning
