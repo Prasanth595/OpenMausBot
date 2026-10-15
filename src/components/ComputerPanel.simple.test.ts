@@ -74,7 +74,7 @@ vi.mock("./DesktopCapabilities", () => ({
 }));
 vi.mock("./AndroidDevicePanel", () => ({
   AndroidDevicePanel: () => null,
-  useAndroidUsbDevices: () => ({ devices: fixture.android ? [{ serial: "p1" }] : [] }),
+  useAndroidUsbDevices: () => ({ devices: fixture.android ? [{ serial: "p1" }] : [], scanned: true }),
 }));
 vi.mock("./BrowserPanel", () => ({ BrowserPanel: () => createElement("div", null, "BROWSER-PANEL") }));
 vi.mock("./CloudScreenPreview", () => ({ CloudScreenPreview: () => null }));
@@ -101,6 +101,8 @@ vi.mock("@/state/store", async (importOriginal) => ({
 }));
 
 const { ComputerPanel } = await import("./ComputerPanel");
+const { Tab, TabList } = await import("./tabs");
+const { ComputerPanelTabList, PANEL_TAB_MIN_WIDTH } = await import("./ComputerPanelTabs");
 const { ComputerFilesPane } = await import("./ComputerFilesPane");
 const { CloudBackendPicker } = await import("./CloudBackendPicker");
 const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
@@ -108,6 +110,7 @@ const { LocalComputerAutoWarning } = await import("./LocalComputerAutoWarning");
 afterAll(() => vi.unstubAllGlobals());
 
 type Node = ReactElement<Record<string, unknown> & { children?: ReactNode }>;
+/** Flattens an element tree depth-first into test-inspectable nodes. */
 function nodes(value: ReactNode): Node[] {
   return Children.toArray(value).flatMap((child) => {
     if (!isValidElement(child)) return [];
@@ -115,6 +118,7 @@ function nodes(value: ReactNode): Node[] {
     return [node, ...nodes(node.props.children)];
   });
 }
+/** Extracts trimmed text from a node subtree, decoding element children. */
 function text(value: ReactNode): string {
   return Children.toArray(value).map((child) => {
     if (typeof child === "string" || typeof child === "number") return String(child);
@@ -122,6 +126,7 @@ function text(value: ReactNode): string {
   }).join("").trim();
 }
 
+/** Builds an available Claude engine instance for panel tests. */
 const engine = (): InstanceInfo => ({
   instanceId: "claude", driverKind: "claudeAgent", displayName: "Claude", access: "subscription",
   snapshot: { state: "available", version: "1", authenticated: true },
@@ -129,6 +134,7 @@ const engine = (): InstanceInfo => ({
   capabilities: { computerMcp: true, browserMcp: true },
 } as InstanceInfo);
 
+/** Builds a Scout bot patch-merged for shallow panel assertions. */
 function makeBot(patch: Partial<Bot> = {}): Bot {
   return {
     id: "scout", threadId: "thread-scout", name: "Scout", title: "", description: "", notifications: true,
@@ -138,9 +144,11 @@ function makeBot(patch: Partial<Bot> = {}): Bot {
   } as Bot;
 }
 
+/** Renders the panel shallowly and indexes its buttons and nodes. */
 function render(forBot: Bot, props: { onOpenVmWorkspace?: (botId: string) => void } = {}) {
   fixture.values.length = Math.min(fixture.values.length, fixture.own);
   let tree: ReactNode = null;
+  /** Captures the panel tree while resetting the hook call index. */
   function Capture() {
     fixture.index = 0;
     tree = ComputerPanel({ bot: forBot, ...props });
@@ -154,12 +162,28 @@ function render(forBot: Bot, props: { onOpenVmWorkspace?: (botId: string) => voi
   return { html, nodes: all, buttons, button };
 }
 
+/** Lists the header tab labels the panel handed its bar. */
 const tabs = (rendered: ReturnType<typeof render>) => {
-  const bar = rendered.nodes.find((node) => node.props["data-testid"] === "computer-tabs")!;
-  return nodes(bar.props.children).filter((node) => node.type === "button").map((node) => text(node.props.children));
+  // The header bar is the generic <TabList>: the shallow tree holds its <Tab>
+  // children, not their rendered buttons. The bar's behaviour itself is
+  // covered in tabs/TabGroup.test.ts; here only the tab order per mode matters.
+  const bar = rendered.nodes.find((node) => node.type === ComputerPanelTabList)!;
+  return Children.toArray(bar.props.children).flatMap((child) =>
+    isValidElement(child) && (child as Node).type === Tab ? [text((child as Node).props.children)] : [],
+  );
 };
+/** Finds the headless `<TabList>` the panel's bar renders. */
+const barList = (rendered: ReturnType<typeof render>) => {
+  const bar = rendered.nodes.find((node) => node.type === ComputerPanelTabList)!;
+  // The bar is a component, so its own tree only exists once it is called;
+  // it holds no hooks, which keeps that a plain function call.
+  const tree = ComputerPanelTabList(bar.props as unknown as Parameters<typeof ComputerPanelTabList>[0]);
+  return nodes(tree).find((node) => node.type === TabList)!;
+};
+/** Reads the chosen-place summary line for the rendered panel. */
 const placeLine = (rendered: ReturnType<typeof render>) =>
   text(rendered.nodes.find((node) => node.props["data-testid"] === "place-line")!.props.children).replace(/&#x27;/g, "'");
+/** Collects the place-grid option buttons from the rendered panel. */
 const grid = (rendered: ReturnType<typeof render>) => {
   const card = rendered.nodes.find((node) => node.props["data-testid"] === "where-works");
   if (!card) return [];
@@ -186,23 +210,37 @@ beforeEach(() => {
 });
 
 describe("Computer panel tabs", () => {
-  it("centres the tabs as a pill with close pinned right, in both modes", () => {
+  it("centres the tabs with close pinned right, in both modes", () => {
     for (const advanced of [false, true]) {
       fixture.advanced = advanced;
       fixture.values = [];
       const rendered = render(makeBot());
-      const bar = rendered.nodes.find((node) => node.props["data-testid"] === "computer-tabs")!;
-      expect(String(bar.props.className).split(" ")).toEqual(expect.arrayContaining(["rounded-full", "mx-9"]));
-      expect(String(bar.props.className).split(" ")).not.toContain("flex-wrap");
-      const firstTab = Children.toArray(bar.props.children).find(isValidElement) as Node;
-      expect(String(firstTab.props.className).split(" ")).toEqual(expect.arrayContaining(["shrink-0", "@max-[28rem]/paneltabs:[&>svg]:hidden"]));
-      expect(rendered.nodes.some((node) => String(node.props.className ?? "").split(" ").includes("@container/paneltabs"))).toBe(true);
+      // The bar hugs its tabs and centres itself, so the row itself keeps the
+      // space the pinned edge buttons need instead of the bar carrying margins.
       const row = rendered.nodes.find((node) => Children.toArray(node.props.children)
-        .some((child) => isValidElement(child) && (child as Node).props["data-testid"] === "computer-tabs"))!;
-      expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining(["relative", "flex", "justify-center"]));
+        .some((child) => isValidElement(child) && (child as Node).type === ComputerPanelTabList))!;
+      expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining(["relative", "flex", "justify-center", "px-9"]));
+      const list = barList(rendered);
+      expect(String(list.props.className).split(" ")).toEqual(expect.arrayContaining(["mx-auto", "w-fit", "max-w-full"]));
       const close = rendered.nodes.find((node) => node.props["aria-label"] === "Close computer panel")!;
       expect(String(close.props.className).split(" ")).toEqual(expect.arrayContaining(["absolute", "right-0"]));
     }
+  });
+
+  it("asks the tab bar to collapse to text-only when narrow", () => {
+    const list = barList(render(makeBot()));
+    expect(list.props.collapse).toBe("text");
+  });
+
+  it("gives the header tabs their own content width", () => {
+    const list = barList(render(makeBot()));
+    expect(list.props.minTabWidth).toBe(PANEL_TAB_MIN_WIDTH);
+    // The row is a segmented control: it scrolls when it cannot fit, but a
+    // scrollbar drawn inside the pill reads as an artefact.
+    expect(list.props.scrollbar).toBe("hidden");
+    expect(String(list.props.className).split(" ")).toEqual(expect.arrayContaining([
+      "grid-flow-col", "auto-cols-max", "overflow-x-auto", "[scrollbar-width:none]", "[&::-webkit-scrollbar]:hidden",
+    ]));
   });
 
   it("shows Computer, Browser, Data and Files in Simple mode", () => {
@@ -227,6 +265,7 @@ describe("Computer panel tabs", () => {
 
   it("lists the files this chat changed in the Files tab", () => {
     fixture.view.current = "files";
+    /** Builds a digest message with the given file changes. */
     const digest = (files: { added?: string[]; changed?: string[]; deleted?: string[] }) => ({
       id: Math.random().toString(36), role: "assistant", kind: "digest", text: "",
       digest: { files: { added: [], changed: [], deleted: [], ...files } },
@@ -351,6 +390,7 @@ describe("Simple Browser tab with the browser off", () => {
   });
 });
 
+/** Finds the browser-consent switch for the rendered panel. */
 function browserSwitch(rendered: ReturnType<typeof render>) {
   return rendered.nodes.find((node) => node.props["aria-label"] === "Let Scout use a browser")!;
 }
@@ -468,7 +508,9 @@ describe("Where the bot works", () => {
 });
 
 describe("A chat pinned to a place", () => {
+  /** Builds a bot whose chat is pinned to the cloud computer. */
   const pinned = () => makeBot({ tasks: [{ threadId: "thread-scout", title: "", createdAt: 1, surface: "cloud" }] } as Partial<Bot>);
+  /** Reads the pinned-place note for the rendered panel. */
   const note = (rendered: ReturnType<typeof render>) =>
     text(rendered.nodes.find((node) => node.props["data-testid"] === "place-pinned-note")!.props.children);
 
@@ -481,9 +523,12 @@ describe("A chat pinned to a place", () => {
     expect(note(render(pinned()))).toBe("This conversation is pinned to Cloud computer. Change it from the composer.");
   });
 
+  /** Builds a bot pinned to a place with an optional task patch. */
   const pinnedOn = (computer: Bot["computer"], task: Partial<Task> = {}) =>
     makeBot({ computer, tasks: [{ threadId: "thread-scout", title: "", createdAt: 1, surface: "cloud", ...task }] } as Partial<Bot>);
+  /** Finds the unpin action for the rendered panel, if any. */
   const unpin = (rendered: ReturnType<typeof render>) => rendered.nodes.find((node) => node.props["data-testid"] === "place-unpin");
+  /** Resets shallow-render hook state between pinned-place cases. */
   const fresh = () => { fixture.values = []; phaseIndex = -1; };
 
   it("leads a person's pin back to the grid's choice, which Simple has no composer chip for", () => {
@@ -518,6 +563,7 @@ describe("A chat pinned to a place", () => {
 });
 
 describe("Technical controls", () => {
+  /** Builds a cloud-computer bot for technical-control assertions. */
   const cloud = () => makeBot({ computer: "cloud" });
 
   it("hides the gear, backend picker and Routines card in Simple and keeps them in Advanced", () => {
@@ -525,7 +571,7 @@ describe("Technical controls", () => {
     expect(simple.nodes.some((node) => node.props.title === "Bot settings")).toBe(false);
     expect(simple.nodes.some((node) => node.type === CloudBackendPicker)).toBe(false);
     expect(simple.html).not.toContain("Works on");
-    expect(simple.buttons.some((node) => text(node.props.children).startsWith("Routines"))).toBe(false);
+    expect(tabs(simple).some((label) => label.startsWith("Routines"))).toBe(false);
 
     fixture.advanced = true;
     fixture.values = [];
@@ -533,7 +579,7 @@ describe("Technical controls", () => {
     expect(advanced.nodes.some((node) => node.props.title === "Bot settings")).toBe(true);
     expect(advanced.nodes.some((node) => node.type === CloudBackendPicker)).toBe(true);
     expect(advanced.html).toContain("Works on");
-    expect(advanced.buttons.some((node) => text(node.props.children).startsWith("Routines"))).toBe(true);
+    expect(tabs(advanced).some((label) => label.startsWith("Routines"))).toBe(true);
   });
 
   it("hides the VM settings link in Simple", () => {
@@ -567,7 +613,9 @@ describe("Technical controls", () => {
       vmViewerUrl: "http://127.0.0.1/viewer",
       vmStatus: { mode: "per-bot", container: "running", ready: true },
     };
+    /** Builds a VM bot for desktop-action assertions. */
     const vm = () => makeBot({ computer: "vm" });
+    /** No-op workspace opener for VM action tests. */
     const onOpenVmWorkspace = () => {};
     const simple = render(vm(), { onOpenVmWorkspace });
     expect(simple.html).not.toContain("Open two desktops");
@@ -586,6 +634,7 @@ describe("Technical controls", () => {
 
   it("turns VPS setup into one friendly line and an Advanced switch", () => {
     fixture.seed = { phase: "vps-stopped", resolved: { botId: "scout", threadId: "thread-scout", computer: "cloud", cloudBackend: "vps" } };
+    /** Builds a VPS-backed bot for setup-line assertions. */
     const vps = () => makeBot({ computer: "cloud", cloudBackend: "vps" });
     const simple = render(vps());
     expect(simple.html).toContain("Scout&#x27;s computer needs a setup step first.");
