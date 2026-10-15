@@ -116,7 +116,7 @@ import * as composio from "./composio.ts";
 import { connectorCallFromFrame, connectorRefusalText, connectorScopeRefusalText, connectorUnrecognizedText, evaluateConnectorTools } from "./connector-verdict.ts";
 import { connectorCardText } from "./connector-card-text.ts";
 import { chiefOfStaffSystemPrompt } from "./chief-of-staff.ts";
-import { buildRecall, recallRooms, recallThreadIds } from "./recall.ts";
+import { buildRecall, recallRooms, recallThreadIds, withRecalled } from "./recall.ts";
 import { hostTimeZone, takesTurnClock, turnClockLine, withTurnClock } from "./turn-clock.ts";
 import { createMemoryUpkeep, upkeepEnabled } from "./memory-upkeep.ts";
 import { createCacheKeepWarm, type KeepWarmStatus, type KeepWarmTarget } from "./cache-keepwarm.ts";
@@ -327,7 +327,7 @@ import { turnStartLogLine } from "./turn-log.ts";
 import { TurnStops, outwardActions, stoppedTurnOutcome, turnEvidence } from "./turn-outcome.ts";
 import { buildRecoveryText, buildTurnContext, engineIsFresh, replaysNatively } from "./turn-context.ts";
 import { Handoffs, handedStateUsable, isContextMessage, recordHanded, renderUnseen, sessionStart, unseenMessages, withUnseenMessages, type ContextMessage } from "./delta-context.ts";
-import { extractTurnImages } from "./turn-images.ts";
+import { extractReplayImages, extractTurnImages } from "./turn-images.ts";
 import { callTitleExcerpt, threadTitlePrompt, type ThreadTitleSource } from "./thread-title.ts";
 import { TurnWatchdog } from "./turn-watchdog.ts";
 import { TurnResources, type TurnOwner } from "./turn-resources.ts";
@@ -370,7 +370,6 @@ import {
   scanSkillText,
   listSkills,
   listStagedSkillWrites,
-  isSkillName,
   readSkillFile,
   rejectStagedSkillWrite,
   setSkillEnabled,
@@ -385,6 +384,7 @@ import { ensureTaskWorkspaceWithSkills } from "./skill-task-links.ts";
 import { parseSkillManageReferences, previousSkillVersion, skillCardCopy, skillRequestReferences } from "./skill-request-card.ts";
 import { skillReferencesSha256 } from "./skill-storage.ts";
 import { createSkillsLibraryHost } from "./host/skills-library.ts";
+import { skillExport } from "./skill-export.ts";
 import { pickBotName } from "./names.ts";
 import { botSkillTemplateSchema, newBotDefaultsSchema } from "./new-bot-defaults.ts";
 import { expandLearnTurnText, learnSource } from "./skill-learn.ts";
@@ -392,6 +392,7 @@ import { connectedAppsForSetup, expandSetupTurnText, setupModeActive, setupSyste
 import type { SkillRequestCardData } from "../shared/skill-request.ts";
 import { checkSoulDrift, readSoulDrift, soulFile, writeSoulMirror } from "./bot-folder.ts";
 import {
+  botPersona,
   buildSystemPrompt,
   userProfileSystemPrompt,
   cloudHomePrompt,
@@ -424,12 +425,11 @@ import { localVmStopReason, recordLocalVmIdleStop } from "./local-vm-stop-reason
 import { LocalVmIdleTimer } from "./local-vm-idle.ts";
 import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts";
-import { createLoopGuard, loopGuardSettings } from "./host/loop-guard.ts";
+import { correctiveRounds, createLoopGuard, loopGuardSettings } from "./host/loop-guard.ts";
 import { addHeldSecretScrubber, redactSecretsInText } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { ROUTINE_RESTARTED, RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
-import { BUILT_IN_BROWSER_SYSTEM_PROMPT } from "./browser-engine.ts";
 import { BROWSER_CONTROL_REFUSAL, BROWSER_UPLOAD_TOOL, BrowserRuntime, TransportError, attachesToChrome, browserRuntimeEnv, formatBrowserTiming } from "./browser-runtime.ts";
 import { namedUploadPaths, uploadableFiles } from "./browser-upload.ts";
 import { listSignedInSites, signOutOfSites } from "./browser-sites.ts";
@@ -449,7 +449,7 @@ import {
   clearBrowserSessionState,
   closeBrowserSession,
   browserEngineStatus,
-  browserSessionId, isTemporaryBrowserSession,
+  browserSessionId, isTemporaryBrowserSession, BUILT_IN_BROWSER_SYSTEM_PROMPT,
   describeBrowserEngine,
   inRunningBrowser,
   setBrowserViewport,
@@ -466,7 +466,6 @@ import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.t
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { profileRevision, profileSnapshot } from "./profile-revision.ts";
 import { flushAllProfileHistory, flushProfileHistory, readHistory, recordProfileChange } from "./profile-versions.ts";
-import { BOT_PACKAGE_MAX_SKILLS } from "./bot-package.ts";
 import { TeamMemory, TEAM_MEMORY_KINDS, type TeamMemoryKind } from "./team-memory.ts";
 import { describeTool } from "./activity.ts";
 import { OutboundCounts } from "./outbound-counts.ts";
@@ -491,7 +490,7 @@ import {
 } from "./skill-library.ts";
 import { runSkillsLibraryBootSweep } from "./skills-library-migration.ts";
 import { installedPlaybookInstructions } from "./installed-playbooks.ts";
-import { picture as sharedPicture, type ExportablePackageSkill, type TeamExportSkip } from "./package-export.ts";
+import { picture as sharedPicture, type TeamExportSkip } from "./package-export.ts";
 import type { PackageImportDeps } from "./package-import.ts";
 import {
   createPresetStore, DEFAULTS_PRESET_KEY,
@@ -520,6 +519,7 @@ import { environmentDescriptor, loadEnvironmentId, serverVersion } from "./envir
 import { WorkspaceBackupMaintenance } from "./workspace-backup-maintenance.ts";
 import { createWorkspaceBackupRoutes, isWorkspaceBackupSessionControl } from "./workspace-backup-http.ts";
 import { applyPendingWorkspaceRestore, readLastWorkspaceRestore, type WorkspaceRestoreResult } from "./workspace-backup.ts";
+import { repairMovedWorkspacePaths } from "./moved-paths-repair.ts";
 import { createCustomDomainVerifier, customDomainIpv4, normalizeCustomDomain } from "./custom-domain.ts";
 import { allowedScopes, createEmailSignIn, parseAllowList } from "./account-signin.ts";
 import { ProviderAuthSessions } from "./provider-auth-sessions.ts";
@@ -595,6 +595,7 @@ import { createBotSkillsRoutes } from "./routes/bot-skills.ts";
 import { createSkillShareRoutes } from "./routes/skill-share.ts";
 import { createTeamContextRoutes } from "./routes/team-context.ts";
 import { createDeciderRoutes } from "./routes/decider.ts";
+import { createUpdateCheckRoutes, serverUpdateChecker } from "./routes/update-check.ts";
 import { createBrowserSiteRoutes } from "./routes/browser-sites.ts";
 import { createInternalSignInRoutes } from "./routes/sign-in.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
@@ -662,9 +663,7 @@ let restoredAtStart: string | undefined;
 if (existsSync(join(DATA_DIR, ".backups"))) {
   workspaceRestore = applyPendingWorkspaceRestore(DATA_DIR);
   if (workspaceRestore.restored) restoredAtStart = workspaceRestore.id;
-  if (!workspaceRestore.restored && !workspaceRestore.rolledBack) {
-    workspaceRestore = readLastWorkspaceRestore(DATA_DIR) ?? workspaceRestore;
-  }
+  if (!workspaceRestore.restored && !workspaceRestore.rolledBack) workspaceRestore = readLastWorkspaceRestore(DATA_DIR) ?? workspaceRestore;
 }
 const workspaceMaintenance = new WorkspaceBackupMaintenance();
 // Only after ensureDirs(), whose one-time legacy data-dir rename must not find ~/.openmausbot already there.
@@ -686,6 +685,7 @@ const sharedComputers = new SharedComputers(id => sessions.isLive(id));
 const CLOUD_SECRETS = BOOT_CLOUD_SECRETS;
 const CLOUD_ENV: NodeJS.ProcessEnv = { ...process.env, ...CLOUD_SECRETS };
 const CLOUD_HOME = cloudHomeConfiguration(CLOUD_ENV);
+if (CLOUD_HOME) repairMovedWorkspacePaths(DATA_DIR);
 if (CLOUD_HOME) sessions.requireAdmin(CLOUD_PERSONAL_REFUSAL);
 const lendingEnabled = () => sharedComputersEnabled(cfg) || CLOUD_HOME !== null;
 const CLOUD_HOME_LENDER = "cloud-home";
@@ -1322,10 +1322,6 @@ function autoRecallPrompt(bot: BotRecord, threadId: string, message: string, opt
     console.warn(`auto-recall failed for ${bot.id}: ${(err as Error).message}`);
     return "";
   }
-}
-
-function withRecalled(recalled: string, text: string): string {
-  return recalled ? `${recalled}\n\n${text}` : text;
 }
 
 /** A room is one transcript: a restricted bot's words would otherwise feed a teammate everyone can see. */
@@ -3165,93 +3161,6 @@ function healThreadModel(botId: string, threadId: string): void {
   } });
 }
 
-function checkedExportSkillNames(
-  value: unknown,
-  bots: readonly BotRecord[],
-): { ok: true; names: string[] } | { ok: false; error: string } {
-  if (value === undefined) return { ok: true, names: [] };
-  if (!Array.isArray(value) || value.some((name) => typeof name !== "string" || !isSkillName(name))) {
-    return { ok: false, error: "skillIds must be a list of exact imported skill names" };
-  }
-  const names = [...value] as string[];
-  if (new Set(names).size !== names.length) return { ok: false, error: "skillIds must not contain duplicates" };
-  if (names.length > BOT_PACKAGE_MAX_SKILLS) return { ok: false, error: `skillIds must contain at most ${BOT_PACKAGE_MAX_SKILLS} names` };
-  const available = new Set(bots.flatMap((bot) => listBotSkills(bot).map((skill) => skill.name)));
-  const unknown = names.find((name) => !available.has(name));
-  if (unknown) return { ok: false, error: `skillIds contains unknown imported skill "${unknown}"` };
-  return { ok: true, names };
-}
-
-function collectExportSkills(
-  bots: readonly BotRecord[],
-  names: readonly string[],
-): ReadonlyMap<string, readonly ExportablePackageSkill[]> {
-  const selected = new Set(names);
-  const byBot = new Map<string, ExportablePackageSkill[]>();
-  if (!selected.size) return byBot;
-  for (const bot of bots) {
-    const assigned: ExportablePackageSkill[] = [];
-    for (const listing of listBotSkills(bot)) {
-      if (!selected.has(listing.name)) continue;
-      const instructions = readBotSkillFile(bot, listing.name);
-      if (instructions === null) {
-        throw new Error(`Skill "${listing.name}" changed or is unavailable and cannot be exported safely`);
-      }
-      const skill: ExportablePackageSkill = {
-        name: listing.name,
-        description: listing.description,
-        ...(listing.source ? { source: listing.source } : {}),
-        ...(listing.license ? { license: listing.license } : {}),
-        ...(listing.compatibility ? { compatibility: listing.compatibility } : {}),
-        instructions,
-      };
-      assigned.push(skill);
-    }
-    if (assigned.length) byBot.set(bot.id, assigned);
-  }
-  return byBot;
-}
-
-function collectTeamSkills(
-  bots: readonly BotRecord[],
-  selection: unknown,
-): { ok: true; all: boolean; skillsByBot: Map<string, ExportablePackageSkill[]>; skipped: TeamExportSkip[]; available: string[] } | { ok: false; error: string; available: string[] } {
-  const all = selection === undefined || selection === "all";
-  const available = [...new Set(bots.flatMap((bot) => listBotSkills(bot).map((skill) => skill.name)))].sort();
-  if (!all && (!Array.isArray(selection) || selection.some((name) => typeof name !== "string" || !isSkillName(name)))) {
-    return { ok: false, error: "skills must be \"all\" or a list of skill names", available };
-  }
-  const chosen = new Set(all ? available : selection as string[]);
-  const unknown = [...chosen].find((name) => !available.includes(name));
-  if (unknown) return { ok: false, error: `This team has no skill named "${unknown}"`, available };
-  const skillsByBot = new Map<string, ExportablePackageSkill[]>();
-  const skipped: TeamExportSkip[] = [];
-  for (const bot of bots) {
-    const assigned: ExportablePackageSkill[] = [];
-    for (const listing of listBotSkills(bot)) {
-      if (!chosen.has(listing.name)) continue;
-      const instructions = readBotSkillFile(bot, listing.name);
-      if (instructions === null) {
-        if (!all) return { ok: false, error: `Skill "${listing.name}" changed or is unavailable and cannot be shared safely`, available };
-        const part = `skills[${listing.name}]`;
-        if (!skipped.some((skip) => skip.part === part)) skipped.push({ part, reason: "skill_changed" });
-        continue;
-      }
-      assigned.push({
-        name: listing.name,
-        description: listing.description,
-        ...(listing.source ? { source: listing.source } : {}),
-        ...(listing.license ? { license: listing.license } : {}),
-        ...(listing.compatibility ? { compatibility: listing.compatibility } : {}),
-        instructions,
-        enabled: listing.enabled,
-      });
-    }
-    if (assigned.length) skillsByBot.set(bot.id, assigned);
-  }
-  return { ok: true, all, skillsByBot, skipped, available };
-}
-
 function starterNotes(botId: string): Array<{ path: string; text: string }> {
   const notes: Array<{ path: string; text: string }> = [];
   const index = readMemoryFile(botId).text;
@@ -3449,13 +3358,7 @@ const wireTrustedApprovalBot = (bot: NonNullable<ReturnType<typeof store.bot>>) 
 };
 
 function previewSystemPrompt(bot: BotRecord) {
-  const persona = [
-    `You are ${bot.name}, a personal bot in OpenMausBot.`,
-    bot.title && `Role: ${bot.title}.`,
-    bot.description && `About: ${bot.description}`,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  const persona = botPersona(bot);
   const instance = registry.get(bot.modelSelection.instanceId);
   const caps = instance?.adapter.capabilities;
   const teamComputer = inheritedTeamComputer(bot);
@@ -8582,7 +8485,7 @@ async function startTurn(
   const turnLineIds = new Set(opts?.excludeMessageIds ?? []);
   const spoken = opts?.via === "call" || opts?.userMessage?.via === "call" ||
     (turnLineIds.size > 0 && store.messagesFor(threadId).some((message) => turnLineIds.has(message.id) && message.via === "call"));
-  console.error(turnStartLogLine({
+  console.log(turnStartLogLine({
     botId, text: resolvedImages.text, images: turnImages.length, depth: commsDepth, card: Boolean(opts?.cardContinuation), spoken,
   }));
   const instanceId = instance.instanceId;
@@ -8776,6 +8679,9 @@ async function startTurn(
         opts?.replyTo,
         cfg.profile?.name?.trim() || "User",
       );
+      const replay = usesNativeImageInput
+        ? extractReplayImages(selection.inline, turnImages)
+        : { transcript: selection.inline, images: [] };
       const decideContext = (config: string) => {
         // A Codex thread keeps the last effort it was sent and no turn can clear it, so one holding a level is rebuilt, not resumed.
         const effortHeld = !effort && typeof handed?.effort === "string";
@@ -8783,7 +8689,7 @@ async function startTurn(
         const { block: unseenBlock, placed } = unseen && !handedStale ? renderUnseen(unseen) : { block: "", placed: [] };
         const { turnText: contextTurnText, resume } = buildTurnContext({
           text: userTurnText,
-          transcript: selection.inline,
+          transcript: replay.transcript,
           rewound,
           fresh: fresh || contextReset,
           externallyUpdated: Boolean(externalContextMarker) || handedStale,
@@ -8800,6 +8706,7 @@ async function startTurn(
         const windowIds = selection.representedIds;
         return {
           turnText: withUnseenMessages(unseenBlock, contextTurnText),
+          images: contextTurnText !== userTurnText ? [...replay.images, ...turnImages] : turnImages,
           resumeCursor, sessionReset: !resume, recoveryText,
           handoff: strictResume ? {
             botId: bot.id, instanceId, config, resumeCursor: typeof resumeCursor === "string" ? resumeCursor : undefined,
@@ -8813,13 +8720,7 @@ async function startTurn(
       };
       let dispatchContext = decideContext(plannedConfig);
 
-      const persona = [
-        `You are ${bot.name}, a personal bot in OpenMausBot.`,
-        bot.title && `Role: ${bot.title}.`,
-        bot.description && `About: ${bot.description}`,
-      ]
-        .filter(Boolean)
-        .join(" ");
+      const persona = botPersona(bot);
 
       {
         const drift = checkSoulDrift(bot.id, bot.soul ?? "", bot.soulHash ?? "");
@@ -9335,7 +9236,7 @@ async function startTurn(
           (opts?.automaticRecoveryIndex ?? 0) < ((liveBot ?? bot).fallback?.length || (cfg.automaticRecovery.backup ? 1 : 0)),
         text: withTurnClock(clock, withRecalled(recalled, dispatchContext.turnText + shareNote.text)),
         ...(recalled ? { recalled } : {}),
-        images: turnImages,
+        images: dispatchContext.images,
         approvalMode: approvalModeForTurn(bot, commsDepth > 0, threadId),
         toolScope,
         ...(guestConfined ? { guestConfined: true, confinedWhy: confinedWhy(threadId) } : {}),
@@ -9354,6 +9255,7 @@ async function startTurn(
         ...(integrations.browser && browserIsThePlace(plan) ? { preloadBrowserTools: true } : {}),
         mcpFromUserConfig: claudeUserMcpEnabled(cfg) && !managedPolicy.restrictsMcp(),
         mcpCallTimeoutMs: mcpCallTimeoutMinutes(cfg) * 60_000,
+        toolErrorCorrectiveRounds: correctiveRounds(cfg),
         cwd,
       })), () => !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
         await instance.adapter.interruptTurn(threadId).catch(() => {});
@@ -11476,6 +11378,7 @@ async function runClaimedGroupMemberTurn(
         ...(integrations.browser && browserIsThePlace(roomPlan) ? { preloadBrowserTools: true } : {}),
         mcpFromUserConfig: roomUserMcp,
         mcpCallTimeoutMs: mcpCallTimeoutMinutes(cfg) * 60_000,
+        toolErrorCorrectiveRounds: correctiveRounds(cfg),
         ...(instance.instanceId === readyBot.modelSelection.instanceId
           ? memberTurnSelection(readyBot.modelSelection)
           : { model: instance.models.default }),
@@ -13846,7 +13749,7 @@ ROUTES.push(createBotMemoryRoutes({
     broadcast({ kind: "config", ...configStatus() });
   },
 }));
-ROUTES.push(createDeciderRoutes({ decider, config: () => cfg }), createNotificationRoutes());
+ROUTES.push(createDeciderRoutes({ decider, config: () => cfg }), createNotificationRoutes(), createUpdateCheckRoutes({ check: serverUpdateChecker({ desktopManaged: DESKTOP_MANAGED, managed: Boolean(CLOUD_HOME || HOSTED_WORKSPACE) }) }));
 ROUTES.push(createSignInCardRoutes({ settle: settleSignIn, saveLogin: saveLoginFromCard }));
 ROUTES.push(createRoomHoldRoutes({
   group: (id) => store.group(id),
@@ -13953,9 +13856,7 @@ ROUTES.push(createTeamRoutes({
   defaultsPresetFor,
   packageImportDeps,
   starterNotes,
-  checkedExportSkillNames,
-  collectExportSkills,
-  collectTeamSkills,
+  ...skillExport(skillsHost),
 }));
 ROUTES.push(createBrowserSiteRoutes({
   target: (which) => {
