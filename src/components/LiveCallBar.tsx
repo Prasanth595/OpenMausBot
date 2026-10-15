@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ExternalLink, Mic, MicOff, PhoneOff, RotateCcw, Settings, X } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ExternalLink, Mic, MicOff, PhoneOff, RotateCcw, X } from "lucide-react";
 
 import { t } from "@/lib/i18n";
 import { isMacPlatform } from "@/lib/keyboard-shortcuts";
@@ -87,8 +87,6 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
   const media = useLiveMedia();
   const [now, setNow] = useState(() => Date.now());
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const gearRef = useRef<HTMLButtonElement>(null);
   const view = liveCallBarView({ bot, media, server: state.liveCall, now });
   const kind = view?.kind;
 
@@ -102,15 +100,6 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
   useEffect(() => {
     if (kind !== "local") setSettingsOpen(false);
   }, [kind]);
-
-  useEffect(() => {
-    if (!settingsOpen) return;
-    const close = (event: PointerEvent) => {
-      if (event.target instanceof Node && !rootRef.current?.contains(event.target)) setSettingsOpen(false);
-    };
-    document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
-  }, [settingsOpen]);
 
   if (!view) return null;
   const button = "flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[12.5px] font-medium transition-colors";
@@ -160,10 +149,9 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
   const hangUpChord = liveCallChord("hangUp", isMac);
   return (
     <div
-      ref={rootRef}
       role="region"
       aria-label={t("call.live.with", { name: bot.name })}
-      className={cn(frame, "relative flex-wrap gap-x-2 gap-y-1 border-success/40")}
+      className={cn(frame, "flex-wrap gap-x-2 gap-y-1 border-success/40")}
     >
       <span className="size-2 shrink-0 animate-pulse rounded-full bg-success" aria-hidden />
       <span className="shrink-0 font-medium tabular-nums">{view.title}</span>
@@ -179,17 +167,11 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
       </span>
       {view.hint && <span role="status" className="order-last w-full min-w-0 truncate text-[11.5px] text-warning" title={view.hint}>{view.hint}</span>}
       <span className="ml-auto flex shrink-0 items-center gap-1">
-        <button
-          ref={gearRef}
-          type="button"
-          aria-label={t("call.live.settings")}
-          aria-expanded={settingsOpen}
-          aria-haspopup="dialog"
-          className={cn(button, settingsOpen ? "text-ink" : "text-ink-secondary hover:text-ink")}
-          onClick={() => setSettingsOpen((open) => !open)}
-        >
-          <Settings className="size-3.5" />
-        </button>
+        <LiveCallSettings
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          triggerClassName={cn(button, "text-ink-secondary hover:text-ink")}
+        />
         <button
           type="button"
           aria-pressed={view.muted}
@@ -214,16 +196,6 @@ export function LiveCallBar({ bot }: { bot: Bot }) {
           <PhoneOff className="size-3.5" /> <span className="hidden sm:inline">{t("call.live.hangUp")}</span>
         </button>
       </span>
-      {settingsOpen && (
-        <div className="absolute bottom-full right-0 z-40 mb-2">
-          <LiveCallSettings
-            onClose={() => {
-              setSettingsOpen(false);
-              gearRef.current?.focus();
-            }}
-          />
-        </div>
-      )}
     </div>
   );
 }
