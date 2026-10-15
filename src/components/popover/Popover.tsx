@@ -46,6 +46,10 @@ export function setMenuHeightVars(sheet: HTMLElement, height: number, upward: bo
  * reachable, so it can still say why it is unavailable). */
 export const MENU_ROW_SELECTOR = '[role="menuitem"]:not(:disabled), [role="menuitemradio"]:not(:disabled)';
 
+/** A plain focusable a non-menu sheet can offer: a dialog's buttons, links
+ * and tabbables. */
+const SHEET_FOCUSABLE = "button:not(:disabled), [href], [tabindex]";
+
 /** Where an open menu's focus lands: a radio menu on its current choice —
  * the arrows move from there, so its neighbours (and their reasons) are one
  * step away — any other menu on its first runnable row. */
@@ -53,8 +57,24 @@ function firstFocusTarget(sheet: HTMLElement): HTMLElement | null {
   return (
     sheet.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]:not(:disabled)') ??
     sheet.querySelector<HTMLElement>(MENU_ROW_SELECTOR) ??
-    sheet.querySelector<HTMLElement>("button:not(:disabled), [href], [tabindex]")
+    sheet.querySelector<HTMLElement>(SHEET_FOCUSABLE)
   );
+}
+
+/** The same order read from its far end, for an ArrowUp on the trigger: the
+ * last runnable row, else the last plain focusable. */
+function lastFocusTarget(sheet: HTMLElement): HTMLElement | null {
+  const rows = sheet.querySelectorAll<HTMLElement>(MENU_ROW_SELECTOR);
+  if (rows.length > 0) return rows[rows.length - 1]!;
+  const focusables = sheet.querySelectorAll<HTMLElement>(SHEET_FOCUSABLE);
+  return focusables[focusables.length - 1] ?? null;
+}
+
+/** Where a focus request lands, the sheet itself (tabIndex -1) as the last
+ * resort. A menu button's keyboard conventions pick the edge: ArrowUp into
+ * the last target, everything else into the first. */
+function edgeFocusTarget(sheet: HTMLElement, edge: "first" | "last"): HTMLElement {
+  return (edge === "first" ? firstFocusTarget(sheet) : lastFocusTarget(sheet)) ?? sheet;
 }
 
 /** Normalizes the hover `leave` dismissal option into an enabled flag plus
@@ -160,7 +180,11 @@ export function Popover({
   // The inner surface keeps its natural height while the outer shell plays
   // the height animation, so all menu measuring reads here, never the
   // animated outer box.
-  const focusFirst = useRef(false);
+
+  // Which end of the sheet a pending focus request lands on: armed by a
+  // keyboard open, by `focusFirstOnOpen`, and by Tab or the arrows pressed
+  // while focus is still on the trigger. Null while nothing is pending.
+  const pendingFocus = useRef<null | "first" | "last">(null);
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const menuId = useId();
@@ -336,24 +360,44 @@ export function Popover({
   // focuses post-animation for the same reason). With no motion, at once
   // once placed.
   useEffect(() => {
-    if (!open) return;
-    if (focusFirstOnOpen) focusFirst.current = true;
-    if (!focusFirst.current) return;
+    if (!open) {
+      // A request that never landed dies with the sheet it was aimed at.
+      pendingFocus.current = null;
+      return;
+    }
+    if (focusFirstOnOpen && !pendingFocus.current) pendingFocus.current = "first";
+    const edge = pendingFocus.current;
+    if (!edge) return;
     if (portal && !position) return;
     if (isMenuMotion && !quick && !isReducedMotion()) return;
-    focusFirst.current = false;
+    pendingFocus.current = null;
     const sheet = contentRef.current;
     if (!sheet) return;
-    (firstFocusTarget(sheet) ?? sheet).focus();
+    edgeFocusTarget(sheet, edge).focus();
   }, [open, focusFirstOnOpen, portal, position, contentRef, isMenuMotion, quick]);
 
-  const focusFirstRow = useCallback(() => {
-    if (!focusFirst.current) return;
-    focusFirst.current = false;
+  const focusPending = useCallback(() => {
+    const edge = pendingFocus.current;
+    if (!edge) return;
+    pendingFocus.current = null;
     const sheet = contentRef.current;
     if (!sheet) return;
-    (firstFocusTarget(sheet) ?? sheet).focus({ preventScroll: true });
+    edgeFocusTarget(sheet, edge).focus({ preventScroll: true });
   }, [contentRef]);
+
+  // Tab and the arrows on the trigger put focus inside a sheet that is already
+  // up (a pointer open leaves it on the trigger). A sheet mid-grow parks the
+  // request instead: focusing while it clips scrolls the shell and snaps back
+  // when the grow lands.
+  const focusIntoSheet = useCallback(
+    (edge: "first" | "last") => {
+      pendingFocus.current = edge;
+      if (portal && !position) return;
+      if (isMenuMotion && animating) return;
+      focusPending();
+    },
+    [portal, position, isMenuMotion, animating, focusPending],
+  );
 
   // The shell's own animations report back (row animations bubble past via
   // the target check): a finished close unmounts at once instead of waiting
@@ -367,7 +411,7 @@ export function Popover({
       return;
     }
     setAnimating(false);
-    focusFirstRow();
+    focusPending();
   };
   const onShellAnimationStart = (event: ReactAnimationEvent<HTMLDivElement>) => {
     if (!isMenuMotion || event.target !== event.currentTarget) return;
@@ -394,7 +438,10 @@ export function Popover({
 
   const onRootBlur = (event: ReactFocusEvent<HTMLDivElement>) => {
     if (!leave.enabled || pinned || isPoint) return;
-    if (!event.relatedTarget || !rootRef.current?.contains(event.relatedTarget as Node)) setOpen(false);
+    // The sheet sits outside the root (a portal), so focus walking from the
+    // trigger into it is a move between the two halves of one popover, not
+    // focus leaving: judge it with the same inside test dismissal uses.
+    if (!event.relatedTarget || !insideRef.current.contains(event.relatedTarget)) setOpen(false);
   };
 
   const resolved = position?.resolved ?? (placement === "auto" ? "below" : placement);
@@ -541,17 +588,32 @@ export function Popover({
           clearTimers();
           if (open && (pinned || !leave.enabled)) close();
           else {
-            focusFirst.current = event.detail === 0;
+            pendingFocus.current = event.detail === 0 ? "first" : null;
             setPinned(true);
             setOpen(true);
           }
         }}
         onKeyDown={(event) => {
-          if (open || (event.key !== "ArrowUp" && event.key !== "ArrowDown")) return;
+          const arrow = event.key === "ArrowUp" || event.key === "ArrowDown";
+          // A menu button's own convention: ArrowUp lands on the far end of
+          // the list, ArrowDown and Tab on its first target.
+          const edge = event.key === "ArrowUp" ? "last" : "first";
+          if (!open) {
+            if (!arrow) return;
+            event.preventDefault();
+            pendingFocus.current = edge;
+            setPinned(true);
+            setOpen(true);
+            return;
+          }
+          // Open with focus still on the trigger (a pointer open leaves it
+          // there): Tab and the arrows move into the sheet instead of moving
+          // on to the next page element past the portal. Shift+Tab stays with
+          // the browser, walking back out of the trigger.
+          if (!arrow && (event.key !== "Tab" || event.shiftKey)) return;
           event.preventDefault();
-          focusFirst.current = true;
           setPinned(true);
-          setOpen(true);
+          focusIntoSheet(edge);
         }}
         className={triggerClassName}
       >

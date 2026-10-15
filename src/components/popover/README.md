@@ -9,7 +9,9 @@ One folder, one module: this directory is the whole boundary for generic floatin
 | File | Role |
 | --- | --- |
 | `Popover.tsx` | Shell: trigger- or point-anchored. Positions, dismisses, returns focus, plays motion. Knows nothing about menus. |
-| `PopoverMenu.tsx` | The menu composed on top of the shell: item model, roles, roving focus, submenus, bands and heads. Items arrive purely via props. |
+| `PopoverMenu.tsx` | The menu composed on top of the shell: public item model and props, the shell wiring, and the root level. |
+| `menu-level.tsx` | The recursive half: a level's rows plus the one submenu those rows can open, each submenu in an animated sheet of its own. |
+| `menu-rows.tsx` | Row chrome (rows, bands) and the selectors the keyboard walks them with. |
 | `positioning.ts` | Geometry helpers — no React, and only `isRtlElement` reads the DOM, so the placement rules stay unit-testable without a browser. |
 | `popover-types.ts` | Types shared by shell and menu: `PopoverProps`, `PopoverDismissOptions`, anchors, variants. |
 | `popover-motion.module.css` | Open/close motion, shared by both. |
@@ -31,7 +33,7 @@ PopoverMenu  →  Popover  →  positioning · popover-types · popover-motion
 ### Keeping it that way
 
 - Menu semantics (menu roles, roving focus, submenus, separators, bands) belong to `PopoverMenu`; the shell stays menu-free.
-- Too big a file? Split it *inside* the folder (`menu-rows.tsx`, `menu-submenu.tsx`, …) and re-export what consumers need. Do not move `PopoverMenu` into a folder of its own: it shares `positioning.ts`, `popover-types.ts` and the motion CSS with the shell, so a split only turns those into cross-folder imports and rewrites every consumer without gaining a boundary.
+- Too big a file? Split it *inside* the folder (`menu-rows.tsx`, `menu-level.tsx`, …) and re-export what consumers need. Do not move `PopoverMenu` into a folder of its own: it shares `positioning.ts`, `popover-types.ts` and the motion CSS with the shell, so a split only turns those into cross-folder imports and rewrites every consumer without gaining a boundary.
 - `index.ts` is the public entry (`import { PopoverMenu } from "./popover"`); call sites that import the deep path (`./popover/PopoverMenu`) still resolve to the same names.
 
 ## Usage
@@ -100,6 +102,18 @@ items={[
 ]}
 ```
 
+Submenus nest to any depth: a submenu's rows are ordinary menu items, so any
+of them may bring a `submenu` of its own. Each level keeps its own hover,
+focus and motion state, so a level opens beside its row, closes on its own,
+and one level closing takes only the levels below it with it.
+
+```tsx
+items={[
+  { key: "voice", title: "Voice", submenu: [{ key: "nova", title: "Nova" }] },
+  { key: "advanced", title: "Advanced", submenu: [{ key: "audio", title: "Audio", submenu: [{ key: "gain", title: "Gain" }] }] },
+]}
+```
+
 ## Key props
 
 `Popover`: `open` / `defaultOpen` / `onOpenChange`, `anchor`, `placement` (`above | below | before | after | auto`), `align` (`start | end | center`), `offset` (default 6), `width` (default 280), `dismiss` (`outsidePress`, `escape`, `tabCloses`, `leave`), `variant` (`styled | headless`), `portal` (default `true`), `motionKind` (`pop | menu`), `quick`, `focusFirstOnOpen`, `restoreFocusOnClose`, `triggerDisabled`.
@@ -111,4 +125,6 @@ items={[
 - Controlled or uncontrolled: pass `open` + `onOpenChange`, or `defaultOpen`.
 - `variant="headless"` drops default chrome for custom styling.
 - `quick` skips motion entirely (useful for tests).
-- Keyboard: `ArrowUp/Down`, `Home/End` move; `ArrowRight/Left` opens/closes submenu (RTL-aware); `Tab` closes by default; `Escape`/outside press dismiss.
+- Keyboard: `ArrowUp/Down`, `Home/End` move; `ArrowRight` opens a submenu and `ArrowLeft`/`Escape` walk back one level at a time (RTL-aware; at the root `Escape` closes the menu); `Tab` closes by default; outside press dismisses.
+- Focus: an open lands on the first runnable row — a radio menu on its current choice, `ArrowUp` on the last; with focus still on the trigger after a pointer open, `Tab` and the arrows move it into the sheet instead of skipping past the portal. `Shift+Tab` on the trigger stays with the browser.
+- Pointer: resting on a trigger row opens its submenu (keyboard and click opens are immediate); leaving the row closes it again unless the pointer crosses into the sheet, and moving to a sibling trigger shrinks the open one out as the new one grows in.

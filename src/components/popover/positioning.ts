@@ -36,6 +36,12 @@ export const CLOSE_DELAY_MS = 250;
  * Keyboard and click opens stay immediate; only the hover path waits. */
 export const SUBMENU_OPEN_DELAY_MS = 200;
 
+/** A submenu closes this long after the pointer leaves the row that opened
+ * it, unless the pointer reaches the submenu sheet or another trigger row in
+ * between: the grace is only there to forgive the short diagonal path across
+ * the gap, not to hold the submenu open by itself. */
+export const SUBMENU_CLOSE_DELAY_MS = 150;
+
 /** A click on the parent row within this window of a hover-open confirms
  * that open instead of toggling the fresh submenu shut: the click gesture
  * and the hover intent land together, and the user meant to open it, not to

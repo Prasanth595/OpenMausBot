@@ -2,13 +2,20 @@
 // The generic menu in a document: trigger opens a portal sheet, a parent row
 // opens a submenu beside it, picking a submenu row runs it and closes
 // everything, Escape and an outside press close and return focus.
-import { act, createElement } from "react";
+import { act, createElement, type ReactNode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PopoverMenu, type PopoverMenuItem } from "./PopoverMenu";
+import { Popover } from "./Popover";
 import { MENU_CLOSE_MS } from "../MenuMotion";
-import { CLOSE_DELAY_MS, OPEN_DELAY_MS, SUBMENU_CONFIRM_MS, SUBMENU_OPEN_DELAY_MS } from "./positioning";
+import {
+  CLOSE_DELAY_MS,
+  OPEN_DELAY_MS,
+  SUBMENU_CLOSE_DELAY_MS,
+  SUBMENU_CONFIRM_MS,
+  SUBMENU_OPEN_DELAY_MS,
+} from "./positioning";
 
 // CSS modules resolve to stable names here so open/close state mapping stays
 // assertable without reading any concrete animation values.
@@ -99,6 +106,14 @@ describe("PopoverMenu in a document", () => {
       target.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", shiftKey: shift, bubbles: true, cancelable: true }));
     });
   };
+  /** A click with the pointer's own detail: focus lands on the trigger (as a
+   * real mousedown does) and stays there, so entering the sheet has to be a
+   * key press. */
+  const pointerClick = (target: Element) =>
+    act(async () => {
+      (target as HTMLElement).focus();
+      target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, detail: 1 }));
+    });
 
   beforeEach(async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -137,7 +152,7 @@ describe("PopoverMenu in a document", () => {
   });
 
   it("opens from the keyboard on the first item and walks the items", async () => {
-    await key(trigger(), "ArrowUp");
+    await key(trigger(), "ArrowDown");
     await flush();
     const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
     expect(document.activeElement).toBe(rows[0]);
@@ -145,6 +160,86 @@ describe("PopoverMenu in a document", () => {
     expect(document.activeElement).toBe(rows[3]);
     await key(rows[3]!, "ArrowDown");
     expect(document.activeElement).toBe(rows[0]);
+  });
+
+  it("opens from the keyboard on the last item with ArrowUp", async () => {
+    await key(trigger(), "ArrowUp");
+    await flush();
+    const rows = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(document.activeElement).toBe(rows[rows.length - 1]);
+  });
+
+  it("enters the sheet after a pointer open on Tab and the arrows", async () => {
+    const rows = () => [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    await pointerClick(trigger());
+    // The pointer open leaves focus on the trigger: the sheet is up, nothing
+    // in it holds focus yet, and the next key enters instead of walking on
+    // past the portal.
+    expect(sheet()).not.toBeNull();
+    expect(document.activeElement).toBe(trigger());
+
+    await key(trigger(), "Tab");
+    expect(document.activeElement).toBe(rows()[0]);
+    // Inside the menu now: the arrows walk its rows.
+    await key(rows()[0]!, "ArrowDown");
+    expect(document.activeElement).toBe(rows()[1]);
+
+    // Reopen for the next key: Escape hands focus back to the trigger.
+    await key(rows()[1]!, "Escape");
+    expect(sheet()).toBeNull();
+    expect(document.activeElement).toBe(trigger());
+
+    await pointerClick(trigger());
+    await key(trigger(), "ArrowDown");
+    expect(document.activeElement).toBe(rows()[0]);
+
+    await key(rows()[0]!, "Escape");
+    await pointerClick(trigger());
+    await key(trigger(), "ArrowUp");
+    expect(document.activeElement).toBe(rows()[rows().length - 1]);
+  });
+
+  it("leaves Shift+Tab on the trigger with the browser", async () => {
+    await pointerClick(trigger());
+    await tab(trigger(), true);
+    expect(document.activeElement).toBe(trigger());
+  });
+
+  it("enters a plain sheet on Tab — a focusable, else the sheet itself", async () => {
+    const open = (children: ReactNode) =>
+      act(async () => {
+        root.render(createElement(Popover, { ariaLabel: "Plain", trigger: () => "Plain", children }));
+      });
+    const toggle = () => host.querySelector<HTMLButtonElement>('button[aria-haspopup="dialog"]')!;
+    const shell = () => document.querySelector<HTMLElement>("[data-popover]")!;
+
+    // A dialog's first focusable is its first target, not a menu row.
+    await open(createElement("button", { type: "button" }, "inside"));
+    await pointerClick(toggle());
+    await key(toggle(), "Tab");
+    expect(document.activeElement).toBe(shell().querySelector("button"));
+
+    // Nothing focusable inside: the sheet itself (tabIndex -1) takes it.
+    await key(shell(), "Escape");
+    await open(createElement("p", null, "no controls here"));
+    await pointerClick(toggle());
+    await key(toggle(), "ArrowDown");
+    expect(document.activeElement).toBe(shell());
+  });
+
+  it("parks the pointer-open entry focus until the grow ends", async () => {
+    delete document.documentElement.dataset.reducedMotion;
+    await pointerClick(trigger());
+    await key(trigger(), "ArrowDown");
+    // Still growing: the request waits so the clipping shell cannot
+    // scroll-jump under it; the grow's end lands it.
+    expect(document.activeElement).toBe(trigger());
+    const surface = sheet()!.closest("[data-popover]") as HTMLElement;
+    await act(async () => {
+      surface.dispatchEvent(new Event("animationend", { bubbles: true }));
+    });
+    expect(document.activeElement).toBe(sheet()!.querySelector<HTMLElement>('[role="menuitem"]'));
+    document.documentElement.dataset.reducedMotion = "true";
   });
 
   it("walks radio rows and lets an unavailable one say its reason instead of acting", async () => {
@@ -255,6 +350,34 @@ describe("PopoverMenu in a document", () => {
       await new Promise((resolve) => setTimeout(resolve, CLOSE_DELAY_MS + 80));
     });
     expect(sheet()).toBeNull();
+  });
+
+  it("keeps a hover menu when focus walks from the trigger into the sheet", async () => {
+    await act(async () => {
+      root.render(
+        createElement(PopoverMenu, {
+          items: [item("Usage"), item("Settings")],
+          ariaLabel: "More",
+          dismiss: { leave: true },
+          trigger: () => "More",
+        }),
+      );
+    });
+    const wrapper = host.firstElementChild as HTMLElement;
+    await act(async () => {
+      wrapper.dispatchEvent(new PointerEvent("pointerover", { bubbles: true, relatedTarget: document.body }));
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, OPEN_DELAY_MS + 40));
+    });
+    expect(sheet()).not.toBeNull();
+    const row = sheet()!.querySelector<HTMLElement>('[role="menuitem"]')!;
+    // Focus out of the trigger into the portalled sheet: the two halves of
+    // one popover, not focus leaving it, so the hover menu stays up.
+    await act(async () => {
+      trigger().dispatchEvent(new FocusEvent("focusout", { bubbles: true, relatedTarget: row }));
+    });
+    expect(sheet()).not.toBeNull();
   });
 
   it("stays shut under a passing pointer or focus unless the caller opts into hover", async () => {
@@ -843,6 +966,206 @@ describe("PopoverMenu in a document", () => {
     // stays up and the browser takes the key.
     await tab(rows[0]!);
     expect(sheet()).not.toBeNull();
+  });
+
+  describe("nested submenus", () => {
+    const nested: PopoverMenuItem[] = [
+      item("One", {
+        submenu: [
+          item("Two", { submenu: [item("Three", { submenu: [item("Leaf three")] }), item("Leaf two")] }),
+          item("Leaf one"),
+        ],
+      }),
+      item("Plain"),
+    ];
+    const twoTriggers: PopoverMenuItem[] = [
+      item("Voice", { submenu: [item("Nova")] }),
+      item("Idle", { submenu: [item("5 minutes")] }),
+      item("Plain"),
+    ];
+    /** One submenu sheet, by the label of the row that opened it. */
+    const subSheet = (label: string) =>
+      document.querySelector<HTMLElement>(`[data-popover-submenu][aria-label="${label}"]`);
+    const subSheetCount = () => document.querySelectorAll("[data-popover-submenu]").length;
+    const rowNamed = (label: string) =>
+      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((node) => node.textContent === label)!;
+    const over = (target: Element) =>
+      act(async () => {
+        target.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+      });
+    const out = (target: Element) =>
+      act(async () => {
+        target.dispatchEvent(new PointerEvent("pointerout", { bubbles: true }));
+      });
+    const wait = (ms: number) =>
+      act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, ms));
+      });
+    // Escape dispatched like a real key press (the `key` helper fires a second
+    // event straight at the window, which a real press never does).
+    const escape = (target: Element) =>
+      act(async () => {
+        target.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      });
+    const renderNested = (menuItems: PopoverMenuItem[] = nested) =>
+      act(async () => {
+        root.render(createElement(PopoverMenu, { items: menuItems, ariaLabel: "Nested", trigger: () => "Nested" }));
+      });
+    /** Rests on a row until its hover intent fires. */
+    const hoverOpen = async (label: string) => {
+      await over(rowNamed(label));
+      await wait(SUBMENU_OPEN_DELAY_MS + 50);
+    };
+
+    it("opens each level from the inline end arrow and walks back one level at a time", async () => {
+      await renderNested();
+      await act(async () => trigger().click());
+      const one = rowNamed("One");
+      one.focus();
+      await key(one, "ArrowRight");
+      await flush();
+      expect(subSheet("One")).not.toBeNull();
+      expect(one.getAttribute("aria-expanded")).toBe("true");
+
+      const two = rowNamed("Two");
+      await key(two, "ArrowRight");
+      await flush();
+      expect(subSheet("Two")).not.toBeNull();
+      expect(two.getAttribute("aria-expanded")).toBe("true");
+      expect(rowNamed("Three").getAttribute("aria-expanded")).not.toBe("true");
+
+      const three = rowNamed("Three");
+      await key(three, "ArrowRight");
+      await flush();
+      expect(subSheet("Three")).not.toBeNull();
+      expect(three.getAttribute("aria-expanded")).toBe("true");
+      expect(document.activeElement).toBe(rowNamed("Leaf three"));
+
+      // Escape in the deepest sheet closes only that level and hands focus
+      // back to its trigger row; the sheets above stay up.
+      await escape(rowNamed("Leaf three"));
+      expect(subSheet("Three")).toBeNull();
+      expect(document.activeElement).toBe(three);
+      expect(subSheet("Two")).not.toBeNull();
+      expect(three.getAttribute("aria-expanded")).toBe("false");
+
+      await escape(three);
+      expect(subSheet("Two")).toBeNull();
+      expect(document.activeElement).toBe(two);
+      expect(subSheet("One")).not.toBeNull();
+
+      // ArrowLeft walks back the same way; Escape at the root takes the menu.
+      await key(two, "ArrowLeft");
+      expect(subSheet("One")).toBeNull();
+      expect(document.activeElement).toBe(one);
+      await key(one, "Escape");
+      expect(sheet()).toBeNull();
+    });
+
+    it("opens a nested chain by hover, waiting at every level", async () => {
+      await renderNested();
+      await act(async () => trigger().click());
+      await hoverOpen("One");
+      expect(subSheet("One")).not.toBeNull();
+      await hoverOpen("Two");
+      expect(subSheet("Two")).not.toBeNull();
+      await hoverOpen("Three");
+      expect(subSheet("Three")).not.toBeNull();
+    });
+
+    it("closes the open submenu after the pointer leaves its trigger row, with nothing else on the way", async () => {
+      await renderNested();
+      await act(async () => trigger().click());
+      await hoverOpen("One");
+      expect(subSheet("One")).not.toBeNull();
+      // Straight out of the row and the menu: no sibling row is entered, so
+      // only the row's own leave can take the submenu down.
+      await out(rowNamed("One"));
+      await wait(SUBMENU_CLOSE_DELAY_MS + 60);
+      expect(subSheet("One")).toBeNull();
+      expect(rowNamed("One").getAttribute("aria-expanded")).not.toBe("true");
+    });
+
+    it("keeps a submenu up while the pointer crosses the gap into it", async () => {
+      await renderNested();
+      await act(async () => trigger().click());
+      await hoverOpen("One");
+      const sheetOne = subSheet("One")!;
+      await act(async () => {
+        rowNamed("One").dispatchEvent(new PointerEvent("pointerout", { bubbles: true, relatedTarget: sheetOne }));
+        sheetOne.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
+      });
+      await wait(SUBMENU_CLOSE_DELAY_MS + 60);
+      expect(subSheet("One")).not.toBeNull();
+      // Leaving the sheet itself arms the same close.
+      await out(sheetOne);
+      await wait(SUBMENU_CLOSE_DELAY_MS + 60);
+      expect(subSheet("One")).toBeNull();
+    });
+
+    it("shrinks the open submenu while the next trigger's own opens", async () => {
+      delete document.documentElement.dataset.reducedMotion;
+      await renderNested(twoTriggers);
+      await act(async () => trigger().click());
+      await hoverOpen("Voice");
+      const voice = subSheet("Voice")!;
+      expect(voice.className).toContain("menuIn");
+      // Onto a sibling trigger: the voice sheet must play its close while the
+      // idle sheet grows in, not swap its rows in place.
+      await out(rowNamed("Voice"));
+      await over(rowNamed("Idle"));
+      // Until the idle intent fires, the voice sheet stays as it was.
+      expect(subSheet("Voice")).toBe(voice);
+      expect(voice.className).toContain("menuIn");
+      await wait(SUBMENU_OPEN_DELAY_MS + 50);
+      expect(subSheet("Idle")).not.toBeNull();
+      expect(subSheet("Idle")!.className).toContain("menuIn");
+      expect(voice.className).toContain("menuOut");
+      expect(voice.hasAttribute("inert")).toBe(true);
+      expect(rowNamed("Idle").getAttribute("aria-expanded")).toBe("true");
+      expect(rowNamed("Voice").getAttribute("aria-expanded")).toBe("false");
+      // Both stay mounted until the close finishes, then only the new one is.
+      await wait(MENU_CLOSE_MS + 50);
+      expect(subSheet("Voice")).toBeNull();
+      expect(subSheet("Idle")).not.toBeNull();
+      document.documentElement.dataset.reducedMotion = "true";
+    });
+
+    it("treats a press inside a nested sheet as inside: the menu stays", async () => {
+      await renderNested();
+      await act(async () => trigger().click());
+      const one = rowNamed("One");
+      one.focus();
+      await key(one, "ArrowRight");
+      await flush();
+      await key(rowNamed("Two"), "ArrowRight");
+      await flush();
+      const deepest = subSheet("Two")!;
+      await act(async () => {
+        deepest.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      });
+      expect(sheet()).not.toBeNull();
+      expect(subSheet("Two")).not.toBeNull();
+      await act(async () => {
+        document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      });
+      expect(sheet()).toBeNull();
+    });
+
+    it("runs a leaf of the deepest level and closes the whole chain", async () => {
+      await renderNested();
+      await act(async () => trigger().click());
+      const one = rowNamed("One");
+      one.focus();
+      await key(one, "ArrowRight");
+      await flush();
+      await key(rowNamed("Two"), "ArrowRight");
+      await flush();
+      await act(async () => rowNamed("Leaf two").click());
+      expect(picked).toEqual(["Leaf two"]);
+      expect(sheet()).toBeNull();
+      expect(subSheetCount()).toBe(0);
+    });
   });
 
   it("draws a band inside a submenu too, and its rows are the submenu's", async () => {
