@@ -45,6 +45,12 @@ const TOKEN = process.env.ASTRA_COMMS_TOKEN ?? "";
 const DEPTH = Number(process.env.ASTRA_TURN_DEPTH ?? "0") || 0;
 const SKILL_AUTHORING_ENABLED = process.env.ASTRA_SKILL_AUTHORING_ENABLED === "1";
 const SELF_MODIFY_ENABLED = process.env.ASTRA_SELF_MODIFY_ENABLED === "1";
+const WORKSHOP_ENABLED = process.env.ASTRA_WORKSHOP_ENABLED === "1";
+// Plain text resources only, capped in the server; a turn that deletes
+// four has stopped drafting and started churning, like the skill/creation
+// caps above.
+const MAX_WORKSHOP_DELETES_PER_TURN = 4;
+let workshopDeletesThisTurn = 0;
 const MAX_CREATED_PER_TURN = 4;
 let createdThisTurn = 0;
 // Code edits are heavy: each apply is journaled, preflight-checked, and — for
@@ -737,6 +743,31 @@ const TOOLS = [
     },
   },
   {
+    name: "workshop",
+    description:
+      "Create and manage reusable text resources in Astra's workshop — a small sandbox the user has opted into, where drafts, runbooks, prompt fragments, and skill notes can live between turns. Files are .md, .txt, or .json, at most 24, each at most 64 KiB. Use action=\"list\" first to avoid overwriting something you did not read; a write replaces the whole file. Nothing here is shared with other bots until you point them at it.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: "string",
+          enum: ["list", "read", "write", "delete"],
+          description: "list = what the crate already holds; read = one resource's full content; write = create or replace one resource with text; delete = remove one.",
+        },
+        name: {
+          type: "string",
+          description: "Resource file name, 1-64 chars [A-Za-z0-9._-], no leading dot, ending in .md, .txt, or .json — for example expense-runbook.md. Required for read, write, and delete.",
+        },
+        content: {
+          type: "string",
+          description: "Required for write: the full file text. A .json name must contain valid JSON. There is no append or diff — writes replace the whole resource.",
+        },
+      },
+      required: ["action"],
+    },
+  },
+  {
     name: "self_modify",
     description:
       "Edit Astra's own source code — the app you are running inside — only when the user asked for a change to the app itself (a bug fix, a feature, a wording change in the product). Every edit is journaled byte-for-byte, preflight-checked, and auto-reverted when a check fails; server/shared changes take effect on the next restart and are rolled back automatically if the app cannot boot. The self-modify machinery, CI config, package.json scripts, and other protected paths are refused by the server. Use action=\"list\" to see the journal and the inbox before proposing or when the user refers to an earlier proposal. After applying, tell the user exactly what changed and that server changes need a restart.",
@@ -783,13 +814,15 @@ const TOOLS = [
 
 const SKILL_TOOL_NAMES = new Set(["skills_list", "skill_manage"]);
 const SELF_MODIFY_TOOL_NAMES = new Set(["self_modify"]);
-// Two independent opt-ins, each hiding only its own tools. The harness
-// re-checks both per request, so a stale env can never widen access — it can
-// only narrow what the model is offered.
+const WORKSHOP_TOOL_NAMES = new Set(["workshop"]);
+// Three independent opt-ins, each hiding only its own tools. The harness
+// re-checks every one per request, so a stale env can never widen access —
+// it can only narrow what the model is offered.
 const AVAILABLE_TOOLS = TOOLS.filter(
   (tool) =>
     (SKILL_AUTHORING_ENABLED || !SKILL_TOOL_NAMES.has(tool.name)) &&
-    (SELF_MODIFY_ENABLED || !SELF_MODIFY_TOOL_NAMES.has(tool.name)),
+    (SELF_MODIFY_ENABLED || !SELF_MODIFY_TOOL_NAMES.has(tool.name)) &&
+    (WORKSHOP_ENABLED || !WORKSHOP_TOOL_NAMES.has(tool.name)),
 );
 
 type Json = Record<string, unknown>;
@@ -1577,6 +1610,63 @@ async function callTool(name: string, args: Json): Promise<{ text: string; isErr
       };
     }
     return { text: 'self_modify action must be "list", "propose", "apply", or "discard".', isError: true };
+  }
+  if (name === "workshop") {
+    const action = args.action;
+    if (action === "list") {
+      const r = await api("/api/internal/workshop");
+      const files = Array.isArray(r.files) ? (r.files as Json[]) : [];
+      const filesText = files.length
+        ? files
+            .map((entry) => {
+              const bytes = typeof entry.bytes === "number" ? entry.bytes : 0;
+              return `- ${String(entry.name ?? "")} (${bytes} bytes, updated ${String(entry.updatedAt ?? "")})`;
+            })
+            .join("\n")
+        : "(empty)";
+      return { text: `Workshop resources:\n${filesText}` };
+    }
+    const resourceName = typeof args.name === "string" ? args.name.trim() : "";
+    if (!resourceName) {
+      return { text: `workshop ${action} needs name: the resource file name to ${action}, as listed by action="list".`, isError: true };
+    }
+    if (action === "read") {
+      const r = await apiResponse("/api/internal/workshop/read", {
+        method: "POST",
+        body: JSON.stringify({ name: resourceName }),
+      });
+      if (!r.ok) return { text: `Could not read ${resourceName}: ${String(r.body.error ?? `HTTP ${r.status}`)}`, isError: true };
+      const content = typeof r.body.content === "string" ? r.body.content : "";
+      return { text: `${resourceName}\n\n${content}` };
+    }
+    if (action === "write") {
+      const content = typeof args.content === "string" ? args.content : "";
+      if (!content.trim()) {
+        return { text: "workshop write needs content: the full text of the resource. There is no diff or append — writes replace the whole file.", isError: true };
+      }
+      const r = await apiResponse("/api/internal/workshop/write", {
+        method: "POST",
+        body: JSON.stringify({ name: resourceName, content }),
+      });
+      if (!r.ok) return { text: `Refused: ${String(r.body.error ?? `HTTP ${r.status}`)}`, isError: true };
+      return { text: `Wrote ${resourceName} (${typeof r.body.bytes === "number" ? r.body.bytes : content.length} bytes) to the workshop. The user can open it directly in the workshop folder.` };
+    }
+    if (action === "delete") {
+      if (workshopDeletesThisTurn >= MAX_WORKSHOP_DELETES_PER_TURN) {
+        return {
+          text: `This turn has already deleted ${MAX_WORKSHOP_DELETES_PER_TURN} resources. Report what was removed and let the user review the folder before more.`,
+          isError: true,
+        };
+      }
+      const r = await apiResponse("/api/internal/workshop/delete", {
+        method: "POST",
+        body: JSON.stringify({ name: resourceName }),
+      });
+      if (!r.ok) return { text: `Could not delete ${resourceName}: ${String(r.body.error ?? `HTTP ${r.status}`)}`, isError: true };
+      workshopDeletesThisTurn += 1;
+      return { text: `Deleted ${resourceName} from the workshop.` };
+    }
+    return { text: 'workshop action must be "list", "read", "write", or "delete".', isError: true };
   }
   return { text: `Unknown tool: ${name}`, isError: true };
 }

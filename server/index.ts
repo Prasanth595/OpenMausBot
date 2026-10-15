@@ -127,8 +127,16 @@ import {
   NATIVE_DIR,
   customMcpServers,
   selfModifyEnabled,
+  workshopEnabled,
   botChromeExecutablePath,
 } from "./config.ts";
+import {
+  deleteWorkshop,
+  listWorkshop,
+  readWorkshop,
+  writeWorkshop,
+  WORKSHOP_DIR,
+} from "./workshop.ts";
 import { ComputerControl } from "./computer-control.ts";
 import { MAX_REMOTE_COMMAND_LENGTH } from "./remote-computer.ts";
 import { augmentedPath, findCliCandidates, resetPathCache } from "./env-path.ts";
@@ -895,6 +903,7 @@ function agentsIntegration(
       ASTRA_TURN_DEPTH: String(depth),
       ASTRA_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
       ASTRA_SELF_MODIFY_ENABLED: selfModifyEnabled(cfg) ? "1" : "0",
+      ASTRA_WORKSHOP_ENABLED: workshopEnabled(cfg) ? "1" : "0",
     },
   };
 }
@@ -8320,6 +8329,7 @@ function configStatus() {
       showToolCalls: showToolCallsEnabled(cfg),
       browser: builtInBrowserEnabled(cfg),
       selfModify: selfModifyEnabled(cfg),
+      workshop: workshopEnabled(cfg),
     },
     // first-run progress — not a secret; the app decides whether to show
     // the welcome tour from this, never from browser storage
@@ -9427,6 +9437,37 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           }
           const result = applyPending(id);
           return json(res, result.ok ? 200 : 422, result);
+        }
+      }
+      // ── workshop: the bot's own creation crate (feature-gated) ──────
+      // The agent-facing door, used by the agents-proxy `workshop` tool.
+      // Same gate shape as self-modify: the operator's opt-in, read per
+      // request, with no per-turn capability — a staged draft is harmless
+      // by construction because the crate holds only plain data files.
+      if (path === "/api/internal/workshop" || path.startsWith("/api/internal/workshop/")) {
+        if (!workshopEnabled(cfg)) return json(res, 403, { error: "workshop is not enabled in Settings" });
+        const from = internalSender;
+        const fromThreadId = internalCapability.threadId;
+        if (!connectorThread(from.id, fromThreadId)) {
+          return json(res, 403, { error: "source conversation does not belong to sender" });
+        }
+        if (method === "GET" && path === "/api/internal/workshop") {
+          return json(res, 200, { enabled: true, dir: WORKSHOP_DIR, files: listWorkshop() });
+        }
+        if (method === "POST" && path === "/api/internal/workshop/read") {
+          const body = await readInternalBody();
+          const result = readWorkshop(typeof body.name === "string" ? body.name : "");
+          return json(res, result.ok ? 200 : result.status, result.ok ? result : { error: result.error });
+        }
+        if (method === "POST" && path === "/api/internal/workshop/write") {
+          const body = await readInternalBody();
+          const result = writeWorkshop(typeof body.name === "string" ? body.name : "", body.content);
+          return json(res, result.ok ? 201 : result.status, result.ok ? result : { error: result.error });
+        }
+        if (method === "POST" && path === "/api/internal/workshop/delete") {
+          const body = await readInternalBody();
+          const result = deleteWorkshop(typeof body.name === "string" ? body.name : "");
+          return json(res, result.ok ? 200 : result.status, result.ok ? result : { error: result.error });
         }
       }
       if (method === "POST" && path === "/api/internal/ask-bot") {

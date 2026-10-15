@@ -232,6 +232,10 @@ const featureConfigSchema = z.object({
    * the journal + watchdog rollback path. Off until explicitly enabled —
    * also settable with ASTRA_SELF_MODIFY=1. */
   selfModify: z.boolean().optional(),
+  /** Bots may create reusable text resources in the workshop crate
+   * (DATA_DIR/workshop) — drafts, runbooks, skill notes. Off until
+   * explicitly enabled — also settable with ASTRA_WORKSHOP=1. */
+  workshop: z.boolean().optional(),
   /** "Astra" wake word: keep an on-device Porcupine detector armed while
    * the app runs. Off until explicitly enabled; the mic is not opened
    * before that. */
@@ -419,7 +423,7 @@ export interface AppConfig {
    * separate container, durable workspace, viewer and lease. */
   localVm?: { mode?: "shared" | "per-bot"; maxInstances?: number };
   /** Opt-in product experiments. Every flag defaults to disabled. */
-  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; selfModify?: boolean; wakeWord?: boolean };
+  features?: { skillAuthoring?: boolean; showToolCalls?: boolean; browser?: boolean; selfModify?: boolean; workshop?: boolean; wakeWord?: boolean };
   /** First-run progress; see onboardingConfigSchema. */
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[] };
   /** Named browser sessions any bot can be pointed at. */
@@ -587,6 +591,16 @@ export function builtInBrowserEnabled(cfg: AppConfig): boolean {
 export function selfModifyEnabled(cfg: AppConfig): boolean {
   if (process.env.ASTRA_SELF_MODIFY === "1") return true;
   return cfg.features?.selfModify === true;
+}
+
+/** Opt-in ONLY: same shape as self-modify's gate. The workshop crate is far
+ * tamer than self-modification — it writes into its own data directory,
+ * never its source — but a bot
+ * writing files at all is still something the operator must opt into.
+ * Read per request so the switch takes effect without a restart. */
+export function workshopEnabled(cfg: AppConfig): boolean {
+  if (process.env.ASTRA_WORKSHOP === "1") return true;
+  return cfg.features?.workshop === true;
 }
 
 /** Config sections no provider driver reads. A write that touches only
