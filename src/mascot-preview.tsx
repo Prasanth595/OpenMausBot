@@ -1,3 +1,4 @@
+import { ZAP_DOT_COLORS as MAUS_COLORS } from "../shared/zap-dot-appearance";
 import { StrictMode, useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -8,7 +9,6 @@ import {
 } from "@/components/Avatar";
 import {
   MAUS_COLOR_NAMES,
-  MAUS_COLORS,
   MAUS_MOTIONS,
   PICKABLE_STATES,
   STATE_GROUPS,
@@ -54,6 +54,16 @@ const MOTION_COLORS: MausColor[] = [
   "green", "blue", "purple", "red", "cyan", "orange",
   "teal", "green", "pink", "yellow", "coral", "red",
 ];
+
+const ZAP_MOOD_PREVIEWS = [
+  ["idle", "idle", "green"],
+  ["thinking", "thinking", "pink"],
+  ["working", "working", "blue"],
+  ["waiting", "curious", "purple"],
+  ["done", "happy", "orange"],
+  ["error", "sad", "red"],
+  ["offline", "sleeping", "teal"],
+] as const;
 
 type Tuning = {
   eyeScale: number;
@@ -294,11 +304,11 @@ function Preview() {
       <header className="preview-header">
         <div>
           <p className="eyebrow">Morphing face engine · 25 expressions · 39 states</p>
-          <h1>Maus motion library</h1>
+          <h1>Zap dot motion library</h1>
           <p className="intro">
-            The app&rsquo;s lit body with the face engine behind it. Expressions morph on a
-            spring, blink on each state&rsquo;s own rhythm, and the eyes wrap around an implied
-            sphere so a turn reads as a head turning — the silhouette itself never rotates.
+            Zap&rsquo;s liquid body, glow and pill eyes, using shared shader sprites for small avatars
+            and the live renderer for large previews. Bot states keep their existing meanings;
+            each is presented with one of seven Zap moods.
           </p>
         </div>
         <button className="replay-all" type="button" onClick={() => setReplayAll((v) => v + 1)}>
@@ -306,6 +316,15 @@ function Preview() {
           Replay all motions
         </button>
       </header>
+
+      <section className="zap-mood-grid" aria-label="Zap dot moods">
+        {ZAP_MOOD_PREVIEWS.map(([mood, state, color]) => (
+          <div key={`${mood}-${replayAll}`} className="zap-mood-preview">
+            <MausAvatar color={color} state={state} size={72} seed={`preview-${mood}`} label={`${mood} Zap dot`} />
+            <strong>{mood}</strong>
+          </div>
+        ))}
+      </section>
 
       <Tuner
         tuning={tuning}

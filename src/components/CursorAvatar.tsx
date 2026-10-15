@@ -1,5 +1,9 @@
 /** Made with Blob Studio. */
-import React, { useEffect, useId, useMemo, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
+
+import { ZapDot } from "./ZapDot"
+import { zapDotShape } from "../../shared/zap-dot-appearance"
+import { zapMoodForExpression, zapMoodForState } from "@/lib/zap-dot-state"
 
 import { MASCOT_BODIES } from "../../shared/mascot-bodies"
 import {
@@ -41,12 +45,7 @@ export interface CursorSilhouette {
 const { id: _cursorBodyId, ...cursorSilhouette } = MASCOT_BODIES.cursor;
 export const DEFAULT_SILHOUETTE: CursorSilhouette = cursorSilhouette;
 
-export const DEFAULT_GRADIENT: [string, string, string] = ["#9FE6B5","#3FAE6E","#1C7A4C"]
-
-const VIEW_BOX = `-15 -15 ${FACE_BOX + 30} ${FACE_BOX + 30}`
-const SPHERE_C = 114.2705
-const SPHERE_R = 105
-
+export const DEFAULT_GRADIENT: [string, string, string] = ["#C8FF00","#C8FF00","#C8FF00"]
 
 export interface BodyMotion {
   bob?: [number, number]
@@ -576,276 +575,6 @@ export const POOLS = {
   ]
 } satisfies Record<CursorState, number[]>
 
-const EXPR_CADENCE = {
-  sleeping: [
-    6000,
-    10000
-  ],
-  waking: [
-    800,
-    800
-  ],
-  idle: [
-    9000,
-    16000
-  ],
-  listening: [
-    2800,
-    5000
-  ],
-  thinking: [
-    2000,
-    3600
-  ],
-  searching: [
-    1000,
-    1800
-  ],
-  working: [
-    1800,
-    3200
-  ],
-  excited: [
-    1100,
-    2000
-  ],
-  surprised: [
-    2500,
-    4000
-  ],
-  suspicious: [
-    2600,
-    4500
-  ],
-  angry: [
-    2200,
-    3800
-  ],
-  drowsy: [
-    4000,
-    8000
-  ],
-  happy: [
-    2500,
-    4500
-  ],
-  curious: [
-    1800,
-    3200
-  ],
-  confused: [
-    2200,
-    3800
-  ],
-  bored: [
-    3500,
-    6000
-  ],
-  proud: [
-    3500,
-    6000
-  ],
-  shy: [
-    3000,
-    5500
-  ],
-  sad: [
-    4000,
-    7000
-  ],
-  laughing: [
-    1200,
-    2400
-  ],
-  scared: [
-    900,
-    1800
-  ],
-  playful: [
-    1500,
-    3000
-  ],
-  celebrate: [
-    1400,
-    2600
-  ],
-  orbit: [
-    4000,
-    8000
-  ],
-  radar: [
-    4000,
-    8000
-  ],
-  progress: [
-    4000,
-    8000
-  ],
-  spawning: [
-    1200,
-    1200
-  ],
-  humming: [
-    5000,
-    9000
-  ],
-  loading: [
-    6000,
-    10000
-  ],
-  dictating: [
-    4000,
-    8000
-  ],
-  sending: [
-    4000,
-    8000
-  ],
-  receiving: [
-    4000,
-    8000
-  ],
-  uploading: [
-    4000,
-    8000
-  ],
-  writing: [
-    4000,
-    8000
-  ],
-  notifying: [
-    1500,
-    2600
-  ],
-  alerting: [
-    2000,
-    3600
-  ],
-  bouncing: [
-    3000,
-    6000
-  ],
-  dragging: [
-    1600,
-    3000
-  ],
-  "powering-down": [
-    6000,
-    9000
-  ]
-} satisfies Record<CursorState, [number, number]>
-
-const BLINK = {
-  sleeping: null,
-  waking: null,
-  idle: [
-    6000,
-    14000
-  ],
-  listening: [
-    3000,
-    7000
-  ],
-  thinking: [
-    3500,
-    7000
-  ],
-  searching: [
-    1600,
-    4000
-  ],
-  working: [
-    2800,
-    5500
-  ],
-  excited: [
-    2000,
-    4000
-  ],
-  surprised: [
-    1800,
-    3500
-  ],
-  suspicious: [
-    4500,
-    8000
-  ],
-  angry: [
-    3500,
-    7000
-  ],
-  drowsy: null,
-  happy: [
-    2500,
-    5000
-  ],
-  curious: [
-    2500,
-    5500
-  ],
-  confused: [
-    2800,
-    5500
-  ],
-  bored: [
-    4000,
-    8000
-  ],
-  proud: [
-    3500,
-    7000
-  ],
-  shy: [
-    3000,
-    6000
-  ],
-  sad: [
-    4000,
-    8000
-  ],
-  laughing: [
-    2500,
-    5000
-  ],
-  scared: [
-    1200,
-    3000
-  ],
-  playful: [
-    2000,
-    4500
-  ],
-  celebrate: [
-    2200,
-    4500
-  ],
-  orbit: null,
-  radar: null,
-  progress: null,
-  spawning: null,
-  humming: [
-    4000,
-    8000
-  ],
-  loading: null,
-  dictating: null,
-  sending: null,
-  receiving: null,
-  uploading: null,
-  writing: null,
-  notifying: [
-    2000,
-    4000
-  ],
-  alerting: null,
-  bouncing: null,
-  dragging: [
-    2200,
-    4500
-  ],
-  "powering-down": null
-} satisfies Record<CursorState, [number, number] | null>
-
 export const STATE_GROUPS = {
   "Cycle de vie": [
     "sleeping",
@@ -899,25 +628,6 @@ export const STATE_GROUPS = {
 const isCursorState = (state: string): state is CursorState => state in POOLS
 export const CURSOR_STATES = Object.keys(POOLS).filter(isCursorState)
 
-
-const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v))
-const noTimestamp = (): number | null => null
-
-const toPath = (ring: Ring) =>
-  'M' + ring.map(p => p[0].toFixed(2) + ' ' + p[1].toFixed(2)).join('L') + 'Z'
-
-const clone = (rings: Ring[]): Ring[] =>
-  rings.map(r => r.map((p): [number, number] => [p[0], p[1]]))
-
-const ringCentre = (ring: Ring): [number, number] => {
-  let x = 0
-  let y = 0
-  for (const p of ring) {
-    x += p[0]
-    y += p[1]
-  }
-  return [x / ring.length, y / ring.length]
-}
 
 export function mouthPath(frame: { x: number; y: number; angle: number }, spec: number[]) {
   const ca = Math.cos(frame.angle)
@@ -1013,6 +723,7 @@ export function bodyTransform(motion: BodyMotion, elapsed: number, strength: num
 
 export interface CursorAvatarProps {
   state?: CursorState
+  seed?: string
   expression?: number
   size?: number | string
   gaze?: { x?: number; y?: number }
@@ -1045,397 +756,52 @@ export interface CursorAvatarHandle {
 
 export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarProps>(
   function CursorAvatar(
-    {
-      state = 'idle',
-      expression,
-      size = 160,
-      gaze,
-      turn = 0,
-      lookAround = 0.5,
-      flip = false,
-      spring = 7,
-      eyeScale = 1,
-      showMouth = true,
-      mouthStroke = MOUTH_STROKE,
-      motion,
-      effects = true,
-      glyphs = true,
-      autoBlink = true,
-      autoExpression = true,
-      paused = false,
-      silhouette = DEFAULT_SILHOUETTE,
-      gradient = DEFAULT_GRADIENT,
-      eyeColor = "#ffffff",
-      title,
-      className,
-      style,
-    },
-    ref
+    { state = "idle", expression, size = 160, gaze, flip = false, paused = false,
+      silhouette = DEFAULT_SILHOUETTE, gradient = DEFAULT_GRADIENT, title, className, style, seed },
+    ref,
   ) {
-    const reactId = useId()
-    const uid = useMemo(() => 'mascot' + reactId.replace(/[^a-zA-Z0-9]/g, ''), [reactId])
-    const eye0 = useRef<SVGPathElement | null>(null)
-    const eye1 = useRef<SVGPathElement | null>(null)
-    const mouth = useRef<SVGPathElement | null>(null)
-    const bodyGroup = useRef<SVGGElement | null>(null)
-    const bodyContent = useRef<SVGGElement | null>(null)
-    const trailLayer = useRef<SVGGElement | null>(null)
-    const confettiLayer = useRef<SVGGElement | null>(null)
-    const glyphLayer = useRef<SVGGElement | null>(null)
-
-    const prefersReducedMotion = useMemo(
-      () => globalThis.window?.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false,
-      []
-    )
-    const motionStrength = motion ?? (prefersReducedMotion ? 0 : 1)
-    const lastState: CursorState = state
-
-    const engine = useRef({
-      current: clone(EXPRESSIONS[0]),
-      target: EXPRESSIONS[0],
-      currentMouth: MOUTHS[0].slice(),
-      targetMouth: MOUTHS[0],
-      currentGaze: [...GAZE[0]],
-      targetGaze: [...GAZE[0]],
-      expression: 0,
-      morph: 1,
-      velocity: 0,
-      blinkStart: noTimestamp(),
-      spinStart: noTimestamp(),
-      spinDuration: 900,
-      last: 0,
-      stateStart: 0,
-      lastState,
-      lastBodyTransform: '',
-      pausedPaint: '',
-      props: {
-        state,
-        expression,
-        gaze,
-        turn,
-        spring,
-        eyeScale,
-        paused,
-        lookAround,
-        motionStrength,
-        effects,
-        glyphs,
+    const host = useRef<HTMLSpanElement>(null);
+    const [chosenExpression, setChosenExpression] = useState<number | undefined>(undefined);
+    useEffect(() => setChosenExpression(undefined), [state, expression]);
+    const canAnimate = () => !paused && !(globalThis.window?.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false);
+    React.useImperativeHandle(ref, () => ({
+      blink: () => {
+        if (!canAnimate()) return;
+        host.current?.querySelectorAll<HTMLElement>(".zs-eye").forEach((eye) => {
+          eye.animate?.([{ scale: "1 1" }, { scale: "1 0.12", offset: 0.5 }, { scale: "1 1" }], { duration: 320 });
+        });
       },
-    })
-    engine.current.props = {
-      state,
-      expression,
-      gaze,
-      turn,
-      spring,
-      eyeScale,
-      paused,
-      lookAround,
-      motionStrength,
-      effects,
-      glyphs,
-    }
-
-    const selectExpression = (index: number) => {
-      const e = engine.current
-      const i = ((index % EXPRESSION_COUNT) + EXPRESSION_COUNT) % EXPRESSION_COUNT
-      if (i === e.expression && e.morph >= 1) return
-      e.current = displayed(e)
-      e.currentMouth = displayedMouth(e)
-      e.currentGaze = displayedGaze(e)
-      e.target = EXPRESSIONS[i]
-      e.targetMouth = MOUTHS[i]
-      e.targetGaze = GAZE[i]
-      e.expression = i
-      e.morph = 0
-      e.velocity = 0
-    }
-
-    React.useImperativeHandle(
-      ref,
-      () => ({
-        blink: () => {
-          engine.current.blinkStart = performance.now()
-        },
-        spin: (durationMs = 900) => {
-          engine.current.spinDuration = durationMs
-          engine.current.spinStart = performance.now()
-        },
-        setExpression: selectExpression,
-      }),
-      []
-    )
-
-    useEffect(() => {
-      selectExpression(expression ?? POOLS[state][0])
-    }, [state, expression])
-
-    useEffect(() => {
-      if (!autoExpression || expression !== undefined || paused) return
-      let timer: ReturnType<typeof setTimeout>
-      const tick = () => {
-        const [lo, hi] = EXPR_CADENCE[state]
-        timer = setTimeout(() => {
-          const pool = POOLS[state]
-          const alternatives = pool.filter(x => x !== engine.current.expression)
-          selectExpression(
-            alternatives.length
-              ? alternatives[Math.floor(Math.random() * alternatives.length)]
-              : pool[0]
-          )
-          tick()
-        }, lo + Math.random() * (hi - lo))
-      }
-      tick()
-      return () => clearTimeout(timer)
-    }, [state, autoExpression, expression, paused])
-
-    useEffect(() => {
-      const cadence = BLINK[state]
-      if (!autoBlink || !cadence || paused) return
-      let timer: ReturnType<typeof setTimeout>
-      const tick = () => {
-        timer = setTimeout(() => {
-          engine.current.blinkStart = performance.now()
-          tick()
-        }, cadence[0] + Math.random() * (cadence[1] - cadence[0]))
-      }
-      tick()
-      return () => clearTimeout(timer)
-    }, [state, autoBlink, paused])
-
-    useEffect(() => {
-      let frame = 0
-      let wake: ReturnType<typeof setTimeout> | undefined
-      engine.current.last = performance.now()
-
-      const draw = (e: typeof engine.current, now: number, spinTurn: number) => {
-        const p = e.props
-        const g = displayedGaze(e)
-        const look = p.lookAround ?? 0.35
-        const ox = g[0] * look
-        const oy = g[1] * look
-        const rings = displayed(e).map(ring =>
-          ring.map((pt): [number, number] => [pt[0] + ox, pt[1] + oy])
-        )
-        const gx = clamp(p.gaze?.x ?? 0, -1, 1) * GAZE_TRAVEL.x
-        const gy = clamp(p.gaze?.y ?? 0, -1, 1) * GAZE_TRAVEL.y
-        const radians = (((p.turn ?? 0) + spinTurn) * Math.PI) / 180
-        const base = p.eyeScale ?? 1
-        const blink = blinkScale(e, now)
-
-        rings.forEach((ring, index) => {
-          const el = index === 0 ? eye0.current : eye1.current
-          if (!el) return
-          const c = ringCentre(ring)
-          const baseLongitude = Math.asin(clamp((c[0] - SPHERE_C) / SPHERE_R, -1, 1))
-          const longitude = baseLongitude + radians
-          const depth = Math.cos(longitude)
-          const perspective = Math.max(depth, 0.02) / Math.max(Math.cos(baseLongitude), 0.02)
-          el.setAttribute('d', toPath(ring))
-          el.setAttribute(
-            'transform',
-            `translate(${(SPHERE_C + SPHERE_R * Math.sin(longitude) + gx).toFixed(2)} ${(
-              c[1] + gy
-            ).toFixed(2)}) scale(${clamp(perspective * base, 0.02, 2.4).toFixed(4)} ${clamp(
-              blink * base,
-              0.02,
-              2.4
-            ).toFixed(4)}) translate(${(-c[0]).toFixed(2)} ${(-c[1]).toFixed(2)})`
-          )
-          el.style.opacity = depth > 0.02 ? '1' : '0'
-        })
-
-        const mouthEl = mouth.current
-        if (mouthEl) {
-          const spec = displayedMouth(e)
-          const frameGeom = mouthFrame(rings, spec)
-          const baseLongitude = Math.asin(clamp((frameGeom.x - SPHERE_C) / SPHERE_R, -1, 1))
-          const longitude = baseLongitude + radians
-          const depth = Math.cos(longitude)
-          const perspective = Math.max(depth, 0.02) / Math.max(Math.cos(baseLongitude), 0.02)
-          mouthEl.setAttribute('d', mouthPath(frameGeom, spec))
-          mouthEl.setAttribute(
-            'transform',
-            `translate(${(SPHERE_C + SPHERE_R * Math.sin(longitude) + gx).toFixed(2)} ${(
-              frameGeom.y + gy
-            ).toFixed(2)}) scale(${clamp(perspective, 0.02, 2.4).toFixed(4)} 1) translate(${(
-              -frameGeom.x
-            ).toFixed(2)} ${(-frameGeom.y).toFixed(2)})`
-          )
-          mouthEl.style.opacity = depth > 0.02 ? '1' : '0'
-        }
-
-        const bodyEl = bodyGroup.current
-        if (bodyEl) {
-          if (p.state !== e.lastState) {
-            e.lastState = p.state
-            e.stateStart = now
-          }
-          const transform = bodyTransform(
-            MOTION[p.state] ?? {},
-            now - e.stateStart,
-            p.motionStrength ?? 1
-          )
-          if (transform !== e.lastBodyTransform) {
-            e.lastBodyTransform = transform
-            if (transform) bodyEl.setAttribute('transform', transform)
-            else bodyEl.removeAttribute('transform')
-          }
-        }
-
-        updateEffects({
-          trails: trailLayer.current,
-          confetti: confettiLayer.current,
-          glyph: glyphLayer.current,
-          bodyContent: bodyContent.current,
-          state: p.state,
-          elapsed: now - e.stateStart,
-          strength: p.motionStrength ?? 1,
-          paint: paintRef.current,
-          showEffects: p.effects !== false,
-          showGlyphs: p.glyphs !== false,
-        })
-      }
-
-      const step = (now: number) => {
-        const e = engine.current
-        const p = e.props
-        // Check pause before re-arming (else idle faces tick at display rate), but paint the resting face once: the SVG
-        // layers hold no expression until the first draw.
-        if (p.paused) {
-          e.last = now
-          const still = `${p.state}|${p.expression ?? ''}|${paintRef.current}`
-          if (e.pausedPaint !== still) {
-            e.pausedPaint = still
-            draw(e, now, 0)
-          }
-          wake = setTimeout(() => {
-            frame = requestAnimationFrame(step)
-          }, 250)
-          return
-        }
-        e.pausedPaint = ''
-        frame = requestAnimationFrame(step)
-        const dt = Math.min((now - e.last) / 1000, 0.1)
-        e.last = now
-
-        const f = p.spring ?? 7
-        e.velocity += (-2 * f * e.velocity - f * f * (e.morph - 1)) * dt
-        e.morph += e.velocity * dt
-        if (!Number.isFinite(e.morph)) {
-          e.morph = 1
-          e.velocity = 0
-        }
-
-        let spinTurn = 0
-        if (e.spinStart !== null) {
-          const tt = (now - e.spinStart) / e.spinDuration
-          if (tt >= 1) e.spinStart = null
-          else spinTurn = 360 * tt
-        }
-
-        draw(e, now, spinTurn)
-      }
-
-      frame = requestAnimationFrame(step)
-      return () => {
-        cancelAnimationFrame(frame)
-        if (wake !== undefined) clearTimeout(wake)
-      }
-    }, [])
-
-    const paint = `url(#${uid}-grad)`
-    const paintRef = useRef(paint)
-    paintRef.current = paint
-
-    const dimension = size.constructor === Number ? `${size}px` : size
-    const label = title === undefined ? `${silhouette.name} mascot` : title
-    const body = silhouette.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
-
+      spin: (durationMs = 900) => {
+        if (!canAnimate()) return;
+        host.current?.animate?.([{ rotate: "0deg" }, { rotate: "360deg" }], { duration: durationMs });
+      },
+      setExpression: setChosenExpression,
+    }));
+    const selected = expression ?? chosenExpression;
+    const mood = selected === undefined ? zapMoodForState(state) : zapMoodForExpression(selected);
+    const bodyId = Object.values(MASCOT_BODIES).find((body) => body.name === silhouette.name)?.id;
+    const shape = zapDotShape(bodyId);
+    const diameter = typeof size === "number" ? size : Number.parseFloat(size) || 160;
+    const dotSize = shape === "pill" ? diameter / 1.32 : diameter;
+    const label = title === undefined ? `${silhouette.name} mascot` : title;
     return (
-      <svg
-        viewBox={VIEW_BOX}
-        width={dimension}
-        height={dimension}
-        className={className}
-        style={style}
-        role={label ? 'img' : undefined}
+      <span
+        ref={host}
+        className={`zap-dot${paused ? " zap-dot-paused" : ""}${className ? ` ${className}` : ""}`}
+        style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+          width: size, height: size, transform: flip ? "scaleX(-1)" : undefined, ...style }}
+        role={label ? "img" : undefined}
         aria-label={label ?? undefined}
         aria-hidden={label ? undefined : true}
+        data-zap-mood={mood}
+        data-zap-shape={shape}
+        data-zap-seed={seed ?? silhouette.name}
       >
-        <defs>
-          <linearGradient id={`${uid}-grad`} x1="1" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={gradient[0]} />
-            <stop offset="55%" stopColor={gradient[1]} />
-            <stop offset="100%" stopColor={gradient[2]} />
-          </linearGradient>
-          {/* The fit goes on the clipPath itself: browsers ignore a <g> inside one, which is also why silhouette.clip is pre-flattened. */}
-          <clipPath
-            id={`${uid}-clip`}
-            transform={silhouette.fit || undefined}
-            dangerouslySetInnerHTML={{ __html: silhouette.clip }}
-          />
-        </defs>
-        <g transform={flip ? `translate(${FACE_BOX} 0) scale(-1 1)` : undefined}>
-          <g ref={trailLayer} />
-          <g ref={bodyGroup}>
-          <g ref={bodyContent}>
-          <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
-          <g clipPath={`url(#${uid}-clip)`}>
-            <g transform={anchorTransform(silhouette.anchor)}>
-              <path ref={eye0} fill={eyeColor} />
-              <path ref={eye1} fill={eyeColor} />
-              {showMouth && (
-                <path
-                  ref={mouth}
-                  fill="none"
-                  stroke={eyeColor}
-                  strokeWidth={mouthStroke}
-                  strokeLinecap="round"
-                />
-              )}
-            </g>
-          </g>
-          </g>
-          <g ref={glyphLayer} style={{ opacity: 0 }} />
-          </g>
-          <g ref={confettiLayer} />
-        </g>
-      </svg>
-    )
-  }
-)
+        <ZapDot size={dotSize} color={gradient[1]} seed={seed ?? silhouette.name} shape={shape} mood={mood}
+          paused={paused} look={gaze ? { x: gaze.x ?? 0, y: gaze.y ?? 0 } : undefined} />
+      </span>
+    );
+  },
+);
 
-
-function displayed(e: { current: Ring[]; target: Ring[]; morph: number }): Ring[] {
-  const m = clamp(e.morph, 0, 1)
-  return e.current.map((ring, eye) =>
-    ring.map((p, i): [number, number] => [
-      p[0] + (e.target[eye][i][0] - p[0]) * m,
-      p[1] + (e.target[eye][i][1] - p[1]) * m,
-    ])
-  )
-}
-
-function displayedMouth(e: { currentMouth: number[]; targetMouth: number[]; morph: number }) {
-  const m = clamp(e.morph, 0, 1)
-  return e.currentMouth.map((v, i) => v + (e.targetMouth[i] - v) * m)
-}
-
-function displayedGaze(e: { currentGaze: number[]; targetGaze: number[]; morph: number }) {
-  const m = clamp(e.morph, 0, 1)
-  return e.currentGaze.map((v, i) => v + (e.targetGaze[i] - v) * m)
-}
-
-function blinkScale(e: { blinkStart: number | null }, now: number) {
-  if (e.blinkStart === null) return 1
-  const t = (now - e.blinkStart) / 320
-  if (t >= 1) {
-    e.blinkStart = null
-    return 1
-  }
-  return Math.max(t < 0.42 ? 1 - t / 0.42 : (t - 0.42) / 0.58, 0.04)
-}
-
-export default CursorAvatar
+export default CursorAvatar;

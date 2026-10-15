@@ -96,7 +96,7 @@ describe("bot-first sidebar", () => {
       expect(String(row.props.className).split(" ")).toEqual(expect.arrayContaining([...spacing]));
       expect(markup).toContain(avatar.avatarUrl
         ? `width="${size}" height="${size}"`
-        : `width="${size}px" height="${size}px"`);
+        : `width:${size}px;height:${size}px`);
     }
   });
 

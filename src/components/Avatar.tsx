@@ -7,10 +7,12 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
+import { type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody, type MascotBodyId } from "../../shared/mascot-bodies";
+
+import { ZAP_DOT_COLORS } from "../../shared/zap-dot-appearance";
 
 export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
@@ -53,23 +55,19 @@ function mix(hex: string, toward: string, t: number): string {
 }
 
 const gradientFor = (color: MausColor): [string, string, string] => {
-  const fill = MAUS_COLORS[color] ?? MAUS_COLORS.green;
+  const fill = ZAP_DOT_COLORS[color] ?? ZAP_DOT_COLORS.green;
   return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
 };
 
 export function roomAvatarGradient(color: MausColor): [string, string, string] {
-  const fill = `var(--identity-${color})`;
-  return [
-    `color-mix(in srgb, ${fill} 82%, #ffffff)`,
-    fill,
-    `color-mix(in srgb, ${fill} 82%, #000000)`,
-  ];
+  return gradientFor(color);
 }
 
 export type MausAvatarHandle = CursorAvatarHandle;
 
 export type MausAvatarProps = {
   color: MausColor;
+  seed?: string;
   state?: MausState;
   expression?: number;
   size?: number;
@@ -93,6 +91,7 @@ export type MausAvatarProps = {
 function MausAvatarComponent(
   {
     color,
+    seed,
     state = "idle",
     expression,
     size = 44,
@@ -138,7 +137,7 @@ function MausAvatarComponent(
   const [pointer, setPointer] = useState({ x: 0, y: 0 });
   const range = forward ? POINTER_GAZE.forward : POINTER_GAZE.authored;
   const onPointerMove = (event: ReactPointerEvent<HTMLSpanElement>) => {
-    if (!trackPointer || !animated) return;
+    if (!trackPointer || !animated || globalThis.window?.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
     const rect = event.currentTarget.getBoundingClientRect();
     setPointer({
       x: Math.max(-1, Math.min(1, ((event.clientX - rect.left) / rect.width) * 2 - 1)) * range,
@@ -155,6 +154,7 @@ function MausAvatarComponent(
     >
       <CursorAvatar
         ref={inner}
+        seed={seed ?? `${color}:${bodyId ?? "cursor"}`}
         state={motionState ?? state}
         expression={expression}
         size={size}
@@ -162,7 +162,7 @@ function MausAvatarComponent(
         gradient={gradient ?? gradientFor(color)}
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
-        gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
+        gaze={gaze || pointer.x || pointer.y ? { x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y } : undefined}
         turn={turn}
         spring={spring}
         eyeScale={eyeScale}
@@ -179,6 +179,7 @@ export const MausAvatar = memo(forwardRef(MausAvatarComponent));
 export type BotAvatarProps = Omit<MausAvatarProps, "color" | "gradient"> & {
   readable?: boolean;
   bot: {
+    id?: string;
     name?: string;
     color: MausColor;
     avatarUrl?: string | null;
@@ -223,6 +224,7 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
         bodyId={bot.mascotBody ?? undefined}
         {...mascotProps}
         color={bot.color}
+        seed={bot.id ?? bot.name ?? bot.color}
         gradient={readable ? roomAvatarGradient(bot.color) : undefined}
         size={size}
         label={label ?? bot.name}

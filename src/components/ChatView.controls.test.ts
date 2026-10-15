@@ -122,7 +122,11 @@ describe("header name", () => {
         return markup.slice(start, markup.indexOf("data-chathead-status", start));
       };
       expect(pillOf(busyMarkup)).not.toContain("animate-status-pulse");
-      expect(pillOf(busyMarkup)).toBe(pillOf(idleMarkup));
+      const avatarDimensions = (markup: string) => [...pillOf(markup).matchAll(/class="zap-dot[^"]*" style="[^"]*width:([^;]+);height:([^";]+)/g)]
+        .map((match) => [match[1], match[2]]);
+      expect(avatarDimensions(busyMarkup)).toEqual([["24px", "24px"]]);
+      expect(avatarDimensions(busyMarkup)).toEqual(avatarDimensions(idleMarkup));
+      expect(pillOf(busyMarkup)).toContain('data-zap-mood="working"');
       expect(busyMarkup).toMatch(/<span role="status" class="sr-only" data-chathead-status="true">Working…<\/span>/);
       expect(idleMarkup).toMatch(/<span role="status" class="sr-only" data-chathead-status="true"><\/span>/);
       expect(busyMarkup).toContain('title="Stop this turn"');

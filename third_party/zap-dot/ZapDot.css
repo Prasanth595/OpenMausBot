@@ -1,0 +1,119 @@
+:root { --zap-ease-out: cubic-bezier(0.2, 0.8, 0.2, 1); --zap-ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1); }
+/* ── CSS spheres (CssSphere moods) ───────────────────────────────────────── */
+.zs-eye {
+  animation: zs-blink 5.2s infinite;
+  transform-origin: center;
+}
+@keyframes zs-blink {
+  0%,
+  94%,
+  100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.12);
+  }
+}
+.zs-bob {
+  animation: zs-bob 1.5s ease-in-out infinite;
+}
+@keyframes zs-bob {
+  0%,
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  50% {
+    transform: translateY(-8%) scale(0.97, 1.03);
+  }
+}
+.zs-hop {
+  animation: zs-hop 2.6s cubic-bezier(0.34, 1.4, 0.64, 1) infinite;
+}
+@keyframes zs-hop {
+  0%,
+  62%,
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  68% {
+    transform: translateY(2%) scale(1.08, 0.9);
+  }
+  76% {
+    transform: translateY(-16%) scale(0.94, 1.06);
+  }
+  86% {
+    transform: translateY(0) scale(1.05, 0.95);
+  }
+}
+.zs-joy {
+  animation: zs-joy 0.7s cubic-bezier(0.34, 1.4, 0.64, 1) 1;
+}
+@keyframes zs-joy {
+  0% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.14, 0.9);
+  }
+  70% {
+    transform: scale(0.95, 1.06);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.zs-shake {
+  animation: zs-shake 0.5s ease-in-out 1;
+}
+@keyframes zs-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-9%);
+  }
+  40% {
+    transform: translateX(8%);
+  }
+  60% {
+    transform: translateX(-5%);
+  }
+  80% {
+    transform: translateX(3%);
+  }
+}
+.zs-orbit {
+  animation: zs-orbit 1.4s linear infinite;
+}
+@keyframes zs-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* The liquid inside a small sphere: a strip of real shader frames, played back and forth. */
+.zs-swirl {
+  animation: zs-swirl 2.6s steps(11) infinite alternate;
+}
+@keyframes zs-swirl {
+  from {
+    background-position: 0% 0;
+  }
+  to {
+    background-position: 100% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zs-swirl,
+  .zs-eye,
+  .zs-bob,
+  .zs-hop,
+  .zs-joy,
+  .zs-shake,
+  .zs-orbit {
+    animation: none;
+  }
+}
+
+.zs, .zs * { box-sizing: border-box; }

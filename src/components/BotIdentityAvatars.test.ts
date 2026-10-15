@@ -59,7 +59,7 @@ describe("uploaded bot identity portraits", () => {
   });
   it("keeps a deleted receipt sender readable with a mascot fallback", () => {
     const html = render(createElement(RoomToolChip, { message: { ...receipt, comm: { ...receipt.comm!, withBotId: "deleted" } } }));
-    expect(html).toContain("<svg");
+    expect(html).toContain('data-zap-shape="circle"');
     expect(html).not.toContain("<img");
     expect(html).toContain("Message from @Juniper");
   });

@@ -1,0 +1,11 @@
+.zap-dot-paused,
+.zap-dot-paused * {
+  animation: none !important;
+  transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zap-dot * {
+    transition: none !important;
+  }
+}
