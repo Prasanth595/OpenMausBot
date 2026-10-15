@@ -196,11 +196,11 @@ export function settleHeldChannelQueueHead(held: HeldChannelQueue): void {
  * notifications harmless.
  */
 export function drainChannelMessages(
-  isWorking: (groupId: string) => boolean,
+  isWorking: (groupId: string, threadId: string) => boolean,
   run: (input: { groupId: string; threadId: string; items: ChannelQueueItem[] }) => void | Promise<void>,
 ): void {
   for (const [threadId, entry] of queues) {
-    if (isWorking(entry.groupId)) continue;
+    if (isWorking(entry.groupId, threadId)) continue;
     if (entry.items.length === 0) {
       queues.delete(threadId);
       continue;
@@ -242,7 +242,11 @@ function coalesceIdentity(item: ChannelQueueItem): string {
   return "person:local";
 }
 
-/** Test helper. */
-export function _queuedChannelCount(threadId: string): number {
+/** How many sends wait behind this room thread's running turn (the job read
+ * counts them as work still to do). */
+export function queuedChannelSends(threadId: string): number {
   return queues.get(threadId)?.items.length ?? 0;
 }
+
+/** Test helper. */
+export const _queuedChannelCount = queuedChannelSends;

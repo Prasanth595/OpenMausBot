@@ -130,8 +130,7 @@ export function renderDigest(d: TurnDigest): string {
     // every entry ends at "×N" or "(N failed)": the phones split the tools
     // part on exactly that (ios DigestSummary, android TurnDigest), so a
     // shell bucket's sample stays in the stored digest, not in this line
-    const tools = d.tools.map((t) => `${t.name} ×${t.count}${t.failed ? ` (${t.failed} failed)` : ""}`).join(", ");
-    parts.push(`tools: ${tools}${d.toolsDropped ? ` +${d.toolsDropped} more` : ""}${d.hookCoverage === "preview" ? " (from tool previews)" : ""}`);
+    parts.push(`tools: ${digestTools(d)}${d.hookCoverage === "preview" ? " (from tool previews)" : ""}`);
   } else if (d.hookCoverage === "none") {
     // English on purpose (R11/R12/R13-visual N11): this line is read by the model (digestPromptLine), the recall
     // index and the phones' parsers, never shown on the desktop — the DigestChip hides a turn with no tools, and its
@@ -152,6 +151,12 @@ export function renderDigest(d: TurnDigest): string {
   if (d.memoryDropped) parts.push(`+${d.memoryDropped} more memory changes`);
   if (d.reply) parts.push(`reply: ${d.reply}`);
   return fitBytes(parts.join(" · "), RENDER_BYTES);
+}
+
+/** The busiest tools of a turn, each "name ×N" with its failures. */
+export function digestTools(d: Pick<TurnDigest, "tools" | "toolsDropped">): string {
+  const tools = d.tools.map((t) => `${t.name} ×${t.count}${t.failed ? ` (${t.failed} failed)` : ""}`).join(", ");
+  return `${tools}${d.toolsDropped ? ` +${d.toolsDropped} more` : ""}`;
 }
 
 /** One bracketed line for a context rebuild — never multi-line, so it sits

@@ -1,9 +1,15 @@
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb, verificationServerArgs, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { request } from "../scripts/mcp-server.ts";
+import { INTERRUPTED_PREFIX } from "./bot-autonomy.ts";
+import { waitForExit } from "./testing/cleanup.ts";
+import { ownTurnText } from "./testing/room-handoff-agent.ts";
 
 /** The system's git, not a package manager's bin: the fixture's PATH is
  * sealed off this machine's CLIs, and watches and sessions run git. */
@@ -1115,3 +1121,178 @@ it("resumes a cut turn once: cut again right after, it is not resumed a second t
     expect(ccLedger()[0].bgJob).toBeUndefined();
   }, { OMB_CC_BIN: fake, OMB_CC_TURN_TIMEOUT_MS: "3000" });
 }, 120_000);
+
+// ── autonomous turns on the job runtime (this fork) ─────────────────────
+
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
+/** Every resume of a requester opens with this (runtime/envelope.ts composeResume). */
+const SETTLED = "Your downstream room requests have settled.";
+/** The report envelope's opening for the teammate's result (composeReport). */
+const REPORT_FROM_PEER = "[OpenMausBot report from @Peer";
+/** What a wake given back by its lease after a restart opens its note with
+ * (bot-autonomy.ts INTERRUPTED_PREFIX), without the brackets. */
+const RERUN_WAKE = "A execução anterior foi interrompida por um restart do servidor";
+/** The line a turn the restart cut gets in its conversation (failedTurnTool). */
+const CUT_LINE = "error: turn interrupted — OpenMausBot restarted";
+/** The chip a root the runtime itself runs again writes (index.ts runRootTurn). */
+const RERUN_CHIP = "Resuming after a restart";
+
+/** Like `fixture`, for the runtime's view of autonomous turns: the bot and a
+ * teammate of one team (each can reach the other), turns picked from a plan
+ * by what each turn was asked (room-handoff-agent's `script`, so a turn a
+ * restart cut is not counted as played), the runtime's rows
+ * (DATA_DIR/runtime.db) and a restart as a quit or an update does it
+ * (SIGTERM, then the same data and port). */
+async function autonomyRuntime(test: (f: any) => Promise<void>) {
+  const parentEnv: NodeJS.ProcessEnv = { ...process.env, OMB_AUTONOMY_MINUTE_MS: "200", OMB_AUTONOMY_TICK_MS: "100", OMB_AUTONOMY_TURN_GAP_MS: "50" };
+  const session = await launchVerificationServer(parentEnv, undefined, undefined, undefined, undefined, { scripted: true });
+  const url = session.info.url;
+  const dataDir = session.info.dataDir;
+  let server: ChildProcess = session.child;
+  let restarted = false;
+  const restart = async () => {
+    await waitForExit(server, { signal: "SIGTERM" });
+    const env = verificationServerEnvironment(parentEnv, dataDir, Number(new URL(url).port));
+    const log = openSync(session.info.logPath, "a", 0o600);
+    server = spawn(process.execPath, verificationServerArgs(env), { cwd: ROOT, env, stdio: ["ignore", log, log] });
+    restarted = true;
+    closeSync(log);
+    await expect.poll(async () => {
+      try { return (await fetch(`${url}/api/health`, { signal: AbortSignal.timeout(1_000) })).ok; } catch { return false; }
+    }, { timeout: 30_000 }).toBe(true);
+  };
+  const planPath = join(dataDir, "room-plan.json");
+  const turns = (botId?: string): any[] => (existsSync(`${planPath}.evidence.jsonl`)
+    ? readFileSync(`${planPath}.evidence.jsonl`, "utf8").trim().split("\n").filter(Boolean).map((line) => JSON.parse(line)) : [])
+    .filter((turn: any) => !botId || turn.botId === botId);
+  try {
+    const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: url } }) as Promise<any>;
+    const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, url) as Promise<any>;
+    const bot = (await cli("new-bot", "--name", "Delivery", "--section", "Ops")).bot;
+    const peer = (await cli("new-bot", "--name", "Peer", "--section", "Ops")).bot;
+    const plan: Record<string, { script: unknown[] }> = { [bot.id]: { script: [] }, [peer.id]: { script: [] } };
+    const script = (botId: string, ...entries: unknown[]) => {
+      (plan[botId] ??= { script: [] }).script.push(...entries);
+      writeFileSync(planPath, JSON.stringify(plan));
+    };
+    writeFileSync(planPath, JSON.stringify(plan));
+    const turn = (key: string) => turns().find((candidate: any) => candidate.planKey === key);
+    const say = (threadId: string, text: string) => api(`/api/bots/${bot.id}/messages`, { text, threadId });
+    const messages = async (threadId: string) => (await api(`/api/threads/${threadId}/messages?limit=300`, undefined, "GET")).messages as any[];
+    const chips = async (threadId: string) => (await messages(threadId)).filter((message: any) => message.kind === "activity").map((message: any) => String(message.tool?.name ?? ""));
+    const ledger = () => JSON.parse(readFileSync(join(dataDir, "bot-autonomy.json"), "utf8"));
+    /** Every assignment record, as the runtime stores it (the json column). */
+    const assignments = (): any[] => {
+      const path = join(dataDir, "runtime.db");
+      if (!existsSync(path)) return [];
+      const db = new DatabaseSync(path, { readOnly: true });
+      try {
+        return (db.prepare("SELECT json FROM assignments ORDER BY created_at, id").all() as Array<{ json: string }>).map((row) => JSON.parse(row.json));
+      } finally { db.close(); }
+    };
+    const events = (id: string): Array<{ kind: string; detail?: string }> => {
+      const db = new DatabaseSync(join(dataDir, "runtime.db"), { readOnly: true });
+      try {
+        return (db.prepare("SELECT kind, detail FROM assignment_events WHERE assignment_id = ? ORDER BY id").all(id) as Array<{ kind: string; detail: string | null }>)
+          .map((row) => ({ kind: row.kind, ...(row.detail == null ? {} : { detail: row.detail }) }));
+      } finally { db.close(); }
+    };
+    const gate = (name: string) => join(dataDir, `${name}.gate`);
+    const ready = (name: string) => join(dataDir, `${name}.ready`);
+    try {
+      await test({ session, bot, peer, script, turns, turn, say, messages, chips, ledger, assignments, events, gate, ready, restart });
+    } catch (error) {
+      console.error(`autonomy runtime fixture state:\n${JSON.stringify({
+        turns: turns().map((record: any) => ({ botId: record.botId, planKey: record.planKey, unplanned: record.unplanned, own: ownTurnText(record.prompt).slice(0, 400) })),
+        assignments: assignments().map(({ id, parentId, requester, status, outcome, outcomeDetail, executions, restarts, restart }: any) =>
+          ({ id, parentId, requester: requester?.kind, status, outcome, outcomeDetail, executions, restarts, restart })),
+      }, null, 1)}`);
+      throw error;
+    }
+    // No bot ran a turn its script did not plan: no second run of a cut
+    // turn, no resume nobody expected.
+    expect(turns().filter((record: any) => record.unplanned).map((record: any) => ownTurnText(record.prompt).slice(0, 300))).toEqual([]);
+  } finally {
+    if (restarted) await waitForExit(server, { signal: "SIGTERM" });
+    await session.close();
+  }
+}
+
+// A wake's turn opens a root of its own, recorded as the bot's own turn
+// (index.ts autonomyOpener): without one its coordinate_bots would be
+// refused. The hand-off is accepted, the teammate's result resumes that
+// root, and the wake's conversation reviews it.
+it("lets a wake's turn hand work to a teammate on a root of its own, recorded as the bot's turn", () => autonomyRuntime(async f => {
+  f.script(f.bot.id,
+    // the resume first: it may quote the wake's note too
+    { key: "W2", match: [SETTLED, REPORT_FROM_PEER], reply: "W2-FINAL: o Peer conferiu o deploy." },
+    { key: "W1", match: ["WAKE_COORD"], steps: [{ tool: "coordinate_bots", arguments: { bot_ids: [f.peer.id], message: "WC-BRIEF: confira o deploy de hoje." } }], reply: "W1: pedi ao Peer." },
+    { key: "U0", match: ["U0-WAKE-COORD"], steps: [{ tool: "wake_me", arguments: { minutes: 1, reason: "WAKE_COORD peça ao Peer para conferir o deploy" } }], reply: "U0: volto em um minuto." });
+  f.script(f.peer.id, { key: "P1", match: ["WC-BRIEF"], reply: "WC-RESULT: deploy conferido." });
+  const thread = f.bot.activeTaskId;
+  await f.say(thread, "U0-WAKE-COORD: daqui a um minuto, peça ao Peer para conferir o deploy.");
+  // the wake's turn handed the work on (a refusal fails the scripted step),
+  // the teammate answered, and the wake's root was resumed with it
+  await expect.poll(() => f.turns(f.bot.id).map((record: any) => record.planKey), { timeout: 45_000 }).toEqual(["U0", "W1", "W2"]);
+  expect(f.turns(f.peer.id).map((record: any) => record.planKey)).toEqual(["P1"]);
+  expect(toolResult(f.turn("W1"), "coordinate_bots")).not.toMatch(/refused|has no root|no longer running/i);
+  expect((await f.chips(thread)).filter((name: string) => name === "Enviado para Peer")).toHaveLength(1);
+  const child = f.assignments().find((row: any) => row.parentId && row.assignee.botId === f.peer.id);
+  expect(child).toMatchObject({ mode: "work", brief: "WC-BRIEF: confira o deploy de hoje." });
+  const root = f.assignments().find((row: any) => row.id === child.parentId);
+  // the wake's root: in the bot's conversation, opened by the bot's own turn, not the person's
+  expect(root).toMatchObject({ assignee: { botId: f.bot.id, destination: { threadId: thread } }, requester: { kind: "bot_turn", botId: f.bot.id, threadId: thread } });
+  expect(root.parentId).toBeUndefined();
+  expect(root.brief).toContain("WAKE_COORD");
+  // the person's own turn before it is a root of its own, the person's
+  expect(f.assignments().filter((row: any) => !row.parentId && row.assignee.destination.threadId === thread).map((row: any) => [row.id === root.id, row.requester.kind]))
+    .toEqual([[false, "person"], [true, "bot_turn"]]);
+  await expect.poll(() => f.assignments().find((row: any) => row.id === child.id)?.status, { timeout: 15_000 }).toBe("completed");
+  await expect.poll(() => f.assignments().find((row: any) => row.id === root.id)?.status, { timeout: 15_000 }).toBe("completed");
+  await expect.poll(async () => (await f.messages(thread)).some((message: any) => message.kind === "text" && message.text === "W2-FINAL: o Peer conferiu o deploy."), { timeout: 15_000 }).toBe(true);
+}), 90_000);
+
+// A wake's turn a restart cuts is never run again by the runtime (index.ts
+// outward port, isAutonomyRoot): its root ends failed(interrupted) at the
+// next start, its conversation says the turn was cut, once, and only its
+// lease (bot-autonomy.ts, resumeCutLeases) gives the wake back, which runs
+// once more, told it was interrupted.
+it("does not rerun a wake's turn a restart cut: its root ends interrupted, said once, and only its lease runs it again, once", () => autonomyRuntime(async f => {
+  expect(INTERRUPTED_PREFIX).toContain(RERUN_WAKE);
+  f.script(f.bot.id,
+    { key: "W-RERUN", match: [RERUN_WAKE, "WAKE_CUT"], reply: "W-RERUN: conferido depois do restart." },
+    { key: "W-CUT", match: ["WAKE_CUT"], readyFile: f.ready("wake-cut"), gateFile: f.gate("wake-cut"), reply: "never" },
+    { key: "U0", match: ["U0-WAKE-CUT"], steps: [{ tool: "wake_me", arguments: { minutes: 1, reason: "WAKE_CUT confira o deploy" } }], reply: "U0: volto em um minuto." });
+  const thread = f.bot.activeTaskId;
+  await f.say(thread, "U0-WAKE-CUT: confira o deploy daqui a um minuto.");
+  // the wake's turn runs, held at its gate, on a root of the bot's own turn
+  await expect.poll(() => existsSync(f.ready("wake-cut")), { timeout: 30_000 }).toBe(true);
+  const wakeRoot = () => f.assignments().find((row: any) => !row.parentId && row.requester.kind === "bot_turn" && row.assignee.destination.threadId === thread);
+  await expect.poll(() => wakeRoot()?.status, { timeout: 15_000 }).toBe("running");
+  const cut = wakeRoot();
+  // its wake is leased to the turn, on disk until the turn ends
+  expect(f.ledger().inFlight).toEqual([expect.objectContaining({ kind: "wake", threadId: thread })]);
+
+  await f.restart();
+
+  // the runtime ends the cut root instead of running it again
+  await expect.poll(() => f.assignments().find((row: any) => row.id === cut.id)?.status, { timeout: 30_000 }).toBe("failed");
+  expect(f.assignments().find((row: any) => row.id === cut.id)).toMatchObject({ outcome: "interrupted", executions: 1, restarts: 0 });
+  expect(f.events(cut.id).find((event: any) => event.kind === "restart_reconciled")?.detail).toBe("failed: outward action done");
+  // only the lease gives the wake back: one more turn, told it was interrupted
+  await expect.poll(() => f.turns(f.bot.id).map((record: any) => record.planKey), { timeout: 30_000 }).toEqual(["U0", "W-RERUN"]);
+  expect(ownTurnText(f.turn("W-RERUN").prompt)).toContain(RERUN_WAKE);
+  await expect.poll(async () => (await f.messages(thread)).some((message: any) => message.kind === "text" && message.text === "W-RERUN: conferido depois do restart."), { timeout: 15_000 }).toBe(true);
+  // that turn opened a root of its own; the cut one is not reused
+  await expect.poll(() => f.assignments().filter((row: any) => !row.parentId && row.requester.kind === "bot_turn" && row.assignee.destination.threadId === thread)
+    .map((row: any) => [row.id === cut.id, row.status]), { timeout: 15_000 }).toEqual([[true, "failed"], [false, "completed"]]);
+  // the conversation says once that the turn was cut; the runtime's own rerun never shows
+  expect((await f.chips(thread)).filter((name: string) => name === CUT_LINE)).toHaveLength(1);
+  expect((await f.chips(thread)).filter((name: string) => name === RERUN_CHIP)).toHaveLength(0);
+  // well after: no second run, the cut root still the one that failed, the lease spent
+  await new Promise((resolve) => setTimeout(resolve, 1_500));
+  expect(f.turns(f.bot.id).filter((record: any) => record.planKey === "W-RERUN")).toHaveLength(1);
+  expect(f.assignments().find((row: any) => row.id === cut.id)).toMatchObject({ status: "failed", executions: 1 });
+  expect(f.ledger().inFlight ?? []).toEqual([]);
+  expect((await f.chips(thread)).filter((name: string) => name === CUT_LINE)).toHaveLength(1);
+}), 120_000);

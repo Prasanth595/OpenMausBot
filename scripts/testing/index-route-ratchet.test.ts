@@ -7,13 +7,16 @@ const INDEX = readFileSync(new URL("../../server/index.ts", import.meta.url), "u
 
 const EXACT: Record<string, number> = {
   // Internal harness routes have no server/routes module yet; moving them out is the follow-up that lowers this.
-  // This fork's own routes (now, reports, worktrees, pipeline board, cc sessions, owner items, delegate) add 14, 6 and 1.
-  'path === "/': 177,
-  "path.match(": 95,
-  "path.startsWith(": 12,
-  ".exec(path)": 18,
-  ".test(path)": 1,
-  ".includes(path)": 3,
+  // Every PR that moves routes into server/routes lowers these to the counts this test prints.
+  // This fork's own routes that still live here (the /api/internal/* harness routes for owner
+  // items, wake, goals and cc sessions: 5 of the 'path === "/' matches) are counted in these
+  // numbers too, and so is one path.startsWith(homedir()) that is not a route.
+  'path === "/': 118,
+  "path.match(": 30,
+  "path.startsWith(": 11,
+  ".exec(path)": 8,
+  ".test(path)": 0,
+  ".includes(path)": 2,
 };
 
 const count = (needle: string) => INDEX.split(needle).length - 1;

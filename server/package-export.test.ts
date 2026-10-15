@@ -271,7 +271,7 @@ describe("whole-team export (package v2)", () => {
       room("foreign-only", "Only outsiders", ["other"]),
     ];
     const routines = [
-      routine("digest", "Daily digest", "scout", { continuity: true, attachments: [{ id: "a", kind: "file", name: "x.txt", path: "/private/x.txt", size: 1 }] }),
+      routine("digest", "Daily digest", "scout", { continuity: true, runOnStartup: true, attachments: [{ id: "a", kind: "file", name: "x.txt", path: "/private/x.txt", size: 1 }] }),
       routine("review", "Weekly review", "lead", { target: "room-goal", groupId: "desk", enabled: false }),
       routine("elsewhere", "Support digest", "other"),
     ];
@@ -301,7 +301,7 @@ describe("whole-team export (package v2)", () => {
     expect(pkg.rooms).toEqual([{ key: "deal-desk", name: "Deal desk", members: ["morgan", "scout"], bulletin: "Cite sources.",
       defaultResponder: { kind: "agent", agent: "morgan" } }]);
     expect(pkg.routines).toEqual([
-      expect.objectContaining({ key: "daily-digest", agent: "scout", continuity: true, enabledAfterInstall: true }),
+      expect.objectContaining({ key: "daily-digest", agent: "scout", continuity: true, runOnStartup: true, enabledAfterInstall: true }),
       expect.objectContaining({ key: "weekly-review", agent: "morgan", room: "deal-desk", runOn: "maus", enabledAfterInstall: false }),
     ]);
     expect(pkg.connections).toEqual([{ key: "crm", label: "crm", reason: "Used by Morgan, Scout",
@@ -315,6 +315,13 @@ describe("whole-team export (package v2)", () => {
       { part: "routines[daily-digest].attachments", reason: "files_not_shared" },
     ]);
     expect(result.filename).toBe("sales-desk-1.0.0.openmaus.json");
+  });
+
+  it("carries Record browser steps for the bots that have it on, and nothing for the rest", () => {
+    const input = fixture();
+    input.bots[1] = { ...input.bots[1]!, recordBrowserSteps: true };
+    const agents = createTeamPackageExport(input).document.package.agents;
+    expect(agents.map((agent) => agent.recordBrowserSteps)).toEqual([undefined, true]);
   });
 
   it("adds starter notes only when asked, within the caps", () => {

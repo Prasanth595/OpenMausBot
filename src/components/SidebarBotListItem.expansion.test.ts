@@ -99,8 +99,8 @@ describe("bot row expansion follows the visible thread tree", () => {
 
   it.each([
     [{ busy: true }, 'class="sr-only">Working…'],
-    [{ activity: "waiting-on-you" }, '<span class="truncate" data-bot-status="true">Waiting for you…'],
-    [{ waitingForTeammates: true }, '<span class="truncate" data-bot-status="true">Waiting on a teammate…'],
+    [{ activity: "waiting-on-you" }, '<span class="truncate" data-bot-status="true" dir="auto">Waiting for you…'],
+    [{ waitingForTeammates: true }, '<span class="truncate" data-bot-status="true" dir="auto">Waiting on a teammate…'],
   ] as const)("keeps sole-thread activity visible after a reveal (%j)", (status, label) => {
     fixture.state.revealThread = { threadId: "current", nonce: 1 };
     render({ ...bot, ...status });

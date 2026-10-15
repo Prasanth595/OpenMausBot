@@ -655,6 +655,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
       description: bot.description || undefined,
       ...(bot.soul ? { soul: bot.soul } : {}),
       appearance,
+      ...(bot.recordBrowserSteps === true ? { recordBrowserSteps: true } : {}),
     };
     const assignedPlaybooks = agentPlaybooks.get(bot.id);
     if (assignedPlaybooks?.length) agent.playbooks = assignedPlaybooks;
@@ -719,6 +720,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
       ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
       ...(routine.overlap === "queue" ? { overlap: "queue" as const } : {}),
       ...(!goal && routine.continuity ? { continuity: true } : {}),
+      ...(routine.runOnStartup ? { runOnStartup: true } : {}),
       enabledAfterInstall: routine.enabled,
     }];
   });

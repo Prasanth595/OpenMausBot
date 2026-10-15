@@ -26,11 +26,17 @@ export const ROUTINE_RESULT_CONTRACT = [
   "O servidor só conta a execução como concluída com feito e uma prova conferível, com nada a fazer dizendo o que foi conferido, ou com em andamento dizendo onde segue; sem a linha, ela fica como não verificada.",
 ].join("\n");
 
-/** Added to a teammate's request. */
+/** Added to a teammate's request (server/runtime/envelope.ts), and to the
+ * turn that resumes a teammate who handed part of it on. The request also
+ * says to end on `NEEDS INPUT:` when the person is needed; both cannot be
+ * the last line, so the question stays last and RESULTADO goes right
+ * before it: needsInputQuestion (runtime-coordinator.ts) parks on the
+ * question, and declaredResult reads the last RESULTADO line wherever it is. */
 export const HANDOFF_RESULT_CONTRACT = [
   "Ao terminar, a última linha da sua resposta precisa ser uma destas, exatamente neste formato:",
   ...OPTIONS,
   "- `RESULTADO: consulta — <resumo>` quando o pedido foi só opinião ou revisão, sem ação a executar.",
+  "Se você precisa da pessoa para seguir, a última linha é a do `NEEDS INPUT:` com a pergunta exata, e a linha RESULTADO vem logo antes dela; o pedido fica parado esperando a resposta e só é julgado quando você terminar sem pergunta.",
   "Quem pediu recebe o resultado como \"não verificado\" se faltar a linha ou a prova.",
 ].join("\n");
 
@@ -63,6 +69,12 @@ export function declaredResult(text: string): DeclaredResult {
     return { kind: "not-done", detail };
   }
   return { kind: "missing" };
+}
+
+/** A line that is, or tries to be, a RESULTADO line (well formed or not):
+ * what a NEEDS INPUT reader steps over when a teammate put it last. */
+export function isResultLine(line: string): boolean {
+  return LINE.test(line) || MENTIONS.test(line);
 }
 
 /** Where in-progress work goes on: a checkable reference, a PR or an issue
@@ -119,10 +131,18 @@ export function settleHandoff(text: string): { failed: boolean; text: string } {
   return { failed: false, text: note ? `[Servidor: ${note}]\n${text}` : text };
 }
 
-/** How a request settles, by who answered it: a teammate's answer (a node
- * with a parent) is judged by its line; the requester's own synthesis (the
- * root, which answers the person) and a room member's reply (rooms do not
- * hand members the contract yet) settle as they are. */
-export function settleHandoffNode(text: string, node: { parentId?: string; groupId?: string }): { failed: boolean; text: string } {
-  return !node.parentId || node.groupId ? { failed: false, text } : settleHandoff(text);
+/** Whose answer the contract judges, and so whose request carries it: a
+ * teammate's request (a node with a parent), work or a consultation. Not
+ * the requester's own synthesis (the root, which answers the person), not
+ * a one-way notice (nothing comes back to judge) and not a room member's
+ * reply (rooms do not hand members the contract yet). The runtime's
+ * HandoffView fits as it is. */
+export function judgedByResult(node: { parentId?: string; groupId?: string; mode?: string }): boolean {
+  return Boolean(node.parentId) && !node.groupId && node.mode !== "notify";
+}
+
+/** How a request settles, by who answered it (judgedByResult): a judged
+ * answer by its line, anything else as it is. */
+export function settleHandoffNode(text: string, node: { parentId?: string; groupId?: string; mode?: string }): { failed: boolean; text: string } {
+  return judgedByResult(node) ? settleHandoff(text) : { failed: false, text };
 }

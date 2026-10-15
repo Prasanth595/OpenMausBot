@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { declaredResult, hasCheckableProof, resultProblem, ROUTINE_RESULT_CONTRACT, HANDOFF_RESULT_CONTRACT, settleHandoff, settleHandoffNode } from "./result-contract.ts";
+import { declaredResult, hasCheckableProof, isResultLine, judgedByResult, resultProblem, ROUTINE_RESULT_CONTRACT, HANDOFF_RESULT_CONTRACT, settleHandoff, settleHandoffNode } from "./result-contract.ts";
 
 describe("the result a turn declares", () => {
   it("reads the last RESULTADO line: done with proof, partial, not done", () => {
@@ -57,6 +57,20 @@ describe("the result a turn declares", () => {
     expect(ROUTINE_RESULT_CONTRACT).toContain("RESULTADO: parcial —");
     expect(HANDOFF_RESULT_CONTRACT).toContain("RESULTADO: consulta");
   });
+
+  it("keeps the teammate's NEEDS INPUT question last, with RESULTADO right before it, and reads that line there", () => {
+    // the request also says to end on NEEDS INPUT (runtime/envelope.ts): both cannot be the last line
+    expect(HANDOFF_RESULT_CONTRACT).toContain("a última linha é a do `NEEDS INPUT:` com a pergunta exata, e a linha RESULTADO vem logo antes dela");
+    expect(declaredResult("Fiz a metade.\nRESULTADO: parcial — falta a conta\nNEEDS INPUT: Qual conta?")).toEqual({ kind: "partial", detail: "falta a conta" });
+  });
+
+  it("tells a RESULTADO line, well formed or not, from any other line", () => {
+    expect(isResultLine("RESULTADO: feito — PR #9528")).toBe(true);
+    expect(isResultLine("- **RESULTADO:** parcial: faltou o aviso")).toBe(true);
+    expect(isResultLine("RESULTADO — sei lá")).toBe(true);
+    expect(isResultLine("NEEDS INPUT: qual resultado: A ou B?")).toBe(false);
+    expect(isResultLine("O resultado ficou bom.")).toBe(false);
+  });
 });
 
 describe("how a teammate's answer settles a request", () => {
@@ -89,5 +103,14 @@ describe("which requests are judged", () => {
     expect(settleHandoffNode("Pronto, resumo para o dono.", { parentId: undefined })).toEqual({ failed: false, text: "Pronto, resumo para o dono." });
     expect(settleHandoffNode("Feito.", { parentId: "root", groupId: "room-1" })).toEqual({ failed: false, text: "Feito." });
     expect(settleHandoffNode("Feito.", { parentId: "root" }).text.startsWith("[Servidor: Resultado não verificado")).toBe(true);
+  });
+
+  it("judges work and consultations, not a one-way notice: nothing comes back from it to judge", () => {
+    expect(settleHandoffNode("Avisado.", { parentId: "root", mode: "notify" })).toEqual({ failed: false, text: "Avisado." });
+    expect(settleHandoffNode("RESULTADO: não feito — x", { parentId: "root", mode: "work" }).failed).toBe(true);
+    expect(judgedByResult({ parentId: "root", mode: "consult" })).toBe(true);
+    expect(judgedByResult({ parentId: "root", mode: "notify" })).toBe(false);
+    expect(judgedByResult({ parentId: "root", groupId: "room-1", mode: "work" })).toBe(false);
+    expect(judgedByResult({ mode: "work" })).toBe(false);
   });
 });

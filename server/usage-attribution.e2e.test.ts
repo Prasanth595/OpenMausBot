@@ -262,6 +262,7 @@ posixOnly("usage attribution e2e", () => {
     const send = async (sendId: string, extra: Record<string, unknown> = {}) => {
       const page = await api("GET", `/api/threads/${bot.threadId}/messages?limit=0`);
       return api("POST", `/api/bots/${bot.id}/messages/guarded`, {
+        // fork: the bot saved no level, so it runs at Ask, the relay's own default.
         threadId: bot.threadId, sendId, text: `guarded ${sendId}`, expectedActiveLeafId: page.body.activeLeafId, ...extra,
       });
     };
