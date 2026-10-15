@@ -425,6 +425,30 @@ describe("live browser control affordance", () => {
     expect(html).toContain("Restart browser…");
   });
 
+  const tab = (tabId: string) => ({ tabId, active: tabId === "t1", title: tabId, url: `https://${tabId}.example.test/` });
+
+  it("does not offer Close on the only tab, which the engine refuses to close", () => {
+    fixture.states = { 2: [tab("t1")], 4: true };
+    const html = render();
+    expect(html).toContain(">t1</button>");
+    expect(html).not.toContain('aria-label="Close t1"');
+  });
+
+  it("still closes one of two tabs", async () => {
+    fixture.states = { 2: [tab("t1"), tab("t2")], 4: true };
+    const nodes = renderElements();
+    expect(nodes.filter((node) => ["Close t1", "Close t2"].includes(node.props["aria-label"] ?? ""))).toHaveLength(2);
+    const cleanup = fixture.effects[2]!();
+    FixtureEventSource.instances[0]!.emit("ready", { viewerId: "current-viewer" });
+    click(nodes, "Close t2"); await settleAll();
+    expect(sentTypes()).toEqual(["take", "tab-close"]);
+    expect(api).toHaveBeenLastCalledWith("/api/bots/pepper/browser/action", {
+      method: "POST", body: JSON.stringify({ type: "tab-close", tabId: "t2", viewerId: "current-viewer" }),
+      timeoutMs: 120_000,
+    });
+    cleanup?.();
+  });
+
   const status = (html: string) => /<div role="status"([^>]*)>(.*?)<\/div><\/div><dialog/.exec(html)!;
 
   it("shows a status pill, not a control, over the page only while this viewer holds the browser", () => {
