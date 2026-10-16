@@ -307,7 +307,10 @@ function isHitTestFailure(error: unknown): boolean {
  * hint on every such error), and a menu sheet can still be settling under
  * the transcript on the first attempt, so one stale/covered attempt is not
  * proof the element is unusable. A `--ref` has nothing to re-resolve to, so
- * it retries the same ref after the same pause. */
+ * it retries the same ref after the same pause. A failed `type` replays only
+ * when the target reads empty: agent-browser writes character by character
+ * without undoing a partial attempt, so replaying over existing text would
+ * append the string a second time. */
 async function clickOrType(
   handle: UiHandle,
   values: Record<string, unknown>,
@@ -335,7 +338,21 @@ async function clickOrType(
       if (typeof values.name === "string" && values.name) {
         resolved = await resolveTarget(handle, values, verb);
       }
+      // An unreadable target is not proof that nothing was written, so it
+      // takes the same path as readable text: surface the failure.
+      if (verb === "type" && !(await targetIsEmpty(handle, env, resolved.target))) throw error;
     }
+  }
+}
+
+/** Whether the target's value reads as empty; a target `get value` cannot
+ * read (a ref the page has since replaced, say) is not proof of emptiness. */
+async function targetIsEmpty(handle: UiHandle, env: NodeJS.ProcessEnv, target: string): Promise<boolean> {
+  try {
+    const data = await agentBrowser(handle.binary, env, ["get", "value", target]);
+    return data.value === "";
+  } catch {
+    return false;
   }
 }
 
