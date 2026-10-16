@@ -221,6 +221,12 @@ export interface WireTask {
   ccAlerts?: WireCcAlert[];
   /** What the bot (or the server) listed as waiting on the person. */
   ownerPending?: WireOwnerPending[];
+  /** The cards (an approval, a provider question) still open here, oldest
+   * first. Said only while the conversation waits on the person (activity
+   * "waiting-on-you"), an empty list included: "Precisa de você" shows and
+   * answers them through the same /respond as the chat, and an empty list
+   * means nothing is left to answer there (already answered or expired). */
+  pendingRequests?: WireMessage[];
   /** Its Claude Code sessions not archived, CLI ones included (they are not in the app). */
   ccSessions?: WireCcSession[];
   threadId: string;

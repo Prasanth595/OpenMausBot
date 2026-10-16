@@ -325,6 +325,9 @@ export interface Task {
   ccAlerts?: WireCcAlert[];
   /** What waits on the person here (owner_pending). */
   ownerPending?: WireOwnerPending[];
+  /** The cards still open here while it waits on the person (an approval, a
+   * question), oldest first; an empty list: nothing left to answer. */
+  pendingRequests?: Message[];
   /** Its Claude Code sessions, CLI ones marked (they are not in the Claude app). */
   ccSessions?: WireCcSession[];
   threadId: string;
@@ -1250,6 +1253,8 @@ export type Action =
       rememberCommand?: boolean;
       /** Local UI recovery hook for voice flows. Never sent to the server. */
       onError?: (message: string) => void;
+      /** The server took the answer ("Precisa de você" awaits it). Never sent. */
+      onDone?: () => void;
     }
   | { type: "newTask"; botId: string; projectId?: string }
   | { type: "switchTask"; botId: string; threadId: string }
@@ -3321,6 +3326,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
               if (response?.settlementPending && typeof response.message === "string") {
                 showError(new Error(response.message));
               }
+              action.onDone?.();
             })
             .catch((error) => {
               // A settings flush failure deliberately stops the response;

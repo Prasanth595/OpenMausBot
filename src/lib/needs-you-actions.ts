@@ -2,8 +2,9 @@
 // server: answer it (a decision, the person's words, or a request for the
 // steps), or mark it resolved. The server sends the answer to the bot in the
 // item's conversation; the row updates through the bot frame it broadcasts.
-import { api, ApiError, type Action } from "@/state/store";
+import { api, ApiError, type Action, type Message } from "@/state/store";
 import type { NeedsYouItem } from "@/lib/needs-you";
+import { approvalDecision, pendingApprovals, type ApprovalChoiceId } from "@/components/PendingApproval";
 
 /** A decision carries the label the person saw with its position: the
  * server refuses it (409) when the bot rewrote the options since. */
@@ -88,4 +89,33 @@ export async function unsupersedeOwnerPending(item: NeedsYouItem): Promise<void>
 export async function resolveOwnerPending(item: NeedsYouItem): Promise<void> {
   if (!item.pendingId) return;
   await api(`/api/bots/${encodeURIComponent(item.botId)}/owner-pending/${encodeURIComponent(item.pendingId)}/resolve`, { method: "POST" });
+}
+
+/** A decision on an open card the conversation stopped on (an approval, a
+ * provider question), from "Precisa de você": the same `decideRequest` the
+ * chat's composer dispatches — POST /api/threads/:id/respond, no other way
+ * in. Settles when the server took it; the item leaves the list through the
+ * bot frame that follows (the conversation stops waiting). "Cancelar
+ * execução" stops the turn, as in the chat. */
+export type RequestChoice = { approval: ApprovalChoiceId } | { answer: string };
+export function answerRequest(item: NeedsYouItem, request: Message, choice: RequestChoice, dispatch: (action: Action) => void): Promise<void> {
+  const requestId = request.card?.requestId;
+  if (!requestId) return Promise.reject(new Error("not an open request"));
+  return new Promise((resolve, reject) => {
+    const settle = { onDone: () => resolve(), onError: (message: string) => reject(new Error(message)) };
+    if ("answer" in choice) {
+      dispatch({ type: "decideRequest", threadId: item.threadId, requestId, behavior: "answer", message: choice.answer, ...settle });
+      return;
+    }
+    const pending = pendingApprovals([request])[0];
+    if (!pending) { reject(new Error("not an approval")); return; }
+    // who asked: in a room the card's speaker, else the item's bot ("Sempre permitir" is theirs)
+    const decision = approvalDecision(pending, choice.approval, { id: request.from?.botId ?? item.botId });
+    if (!decision) {
+      dispatch({ type: "interrupt", botId: item.botId, threadId: item.threadId });
+      resolve();
+      return;
+    }
+    dispatch({ type: "decideRequest", threadId: item.threadId, ...decision, ...settle });
+  });
 }

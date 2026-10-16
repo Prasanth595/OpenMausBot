@@ -130,7 +130,7 @@ import { SidebarNow } from "./NowPanel";
 import { NeedsYouResolver } from "./NeedsYouResolver";
 import { needsYouItems, needsYouKey, nextAwaitingChange, startNeedsYouClock } from "@/lib/needs-you";
 import { OPEN_NEEDS_YOU_EVENT } from "@/lib/pipeline-board";
-import { askQuestionSteps, decisionReply, delegateOwnerPending, remindOwnerPending, replyToOwnerPending, resolveOwnerPending, sendToConversation, unsupersedeOwnerPending } from "@/lib/needs-you-actions";
+import { answerRequest, askQuestionSteps, decisionReply, delegateOwnerPending, remindOwnerPending, replyToOwnerPending, resolveOwnerPending, sendToConversation, unsupersedeOwnerPending } from "@/lib/needs-you-actions";
 import { openExternalLink } from "@/lib/app-links";
 import { ShortcutHint } from "./ShortcutHint";
 import { sidebarStamp, needsYouLabel } from "@/lib/message-stamp";
@@ -2547,6 +2547,8 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
         onRemind={remindOwnerPending}
         onDelegate={delegateOwnerPending}
         onUnsupersede={unsupersedeOwnerPending}
+        // the card the conversation stopped on: the same /respond as the chat's card
+        onRequest={(item, request, choice) => answerRequest(item, request, choice, dispatch)}
       />
 
       {universalPins && pinnedBots.length > 0 && (

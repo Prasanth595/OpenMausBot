@@ -292,6 +292,9 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect(bot.threadId).toBe(threadA);
     expect(bot.tasks.find((task: any) => task.threadId === threadB)?.activity).toBe("waiting-on-you");
     expect(bot.messages.some((message: any) => message.card?.requestId === "phone-approval-b")).toBe(false);
+    // "Precisa de você" gets each waiting conversation's open card with it, the background one included
+    expect(bot.tasks.find((task: any) => task.threadId === threadB)?.pendingRequests?.map((message: any) => message.card?.requestId)).toEqual(["phone-approval-b"]);
+    expect(bot.tasks.find((task: any) => task.threadId === threadA)?.pendingRequests?.map((message: any) => message.card?.requestId)).toEqual(["phone-approval-a"]);
     const background = await paired("GET", `/api/threads/${threadB}/messages?limit=50`);
     expect(background.body.messages.some((message: any) => message.card?.requestId === "phone-approval-b" && !message.card.answered)).toBe(true);
 
@@ -304,6 +307,9 @@ describe("independent bot tasks through the isolated control surface", () => {
     expect(answered.status).toBe(200);
     expect(answered.body.outcome).toBe("allowed-once");
     await expect.poll(() => answersB.some((answer) => answer.id === "phone-approval-b")).toBe(true);
+    // answered: the conversation no longer waits, and lists no card for the panel
+    await expect.poll(async () => (await paired("GET", "/api/bots?messages=0")).body.bots.find((candidate: any) => candidate.id === botId)
+      .tasks.find((task: any) => task.threadId === threadB)?.pendingRequests).toBeUndefined();
     expect(answersA).toEqual([]);
     expect((await botState(botId)).tasks.find((task: any) => task.taskId === threadA)?.activity).toBe("waiting-on-you");
     evidence.push({ phoneApproval: { botId, threadA, threadB, backgroundActivity: "waiting-on-you", staleOutcome: stale.body.outcome, displayedOutcome: answered.body.outcome } });

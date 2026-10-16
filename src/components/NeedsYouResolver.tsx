@@ -5,12 +5,16 @@ import {
   ListChecks, ListTodo, Loader2, MessageSquare, Repeat, Send, ShieldQuestion, Sparkles, X,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
-import { t } from "@/lib/i18n";
+import { activeLocale, t } from "@/lib/i18n";
 import {
   answerNotDelivered, answerStuck, answerTime, awaitingBot, botSilent, chosenOption, decisionsInOrder, delegated, dueAt, maybeResolved, waitingOnYou, needsYouBots, needsYouKey, needsYouSteps, negativeDecision, sortNeedsYou, waitingAge,
   type NeedsYouItem, type NeedsYouSort,
 } from "@/lib/needs-you";
 import { CHOICE_REPLACED } from "../../shared/owner-pending-title";
+import type { Message } from "@/state/store";
+import type { RequestChoice } from "@/lib/needs-you-actions";
+import { approvalChoices, pendingApprovals, PendingApprovalPanel, type ApprovalChoice } from "@/components/PendingApproval";
+import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 
 /** What a key press does on the resolution screen. Text fields keep their
  * keys: ⌘/Ctrl+Enter sends and Escape only leaves the field. Elsewhere ↑/↓
@@ -40,7 +44,7 @@ export function linkLabel(url: string): string {
   }
 }
 
-export type ResolverBusy = null | "reply" | "resolve" | "steps" | "recommend" | "remind" | "delegate" | "unsupersede" | `option:${number}`;
+export type ResolverBusy = null | "reply" | "resolve" | "steps" | "recommend" | "remind" | "delegate" | "unsupersede" | `option:${number}` | `request:${string}`;
 
 export interface NeedsYouResolverViewProps {
   items: NeedsYouItem[];
@@ -96,6 +100,11 @@ export interface NeedsYouResolverViewProps {
   /** "Talvez já resolvido" opened: a routine's items said once and let go (INSP-N22 r2 F2). Folded by default. */
   showMaybeResolved?: boolean;
   onToggleMaybeResolved?: () => void;
+  /** A decision on the card the conversation stopped on (an approval, a
+   * question): the same answer the chat's card sends. `label` names it in the notice. */
+  onRequest?: (item: NeedsYouItem, request: Message, choice: RequestChoice, label: string) => void;
+  /** May remember an exact command ("Sempre permitir este comando"); null while unknown. */
+  ownerOrAdmin?: boolean | null;
 }
 
 /** The visible list (filtered by bot, sorted) and the item on screen. */
@@ -422,6 +431,8 @@ function ItemDetail(props: NeedsYouResolverViewProps & { item: NeedsYouItem; pos
   // superseded by another item (R13-intake #1): no decision to pick, no command to copy
   const superseded = Boolean(item.superseded);
   const decisionsOpen = Boolean(item.options?.length) && !isDelegated && !superseded && (!awaiting || props.changingAnswer === needsYouKey(item));
+  // the card the conversation stopped on (an approval, a question): shown, and answered from here
+  const request = item.requests?.[0];
   return (
     <>
       <div className="flex items-center gap-1 border-b border-hairline/40 px-2 py-1.5 sm:px-3">
@@ -580,9 +591,13 @@ function ItemDetail(props: NeedsYouResolverViewProps & { item: NeedsYouItem; pos
           </section>
         )}
 
+        {request && <RequestDetail item={item} request={request} more={(item.requests?.length ?? 1) - 1} />}
+
         <section className="mt-5 sm:mt-6" aria-labelledby="needs-you-steps">
           <h3 id="needs-you-steps" className={sectionHeading}>{t("needsYou.screen.steps")}</h3>
-          {steps.length ? (
+          {request && !steps.length ? (
+            <RequestSteps item={item} request={request} />
+          ) : steps.length ? (
             <ol className="mt-2.5 flex flex-col gap-3">
               {steps.map((step, n) => (
                 <li key={n} className="flex gap-3">
@@ -669,6 +684,7 @@ function ItemDetail(props: NeedsYouResolverViewProps & { item: NeedsYouItem; pos
             <button type="button" onClick={props.onDismissError} className="shrink-0 rounded px-1 text-[12px] underline-offset-2 hover:underline">{t("needsYou.screen.dismiss")}</button>
           </div>
         )}
+        {request && props.onRequest ? <RequestDecisions {...props} item={item} request={request} /> : null}
         {decisionsOpen ? (
           // compact: at most ~40% of the window, scrolling inside (INSP-J2 #8); the
           // padding keeps the rings (chosen, focus: 2 px + 2 px offset) inside the clip (r2 N1)
@@ -743,6 +759,13 @@ export function decisionNotice(item: Pick<NeedsYouItem, "options" | "botName" | 
   const values = { label: item.options?.[option]?.label ?? "", name: item.botName, title: item.title };
   const resolved = Number((result as { resolved?: unknown } | undefined)?.resolved ?? 0) > 0;
   return t(resolved ? "needsYou.screen.decided" : "needsYou.screen.decidedWaiting", values);
+}
+
+/** What the screen says after a decision on the card the conversation stopped on. */
+export function requestNotice(item: Pick<NeedsYouItem, "botName">, request: Pick<Message, "from">, choice: RequestChoice, label: string): string {
+  const name = request.from?.name ?? item.botName;
+  if ("approval" in choice && choice.approval === "cancelTurn") return t("needsYou.approval.cancelled", { name });
+  return t("needsYou.approval.sent", { label, name });
 }
 
 /** What the screen says after the person's own words were sent — or, when the
@@ -988,6 +1011,97 @@ function Decisions(props: NeedsYouResolverViewProps & { item: NeedsYouItem; plac
   );
 }
 
+/** What the card the conversation stopped on asks, drawn as the chat's
+ * composer draws it: the action, the tool and the exact detail (never cut,
+ * it scrolls), and why it is held. */
+function RequestDetail({ item, request, more }: { item: NeedsYouItem; request: Message; more: number }) {
+  const approval = pendingApprovals([request])[0];
+  const name = request.from?.name ?? item.botName;
+  return (
+    <section className="mt-5 sm:mt-6" aria-labelledby="needs-you-request" data-resolver-request={request.card?.requestId}>
+      <h3 id="needs-you-request" className={sectionHeading}>{t(approval ? "needsYou.approval.heading" : "needsYou.question.heading", { name })}</h3>
+      <div className="mt-2 overflow-hidden rounded-xl border border-accent/40 bg-card">
+        {approval ? (
+          <PendingApprovalPanel pending={approval} count={1} index={0} locale={activeLocale()} />
+        ) : (
+          <div className="px-4 py-3">
+            <p className="text-[13.5px] font-medium text-ink">{request.card?.title}</p>
+            {request.card?.subtitle ? (
+              <pre tabIndex={0} className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-ink">{request.card.subtitle}</pre>
+            ) : null}
+          </div>
+        )}
+      </div>
+      {more > 0 && <p data-resolver-request-more="" className="mt-1.5 text-[12px] text-ink-secondary">{t("needsYou.approval.more", { count: more })}</p>}
+    </section>
+  );
+}
+
+/** The steps for a card the conversation stopped on: what to read, what to
+ * choose, and how to close it — never "abra a conversa" when it can be
+ * answered right here. */
+function RequestSteps({ item, request }: { item: NeedsYouItem; request: Message }) {
+  const name = request.from?.name ?? item.botName;
+  const approval = Boolean(request.card?.tool);
+  const answerable = approval || (!request.card?.questionRequest && Boolean(request.card?.options.length));
+  const lines = approval
+    ? [t("needsYou.approval.step1", { name }), t("needsYou.approval.step2"), t("needsYou.approval.step3", { name })]
+    : answerable ? [t("needsYou.question.step1", { name }), t("needsYou.question.step2")] : [t("needsYou.question.openToAnswer")];
+  return (
+    <ol className="mt-2.5 flex flex-col gap-3" data-resolver-request-steps="">
+      {lines.map((line, n) => (
+        <li key={n} className="flex gap-3">
+          <span aria-hidden="true" className="mt-px flex size-6 shrink-0 items-center justify-center rounded-full bg-accent/15 text-[12px] font-semibold tabular-nums text-accent-text">{n + 1}</span>
+          <p className="min-w-0 flex-1 text-[14px] leading-relaxed text-ink"><span className="sr-only">{t("needsYou.screen.stepNumber", { number: n + 1 })} </span>{line}</p>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+const REQUEST_LOOK: Record<ApprovalChoice["look"], string> = {
+  quiet: quietButton,
+  danger: "inline-flex items-center justify-center gap-1.5 rounded-lg border border-danger/50 px-3.5 py-2 text-[13px] text-danger outline-none hover:bg-danger/10 focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-40",
+  outline: "inline-flex items-center justify-center gap-1.5 rounded-lg border border-hairline px-3.5 py-2 text-[13px] text-ink outline-none hover:bg-raised focus-visible:ring-2 focus-visible:ring-focus disabled:pointer-events-none disabled:opacity-40",
+  primary: strongButton,
+};
+
+/** The card's own decisions, the ones the chat offers for it (the same list
+ * builds both — approvalChoices): picking one answers the card and the item
+ * leaves; "Negar" is how a request is closed without running it. A
+ * question offers its answers. No shortcut: a stray key never answers. */
+function RequestDecisions(props: NeedsYouResolverViewProps & { item: NeedsYouItem; request: Message }) {
+  const { item, request, busy } = props;
+  const approval = pendingApprovals([request])[0];
+  const card = request.card!;
+  const asker = { id: request.from?.botId ?? item.botId, name: request.from?.name ?? item.botName };
+  const choices: Array<{ key: string; label: string; title?: string; look: ApprovalChoice["look"]; disabled?: boolean; choice: RequestChoice }> = approval
+    ? approvalChoices(approval, { bot: asker, ownerOrAdmin: props.ownerOrAdmin ?? null }).map((each) => ({ key: each.id, label: each.label, title: each.title, look: each.look, disabled: each.disabled, choice: { approval: each.id } }))
+    : card.questionRequest ? [] : card.options.map((option, n) => ({ key: `answer-${n}`, label: option, look: n === 0 ? "primary" as const : "outline" as const, choice: { answer: option } }));
+  if (!choices.length) return null;
+  return (
+    <div role="group" aria-labelledby="needs-you-request-decide" data-resolver-request-decisions="" className="mb-2.5">
+      <p id="needs-you-request-decide" className={cn(sectionHeading, "mb-1.5")}>{t("needsYou.screen.decide")}</p>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {choices.map((each) => (
+          <button
+            key={each.key}
+            type="button"
+            data-resolver-request-choice={each.key}
+            title={each.title}
+            disabled={busy !== null || each.disabled}
+            onClick={() => props.onRequest?.(item, request, each.choice, each.label)}
+            className={cn(REQUEST_LOOK[each.look], each.look === "quiet" && "mr-auto")}
+          >
+            {busy === `request:${each.key}` ? <Loader2 size={14} aria-hidden="true" className="animate-spin" /> : null}
+            {each.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function NoSteps(props: NeedsYouResolverViewProps & { item: NeedsYouItem }) {
   const { item, busy, now } = props;
   // a bot's bare question the server asked it to register as an item (lot J2): it is coming, and the question stays answerable
@@ -1050,7 +1164,7 @@ export const STEPS_ASK_AGAIN_AFTER_MS = 15 * 60_000;
 /** The resolution screen: portalled over the app, focus held inside and
  * given back on close, keys handled, every action awaited with its own
  * loading and error state. */
-export function NeedsYouResolver({ open, items, initialKey, now: fixedNow, onClose, onOpenConversation, onOpenLink, onCopy, onDecide, onReply, onAskSteps, onAskRecommend, onRemind, onResolve, onDelegate, onUnsupersede }: {
+export function NeedsYouResolver({ open, items, initialKey, now: fixedNow, onClose, onOpenConversation, onOpenLink, onCopy, onDecide, onReply, onAskSteps, onAskRecommend, onRemind, onResolve, onDelegate, onUnsupersede, onRequest }: {
   open: boolean;
   items: NeedsYouItem[];
   initialKey?: string | null;
@@ -1070,7 +1184,10 @@ export function NeedsYouResolver({ open, items, initialKey, now: fixedNow, onClo
   /** "Delegar a um agente" (lote del): the server opens a session for the item. */
   onDelegate?: (item: NeedsYouItem) => Promise<unknown>;
   onUnsupersede?: (item: NeedsYouItem) => Promise<unknown>;
+  /** Answers the card the conversation stopped on, the way the chat does. */
+  onRequest?: (item: NeedsYouItem, request: Message, choice: RequestChoice) => Promise<unknown>;
 }) {
+  const ownerOrAdmin = useOwnerOrAdmin();
   const [selectedKey, setSelectedKey] = useState<string | null>(initialKey ?? null);
   const [fallbackIndex, setFallbackIndex] = useState(0);
   const [botFilter, setBotFilter] = useState<string | null>(null);
@@ -1285,6 +1402,12 @@ export function NeedsYouResolver({ open, items, initialKey, now: fixedNow, onClo
           onDismissNotice={() => setNotice(null)}
           showMaybeResolved={showMaybeResolved}
           onToggleMaybeResolved={() => setShowMaybeResolved((open) => !open)}
+          ownerOrAdmin={ownerOrAdmin}
+          onRequest={onRequest ? (item, request, choice, label) => void run(
+            `request:${"approval" in choice ? choice.approval : `answer-${request.card?.options.indexOf(choice.answer) ?? 0}`}`,
+            () => onRequest(item, request, choice),
+            requestNotice(item, request, choice, label),
+          ) : undefined}
         />
       </div>
     </div>,

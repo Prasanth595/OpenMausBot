@@ -1,11 +1,12 @@
 // Everything that waits on the person, across all bots: approvals a bot
 // stopped for, goals that asked, bots whose last reply asked something. One
 // list, oldest first — what has waited longest is what to answer first.
-import type { Bot, Task } from "@/state/store";
+import { visibleMessages, type Bot, type Message, type Task } from "@/state/store";
 import { t } from "@/lib/i18n";
 import type { WireOwnerPending } from "../../shared/wire";
 import { isMentionOnly, stripLeadingMentions } from "../../shared/owner-pending-title";
 import { displayThreadTitle, isHandoffTitle } from "@/lib/thread-title";
+import { toolLabel } from "@/components/ApprovalCard";
 
 export type NeedsYouStep = NonNullable<WireOwnerPending["steps"]>[number];
 export type NeedsYouOption = NonNullable<WireOwnerPending["options"]>[number];
@@ -57,6 +58,38 @@ export interface NeedsYouItem {
   superseded?: NonNullable<WireOwnerPending["superseded"]>;
   /** Its commands write a fixed sheet row and are older than 6 h. */
   rowWarning?: string;
+  /** An approval (or a provider question) the conversation stopped on: the
+   * cards still open there, oldest first — the panel shows what each asks
+   * and offers the same decisions as the chat. Absent: not known (a server
+   * older than this field), the panel falls back to "Abrir conversa". */
+  requests?: Message[];
+}
+
+/** A card still waiting on an answer (an approval, a provider question):
+ * answered, dismissed and expired ones are settled. */
+export const openRequestCard = (message: Pick<Message, "kind" | "card">): boolean =>
+  message.kind === "options" && Boolean(message.card?.requestId) && !message.card?.answered && !message.card?.dismissed && !message.card?.expired;
+
+/** The open cards of a conversation that waits on the person: what the chat
+ * holds when it is the bot's open conversation (live, settles the moment it
+ * is answered there), else what the server said with the conversation.
+ * null: not known. An empty list: nothing left to answer there. */
+export function openRequests(bot: Pick<Bot, "threadId" | "messages" | "activeLeafId">, task: Pick<Task, "threadId" | "pendingRequests">): Message[] | null {
+  const chat = task.threadId === bot.threadId && bot.messages?.length ? visibleMessages(bot) : null;
+  const live = chat?.filter(openRequestCard) ?? null;
+  if (live?.length) return live;
+  // else the server's list — over a chat that shows nothing open too: the card may not have arrived
+  // yet — but never a card the chat already settled (answered there a moment before the next frame)
+  const settled = new Set((chat ?? []).filter((message) => message.card?.requestId && !openRequestCard(message)).map((message) => message.card!.requestId!));
+  return task.pendingRequests?.filter((message) => openRequestCard(message) && !settled.has(message.card!.requestId!)) ?? null;
+}
+
+/** What an open card asks, as the list's title: "<bot> quer <ação>" for an
+ * approval, the question for a question. */
+export function requestTitle(request: Message, botName: string): string {
+  const card = request.card!;
+  if (!card.tool) return card.title.trim() || t("needsYou.answerBot", { name: botName });
+  return t("approval.card.namedWantsTo", { name: botName, action: toolLabel(card.tool) });
 }
 
 /** A routine's item said once and let go (INSP-N22 r2 F2): shown apart, folded, never counted as waiting on the person. */
@@ -224,15 +257,23 @@ export function needsYouItems(bots: readonly Bot[]): NeedsYouItem[] {
       // the conversation's own line (an approval, a question): never from a routine's run nor an archived one
       if (threadKind) continue;
       const approval = task.activity === "waiting-on-you";
-      if (!approval && task.goalNeedsInput !== true) continue;
+      // an approval answered (or expired) already, in the chat or anywhere: nothing left to do here
+      const requests = approval ? openRequests(bot, task) : null;
+      const waiting = approval && (requests === null || requests.length > 0);
+      if (!waiting && task.goalNeedsInput !== true) continue;
       // the bot's question says what it waits for better than the conversation's title
       const ask = task.goalNeedsInputAsk?.trim();
+      // an approval says the action it waits on, never only who asks (the conversation is named under it)
+      const first = waiting && requests?.length ? requests[0]! : null;
       // a teammate's handoff conversation ("@Chief of Staff · work") reads as one, never "· work" (R11-visual N9)
-      const title = ask || (isHandoffTitle(task.title) ? displayThreadTitle(task.title, botNames) : needsYouTitle(task.title, { botName: bot.name, botNames }));
+      const title = first ? requestTitle(first, first.from?.name ?? bot.name)
+        : ask || (isHandoffTitle(task.title) ? displayThreadTitle(task.title, botNames) : needsYouTitle(task.title, { botName: bot.name, botNames }));
       items.push({
-        botId: bot.id, botName: bot.name, threadId: task.threadId, threadTitle: displayThreadTitle(task.title, botNames), title, since: task.goalNeedsInputSince ?? task.updatedAt ?? task.createdAt, approval,
+        botId: bot.id, botName: bot.name, threadId: task.threadId, threadTitle: displayThreadTitle(task.title, botNames), title,
+        since: first?.at ?? task.goalNeedsInputSince ?? task.updatedAt ?? task.createdAt, approval: waiting,
         // the server asked the bot to register the question as an item with steps (lot J2): the screen says so
-        ...(!approval && task.goalNeedsInputStepsAskedAt ? { stepsRequestedAt: task.goalNeedsInputStepsAskedAt } : {}),
+        ...(!waiting && task.goalNeedsInputStepsAskedAt ? { stepsRequestedAt: task.goalNeedsInputStepsAskedAt } : {}),
+        ...(waiting && requests?.length ? { requests } : {}),
       });
     }
   }

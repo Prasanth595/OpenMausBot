@@ -11651,7 +11651,18 @@
       "mcp.auth.pasteBackHint": "0dbfd2f815d9251f0d5a5b628c00c79d5479b9a012fdf859bf34e21ebe15b866",
       "report.preset.hour24": "926c889a56c684d7f6d50c5f15dd7b57079c9264ce9a1c0eb4055c1cd5b635fd",
       "report.preset.day7": "f50b7a5adc2e24b15593405d325f7833165a59703d0c9194d915d921fac8734e",
-      "report.preset.day15": "b5fef8643058feb5c1cf4c4d9bc0af9d3cfe2210325d7ec4c669ce1cc05fe84f"
+      "report.preset.day15": "b5fef8643058feb5c1cf4c4d9bc0af9d3cfe2210325d7ec4c669ce1cc05fe84f",
+      "needsYou.approval.heading": "5e0d9b9787c5c3356f62951b241719c2616e0ee08bb9a817a80237d9532fa703",
+      "needsYou.question.heading": "523a89a4767808bec6fc5858cb35cb78bb3435aa624f1752407fc97c7d0fb7eb",
+      "needsYou.approval.step1": "4d76e16018644cf8c7f621ae6f113c75ac98cc80c32dd932d1563f5d93905714",
+      "needsYou.approval.step2": "2b59047277882f5405b8be6d4836e7057fe45c686924bdacf5c43aed4d2ba926",
+      "needsYou.approval.step3": "0acdc08a5b484af4cfec7f22a1a862760fdaf1e7cd088f900a783bb7f5c0a963",
+      "needsYou.question.step1": "5fc4ea5bde5a694cd7abf41e5d1cd374a53ad7d11e621a0aaa46af86ffd3a7ff",
+      "needsYou.question.step2": "ac5dd5a6f53f8dfe4e5c00a464405c137c953c8bc1b8dfabc6717765d67f1991",
+      "needsYou.question.openToAnswer": "6618258627be912bdf8c9ee480aaf62b749fa573c59323351e4eb5894cf7fab3",
+      "needsYou.approval.more": "38b4ad0d321284b60bc227cee76a501b8d31b60a1e099c25b9e9fc10cbdc43e5",
+      "needsYou.approval.sent": "c80f33ff9b916baf269dc4122e0643b1951284ed09634db011bc7a35727cb908",
+      "needsYou.approval.cancelled": "c78331e147541699f6062176cf1d57f539004177765e7cf09fb4bab513a08690"
     },
     "zh": {
       "pro.getPro": "12657108fe5682e937f179e5f394191b99fad614dbb3bf8759376d5da35d4992",
