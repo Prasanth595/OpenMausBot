@@ -230,11 +230,12 @@ export function CallTargetButton({
     startCall(targetId);
   };
 
-  const popoverOpen = helpOpen || keyPopover;
+  const popoverOpen = helpOpen || startPrompt;
   useEffect(() => {
     if (!popoverOpen) return;
-    // The help sheet and the key prompt are plain absolute sheets: an outside
-    // press or Escape puts them away. The mode menu brings its own dismissal.
+    // The help sheet, the key prompt and the Pro card are plain absolute
+    // sheets: an outside press or Escape puts them away. The mode menu brings
+    // its own dismissal.
     const closeOnOutsideClick = (event: PointerEvent) => {
       if (event.target instanceof Node && !rootRef.current?.contains(event.target)) closePopovers();
     };
