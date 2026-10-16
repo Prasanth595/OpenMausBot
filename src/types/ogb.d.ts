@@ -125,6 +125,8 @@ const __APP_VERSION__: string;
       cloudLending?: { open(): Promise<void> };
       /** Settings on the person's own Cloud: the plan, read only. */
       cloudPlan?: import("../../electron/cloud-account.mjs").CloudPlanBridge;
+      desktopNotices?: import("../../electron/desktop-prefs.mjs").DesktopNoticesBridge;
+      desktopAnalytics?: import("../../electron/desktop-prefs.mjs").DesktopAnalyticsBridge;
       companyBackups?: {
         state(): Promise<CompanyBackupState>;
         list(): Promise<{ backups: CompanyBackupEntry[]; usedBytes: number; limits: { ownerQuotaBytes: number; retainedSnapshots: number } }>;
@@ -137,7 +139,8 @@ const __APP_VERSION__: string;
         onState(callback: (state: CompanyBackupState) => void): () => void;
       };
       workspaces?: {
-        state: () => Promise<{ local: boolean; name: string; origin?: string }>;
+        /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up). */
+        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string }>;
         /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
         menu: (options?: { from?: "howto" }) => Promise<void>;
       };
@@ -157,6 +160,8 @@ const __APP_VERSION__: string;
             origin?: string;
             dataDir?: string;
             missing?: boolean;
+            /** One of the six Cloud colours (environments.cjs ENTRY_COLORS). */
+            color?: string;
           }>;
         }>;
         /** Local targets answer {ok, error?} (error strings are an open set); remote ones answer nothing. */
