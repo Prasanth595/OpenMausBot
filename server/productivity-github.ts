@@ -52,7 +52,7 @@ export interface GhPr {
   /** Of those, the ones it says it closes (Closes/Fixes/Resolves/Fecha/Corrige/Encerra #N),
    * not only cites (Refs #N): a "Refs" PR delivers part of an issue. */
   fixes?: number[];
-  /** Its title or text says it ships a part ("Fase 0 do #9071", "parte 2", "entrega parcial"). */
+  /** Its title or text says it ships a part ("Fase 0 do 9071", "parte 2", "entrega parcial"). */
   partial?: true;
   labels: string[];
 }
@@ -139,13 +139,13 @@ export function migrateGhCache(cache: GhCache): { cache: GhCache; migrated: bool
   };
 }
 
-// English and the repository's Portuguese (#9190's "Fecha #9185" was no reference)
+// English and the repository's Portuguese (9190's "Fecha 9185" was no reference)
 const CLOSING = String.raw`close[sd]?|fix(?:e[sd])?|resolve[sd]?|fecha[rm]?|fechou|corrige[m]?|corrigir|corrigiu|resolvido|resolvida|resolveu|encerra[rm]?|encerrou`;
 const referenceOf = (words: string) => new RegExp(String.raw`(?<![\p{L}])(?:${words})(?![\p{L}])[\s:]*((?:#\d+(?:\s*(?:,|;|&|\band\b|\be\b)\s*)?)+)`, "giu");
 const REFERENCE = referenceOf(`${CLOSING}|refs?|references?`);
 const CLOSING_REFERENCE = referenceOf(CLOSING);
 
-/** A PR that says it ships a part of its issue: "Fase 0 do #9071", "parte 2", "etapa 1 de 3",
+/** A PR that says it ships a part of its issue: "Fase 0 do 9071", "parte 2", "etapa 1 de 3",
  * "degrau 2", "entrega parcial", "primeira parte". Not "parcialmente aplicadas" (a bug's
  * description) nor "fila e etapa" (a ticket's stage): a number or the phrase itself. */
 export function partialDelivery(text: string | null | undefined): boolean {
@@ -153,7 +153,7 @@ export function partialDelivery(text: string | null | undefined): boolean {
 }
 
 /** Issue numbers a text names explicitly: "Closes #12", "Fixes: #3, #4", "Refs #9",
- * "Fecha #9185", "Corrige #3" — or, `closing`, only those it says it closes (not "Refs").
+ * "Fecha 9185", "Corrige 3" — or, `closing`, only those it says it closes (not "Refs").
  * A bare "#12" is not a reference (it may be a PR, a table row, a sentence). */
 export function explicitReferences(text: string | null | undefined, options: { closing?: boolean } = {}): number[] {
   if (!text) return [];

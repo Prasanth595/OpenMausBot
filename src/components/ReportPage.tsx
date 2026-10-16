@@ -5,6 +5,7 @@
 // the PRs and issues each one carried, the backlog now, the bots' effort, and
 // where the data comes from (and where it does not exist). "Exportar para o
 // board" downloads the same report as PDF or Markdown, numbers only.
+import { Select } from "./Select";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   AlertTriangle, BarChart3, ChevronDown, ChevronRight, Download, FileText, Info, Loader2, Minus, RefreshCw, TrendingDown, TrendingUp,
@@ -106,7 +107,7 @@ export function PeriodBar({ query, onChange, report }: { query: ReportQuery; onC
       </fieldset>
       <label className="flex flex-col gap-1 text-[12px] font-medium text-ink-secondary">
         {t("report.window")}
-        <select value={isClosed ? "closed" : custom ? "custom" : String(query.count ?? defaultCount(query.granularity))}
+        <Select value={isClosed ? "closed" : custom ? "custom" : String(query.count ?? defaultCount(query.granularity))}
           onChange={(event) => {
             const value = event.target.value;
             if (value === "closed") onChange({ granularity: query.granularity, from: closed.from, to: closed.to });
@@ -115,12 +116,11 @@ export function PeriodBar({ query, onChange, report }: { query: ReportQuery; onC
               const [granularity, count] = value.includes(":") ? value.split(":") as [Granularity, string] : [query.granularity, value];
               onChange({ granularity, count: Number(count) });
             }
-          }}
-          className="h-9 rounded-lg border border-hairline/60 bg-panel px-2.5 text-[13px] font-normal text-ink">
+          }}>
           {PRESETS[query.granularity].map((preset) => <option key={presetValue(preset)} value={presetValue(preset)}>{t(preset.label)}</option>)}
           {query.granularity !== "hour" && <option value="closed">{t("report.preset.closedMonth")}</option>}
           <option value="custom">{t("report.preset.custom")}</option>
-        </select>
+        </Select>
       </label>
       {custom && (
         <form className="flex flex-wrap items-end gap-2" onSubmit={(event) => { event.preventDefault(); if (from && to) onChange({ granularity: query.granularity, from: normalize(from), to: normalize(to) }); }}>
