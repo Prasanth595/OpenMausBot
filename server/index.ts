@@ -14734,7 +14734,8 @@ async function deleteBotWithLifecycle(botId: string, revalidate: () => void = ()
           }
           if (localVmCleanup) {
             if (localVmCleanup.removeContainer) {
-              await containerComputerAction("remove", undefined, undefined, localVmCleanup.target);
+              // The bot and its durable folder go together, so there is no Firefox profile to keep.
+              await containerComputerAction("remove", undefined, undefined, localVmCleanup.target, { preserveBrowserProfile: false });
             }
             await removeDirectory(localVmCleanup.target.workspaceDir, { recursive: true, force: true });
             localVmSeen.delete(localVmCleanup.target.key);

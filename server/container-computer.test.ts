@@ -808,7 +808,7 @@ describe("Cua integration", () => {
     expect(dockerfile).toContain("6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2");
     expect(dockerfile).toContain("/usr/local/share/licenses/noto-cjk/OFL.txt");
     expect(dockerfile).toContain("fc-cache -f");
-    expect(IMAGE_LAYER_VERSION).toBe("5");
+    expect(IMAGE_LAYER_VERSION).toBe("6");
   });
 
   it("rejects a zero-byte OpenSSL base image before the wheel download needs curl", () => {
@@ -917,8 +917,13 @@ describe("containerComputerAction", () => {
       }),
       [`docker rm -f ${CONTAINER}`]: "",
     });
+    const cp = fake.run;
+    const run: CommandRunner = async (command, args, timeout) => {
+      if (command === "docker" && args[0] === "cp") throw new Error("Could not find the file /home/cua/.mozilla in container");
+      return cp(command, args, timeout);
+    };
 
-    await containerComputerAction("remove", fake.run, "linux");
+    await containerComputerAction("remove", run, "linux");
 
     expect(fake.calls).toContain(`docker rm -f ${CONTAINER}`);
   });

@@ -2,7 +2,7 @@
 import { execFile } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { lstatSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -28,7 +28,7 @@ export const BASE_IMAGE = `${BASE_IMAGE_REPOSITORY}@${BASE_IMAGE_DIGEST}`;
 // localhost/ is explicit: Podman prepends it to unqualified build tags and may then resolve the name on Docker Hub.
 // Image and container labels, not this mutable tag, decide compatibility.
 export const IMAGE_REPOSITORY = "localhost/openmausbot/cua-local-vm";
-export const IMAGE_LAYER_VERSION = "5";
+export const IMAGE_LAYER_VERSION = "6";
 export const IMAGE_LAYER_LABEL = "com.openmausbot.image-layer";
 export const IMAGE = `${IMAGE_REPOSITORY}:driver-${CUA_DRIVER_VERSION}-v${IMAGE_LAYER_VERSION}`;
 export const CONTAINER = "openmausbot-computer";
@@ -39,6 +39,11 @@ export const WORKSPACE_LABEL = "com.openmausbot.workspace";
 export const TARGET_LABEL = "com.openmausbot.local-vm-target";
 export const VM_WORKSPACE_DIR = join(DATA_DIR, "vm-home");
 export const VM_WORKSPACE_GUEST = "/home/cua/workspace";
+/** Firefox ESR is the desktop's only browser; layer 6 keeps its profile here, under the durable folder. */
+export const VM_BROWSER_PROFILES_DIR = ".browser-profiles";
+export const VM_FIREFOX_PROFILE_DIR = "mozilla";
+/** The first image layer whose desktop links ~/.mozilla into the durable folder. */
+export const FIREFOX_PROFILE_LAYER = 6;
 export const DISPLAY = ":1";
 export const CUA_SOCKET = "/run/user/1000/openmausbot-cua.sock";
 export const CUA_EXECUTABLE = "/usr/local/libexec/openmausbot/cua-driver";
@@ -154,16 +159,16 @@ RUN printf '%s\\n' \\
       '#!/bin/sh' \\
       'set -eu' \\
       'workspace=${VM_WORKSPACE_GUEST}' \\
-      'profiles="$workspace/.browser-profiles"' \\
-      'mkdir -p "$profiles/google-chrome" "$profiles/chromium" "$HOME/.config"' \\
-      'if ! chmod 0700 "$workspace" "$profiles" "$profiles/google-chrome" "$profiles/chromium" 2>/dev/null; then' \\
-      '  for directory in "$workspace" "$profiles" "$profiles/google-chrome" "$profiles/chromium"; do' \\
+      'profiles="$workspace/${VM_BROWSER_PROFILES_DIR}"' \\
+      'mkdir -p "$profiles/google-chrome" "$profiles/chromium" "$profiles/${VM_FIREFOX_PROFILE_DIR}" "$HOME/.config"' \\
+      'if ! chmod 0700 "$workspace" "$profiles" "$profiles/google-chrome" "$profiles/chromium" "$profiles/${VM_FIREFOX_PROFILE_DIR}" 2>/dev/null; then' \\
+      '  for directory in "$workspace" "$profiles" "$profiles/google-chrome" "$profiles/chromium" "$profiles/${VM_FIREFOX_PROFILE_DIR}"; do' \\
       '    test -r "$directory" && test -w "$directory" && test -x "$directory"' \\
       '  done' \\
       'fi' \\
       'migrate_profile() {' \\
       '  name="$1"' \\
-      '  source="$HOME/.config/$name"' \\
+      '  source="$2"' \\
       '  target="$profiles/$name"' \\
       '  if [ -d "$source" ] && [ ! -L "$source" ] && [ -z "$(find "$target" -mindepth 1 -print -quit)" ]; then' \\
       '    cp -a "$source"/. "$target"/' \\
@@ -171,9 +176,10 @@ RUN printf '%s\\n' \\
       '  rm -rf "$source"' \\
       '  ln -s "$target" "$source"' \\
       '}' \\
-      'migrate_profile google-chrome' \\
-      'migrate_profile chromium' \\
-      'find "$profiles" \\( -name SingletonLock -o -name SingletonSocket -o -name SingletonCookie -o -name .parentlock \\) -delete' \\
+      'migrate_profile google-chrome "$HOME/.config/google-chrome"' \\
+      'migrate_profile chromium "$HOME/.config/chromium"' \\
+      'migrate_profile ${VM_FIREFOX_PROFILE_DIR} "$HOME/.mozilla"' \\
+      'find "$profiles" \\( -name SingletonLock -o -name SingletonSocket -o -name SingletonCookie -o -name .parentlock -o \\( -name lock -type l \\) \\) -delete' \\
       > /usr/local/bin/prepare-openmausbot-workspace.sh \\
     && chmod 0755 /usr/local/bin/prepare-openmausbot-workspace.sh
 RUN printf '%s\\n' \\
@@ -972,11 +978,92 @@ async function prepareManagedImage(runtime: Runtime, runner: CommandRunner): Pro
   }
 }
 
+export type FirefoxProfileRescue =
+  | { kind: "copied" }
+  | { kind: "skipped"; reason: "current-layer" | "already-durable" | "no-profile" | "unsupported-runtime" };
+
+async function directoryHasEntries(path: string): Promise<boolean> {
+  try {
+    return (await readdir(path)).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function containerLayer(stdout: string, runtime: Runtime): number | null {
+  try {
+    const parsed = JSON.parse(stdout) as Array<{
+      Config?: { Labels?: Record<string, string> };
+      configuration?: { labels?: Record<string, string> };
+    }>;
+    const labels = runtime === "container" ? parsed[0]?.configuration?.labels : parsed[0]?.Config?.Labels;
+    const value = Number.parseInt(labels?.[IMAGE_LAYER_LABEL] ?? "", 10);
+    return Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function missingInContainer(error: unknown): boolean {
+  const failure = error as { stderr?: unknown; message?: unknown };
+  const text = `${typeof failure?.stderr === "string" ? failure.stderr : ""} ${typeof failure?.message === "string" ? failure.message : ""}`;
+  return /could not find the file|no such file or directory|no such container:path/i.test(text);
+}
+
+/**
+ * Before layer 6, Firefox kept its profile (and so every signed-in session) in the container's own ~/.mozilla, which a
+ * remove would destroy. Copy it into the durable folder first, through a staging directory renamed into place, but only
+ * when the durable Firefox profile is still empty: a profile already there (or one a bot made beside it, such as
+ * firefox-qa) is never overwritten. Nothing secret is read: the files are copied byte for byte by the runtime.
+ */
+export async function rescueFirefoxProfile(
+  runtime: Runtime,
+  target: LocalVmTarget,
+  runner: CommandRunner = sh,
+  running = false,
+): Promise<FirefoxProfileRescue> {
+  if (runtime === "container") return { kind: "skipped", reason: "unsupported-runtime" };
+  const { stdout } = await runner(runtime, ["inspect", target.containerName], 8_000);
+  const layer = containerLayer(stdout, runtime);
+  if (layer !== null && layer >= FIREFOX_PROFILE_LAYER) return { kind: "skipped", reason: "current-layer" };
+  const profiles = join(target.workspaceDir, VM_BROWSER_PROFILES_DIR);
+  const durable = join(profiles, VM_FIREFOX_PROFILE_DIR);
+  if (await directoryHasEntries(durable)) return { kind: "skipped", reason: "already-durable" };
+  if (running) {
+    // Let Firefox write its session and cookies out before the copy; the container is about to go anyway.
+    await runner(runtime, [
+      "exec", "-u", "cua", target.containerName, "sh", "-c",
+      "pkill -TERM -x firefox-esr 2>/dev/null || pkill -TERM -x firefox 2>/dev/null || true; " +
+        "for i in 1 2 3 4 5 6 7 8 9 10; do pgrep -x firefox-esr >/dev/null 2>&1 || pgrep -x firefox >/dev/null 2>&1 || break; sleep 0.5; done",
+    ], 15_000).catch(() => null);
+  }
+  await mkdir(profiles, { recursive: true, mode: 0o700 });
+  const staging = join(profiles, `.mozilla-rescue-${randomBytes(6).toString("hex")}`);
+  try {
+    try {
+      await runner(runtime, ["cp", `${target.containerName}:/home/cua/.mozilla/.`, staging], 5 * 60_000);
+    } catch (error) {
+      if (missingInContainer(error)) return { kind: "skipped", reason: "no-profile" };
+      throw error;
+    }
+    if (!(await directoryHasEntries(staging))) return { kind: "skipped", reason: "no-profile" };
+    // A durable profile may have appeared meanwhile (another action); never replace it.
+    if (await directoryHasEntries(durable)) return { kind: "skipped", reason: "already-durable" };
+    await rmdir(durable).catch(() => undefined);
+    await rename(staging, durable);
+    await chmod(durable, 0o700).catch(() => undefined);
+    return { kind: "copied" };
+  } finally {
+    await rm(staging, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 export async function containerComputerAction(
   action: LifecycleAction,
   runner: CommandRunner = sh,
   platform: NodeJS.Platform = process.platform,
   target: LocalVmTarget = SHARED_LOCAL_VM_TARGET,
+  options: { preserveBrowserProfile?: boolean } = {},
 ): Promise<ContainerComputerStatus> {
   if (runner === sh && platform === process.platform) screenshotStatusCache.delete(target.key);
   const before = await containerComputerStatus(runner, platform, target);
@@ -1007,6 +1094,19 @@ export async function containerComputerAction(
       ),
       { status: 409 },
     );
+  }
+
+  if (action === "remove" && before.managed && options.preserveBrowserProfile !== false) {
+    try {
+      const rescued = await rescueFirefoxProfile(runtime, target, runner, before.container === "running");
+      if (rescued.kind === "copied") console.log(`[local-vm] ${target.key}: saved the Firefox profile into the durable folder before removing`);
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      throw Object.assign(
+        new Error(`Could not save this Local VM's Firefox profile (its signed-in sessions) before removing it, so nothing was removed: ${why.slice(0, 200)}`),
+        { status: 409 },
+      );
+    }
   }
 
   if (action === "pull") {
