@@ -4046,6 +4046,18 @@ let goalNeedsInputForThread = (_threadId: string): number | null => null;
 let goalNeedsInputAskForThread = (_threadId: string): string | null => null;
 /** When the server asked the bot to turn that ask into an item with steps (lot J2), or null. */
 let goalNeedsInputStepsAskedForThread = (_threadId: string, _at: number): number | null => null;
+/** How far back a waiting conversation is read for its open cards. */
+const OPEN_REQUEST_SCAN = 100;
+/** The cards still open in a conversation that waits on the person (an
+ * approval, a provider question), for "Precisa de você": it renders the same
+ * decisions as the chat and answers through the same /respond. Said only
+ * while it waits, an empty list included (nothing left to answer there). */
+const openRequestsWhileWaiting = (task: TaskRecord): Pick<WireTask, "pendingRequests"> => {
+  if (task.activity !== "waiting-on-you") return {};
+  const open = store.messagesTail(task.threadId, OPEN_REQUEST_SCAN).messages
+    .filter((message) => message.kind === "options" && message.card?.requestId && !message.card.answered && !message.card.dismissed && !message.card.expired);
+  return { pendingRequests: open as unknown as NonNullable<WireTask["pendingRequests"]> };
+};
 /** One thread as a client sees it. `botModel` is its bot's model: a thread
  * without a model of its own runs on it (toWireTask). */
 const wireTask = (task: TaskRecord, botModel: ModelSelection): WireTask => {
@@ -4056,7 +4068,7 @@ const wireTask = (task: TaskRecord, botModel: ModelSelection): WireTask => {
   const needsInput = goalNeedsInputForThread(task.threadId);
   const ask = needsInput !== null ? goalNeedsInputAskForThread(task.threadId) : null;
   const stepsAsked = needsInput !== null ? goalNeedsInputStepsAskedForThread(task.threadId, needsInput) : null;
-  const coordinated = { ...base, ...threadSignals(task.threadId), waitingForTeammates: needsInput === null && activeCoordinationForThread(task.threadId) && !task.busy, ...(needsInput !== null ? { goalNeedsInput: true, goalNeedsInputSince: needsInput, ...(ask ? { goalNeedsInputAsk: ask } : {}), ...(stepsAsked !== null ? { goalNeedsInputStepsAskedAt: stepsAsked } : {}) } : {}) };
+  const coordinated = { ...base, ...threadSignals(task.threadId), ...openRequestsWhileWaiting(task), waitingForTeammates: needsInput === null && activeCoordinationForThread(task.threadId) && !task.busy, ...(needsInput !== null ? { goalNeedsInput: true, goalNeedsInputSince: needsInput, ...(ask ? { goalNeedsInputAsk: ask } : {}), ...(stepsAsked !== null ? { goalNeedsInputStepsAskedAt: stepsAsked } : {}) } : {}) };
   const asleep = snoozedUntil === 0 || (snoozedUntil !== undefined && snoozedUntil > Date.now());
   return asleep ? { ...coordinated, snoozedUntil } : coordinated;
 };
@@ -8115,8 +8127,13 @@ bus.subscribe((event: RuntimeEvent) => {
         const card = store.messagesFor(event.threadId).find((candidate) => candidate.id === message.id)?.card;
         if (card && !card.answered) {
           // the bot is not working now — it is waiting on a person
-          if (bot) store.setTaskActivity(bot.id, event.threadId, "waiting-on-you");
-          else if (asker.busy) store.setActivity(asker.id, "waiting-on-you");
+          if (bot) {
+            const alreadyWaiting = store.taskByThread(bot.id, event.threadId)?.activity === "waiting-on-you";
+            store.setTaskActivity(bot.id, event.threadId, "waiting-on-you");
+            // a second card while it already waits: the activity did not change, so no
+            // frame went out — and "Precisa de você" would not list this card
+            if (alreadyWaiting) broadcast({ kind: "bot", bot: wireBot(bot) });
+          } else if (asker.busy) store.setActivity(asker.id, "waiting-on-you");
           if (event.requestId) showWaitingOnPersonChip(event.threadId, event.requestId, asker, permission ? "approval" : "answer");
           const notificationBot = (routineRun && routineSourceOwner(routineRun)?.bot) || asker;
           notify(buildNotification(

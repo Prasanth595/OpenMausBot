@@ -23,7 +23,7 @@ import { newId, type ModelSelection } from "./contracts.ts";
 import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
-import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk } from "../shared/approval-mode.ts";
+import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, supportsApprovalMode } from "../shared/approval-mode.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
 import type { ProfileRequestChanges } from "../shared/profile-request.ts";
 import type { TeamSetupRequest, TeamSetupResult } from "../shared/team-setup.ts";
@@ -1944,6 +1944,18 @@ export class Store {
     return Boolean(thread) && modelSwitchNeedsAsk(approvalModeFor(thread!), this.driverKindOf(from.instanceId), this.driverKindOf(to.instanceId));
   }
 
+  /** The level a thread lands on when it moves onto its bot's own model and
+   * the level it had would need confirming there: the bot's own saved level
+   * — one the person set for this bot, on this engine, through the trusted
+   * channel — instead of Ask. Never a grant still pending (it reads as Ask),
+   * never a level the engine does not implement: Ask then, as before. */
+  private botLevelOnItsEngine(bot: BotRecord): Pick<TaskRecord, "approvalMode" | "autoApprove" | "alwaysAllow"> {
+    // a thread-only grant belongs to one thread; the bot's own level is what stays saved
+    const mode = approvalModeFor({ approvalMode: bot.approvalMode, autoApprove: bot.autoApprove, approvalGrant: bot.approvalGrant?.threadOnly ? undefined : bot.approvalGrant });
+    if (mode === "ask" || !supportsApprovalMode(this.driverKindOf(bot.modelSelection.instanceId), mode)) return structuredClone(ASK_NOW);
+    return { approvalMode: mode, autoApprove: mode === "auto", alwaysAllow: structuredClone(bot.alwaysAllow ?? []) };
+  }
+
   /** A bot's threads as a change of its model to `next` leaves them. Each
    * keeps the level it runs at now (older threads may still inherit the
    * bot's, which may change in the same write); one that follows the bot
@@ -2788,7 +2800,7 @@ export class Store {
     const patches = bot.tasks.map((task): Partial<TaskRecord> | null => !listed.has(task.threadId) || task.modelSelection === undefined ? null : {
       ...reset(task.modelSelection, bot.modelSelection),
       modelSelection: undefined,
-      ...(this.switchNeedsAsk(botId, task.threadId, task.modelSelection, bot.modelSelection) ? structuredClone(ASK_NOW) : {}),
+      ...(this.switchNeedsAsk(botId, task.threadId, task.modelSelection, bot.modelSelection) ? this.botLevelOnItsEngine(bot) : {}),
     });
     const moved = bot.tasks.filter((_, index) => patches[index]).map((task) => task.threadId);
     if (!moved.length) return [];
