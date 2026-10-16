@@ -124,11 +124,16 @@ export interface BrowserEngineSummary {
   reason?: string;
   installable?: boolean;
   version?: string;
+  /** The browser the engine starts, e.g. "Google Chrome 153 (installed)", or while Chrome for Testing downloads,
+   * "Chrome for Testing 153.0.8010.47 (downloading: 52 of 182 MB)". */
+  chrome?: string;
   installing?: boolean;
   installError?: string;
   /** Whether a browser profile can use "My Chrome", the person's own running
    * Chrome: only where the bots run on their computer (the desktop app). */
   myChrome?: boolean;
+  /** browserEngine.engine: "chrome" when the bots' browsers run on OpenMausBot's own Chrome driver. */
+  engine?: "agent-browser" | "chrome";
 }
 
 export interface BrowserProfile {
