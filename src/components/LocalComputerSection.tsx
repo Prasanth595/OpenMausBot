@@ -19,6 +19,7 @@ import {
 import { Card, CommandLine } from "./SettingsPrimitives";
 import { MacLocalControl } from "./MacLocalControl";
 import { Select } from "./Select";
+import { LOCAL_VM_MAX_INSTANCE_CHOICES } from "../../shared/local-vm-limits";
 import { cn } from "@/lib/cn";
 import { useStore } from "@/state/store";
 
@@ -1449,7 +1450,7 @@ export function LocalComputerSection() {
               disabled={!status || policyPending}
               onChange={(event) => void savePolicy(status?.mode ?? "shared", Number(event.target.value))}
             >
-              {[1, 2, 3, 4, 5, 6, 7, 8].map((value) => <option key={value} value={value}>{value}</option>)}
+              {LOCAL_VM_MAX_INSTANCE_CHOICES.map((value) => <option key={value} value={value}>{value}</option>)}
             </Select>
           </div>
         )}

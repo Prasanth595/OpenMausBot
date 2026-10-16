@@ -10055,7 +10055,7 @@ describe("harness HTTP API", () => {
     }
     expect(JSON.stringify(inventoryBody)).not.toMatch(/viewer_url|workspace_path|container_name|target_key/);
 
-    const invalid = await api("PATCH", "/api/config", { localVm: { maxInstances: 9 } });
+    const invalid = await api("PATCH", "/api/config", { localVm: { maxInstances: 17 } });
     expect(invalid.status).toBe(400);
     expect(invalid.body.error).toContain("localVm.maxInstances");
 
