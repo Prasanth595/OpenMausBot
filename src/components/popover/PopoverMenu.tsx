@@ -52,7 +52,7 @@ export interface PopoverMenuItem {
   attention?: boolean;
   attentionTone?: "danger" | "accent";
   disabled?: boolean;
-  /** Marks an in-progress row (with `disabled`): the work is under way. */
+  /** Marks an in-progress row (with `disabled` or `ariaDisabled`): the work is under way. */
   busy?: boolean;
   /** Native tooltip: why a disabled row can't be picked, say. */
   hint?: string;

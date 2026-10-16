@@ -560,6 +560,7 @@ type MenuItemNode = {
   title?: ReactNode;
   content?: ReactNode;
   disabled?: boolean;
+  ariaDisabled?: boolean;
   busy?: boolean;
   hint?: string;
   overrideClassNames?: { row?: string; leading?: string };
@@ -645,11 +646,12 @@ describe("Regenerate title", () => {
     const onRegenerateTitle = vi.fn();
     openMenu(renderRow(task, "scout", true, { onRegenerateTitle }));
     const offered = menuItem(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerate title")!;
-    expect(offered.disabled).toBe(false);
+    expect(offered.disabled).toBeFalsy();
+    expect(offered.ariaDisabled).toBeFalsy();
     vi.unstubAllGlobals();
   });
 
-  it("shows Regenerating… and stays disabled until the request settles", () => {
+  it("shows Regenerating… and stays aria-disabled until the request settles", () => {
     vi.stubGlobal("window", { innerWidth: 1024, innerHeight: 768 });
     vi.stubGlobal("document", { body: { nodeType: 1 } });
     const task = { threadId: "t1", title: "Fix the login" };
@@ -661,7 +663,8 @@ describe("Regenerate title", () => {
     expect(onRegenerateTitle).toHaveBeenCalledTimes(1);
 
     const pending = menuItem(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerating…")!;
-    expect(pending.disabled).toBe(true);
+    expect(pending.ariaDisabled).toBe(true);
+    expect(pending.disabled).toBeFalsy();
     expect(pending.busy).toBe(true);
     // a second click while it runs asks nothing more of the server
     pending.onSelect!();
@@ -669,7 +672,8 @@ describe("Regenerate title", () => {
 
     settle!(false);
     const again = menuItem(renderRow(task, "scout", false, { onRegenerateTitle }), "Regenerate title")!;
-    expect(again.disabled).toBe(false);
+    expect(again.disabled).toBeFalsy();
+    expect(again.ariaDisabled).toBeFalsy();
     vi.unstubAllGlobals();
   });
 });
