@@ -245,6 +245,10 @@ export function LiveBrowser({ bot, signIn }: { bot: Bot; signIn?: BrowserSignIn 
       await queue?.drain();
       if (generation.current !== current || viewer.current !== expected) return;
       await action(body, expected);
+      // The engine's tabs event may trail the reply; drop the closed tab now so its stale entry cannot offer Close on the last one.
+      if (body.type === "tab-close" && generation.current === current && viewer.current === expected) {
+        setTabs((tabs) => tabs.filter((tab) => tab.tabId !== body.tabId));
+      }
       if (inputQueue.current?.stopped() && generation.current === current) setError(haltMessage.current);
       if (generation.current === current && body.type === "restart") reconnect();
     }
