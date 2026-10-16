@@ -155,6 +155,12 @@ RUN set -eux; \\
     curl -fsSL 'https://raw.githubusercontent.com/notofonts/noto-cjk/165c01b46ea533872e002e0785ff17e44f6d97d8/LICENSE' -o /usr/local/share/licenses/noto-cjk/OFL.txt; \\
     echo '6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2  /usr/local/share/licenses/noto-cjk/OFL.txt' | sha256sum -c -; \\
     fc-cache -f
+# fill_login reads Firefox's accessibility tree (page address, login boxes; never a value) with the system Python.
+RUN set -eux; \\
+    apt-get update; \\
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends python3-gi gir1.2-atspi-2.0; \\
+    rm -rf /var/lib/apt/lists/*; \\
+    /usr/bin/python3 -c 'import gi; gi.require_version("Atspi", "2.0"); from gi.repository import Atspi'
 RUN printf '%s\\n' \\
       '#!/bin/sh' \\
       'set -eu' \\

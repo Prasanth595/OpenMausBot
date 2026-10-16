@@ -587,6 +587,7 @@ import {
   ROUTINE_EXECUTION_PROMPT,
   WEBHOOK_PROMPT,
   resolveComputerPromptKind,
+  type ComputerPromptKind,
   savedLoginsPrompt,
   teamAvailabilityPart,
   stableSectionDigests,
@@ -610,7 +611,7 @@ import { LocalVmLease, LocalVmLeasePool } from "./local-vm-lease.ts";
 import { LocalVmSeatPool, type LocalVmSeatHolder } from "./local-vm-seat-pool.ts";
 import { createLoopGuard, loopGuardSettings } from "./host/loop-guard.ts";
 import { claudeUserSkillsEnabled, settingsTurnFields } from "./turn-settings.ts";
-import { addHeldSecretScrubber, redactSecretsInText } from "./redact.ts";
+import { addHeldSecretScrubber, redactSecretsInText, scrubHeldSecrets } from "./redact.ts";
 import * as vps from "./vps-computer.ts";
 import { ROUTINE_RESTARTED, RoutineManager, type RoutineRun, type RoutineRunOn, type RoutineRunTrigger } from "./routines.ts";
 import { CalendarCallManager, type CalendarCall } from "./calendar-calls.ts";
@@ -620,7 +621,8 @@ import { listSignedInSites, signOutOfSites } from "./browser-sites.ts";
 import { HeldSecrets, LoginStore } from "./login-store.ts";
 import { OnePasswordLogins, sdkOnePasswordClient, type OnePasswordSdk } from "./onepassword.ts";
 import { nativeRequire } from "./data/engine.ts";
-import { fillLogin } from "./login-fill.ts";
+import { fillLogin, fillLoginOn } from "./login-fill.ts";
+import { cuaMcpInput, firefoxProbe, vmLoginPage } from "./vm-firefox-login.ts";
 import { BotLogins, cardLoginPlace, cardSignInElsewhere, observeSignInPage, type ObservedPage } from "./bot-logins.ts";
 import { relayFrame } from "./browser-relay.ts";
 import { browserEvidence, stepContext } from "./browser-steps.ts";
@@ -3568,7 +3570,7 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "language", label: "Language", text: languagePrompt(cfg.language) },
     { id: "shared", label: "Other conversations", text: sharedStatePrompt(bot.id, bot.threadId) },
     { id: "shell", label: "Long-running commands", text: privateWorkspace ? longCommandsPrompt(computerPromptKind) : "" },
-    { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
+    { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) + vmLoginsPromptFor(bot.id, computerPromptKind, agentsMounted, Boolean(previewPlan.browser)) },
     { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
     { id: "plan", label: "Surface", text: previewPlan.computer === undefined ? "" : surfacePrompt({
       computer: previewPlan.computer && previewPlan.computer !== "off" && computerPromptKind ? previewPlan.computer : null,
@@ -13530,7 +13532,7 @@ async function startTurn(
         { id: "files", label: "File locations", text: worksInWorkspace ? workspaceLocationsPrompt(bot.id, cwd, liveBot?.cwd ?? bot.cwd, { attachFile: Boolean(integrations.agents) && !CLOUD_HOME && !HOSTED_WORKSPACE }) : "" },
         { id: "language", label: "Language", text: languagePrompt(cfg.language) },
         { id: "shell", label: "Long-running commands", text: worksInWorkspace ? longCommandsPrompt(computerPromptKind) : "" },
-        { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) },
+        { id: "computer", label: "Computer", text: computerPrompt(computerPromptKind) + vmLoginsPromptFor(bot.id, computerPromptKind, Boolean(integrations.agents), Boolean(integrations.browser)) },
         { id: "team-computer", label: "Team computer", text: teamComputerPrompt(teamComputer) },
         { id: "plan", label: "Surface", text: surfacePrompt({ computer: mountedComputer, browser: Boolean(integrations.browser) }, { pinned: plan.pinned, note: plan.note + vpsUnavailableNote + (computerSkipped && plan.computer !== "off" ? computerSkippedNote(redactSecretsInText(computerSkipped)) : ""), canSelect: computerSelectionTurns.has(threadId), cloudHome: Boolean(CLOUD_HOME) }) },
         { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled(), syncedFolders(DATA_DIR)) : "" },
@@ -15951,7 +15953,7 @@ async function runClaimedGroupMemberTurn(
     { id: "shell", label: "Long-running commands", text: workspace ? longCommandsPrompt(roomComputerPromptKind) : "" },
     { id: "mcp", label: "MCP servers", text: customMcpPrompt(Object.keys(integrations.custom ?? {})) },
     { id: "language", label: "Language", text: languagePrompt(cfg.language) },
-    { id: "computer", label: "Computer", text: computerPrompt(roomComputerPromptKind) },
+    { id: "computer", label: "Computer", text: computerPrompt(roomComputerPromptKind) + vmLoginsPromptFor(bot.id, roomComputerPromptKind, Boolean(integrations.agents), Boolean(integrations.browser)) },
     { id: "team-computer", label: "Team computer", text: teamComputerPrompt(roomTeamComputer) },
     { id: "plan", label: "Surface", text: surfacePrompt({ computer: roomTeamComputer ? "cloud" : roomVmTarget ? "vm" : surfaceOfComputerKind(roomComputerKind), browser: Boolean(integrations.browser) }, { note: roomPlan.note, cloudHome: Boolean(CLOUD_HOME) }) },
     { id: "cloud-home", label: "My Cloud", text: CLOUD_HOME ? cloudHomePrompt(Boolean(integrations.agents) && lendingEnabled(), syncedFolders(DATA_DIR)) : "" },
@@ -17811,15 +17813,60 @@ async function botBrowserTarget(bot: BotRecord): Promise<{ session: string; spec
   return target && { ...target, env: browserRuntimeEnv({ ...target.spec.env, AGENT_BROWSER_SESSION: target.session }) };
 }
 
+/** On a Local VM, fill_login fills Firefox there; listed once, here or with the built-in browser. */
+function vmLoginsPromptFor(botId: string, kind: ComputerPromptKind | null, agentsMounted: boolean, browserShown: boolean): string {
+  if (!agentsMounted || browserShown || (kind !== "vm-private" && kind !== "vm-shared")) return "";
+  return savedLoginsPrompt(botLogins.sitesFor(botId));
+}
+
 const FILL_LOGIN_ELSEWHERE: Record<Surface, string> = { browser: "your built-in browser", local: "this computer", vm: "the Local VM", cloud: "the cloud computer" };
+
+/** Firefox on the turn's own Local VM: found through accessibility, typed by Cua Driver; the bot hears words only. */
+async function fillLoginOnVm(bot: BotRecord, capability: InternalCapability, rawUsername: unknown): Promise<{ ok: boolean; text: string }> {
+  let vm: LocalVmTarget | undefined;
+  try {
+    vm = await attachmentVmForTurn(capability);
+  } catch (error) {
+    return { ok: false, text: `${error instanceof Error ? error.message : "The Local VM is not available to this turn."} Call request_sign_in if it keeps failing.` };
+  }
+  if (!vm) return { ok: false, text: "You have no Local VM desktop in this turn, so fill_login has nothing to fill. Call request_sign_in instead." };
+  const runtime = (await containerRuntimeStatus()).runtime;
+  if (!runtime) return { ok: false, text: "The Local VM's container runtime is not available. Call request_sign_in instead." };
+  const target = vm;
+  const stillAllowed = () => internalCapabilityIsActive({ ...capability, localVmTarget: target }) && !botComputerControlSnapshot(bot.id).held;
+  if (!stillAllowed()) return { ok: false, text: "The Local VM is no longer available to this turn, or the person is using it. Call request_sign_in instead." };
+  const username = typeof rawUsername === "string" ? rawUsername.slice(0, 512) : undefined;
+  const page = vmLoginPage({ probe: firefoxProbe(runtime, target), input: cuaMcpInput(runtime, target), stillAllowed });
+  try {
+    const outcome = await fillLoginOn({
+      username,
+      candidates: (host) => botLogins.candidates(bot.id, host),
+      available: async () => botLogins.sitesFor(bot.id),
+    }, page, { remember: (value, kind) => heldSecrets.remember(value, kind) });
+    localVmIdleFor(target).touch();
+    if (outcome.ok && outcome.loginId) botLogins.markUsed(outcome.loginId);
+    const problem = page.problem();
+    if (problem) {
+      const done = outcome.filled?.length ? ` Already filled: ${outcome.filled.join(" and ")}.` : "";
+      return { ok: false, text: redactSecretsInText(`${problem}${done}`) };
+    }
+    return { ok: outcome.ok, text: outcome.text };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    return { ok: false, text: `Could not fill the login on the Local VM: ${redactSecretsInText(reason)} Call request_sign_in if it keeps failing.` };
+  } finally {
+    page.close();
+  }
+}
 
 /** Filled by the server as one browser action; the answer is a status in words, never a value. */
 async function fillLoginForTurn(bot: BotRecord, capability: InternalCapability, rawUsername: unknown, rawSubmit: unknown): Promise<{ ok: boolean; text: string }> {
   const threadId = capability.threadId;
   const place = signInPlace(bot, threadId);
+  if (place === "vm") return fillLoginOnVm(bot, capability, rawUsername);
   if (place !== "browser") {
     return { ok: false, text: place
-      ? `fill_login works in the built-in browser and My Chrome, not on ${FILL_LOGIN_ELSEWHERE[place]} yet. Call request_sign_in so the person signs in there.`
+      ? `fill_login works in the built-in browser, My Chrome and Firefox on a Local VM, not on ${FILL_LOGIN_ELSEWHERE[place]} yet. Call request_sign_in so the person signs in there.`
       : "fill_login works in the built-in browser, and this conversation has none. Call request_sign_in instead." };
   }
   const current = botForThread(bot.id, threadId) ?? bot;
@@ -19689,7 +19736,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
             timeoutSeconds: typeof body.timeout_seconds === "number" ? body.timeout_seconds : undefined,
           });
           localVmIdleFor(vm).touch();
-          return json(res, 200, result);
+          // A login OpenMausBot typed on this desktop never comes back through a command's output.
+          return json(res, 200, { ...result, stdout: scrubHeldSecrets(result.stdout), stderr: scrubHeldSecrets(result.stderr) });
         } catch (error) {
           const status = typeof (error as { status?: unknown }).status === "number" ? (error as { status: number }).status : 500;
           return json(res, status, { error: error instanceof Error ? error.message : "could not run the command" });

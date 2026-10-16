@@ -6459,6 +6459,9 @@ describe("harness HTTP API", () => {
       const inBrowser = await fill();
       expect(inBrowser.ok).toBe(false);
       expect(inBrowser.text).toContain("request_sign_in");
+      // A Local VM bot reaches Firefox on its own desktop; with none attached to this turn there is nothing to type on.
+      expect((await api("PATCH", `/api/bots/${bot.id}`, { computer: "vm" })).status).toBe(200);
+      expect(await fill()).toEqual({ ok: false, text: "You have no Local VM desktop in this turn, so fill_login has nothing to fill. Call request_sign_in instead." });
     } finally {
       if (botId) await api("DELETE", `/api/bots/${botId}`);
     }
