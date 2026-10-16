@@ -292,6 +292,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
       leading: regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />,
       disabled: regenerating,
       busy: regenerating,
+      keepOpen: true,
       onSelect: regenerateTitle,
     });
   }
