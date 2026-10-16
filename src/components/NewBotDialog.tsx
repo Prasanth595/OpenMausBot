@@ -25,12 +25,12 @@ import { RoutineEditor } from "./RoutinesPage";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { SharePresetDialog } from "./SharePresetDialog";
 import { SettingRow } from "./SettingsPrimitives";
+import { Select } from "./Select";
 
 const SECTIONS = ["Identity", "Soul", "Skills", "Memory", "Routines", "Access", "Model", "Permissions", "Voice & alerts"] as const;
 type Section = typeof SECTIONS[number];
 
-/** Companion pairing permits creation, but not reading host defaults or
- * patching host settings. Keep its existing single-request creation flow. */
+/** Companion pairing permits creation, but not reading host defaults or patching host settings. */
 export function CompanionNewBotDialog() {
   const { state, dispatch } = useStore();
   const dialog = useRef<HTMLDivElement>(null);
@@ -111,7 +111,6 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
   useEffect(() => () => draft.dispose(), [draft]);
   // Disabling the focused Create button drops focus to the page in Chromium.
-  // Keep keyboard dismissal and focus trapping inside the pending dialog.
   useEffect(() => { if (saving) dialog.current?.focus(); }, [saving]);
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -167,8 +166,8 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
       else if (action.type === "setModel" && action.botId === draft.id) {
         draft.setModel(action.selection);
         if (action.resetApprovalToAsk) draft.patch({ approvalMode: "ask" });
-      } else if (action.type === "routinePatched") { /* Applied by the draft transport. */ }
-      else if (action.type === "toggleSettings") { /* Editor links stay inside this dialog. */ }
+      } else if (action.type === "routinePatched") {}
+      else if (action.type === "toggleSettings") {}
       else parent.dispatch(action);
     },
   };
@@ -185,16 +184,15 @@ export function LocalNewBotDialog({ defaultsMode = false, onClose, section, onCr
           <div className="flex flex-wrap items-center gap-2 px-5 pt-3 text-[13px] text-ink-secondary" data-new-bot-visibility>
             <label className="flex items-center gap-2">
               {t("botSettings.visibility.title")}
-              <select
+              <Select size="sm"
                 value={audience}
                 disabled={saving}
                 onChange={(event) => setAudience(event.target.value as VisibilityMode)}
-                className="rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] text-ink focus:outline-none"
               >
                 <option value="everyone">{t("botSettings.visibility.everyone")}</option>
                 <option value="admins">{t("botSettings.visibility.admins")}</option>
                 <option value="people">{t("botSettings.visibility.people")}</option>
-              </select>
+              </Select>
             </label>
             {audience === "people" && (
               <input
@@ -244,9 +242,9 @@ function DraftSection({ active, draft, defaultsMode }: { active: Section; draft:
     <IdentitySection bot={bot} patch={derived.patch} activeState={derived.activeState} mascotMotion={null}
       namePlaceholder={defaultsMode ? t("newBot.randomName") : undefined} />
     <label className="block text-[13px] text-ink-secondary">Team
-      <select className={cn(inputCls, "mt-1.5")} value={bot.section ?? ""} onChange={event => draft.patch({ section: event.target.value })}>
+      <Select size="lg" className="mt-1.5 w-full" value={bot.section ?? ""} onChange={event => draft.patch({ section: event.target.value })}>
         <option value="">General</option>{[...new Set([...(state.sections ?? []), ...state.bots.map(bot => bot.section ?? "")])].filter(Boolean).map(name => <option key={name}>{name}</option>)}
-      </select>
+      </Select>
     </label>
   </div>;
   if (active === "Soul") return <SoulSection bot={bot} patch={derived.patch} />;
@@ -259,22 +257,16 @@ function DraftSection({ active, draft, defaultsMode }: { active: Section; draft:
   return <VoiceSection bot={bot} derived={derived} />;
 }
 
-/** Starting role: presets from the organization and imported files first,
- * then the built-in roles. A preset fills name, look and instructions (all
- * still editable); its skills and notes are added when the bot is created. */
 function StartingRole({ draft, defaultsMode }: { draft: BotCreationDraft; defaultsMode: boolean }) {
   const [presets, setPresets] = useState<BotPreset[]>([]);
   const [loads, setLoads] = useState(0);
   const [error, setError] = useState("");
-  // The draft's picture came from a preset (so the next preset may replace it).
   const presetPicture = useRef(false);
   useEffect(() => {
-    // Defaults are the installation's own; presets are for one new bot.
     if (defaultsMode) return;
     let cancelled = false;
     void api<{ presets: BotPreset[] }>("/api/bot-presets")
       .then(result => { if (!cancelled) setPresets(result.presets); })
-      // Members and older servers: the built-in roles only.
       .catch(() => { if (!cancelled) setPresets([]); });
     return () => { cancelled = true; };
   }, [defaultsMode, loads]);
@@ -316,13 +308,13 @@ function StartingRole({ draft, defaultsMode }: { draft: BotCreationDraft; defaul
   const roles = BOT_ROLES.map(role => <option key={role.id} value={role.id}>{role.title}</option>);
   return <div>
     <label className="block text-[13px] text-ink-secondary">{t("newBot.startingRole")}
-      <select className={cn(inputCls, "mt-1.5")} value={draft.preset ? `preset:${draft.preset.id}` : ""} onChange={event => void choose(event.target.value)}>
+      <Select size="lg" className="mt-1.5 w-full" value={draft.preset ? `preset:${draft.preset.id}` : ""} onChange={event => void choose(event.target.value)}>
         <option value="">{t("newBot.customSettings")}</option>
         {presetGroups(presets).map(group => <optgroup key={group.label} label={group.label}>
           {group.presets.map(preset => <option key={preset.id} value={`preset:${preset.id}`}>{preset.name}</option>)}
         </optgroup>)}
         {presets.length ? <optgroup label={t("newBot.builtInRoles")}>{roles}</optgroup> : roles}
-      </select>
+      </Select>
     </label>
     {chosen && <div className="mt-2 space-y-1 rounded-lg bg-card px-3 py-2.5 text-[12.5px] text-ink-secondary" data-new-bot-preset>
       {presetSummaryLines(chosen).map((line, index) => <p key={index} className="break-words">{line}</p>)}
@@ -337,9 +329,9 @@ function DraftMemory({ draft }: { draft: BotCreationDraft }) {
   const [path, setPath] = useState("MEMORY.md");
   const [name, setName] = useState("");
   return <div className="space-y-3">
-    <select className={inputCls} aria-label="Memory file" value={path} onChange={event => setPath(event.target.value)}>
+    <Select size="lg" className="w-full" aria-label="Memory file" value={path} onChange={event => setPath(event.target.value)}>
       {[...new Set(["MEMORY.md", ...Object.keys(draft.template.memory)])].map(file => <option key={file}>{file}</option>)}
-    </select>
+    </Select>
     <textarea className={cn(inputCls, "min-h-72 font-mono")} aria-label="Memory contents" value={draft.template.memory[path] ?? ""} onChange={event => draft.setMemory(path, event.target.value)} />
     <div className="flex gap-2"><input className={inputCls} aria-label="New memory topic" placeholder="Topic name" value={name} onChange={event => setName(event.target.value)} />
       <button type="button" aria-label="Add memory topic" disabled={!/^[a-zA-Z0-9_-]+$/.test(name)} className="rounded-lg bg-control px-3 disabled:opacity-40" onClick={() => { const next = `memory/${name}.md`; if (!(next in draft.template.memory)) draft.setMemory(next, ""); setPath(next); setName(""); }}><Plus size={16} /></button>

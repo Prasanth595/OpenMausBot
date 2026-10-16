@@ -252,8 +252,6 @@ it.each([
     await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: primary, updateBotDefault: true });
     await api("PATCH", `/api/bots/${bot.id}`, { fallback: [{ instanceId: "secondary", model: primary.model }, backup] });
     await control("send", "--bot", bot.id, "--task", threadId, "--text", "DO_NOT_REPLAY_THIS_9S");
-    // The control surface calls a partial-output failure settled; the
-    // transcript's terminal error is the failure evidence in that case.
     expect((await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30")).status)
       .toBe(options.afterOutput ? "settled" : "failed");
     expect(backupPrompts()).toHaveLength(0);
@@ -297,8 +295,6 @@ it("stops after one failed backup instead of looping between engines", async () 
     expect(calls().filter((call) => call.method === "initialize.error")).toHaveLength(1);
     const { messages } = await control("messages", "--bot", bot.id, "--task", threadId, "--limit", "20");
     expect(messages.filter((message: any) => message.role === "user" && message.text === "ONLY_ONE_BACKUP_4T")).toHaveLength(1);
-    // the backup's sign-in failure is the one failed-turn row every client
-    // reads (shared/failed-turn.ts): whole, with the flag its sign-in needs
     expect(messages.map((message: any) => message.tool).filter((tool: any) => tool?.ok === false))
       .toEqual([{ name: "error: Not logged in · Please run /login", ok: false, setup: true }]);
   });

@@ -36,6 +36,14 @@ describe("botShowsUnread", () => {
     ]);
     expect(botShowsUnread(visible)).toBe(true);
   });
+
+  it("ignores an archived thread's unread reply", () => {
+    const archived = bot("p", "Plain", "p0", [
+      task("p0", "Read chat", {}),
+      task("p1", "Put away", { archivedAt: 5, unread: true }),
+    ], { unread: true });
+    expect(botShowsUnread(archived)).toBe(false);
+  });
 });
 
 describe("header activity", () => {
@@ -92,6 +100,19 @@ describe("cross-bot attention", () => {
     expect(crossBotAttentionThreads([hidden, runner, plain], {}).map((entry) => entry.task.threadId)).toEqual(["p0"]);
   });
 
+  it("keeps an archived thread out of the bot's rows, and offers it across bots only while it waits on the person", () => {
+    const alpha = bot("a", "Alpha", "a0", [
+      task("a0", "Idle chat", {}),
+      task("a1", "Archived approval", { archivedAt: 5, activity: "waiting-on-you" }),
+      task("a2", "Archived reply", { archivedAt: 5, unread: true }),
+      task("a3", "Archived work", { archivedAt: 5, busy: true, activity: "working" }),
+      task("a4", "Archived queue", { archivedAt: 0 }),
+    ]);
+    expect(sidebarBotActivityTasks(alpha, { a4: [{}] })).toEqual([]);
+    expect(threadsWhenTreeHidden(alpha, { a4: [{}] })).toEqual([]);
+    expect(crossBotAttentionThreads([alpha], { a4: [{}] }).map((entry) => entry.task.threadId)).toEqual(["a1"]);
+  });
+
   it("orders waiting ahead of unread across bots, not just inside one", () => {
     const alpha = bot("a", "Alpha", "a0", [task("a0", "Unread reply", { unread: true })]);
     const beta = bot("b", "Beta", "b0", [task("b0", "Waiting approval", { activity: "waiting-on-you" })]);
@@ -132,8 +153,6 @@ describe("group attention", () => {
   });
 
   it("shows each thread's own work when a room's threads run side by side", () => {
-    // the open thread is idle; a side thread's member waits on the person
-    // while the room-level flag counts the whole room as working
     const room = group("g", "Crew", "g0", {
       working: true,
       busyBotId: null,
@@ -265,11 +284,11 @@ describe("cross-bot pinned threads", () => {
   it("collects only pinned threads from every bot, newest pin first", () => {
     const alpha = bot("a", "Alpha", "a0", [
       task("a0", "Idle chat", {}),
-      task("a1", "Old pin", { pinned: true, updatedAt: 1 }),
+      task("a1", "Old pin", { pinned: true, updatedAt: 30, lastThreadOrderAt: 1 }),
     ]);
     const beta = bot("b", "Beta", "b0", [
       task("b0", "Unpinned", {}),
-      task("b1", "New pin", { pinned: true, updatedAt: 2 }),
+      task("b1", "New pin", { pinned: true, updatedAt: 20, lastThreadOrderAt: 2 }),
     ]);
     const entries = crossBotPinnedThreads([alpha, beta], [], {});
     expect(entries.map((entry) => entry.task.threadId)).toEqual(["b1", "a1"]);
@@ -283,8 +302,8 @@ describe("cross-bot pinned threads", () => {
   });
 
   it("includes a pinned room thread alongside pinned bot threads", () => {
-    const alpha = bot("a", "Alpha", "a0", [task("a0", "Pinned chat", { pinned: true, updatedAt: 1 })]);
-    const room = group("g", "Crew", "g0", { tasks: [{ threadId: "g0", title: "Crew", createdAt: 0, pinned: true, updatedAt: 2 }] });
+    const alpha = bot("a", "Alpha", "a0", [task("a0", "Pinned chat", { pinned: true, updatedAt: 30, lastThreadOrderAt: 1 })]);
+    const room = group("g", "Crew", "g0", { tasks: [{ threadId: "g0", title: "Crew", createdAt: 0, pinned: true, updatedAt: 20, lastThreadOrderAt: 2 }] });
     const entries = crossBotPinnedThreads([alpha], [room], {});
     expect(entries.map((entry) => `${entry.kind}:${entry.task.threadId}`)).toEqual(["group:g0", "bot:a0"]);
     expect(attentionJumpAction(entries[0])).toEqual({ type: "select", id: "g" });

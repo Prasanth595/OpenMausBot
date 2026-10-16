@@ -1,17 +1,3 @@
-// What a requester learns when the turn it assigned ends without completing.
-// The requester (a Chief of Staff, a lead) decides what happens next: send
-// what is left, send it again, or tell the person. So it is told the cause in
-// the runtime's own words — a stall, a provider reload, a quota, an error —
-// what the turn did before it stopped, and the turn's last message whole. A
-// bare "error" or "The coordinated turn was interrupted" left it guessing,
-// and a guess re-sends the whole assignment. A step cap is not an end: the
-// same turn continues in place from the handoff the driver wrote
-// (docs/runtime-contract.md §10 PR 4), so TurnStops keeps that path for the
-// continuation and no account asks anyone to assign what is left.
-//
-// The harness (index.ts) folds runtime events into TurnStops, notes there why
-// it stops a turn itself, and reads it when a coordinated or delegated turn
-// settles; the wording is a pure function.
 import { errorTranscript } from "../shared/client-cancel.ts";
 import { isOutboundTool } from "../shared/outbound.ts";
 import type { RuntimeEvent } from "./contracts.ts";
@@ -19,28 +5,15 @@ import { buildTurnDigest, digestTools } from "./digest.ts";
 import type { TurnEvidence } from "./runtime/types.ts";
 import type { Message } from "./store.ts";
 
-/** The longest cause an outcome repeats: a provider's HTML body or a stack
- * trace is cut, a sentence a requester acts on is not. */
 const REASON_CHARS = 600;
 
 export interface TurnStop {
   turnId?: string;
-  /** Why the harness stopped the turn itself (a Company change), noted
-   * before it interrupts: the turn's own end may settle it first. */
   cause?: string;
-  /** The runtime's last error for the turn, a client abort excepted: its
-   * runtime.error, or a provider's own error sent as a reply (a usage limit,
-   * an overload: RuntimeEventBase.synthetic). */
   error?: string;
-  /** The step cap's handoff: every step the turn ran, in order. The same
-   * turn continues from it in place (the runtime's `continue`). */
   handoffPath?: string;
 }
 
-/** Each thread's turn as its runtime last described a failure — its error
- * and the handoff a step cap wrote — and the harness's cause when it stopped
- * the turn. A new turn on the thread starts clean, and a read names the turn
- * it settles, so an earlier turn's words never stand in. */
 export class TurnStops {
   readonly #byThread = new Map<string, TurnStop>();
 
@@ -57,8 +30,6 @@ export class TurnStops {
     else stop.error = error;
   }
 
-  /** The harness is stopping this turn, for this cause: whichever settles it
-   * first, its own end or the harness's teardown, reports the same words. */
   stopping(threadId: string, turnId: string | undefined, cause: string): void {
     this.#turn(threadId, turnId).cause = cause;
   }
@@ -75,21 +46,20 @@ export class TurnStops {
     return stop && (!turnId || !stop.turnId || stop.turnId === turnId) ? stop : undefined;
   }
 
-  /** The thread is gone: nothing reads its last stop again. */
+  /** The turn's own last error, else the provider's stop token; undefined for a turn that did not fail. */
+  failureCause(event: { threadId: string; turnId?: string; ok: boolean; stopReason?: string | null }): string | undefined {
+    if (event.ok) return undefined;
+    return this.read(event.threadId, event.turnId)?.error ?? (event.stopReason?.trim() || undefined);
+  }
+
   forget(threadId: string): void {
     this.#byThread.delete(threadId);
   }
 }
 
-/** The requester's account of a turn that ended without completing. The
- * cause comes first, since a result chip shows only the start; then what the
- * turn did before it stopped, and its last message, unabridged:
- * a report written before a late failure is still the teammate's report. It
- * is quoted, as data: the account reaches prompts the harness speaks in (a
- * delegator's wake), where a teammate's words must never pass for its lines. */
+/** Cause first (a chip shows only the start), then the last message quoted as data, so a teammate's words never pass for the harness's. */
 export function stoppedTurnOutcome(input: {
   reason: string;
-  /** The thread's messages; only this turn's tool rows are read. */
   activities: readonly Message[];
   turnId?: string;
   said?: string;
@@ -176,7 +146,6 @@ const COMMAND_LABEL_CHARS = 80;
 const ERROR_CHARS = 200;
 const ERRORS_KEPT = 3;
 
-/** A tool activity row of a turn: a bot's activity row with a tool. */
 const toolRows = (rows: readonly Message[]) =>
   rows.filter((row) => row.role === "bot" && row.kind === "activity" && row.tool !== undefined);
 

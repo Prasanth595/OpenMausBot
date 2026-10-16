@@ -1,16 +1,9 @@
-// Dev gallery for the welcome flow, like mascot-preview.html for the mascot:
-// every beat, in every skin, with reduced motion on or off, without touching
-// the workspace's real onboarding record. Served by Vite in dev at
-// /onboarding-preview.html; not part of the packaged app.
-//
-// The flow talks to whatever harness the dev proxy points at, so the engines
-// and phone beats show real data when `pnpm dev:server` is running and their
-// empty or error states when it is not. Saving the preview bot fails on
-// purpose (there is no such bot), which exercises the exit beat's error path.
+// Dev-only gallery of the welcome flow's beats, served at /onboarding-preview.html; not in the packaged app.
 import { StrictMode, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { DesktopCapabilitiesProvider } from "@/components/DesktopCapabilities";
 import { WelcomeFlow } from "@/components/onboarding/WelcomeFlow";
+import { Select } from "@/components/Select";
 import type { MausMotion } from "@/lib/mascot";
 import { type BeatId, beatsFor } from "@/lib/onboarding";
 import { SKINS, type SkinId } from "@/lib/skins";
@@ -26,8 +19,7 @@ const PREVIEW_BOT = {
 
 const BEATS = beatsFor({ dictation: true, reel: true });
 
-/** ?beat=engines&skin=linen&reduced=1&all=1 — so a screenshot script can
- * open any state directly. Unknown values fall back to the defaults. */
+/** ?beat=engines&skin=linen&reduced=1&all=1 opens any state directly. */
 function fromUrl() {
   const params = new URLSearchParams(location.search);
   const beat = params.get("beat") as BeatId | null;
@@ -41,7 +33,6 @@ function fromUrl() {
   };
 }
 
-/** One window-sized stage in one skin. The flow fills it via `embedded`. */
 function Stage({ skin, beat, run, scale = 1, entrance }: { skin: SkinId; beat: BeatId; run: number; scale?: number; entrance: Exclude<MausMotion, "none"> }) {
   const width = 1100;
   const height = 720;
@@ -78,8 +69,7 @@ function Preview() {
     document.documentElement.dataset.reducedMotion = reduced ? "true" : "false";
   }, [reduced]);
 
-  // ?debug=1 — after a few seconds, log what the guide's face was drawn as.
-  // Lets a headless run inspect the animation loop's output without DevTools.
+  // ?debug=1 logs what the guide's face was drawn as, for headless runs.
   useEffect(() => {
     if (!new URLSearchParams(location.search).has("debug")) return;
     const timer = setTimeout(() => {
@@ -93,32 +83,29 @@ function Preview() {
     return () => clearTimeout(timer);
   }, []);
 
-  const control =
-    "rounded-lg border border-hairline/40 bg-inset px-2 py-1.5 text-[13px] text-ink focus:outline-none";
-
   return (
     <div data-skin="midnight" className="min-h-screen bg-app p-6 text-ink">
       <header className="mb-5 flex flex-wrap items-center gap-3">
         <h1 className="mr-2 text-[18px] font-semibold">Welcome flow</h1>
         <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
           Beat
-          <select value={beat} onChange={(e) => setBeat(e.target.value as BeatId)} className={control}>
+          <Select size="sm" value={beat} onChange={(e) => setBeat(e.target.value as BeatId)}>
             {BEATS.map((id) => (
               <option key={id} value={id}>
                 {id}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
           Skin
-          <select value={skin} onChange={(e) => setSkin(e.target.value as SkinId)} className={control} disabled={all}>
+          <Select size="sm" value={skin} onChange={(e) => setSkin(e.target.value as SkinId)} disabled={all}>
             {SKINS.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         <label className="flex items-center gap-1.5 text-[13px] text-ink-secondary">
           <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} /> All skins

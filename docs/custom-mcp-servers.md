@@ -242,6 +242,16 @@ Claude Code config on every message; skills, hooks and the personal
 it off unless you need those servers — the recommended way to give a bot a
 server is still this page or the bot project's `.mcp.json`.
 
+**Also use my Claude Code skills**, just below it, gives Claude bots the skills
+in your own `~/.claude/skills` and nothing else from your setup. OpenMausBot
+keeps one link to that folder (in its data folder, `claude-user-skills/`) and
+passes it with `--add-dir`, so each skill loads as it is on disk, scripts and
+reference files included, and Claude Code picks up your edits within the
+session. Your hooks, MCP servers and `CLAUDE.md` stay out, so a bot with a
+tool selection keeps working. In `config.json` it is
+`"features": { "claudeUserSkills": true }`. Skills in a bot project's own
+`.claude/skills` load either way.
+
 The switch drops the CLI flag `--strict-mcp-config` (Claude Code 1.0.60+)
 while keeping `--setting-sources project` (1.0.122+). The environment variable
 `OMB_CLAUDE_INHERIT_USER_CONFIG=1` on the OpenMausBot process remains the full
@@ -319,6 +329,12 @@ servers gets the enabled tools on its next task.
   `browser`, `phone`, `dweb`, `ogb`, …) so a custom entry can never shadow
   a built-in tool surface. Names are lowercase letters/digits/`_`/`-`, max
   32 chars, starting with a letter.
+- **Environment names are checked.** `OMB_*` and `OGB_*` are refused: Codex
+  hands MCP children their variables from one shared environment, and those
+  names carry OpenMausBot's own routing and bearers. `ELECTRON_RUN_AS_NODE`
+  is accepted as `1` only — the value OpenMausBot's own proxies use — so a
+  server bundled inside an Electron app (its binary as the command) can run
+  as node; any other value would overwrite what the built-in proxies need.
 - **One bad entry never takes the fleet down.** Invalid entries are skipped
   with a logged reason; the rest still mount.
 - **Credentials are write-only in the UI.** The API returns environment and

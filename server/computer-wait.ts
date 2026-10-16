@@ -47,10 +47,6 @@ const holderPhrase = (holder: ComputerHolder, language?: string): string => {
   return holder.task ? `${holder.name} is running ${holder.task}` : `${holder.name} is using it`;
 };
 
-/** Where this turn sits in the wait, and how long waits here have been
- * taking, as known when the chip was written (#1652). The estimate is
- * undefined until the resource has wait history; the chip then simply omits
- * it — an honest blank beats a made-up number. */
 export interface WaitQueueFact {
   position?: number;
   estimateMs?: number;
@@ -81,9 +77,7 @@ export function computerWaitingText(holder?: ComputerHolder | null, queue?: Wait
   }
   const place = position ? ` — ${ordinal(position)} in queue` : "";
   const estimate = queue?.estimateMs !== undefined ? `; recent waits here have taken ${computerWaitDuration(queue.estimateMs)}` : "";
-  // Behind more than the holder, that turn ending is not this turn's start:
-  // the released seat goes to the front waiter first, so this turn starts
-  // only once every turn ahead of it has finished (#1652).
+  // Behind more than the holder: the freed seat goes to the front waiter first.
   const starts = position && position > 1
     ? "Starts automatically when the turns ahead finish"
     : holder
@@ -122,11 +116,6 @@ export function computerParkedText(holder: ComputerHolder | null | undefined, ce
   return `Computer still busy after ${minutes(ceilingMs, language)}${who}. Parked — it continues automatically when the computer is free.`;
 }
 
-/** What a computer call answers once a person's hold has outlasted the wait
- * ceiling — the longest any turn waits for a computer, whoever has it. Until
- * then each call waits for them inside the call; past it the turn stops
- * waiting, as it did at every hold before calls waited, instead of calling
- * again every 45 seconds for as long as they are away. */
 export function computerPersonAwayText(ceilingMs: number): string {
   return `A person has had control of this computer for over ${minutes(ceilingMs)}, so this call was NOT performed and this turn stops waiting for them. ` +
     "Pause this task: tell the person you are waiting for them to hand control back, and take a fresh screenshot before your next action once they have.";

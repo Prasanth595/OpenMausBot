@@ -1,8 +1,4 @@
-// The whole sign-in loop on the fake engine, through the real agents MCP
-// proxy: a bot working in its built-in browser calls request_sign_in, the
-// person gets one card and one notification, presses Done, and the bot's
-// next turn runs with the news. Nothing here reaches a real browser, the
-// user's data or port 8799.
+// Nothing here reaches a real browser, the user's data or port 8799.
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +7,6 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import { removeTempDir } from "./testing/cleanup.ts";
 import { openSse } from "./testing/sse.ts";
 
-/** What one scripted turn was asked: its own message, past the replayed history. */
 const asked = (turn: any): string => JSON.stringify(turn.prompt?.message?.content ?? "");
 
 // The browser stand-in is a shell script; the mount only needs it to exist.

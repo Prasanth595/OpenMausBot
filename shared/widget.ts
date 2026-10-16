@@ -1,8 +1,6 @@
 // A bot-authored chat widget: the JSON tree `show_widget` posts as a message
-// of kind "widget" (docs/superpowers/specs/2026-10-13-chat-widgets-design.md).
-// Node names and props follow ChatKit's widget components. Model input is
-// normalised here once, into a canonical tree, and nothing else is stored or
-// drawn: every renderer (desktop, iOS, Android) reads canonical trees only.
+// of kind "widget". Node names and props follow ChatKit's widget components.
+// Model input is normalised here once; every renderer reads canonical trees only.
 import type { JsonValue } from "./json.ts";
 
 export const WIDGET_VERSION = 1;
@@ -55,7 +53,7 @@ export interface WidgetButtonSpec {
 }
 
 /** One canonical node. `id` is assigned here ("n1", "n2", ... in document
- * order) and is how a press names its button. Props are per type; see the spec. */
+ * order) and is how a press names its button. */
 export interface WidgetNode {
   type: string;
   id: string;
@@ -117,7 +115,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const clamp = (value: number, low: number, high: number) => Math.min(high, Math.max(low, value));
 
-// ── Prop readers ────────────────────────────────────────────────────────────
 // A reader turns one raw prop into its canonical value. `undefined` drops the
 // prop (a lenient miss: an unknown token, a CSS value this app does not take).
 // A reader throws only where a silently dropped value would post a broken or
@@ -390,7 +387,6 @@ const chartSeries: Reader = (raw, path) => {
 
 const chartAxis: Reader = (raw, path) => ({ dataKey: text(64, "nonEmpty")(isRecord(raw) ? raw.dataKey : raw, `${path}.dataKey`) });
 
-// ── Node specs ──────────────────────────────────────────────────────────────
 
 const LAYOUT: Record<string, Reader> = {
   gap: spacing(),
@@ -619,7 +615,6 @@ export function parseWidgetInput(value: unknown): ParsedWidgetInput {
   }
 }
 
-// ── Reading a canonical tree ────────────────────────────────────────────────
 
 export const widgetString = (node: WidgetNode, key: string): string | undefined => (typeof node[key] === "string" ? node[key] as string : undefined);
 export const widgetNumber = (node: WidgetNode, key: string): number | undefined => (typeof node[key] === "number" ? node[key] as number : undefined);
@@ -653,7 +648,6 @@ function firstText(node: WidgetNode): string {
   return found;
 }
 
-/** One pressable thing in a widget. */
 export interface WidgetActionEntry {
   /** "confirm", "cancel", or the node id of the button or list item. */
   ref: string;
@@ -852,11 +846,24 @@ export function widgetAdvice(root: WidgetRoot): string | undefined {
     && !widgetActions(root).some((entry) => entry.kind === "item" || entry.kind === "button")) {
     notes.push("No row of this list can be chosen: the person can only confirm or cancel it as a whole. If they are meant to pick one row, call update_widget and give the ListView a name (and each row a value), so the rows become selectable and confirm sends the pick.");
   }
-  const typed = widgetFields(root).filter((field) => field.type === "Input" || field.type === "Textarea");
-  const asks = (pattern: RegExp) => typed.filter((field) => pattern.test(`${field.name} ${field.label} ${widgetString(field.node, "placeholder") ?? ""}`)).map((field) => field.label);
+  const fields = widgetFields(root);
+  const sending = widgetActions(root).filter((entry) => !entry.client && entry.tone !== "cancel");
+  if (fields.length > 0 && !sending.length) {
+    notes.push("Nothing in this widget sends what the person fills in. Call update_widget with confirm: {label, action} (and cancel if they may decline) so they can send it.");
+  } else if (fields.length > 0) {
+    const sent = new Set(sending.flatMap((entry) => widgetFields(widgetScope(root, entry.ref), root).map((field) => field.name)));
+    const unsent = fields.filter((field) => !sent.has(field.name)).map((field) => JSON.stringify(field.label));
+    if (unsent.length) notes.push(`${unsent.join(", ")} sits outside the Form whose button is the only way to send, so it is never sent. Call update_widget with it inside that Form, or with confirm on the Card.`);
+  }
+  const typed = fields.filter((field) => field.type === "Input" || field.type === "Textarea");
+  // "each time", "every time" and "how many times" are not a time of day
+  const phrase = (field: WidgetField) => `${field.name} ${field.label} ${widgetString(field.node, "placeholder") ?? ""}`
+    .replace(/\b(each|every|this|next|first|last|any|some|one|other|same|spare|free|full|part|lead|over|down)[\s-]+times?\b/gi, " ")
+    .replace(/\btimes\b/gi, " ");
+  const asks = (pattern: RegExp) => typed.filter((field) => pattern.test(phrase(field))).map((field) => field.label);
   const pickers: Array<[RegExp, string]> = [
-    [/\b(days?|weekdays?|weekly|repeat)\b/i, "DayPicker"],
-    [/\b(times?|o'?clock|hh:mm)\b|\b\d{1,2}(:\d{2})?\s?[ap]m\b|\b\d{1,2}:\d{2}\b/i, "TimePicker"],
+    [/\b(time|o'?clock|hh:mm)\b|\b\d{1,2}(:\d{2})?\s?[ap]m\b|\b\d{1,2}:\d{2}\b/i, "TimePicker"],
+    [/\b(days|weekdays?|weekly|repeats?|repeating|(which|what) days?|days? of the week)\b/i, "DayPicker"],
     [/\b(dates?|deadline|due)\b/i, "DatePicker"],
   ];
   const seen = new Set<string>();
@@ -878,7 +885,6 @@ export function dayList(days: string): string {
   return picked.map((day) => names[day] ?? day).join(", ");
 }
 
-// ── Text fallback ───────────────────────────────────────────────────────────
 
 function inlineText(node: WidgetNode): string {
   switch (node.type) {
