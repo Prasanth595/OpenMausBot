@@ -5,7 +5,7 @@ export type { Notification, NotifyKind } from "../shared/notification.ts";
 
 /** A model's markdown as the plain text a notification banner can show:
  * no fences, headings, emphasis markers, link syntax, bullets, quotes or
- * table pipes. "#1234" and snake_case words stay as they are. */
+ * table pipes. Issue numbers and snake_case words stay as they are. */
 export function plainNotificationText(text: string): string {
   return text
     .replace(/```[\s\S]*?```/g, " ")
