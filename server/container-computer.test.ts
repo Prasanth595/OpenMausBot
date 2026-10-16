@@ -27,6 +27,7 @@ import {
   containerComputerStatus,
   containerRuntimeStatus,
   containerRunArgs,
+  hostTimeZone,
   dockerSecurityIsHardened,
   localVmRecreatableAfterStop,
   localVmRecreatableOnDemand,
@@ -1006,6 +1007,30 @@ describe("setupCommands", () => {
     expect(args).not.toContain("--userns");
     expect(args).not.toContain("--user");
     expect(command).not.toContain("relabel=");
+  });
+
+  it("creates each desktop in the host's time zone", () => {
+    const target = perBotLocalVmTarget("bot-a");
+    for (const runtime of ["docker", "podman"] as const) {
+      const args = containerRunArgs(runtime, "secret", target, "America/Sao_Paulo");
+      const at = args.indexOf("TZ=America/Sao_Paulo");
+      expect(at).toBeGreaterThan(0);
+      expect(args[at - 1]).toBe("-e");
+      expect(at).toBeLessThan(args.indexOf(IMAGE));
+    }
+    expect(containerRunArgs("container", "secret", SHARED_LOCAL_VM_TARGET, "Europe/Lisbon")).toContain("TZ=Europe/Lisbon");
+    expect(containerRunArgs("docker", "secret", target, null).some((arg) => arg.startsWith("TZ="))).toBe(false);
+  });
+
+  it("passes on only a well-formed IANA zone name", () => {
+    expect(hostTimeZone("America/Sao_Paulo")).toBe("America/Sao_Paulo");
+    expect(hostTimeZone("America/Argentina/Buenos_Aires")).toBe("America/Argentina/Buenos_Aires");
+    expect(hostTimeZone("Etc/GMT+3")).toBe("Etc/GMT+3");
+    expect(hostTimeZone("UTC")).toBe("UTC");
+    for (const bad of ["", "../../etc/passwd", "America/../../x", "/etc/localtime", "Zone with space", "A;rm -rf", "x".repeat(65)]) {
+      expect(hostTimeZone(bad)).toBeNull();
+    }
+    expect(hostTimeZone()).toBe(hostTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone));
   });
 
   it("does not invent Docker commands when no runtime was detected", () => {
