@@ -3242,6 +3242,7 @@
   "call.live.keyRemove": "Remover a chave",
   "call.live.cost": "Pelo OpenAI GPT-Live, cerca de US$ 0,05 por minuto.",
   "call.live.disclosure": "Uma chamada ao vivo envia a sua voz para a OpenAI, junto com as mensagens recentes da conversa, as respostas do bot e os detalhes de qualquer aprovação que ele pedir. A chave da OpenAI fica no seu computador.",
+  "call.live.disclosureCloud": "Uma chamada ao vivo envia a sua voz para a OpenAI, junto com as mensagens recentes da conversa, as respostas do bot e os detalhes de qualquer aprovação que ele pedir. A chave da OpenAI fica no My Cloud.",
   "call.live.device.ios": "um iPhone",
   "call.live.device.android": "um celular Android",
   "call.live.device.desktop": "outra janela",
