@@ -1,6 +1,6 @@
-# Self-modify: agents editing Astra's own code
+# Self-modify: agents editing OpenMausBot's own code
 
-Astra's agents can propose, apply, and roll back edits to this app's own
+OpenMausBot's agents can propose, apply, and roll back edits to this app's own
 TypeScript. The capability is opt-in, and every edit travels the same pipeline
 whoever starts it — a bot turn through the `self_modify` tool, or an operator
 clicking Apply in Settings → Self-modify.
@@ -17,14 +17,14 @@ The machinery that makes self-modification safe sits on a protected list
 `package.json`, `pnpm-lock.yaml`, CI workflows, and anything under
 `server/self-modify*`). A proposal that touches them is refused — a
 comment-only touch counts — and so is any content that would disarm a guard
-(`ASTRA_SELF_MODIFY`, the revert/verify helpers, the watchdog path), wherever
+(`OMB_SELF_MODIFY`, the revert/verify helpers, the watchdog path), wherever
 that content appears. The system can propose; it cannot touch its own leash.
 
 ## The pipeline
 
 1. **Propose.** A proposal carries a reason and 1–8 whole files, each an
    `edit`, `create`, or `delete`. It is validated against the rules above and
-   lands in `~/.astra/self-modify/pending/` — at most 20 waiting; a duplicate
+   lands in `~/.openmausbot/self-modify/pending/` — at most 20 waiting; a duplicate
    id, or an id that already has a journal entry, is refused.
 2. **Apply.** The journal entry is written first, with byte-exact copies of
    every original, and only then are files written. Nothing is applied by
@@ -50,8 +50,8 @@ would be built on files the first was about to restore.
 
 ## Where it is controlled
 
-- **Feature flag:** `features.selfModify` in `~/.astra/config.json`, or
-  `ASTRA_SELF_MODIFY=1`. It is read per request, so the switch takes effect
+- **Feature flag:** `features.selfModify` in `~/.openmausbot/config.json`, or
+  `OMB_SELF_MODIFY=1`. It is read per request, so the switch takes effect
   without a restart.
 - **Settings → Self-modify** (desktop): the switch, the inbox (Apply asks
   twice; Discard drops), the journal (per-entry Revert and Mark verified), and

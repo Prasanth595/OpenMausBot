@@ -1,6 +1,6 @@
-// Astra Browser Control — background service worker (MV3, module).
+// OpenMausBot Browser Control — background service worker (MV3, module).
 //
-// The Astra server is the WebSocket server; this extension is the client.
+// The OpenMausBot server is the WebSocket server; this extension is the client.
 // The server URL and pairing token live in chrome.storage.local and are
 // configured from the popup or options page. Every inbound command is a JSON
 // object { id, action, ...args } and is answered with

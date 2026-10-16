@@ -1,14 +1,13 @@
 // The handful of outward links the app offers from the profile menu and the
 // About dialog. They are collected here so "where does Help go?" has one
 // answer rather than one per call site.
-export const APP_NAME = "Astra";
-/** The repository that exists. The Astra rename is staged in the code but not
- * yet made on GitHub, and every link here (Help, releases, the licence) 404s
- * against the name that isn't there — so this follows the publish target in
- * electron-builder.yml and moves with it. */
+export const APP_NAME = "OpenMausBot";
+/** The repository that actually hosts releases and docs. A previous rebrand
+ * staged links at a GitHub name that never existed — every one of these 404'd
+ * for installed builds — so they follow the publish target in
+ * electron-builder.yml and move with it. */
 export const APP_REPOSITORY = "https://github.com/milind-soni/OpenMausBot";
-/** The docs tree is the help centre, and it is where astra.com sends
- * people too — one destination, not two competing ones. */
+/** The docs tree is the help centre — one destination, not two competing ones. */
 export const DOCS_URL = `${APP_REPOSITORY}/tree/main/docs`;
 export const HELP_CENTER_URL = DOCS_URL;
 export const APPROVAL_LEVELS_URL = `${APP_REPOSITORY}/blob/main/docs/approval-levels.md`;

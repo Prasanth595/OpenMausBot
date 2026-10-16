@@ -1,5 +1,5 @@
 // Settings → Self-modify: the operator console for the self-modification
-// subsystem. Astra (or anyone holding the agent tool) proposes edits to this
+// subsystem. A bot (or anyone holding the agent tool) proposes edits to this
 // app's own TypeScript; this screen is where proposals are reviewed, applied,
 // and rolled back.
 //

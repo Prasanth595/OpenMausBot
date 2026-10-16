@@ -57,13 +57,13 @@ node --test electron/preload.node-test.mjs electron/capabilities.node-test.mjs e
 ```
 
 `dictationApiKey` is not migrated into active credentials or emitted as
-`ASTRA_DICTATION_KEY`; config GET/PUT responses omit `dictation`, and incoming
+`OMB_DICTATION_KEY`; config GET/PUT responses omit `dictation`, and incoming
 `dictation` patches and legacy env values are ignored. Wake-word Picovoice and
 TTS credentials remain supported. This removal does not change Handy or native
 macOS dictation.
 
 Legacy raw config/store entries are not destructively deleted by unrelated
-saves. `ASTRA_DICTATION_KEY` deliberately remains in child-env stripping and
+saves. `OMB_DICTATION_KEY` deliberately remains in child-env stripping and
 diagnostics redaction: retiring a provider must not expose old secrets.
 
 Run the focused config-only fixture (no microphone or speech-provider calls):
@@ -152,7 +152,7 @@ executable resolution plus three channels:
 dictation and call turns capture in the renderer and post a finished WAV, so they
 never toggle or cancel Handy's recording.
 
-`--model` is Astra's own pin (Settings → Voice & Handy), not a change to Handy:
+`--model` is OpenMausBot's own pin (Settings → Voice & Handy), not a change to Handy:
 Handy owns its settings file and rewrites it on exit, so switching the engine
 there would change dictation in every app on the machine. `handy:models` is
 read-only for the same reason, and reports Handy's `selected_model` separately
@@ -194,7 +194,7 @@ launcher, a disposable home, and a disposable browser driven over CDP:
 
 ```sh
 node --experimental-strip-types scripts/verify-voice-ui.ts
-# ASTRA_CAPTURE_CHROME=/path/to/chrome overrides the browser it drives
+# OMB_CAPTURE_CHROME=/path/to/chrome overrides the browser it drives
 ```
 
 It mounts `scripts/testing/voice-preview.tsx`, which renders the real
@@ -215,7 +215,7 @@ Recorded run (Windows, isolated fixture, headless Chrome):
 | [`piper-installed.png`](evidence/voice/piper-installed.png) | Piper selected, the offer gone, and the voice it brought ("Amy — offline neural voice — medium quality") ready to try |
 
 The run installs through the real route — `POST /api/tts/piper/install`, the
-hash-pinned download, the host's own `~/.astra/piper` untouched — and the engine
+hash-pinned download, the host's own `~/.openmausbot/piper` untouched — and the engine
 it pictured then returns a real 22.05 kHz WAV from `/api/tts/speak`: about 3.4 s
 of audio (147,144 bytes on one run, 148,680 on the next), because Piper's sampler
 is not bit-reproducible. `findings.json` beside the pictures is the newest run's
@@ -232,7 +232,7 @@ the real IPC and preload are pinned by
 ## Provisioning Piper (offline neural speech)
 
 Piper is per machine: an absent engine is reported, never worked around. There
-are two ways to get it, and both end in the same `~/.astra/piper` layout.
+are two ways to get it, and both end in the same `~/.openmausbot/piper` layout.
 
 **From Settings** — `POST /api/tts/piper/install` answers `202` and installs the
 engine plus `en_US-amy-medium` in the background, reporting progress through the
@@ -249,15 +249,15 @@ Two invariants sit behind that route, both learned the hard way:
   "not installed" rather than a usable engine with no voice.
 - **The staging directory is never left behind**, so a retry starts clean.
 
-**By hand** — on Windows, with the data directory at `~/.astra`:
+**By hand** — on Windows, with the data directory at `~/.openmausbot`:
 
 ```sh
 curl -sL -o /tmp/piper.zip https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_windows_amd64.zip
 unzip -q /tmp/piper.zip -d /tmp/piper-extract
-mkdir -p ~/.astra/piper/voices && cp -r /tmp/piper-extract/piper/. ~/.astra/piper/
-curl -sL -o ~/.astra/piper/voices/en_US-amy-medium.onnx \
+mkdir -p ~/.openmausbot/piper/voices && cp -r /tmp/piper-extract/piper/. ~/.openmausbot/piper/
+curl -sL -o ~/.openmausbot/piper/voices/en_US-amy-medium.onnx \
   https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx
-curl -sL -o ~/.astra/piper/voices/en_US-amy-medium.onnx.json \
+curl -sL -o ~/.openmausbot/piper/voices/en_US-amy-medium.onnx.json \
   https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/amy/medium/en_US-amy-medium.onnx.json
 ```
 
@@ -278,7 +278,7 @@ printed `dataDir` — availability is evaluated per request. Then PUT
 Recorded run (Windows, 4-core i7-8550U, isolated fixture): `202` on install,
 `piperInstalling` observed mid-flight, `piperAvailable` true with no error, the
 voice listed as `en_US-amy-medium` ("Amy"), and a real 131,784-byte 22.05 kHz
-WAV (2.99 s) from `/api/tts/speak` — with the host's own `~/.astra/piper`
+WAV (2.99 s) from `/api/tts/speak` — with the host's own `~/.openmausbot/piper`
 untouched. The same route is photographed end to end in
 [Pictures of both panels](#pictures-of-both-panels).
 

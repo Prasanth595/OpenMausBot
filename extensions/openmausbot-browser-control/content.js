@@ -1,4 +1,4 @@
-// Astra Browser Control — content script (page actor).
+// OpenMausBot Browser Control — content script (page actor).
 //
 // Injected at document_idle into http(s) pages. Executes DOM-level commands
 // relayed from the service worker. Everything here runs in the ISOLATED world;
@@ -10,8 +10,8 @@
 (() => {
   "use strict";
 
-  if (window.__astraBrowserControl) return;
-  window.__astraBrowserControl = true;
+  if (window.__ombBrowserControl) return;
+  window.__ombBrowserControl = true;
 
   const MAX_TEXT = 200_000;
   const MAX_LINKS = 200;

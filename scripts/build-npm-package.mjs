@@ -54,7 +54,7 @@ writeFileSync(
       engines: { node: ">=24" },
       repository: { type: "git", url: "https://github.com/milind-soni/OpenMausBot.git" },
       homepage: "https://github.com/milind-soni/OpenMausBot#readme",
-      keywords: ["astra", "agents", "self-hosted", "server"],
+      keywords: ["openmausbot", "agents", "self-hosted", "server"],
     },
     null,
     2,

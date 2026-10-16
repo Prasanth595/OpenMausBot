@@ -107,7 +107,7 @@ export function resolveBoxPanelAction({
 /** Whether the agent — not a person — is at this computer's wheel. The
  * Computer panel marks exactly this window with its beam: a bot that is merely
  * selected, or a person who has taken control, drives nothing. */
-export function astraDriving({ held, busy }: { held: boolean; busy: boolean }): boolean {
+export function botDriving({ held, busy }: { held: boolean; busy: boolean }): boolean {
   return !held && busy;
 }
 

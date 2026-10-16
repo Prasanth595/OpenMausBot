@@ -34,7 +34,7 @@ export interface HandyReadoutCatalogEntry {
 
 export interface HandyEngineReadoutProps {
   status: HandyReadoutStatus;
-  /** The model id Astra pins for its own calls; "" follows Handy. */
+  /** The model id the app pins for its own calls; "" follows Handy. */
   pinned: string;
   onPin: (model: string) => void;
 }

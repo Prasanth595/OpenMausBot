@@ -6,7 +6,7 @@ import { EngineUpdateNotice } from "./EngineSetup";
 
 const update = {
   title: "Update Codex for GPT-6 Astra",
-  message: "This Codex version predates Astra support. Update it, then refresh models.",
+  message: "This Codex version predates the bundled model support. Update it, then refresh models.",
   command: "codex update",
 };
 

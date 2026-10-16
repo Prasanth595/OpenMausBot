@@ -1,13 +1,13 @@
-// Astra's "workshop": a sandbox crate where agents can create reusable
+// The app's "workshop": a sandbox crate where agents can create reusable
 // resources of their own — prompt fragments, runbooks, drafts, skill notes —
 // without touching anything else on disk.
 //
 // The whole subsystem is opt-in (`features.workshop` in the config, or
-// `ASTRA_WORKSHOP=1`) and read per request, so the operator's switch takes
+// `OMB_WORKSHOP=1`) and read per request, so the operator's switch takes
 // effect without a restart. Everything an agent can touch lives under
 // DATA_DIR/workshop — plain data, never source, so there is no journal,
 // no trial boot, and nothing to auto-revert: the operator can inspect and
-// edit the crate like any other file in ~/.astra.
+// edit the crate like any other file in the data dir.
 //
 // The rules are the whole safety story, and they are enforced here before
 // a single write reaches disk:

@@ -234,9 +234,9 @@ const featureConfigSchema = z.object({
   selfModify: z.boolean().optional(),
   /** Bots may create reusable text resources in the workshop crate
    * (DATA_DIR/workshop) — drafts, runbooks, skill notes. Off until
-   * explicitly enabled — also settable with ASTRA_WORKSHOP=1. */
+   * explicitly enabled — also settable with OMB_WORKSHOP=1. */
   workshop: z.boolean().optional(),
-  /** "Astra" wake word: keep an on-device Porcupine detector armed while
+  /** "Luna" wake word: keep an on-device Porcupine detector armed while
    * the app runs. Off until explicitly enabled; the mic is not opened
    * before that. */
   wakeWord: z.boolean().optional(),
@@ -341,7 +341,7 @@ const appConfigSchema = z.object({
     })
     .strict()
     .optional(),
-  /** The "Astra" wake word: the Picovoice AccessKey for the renderer's
+  /** The "Luna" wake word: the Picovoice AccessKey for the renderer's
    * on-device Porcupine detector. Stored and reported configured-or-not
    * only; the key never leaves the server except to the user's own
    * desktop shell. */
@@ -411,7 +411,7 @@ export interface AppConfig {
   vps?: { sshAlias?: string };
   opencodeGo?: { apiKey?: string };
   tts?: { key?: string; voice?: string; provider?: "elevenlabs" | "system" | "piper" };
-  /** The bots' browser. Absent chromePath = Astra's own bundled Chrome;
+  /** The bots' browser. Absent chromePath = the app's own bundled Chrome;
    * a path = the user's installed Chrome, in the bot's own profile. */
   browser?: { chromePath?: string };
   wakeWord?: { accessKey?: string };
@@ -499,7 +499,7 @@ export interface BrowserProfilePartitionTarget {
 }
 
 /** Where the bots' Chrome comes from: the configured installed Chrome if it
- *  exists, else Astra's own bundled/pinned one. A configured path that has
+ *  exists, else the app's own bundled/pinned one. A configured path that has
  *  vanished (update, uninstall) fails soft to the managed browser — the bot
  *  keeps working and Settings can say the path is stale. */
 export function botChromeExecutablePath(
@@ -599,7 +599,7 @@ export function selfModifyEnabled(cfg: AppConfig): boolean {
  * writing files at all is still something the operator must opt into.
  * Read per request so the switch takes effect without a restart. */
 export function workshopEnabled(cfg: AppConfig): boolean {
-  if (process.env.ASTRA_WORKSHOP === "1") return true;
+  if (process.env.OMB_WORKSHOP === "1") return true;
   return cfg.features?.workshop === true;
 }
 
@@ -790,7 +790,7 @@ export function loadConfig(): AppConfig {
   cfg.opencodeGo = { ...cfg.opencodeGo };
   if (process.env.OPENCODE_API_KEY !== undefined) cfg.opencodeGo.apiKey = process.env.OPENCODE_API_KEY;
   cfg.tts = { ...cfg.tts };
-  if (process.env.ASTRA_TTS_KEY !== undefined) cfg.tts.key = process.env.ASTRA_TTS_KEY;
+  if (process.env.OMB_TTS_KEY !== undefined) cfg.tts.key = process.env.OMB_TTS_KEY;
   cfg.wakeWord = { ...cfg.wakeWord };
   if (process.env.OMB_PICOVOICE_KEY !== undefined) cfg.wakeWord.accessKey = process.env.OMB_PICOVOICE_KEY;
   cfg.imageGen = { ...cfg.imageGen };
@@ -823,10 +823,10 @@ export function syncCredentialEnv(patch: Partial<AppConfig>): void {
     [patch.composio?.apiKey, "COMPOSIO_API_KEY"],
     [patch.box?.token, "BOX_TOKEN"],
     [patch.opencodeGo?.apiKey, "OPENCODE_API_KEY"],
-    [patch.tts?.key, "ASTRA_TTS_KEY"],
-    [patch.wakeWord?.accessKey, "ASTRA_PICOVOICE_KEY"],
-    [patch.imageGen?.key, "ASTRA_OPENAI_IMAGE_KEY"],
-    [patch.imageGen?.customApiKey, "ASTRA_CUSTOM_IMAGE_KEY"],
+    [patch.tts?.key, "OMB_TTS_KEY"],
+    [patch.wakeWord?.accessKey, "OMB_PICOVOICE_KEY"],
+    [patch.imageGen?.key, "OMB_OPENAI_IMAGE_KEY"],
+    [patch.imageGen?.customApiKey, "OMB_CUSTOM_IMAGE_KEY"],
   ];
   for (const [value, name] of secrets) {
     if (value === undefined) continue;
@@ -865,12 +865,12 @@ export const WORKSPACE_CREDENTIAL_ENV = [
   "VISION_URL",
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
-  "ASTRA_TTS_KEY",
+  "OMB_TTS_KEY",
   // Legacy Deepgram secret: no longer consumed, but must not leak to children.
-  "ASTRA_DICTATION_KEY",
-  "ASTRA_PICOVOICE_KEY",
-  "ASTRA_OPENAI_IMAGE_KEY",
-  "ASTRA_CUSTOM_IMAGE_KEY",
+  "OMB_DICTATION_KEY",
+  "OMB_PICOVOICE_KEY",
+  "OMB_OPENAI_IMAGE_KEY",
+  "OMB_CUSTOM_IMAGE_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   // Harness-private filesystem hints are not credentials themselves, but

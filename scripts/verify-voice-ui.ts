@@ -17,7 +17,7 @@
 //
 // Chrome is driven over CDP through Node's built-in WebSocket, so this adds no
 // dependency; the browser and the page live in scripts/testing/chrome-capture.ts,
-// which the app-wide capture recipe shares. Set ASTRA_CAPTURE_CHROME to a
+// which the app-wide capture recipe shares. Set OMB_CAPTURE_CHROME to a
 // Chromium binary to override the usual install locations. Pictures land in
 // docs/verification/evidence/voice/ with a findings.json beside them, and
 // everything asserted is printed.
@@ -29,7 +29,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { handyDataDir, readHandyCatalog, readHandyEngine } from "../electron/handy-engine.mjs";
-import { launchVerificationServer } from "./control-astra.ts";
+import { launchVerificationServer } from "./control-omb.ts";
 import {
   closeChrome,
   launchChrome,
@@ -97,7 +97,7 @@ try {
   preview = await mountPreview(fixture, {
     entry: "/scripts/testing/voice-preview.tsx",
     route: "/__voice.html",
-    title: "Astra · Voice preview",
+    title: "OpenMausBot · Voice preview",
     extraRoutes: [
       {
         path: "/__fixture/handy.json",
@@ -236,7 +236,7 @@ try {
     // allow: copy a provisioned piper/ into the printed dataDir, since
     // availability is evaluated per request.
     installMode = "offline copy of the host's install";
-    const source = join(homedir(), ".astra", "piper");
+    const source = join(homedir(), ".openmausbot", "piper");
     const engine = join(source, process.platform === "win32" ? "piper.exe" : "piper");
     if (!existsSync(engine)) {
       fail(`the install did not finish (${installError ?? "timed out"}) and ${source} has no engine to copy`);

@@ -109,7 +109,7 @@ describe("dictation capture lifecycle", () => {
     // Only the pin key is stored, so the executable path still resolves to
     // "detect it yourself": the two preferences must not be confused for each
     // other, and the id must reach Handy as a third argument.
-    const stored = new Map([["astra.handy-model.v1", "parakeet-tdt-0.6b-v2"]]);
+    const stored = new Map([["omb.handy-model.v1", "parakeet-tdt-0.6b-v2"]]);
     vi.stubGlobal("localStorage", {
       getItem: (key: string) => stored.get(key) ?? null,
       setItem: () => {},

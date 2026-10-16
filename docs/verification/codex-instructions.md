@@ -56,7 +56,7 @@ Goal counters, team status, selected skills, and memory can change between
 turns and cause another full developer update. Deduplication applies only to
 identical complete instruction blocks, not every production conversation.
 
-An additional authenticated smoke on Codex 0.153.4 with Astra medium used four
+An additional authenticated smoke on Codex 0.153.4 (GPT-6 Astra, medium effort) used four
 synthetic read-only turns and a fresh app-server process for each. Replies were
 ALPHA, ALPHA, BETA, GAMMA: unchanged rules persisted, edits took effect on the
 next turn, and removal let the current user request determine the reply. This

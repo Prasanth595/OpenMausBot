@@ -80,7 +80,7 @@ describe("Settings → Voice & Handy", () => {
     expect(html).toContain("Handy (offline dictation)");
     expect(html).toContain("Handy executable");
     expect(html).toContain("Wake word");
-    expect(html).toContain('aria-label="Listen for “Astra”"');
+    expect(html).toContain('aria-label="Listen for “Luna”"');
   });
 
   it("does not leak General settings or the ElevenLabs key row into a Piper setup", () => {

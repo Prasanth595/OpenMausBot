@@ -418,7 +418,7 @@ export interface ConfigStatus {
   anthropic?: { configured: boolean };
   openaiCompat?: { configured: boolean; url?: string };
   vision?: { configured: boolean; url?: string };
-  /** The "Astra" wake word's Picovoice AccessKey is saved (never echoed). */
+  /** The "Luna" wake word's Picovoice AccessKey is saved (never echoed). */
   wakeWord?: { configured: boolean };
   /** what this server is entitled to; Settings shows only what works here */
   edition?: { edition: "oss" | "enterprise"; features: string[] };
@@ -473,7 +473,7 @@ export interface ConfigStatus {
   browserEngine?: BrowserEngineSummary;
   /** Named browser sessions any bot can be pointed at. */
   browserProfiles?: BrowserProfile[];
-  /** Which Chrome the bots' browser launches; absent = Astra's managed one. */
+  /** Which Chrome the bots' browser launches; absent = the app's managed one. */
   browser?: { chromePath?: string };
 }
 

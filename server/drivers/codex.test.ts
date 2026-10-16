@@ -18,7 +18,7 @@ import { recordEvents, type EventRecorder } from "../testing/events.ts";
 import {
   CodexDriver,
   codexNativeIncomingLogMessage,
-  codexPredatesAstra,
+  codexPredatesOmb,
   codexUpdateCommand,
 } from "./codex.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -99,7 +99,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     delete process.env.FAKE_CODEX_STATE;
     delete process.env.FAKE_CODEX_RETRY_SCALE;
     delete process.env.FAKE_CODEX_VERSION;
-    delete process.env.FAKE_CODEX_ASTRA;
+    delete process.env.FAKE_CODEX_OMB;
     delete process.env.FAKE_CODEX_INSTRUCTIONS;
     delete process.env.OPENAI_API_KEY;
     delete process.env.BOX_TOKEN;
@@ -1144,7 +1144,7 @@ describe("CodexDriver turns (fake app-server)", () => {
     });
   });
 
-  it("offers the exact Astra update command without blocking older Codex models", async () => {
+  it("offers the exact Codex update command without blocking older Codex models", async () => {
     process.env.FAKE_CODEX_VERSION = "codex-cli 0.152.1";
     await create();
 
@@ -1157,16 +1157,16 @@ describe("CodexDriver turns (fake app-server)", () => {
     });
   });
 
-  it("does not show an Astra update prompt for a supported Codex version", async () => {
+  it("does not show an update prompt for a supported Codex version", async () => {
     process.env.FAKE_CODEX_VERSION = "codex-cli 0.153.1";
     await create();
 
     expect((await instance.snapshot()).update).toBeUndefined();
   });
 
-  it("trusts a live Astra catalog even when the bundled CLI version predates the documented release", async () => {
+  it("trusts a live model catalog even when the bundled CLI version predates the documented release", async () => {
     process.env.FAKE_CODEX_VERSION = "codex-cli 0.153.0";
-    process.env.FAKE_CODEX_ASTRA = "1";
+    process.env.FAKE_CODEX_OMB = "1";
     await create();
 
     expect(instance.models.options.map((model) => model.id)).toContain("gpt-6-astra");
@@ -1174,14 +1174,14 @@ describe("CodexDriver turns (fake app-server)", () => {
   });
 
   it("compares Codex versions conservatively", () => {
-    expect(codexPredatesAstra("codex-cli 0.152.1")).toBe(true);
-    expect(codexPredatesAstra("codex-cli 0.153.0")).toBe(true);
-    expect(codexPredatesAstra("codex-cli 0.153.1")).toBe(false);
-    expect(codexPredatesAstra("codex-cli 1.0.0-beta.1")).toBe(false);
-    expect(codexPredatesAstra("wrapper 0.1.0 using codex-cli 0.153.3")).toBe(false);
-    expect(codexPredatesAstra("wrapper 1.0.0 using codex-cli 0.151.0")).toBe(true);
-    expect(codexPredatesAstra("codex-cli 0.152.1.4")).toBe(false);
-    expect(codexPredatesAstra("custom nightly")).toBe(false);
+    expect(codexPredatesOmb("codex-cli 0.152.1")).toBe(true);
+    expect(codexPredatesOmb("codex-cli 0.153.0")).toBe(true);
+    expect(codexPredatesOmb("codex-cli 0.153.1")).toBe(false);
+    expect(codexPredatesOmb("codex-cli 1.0.0-beta.1")).toBe(false);
+    expect(codexPredatesOmb("wrapper 0.1.0 using codex-cli 0.153.3")).toBe(false);
+    expect(codexPredatesOmb("wrapper 1.0.0 using codex-cli 0.151.0")).toBe(true);
+    expect(codexPredatesOmb("codex-cli 0.152.1.4")).toBe(false);
+    expect(codexPredatesOmb("custom nightly")).toBe(false);
   });
 
   it("updates the selected Codex executable instead of installing a second copy", () => {

@@ -1,7 +1,7 @@
 // Unit tests for the workshop crate subsystem. Like the self-modify tests,
 // every disk-facing test runs in an isolated fixture: the vitest setup file
 // has already redirected homedir() to a throwaway per-file home, so the
-// workshop dir (DATA_DIR/workshop) lands inside it and the real ~/.astra is
+// workshop dir (DATA_DIR/workshop) lands inside it and the real data dir is
 // never touched.
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";

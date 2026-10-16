@@ -1,12 +1,12 @@
 // Headless-browser capture, on the browser this machine already has.
 //
 // The verification recipes that need a picture (scripts/verify-voice-ui.ts,
-// scripts/capture-astra-ui.ts) drive Chrome over CDP through Node's built-in
+// scripts/capture-omb-ui.ts) drive Chrome over CDP through Node's built-in
 // WebSocket, so no dependency joins the repo for a screenshot. A recipe owns
 // its page; this module owns the browser, the session and the disposal, so a
 // run cannot leave a window, a profile directory or a stray process behind.
 //
-// Set ASTRA_CAPTURE_CHROME to a Chromium binary to override the platform's
+// Set OMB_CAPTURE_CHROME to a Chromium binary to override the platform's
 // usual install locations.
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
@@ -35,15 +35,15 @@ const CHROME_PATHS: Partial<Record<NodeJS.Platform, string[]>> = {
 };
 
 export function chromeBinary(): string {
-  const explicit = process.env.ASTRA_CAPTURE_CHROME?.trim();
+  const explicit = process.env.OMB_CAPTURE_CHROME?.trim();
   if (explicit) {
-    if (!existsSync(explicit)) throw new Error(`ASTRA_CAPTURE_CHROME does not exist: ${explicit}`);
+    if (!existsSync(explicit)) throw new Error(`OMB_CAPTURE_CHROME does not exist: ${explicit}`);
     return explicit;
   }
   for (const candidate of CHROME_PATHS[process.platform] ?? []) {
     if (candidate && existsSync(candidate)) return candidate;
   }
-  throw new Error("no Chrome found — set ASTRA_CAPTURE_CHROME to a Chromium binary to take these pictures");
+  throw new Error("no Chrome found — set OMB_CAPTURE_CHROME to a Chromium binary to take these pictures");
 }
 
 export interface ChromeSession {
@@ -59,7 +59,7 @@ export async function launchChrome(
   viewport: CaptureViewport = CAPTURE_VIEWPORT,
   scale: number = CAPTURE_SCALE,
 ): Promise<ChromeSession> {
-  const profileDir = await mkdtemp(join(tmpdir(), "astra-capture-"));
+  const profileDir = await mkdtemp(join(tmpdir(), "omb-capture-"));
   const binary = chromeBinary();
   const child = spawn(
     binary,

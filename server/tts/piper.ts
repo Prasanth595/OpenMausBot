@@ -17,7 +17,7 @@ import { DATA_DIR } from "../config.ts";
 import type { Audio, Voice } from "./elevenlabs.ts";
 
 // Derived from DATA_DIR like every other server-owned path, so an
-// ASTRA_DATA_DIR override (test rigs, the soak harness) relocates the engine
+// OMB_DATA_DIR override (test rigs, the soak harness) relocates the engine
 // with the rest of the workspace instead of silently reading the real home.
 const PIPER_ROOT = join(DATA_DIR, "piper");
 const VOICES_DIR = join(PIPER_ROOT, "voices");

@@ -172,7 +172,7 @@ export function createDictationCapture(options: DictationCaptureOptions): Dictat
           if (!hasSpeech) return "";
           const wav = encodeWav(merged());
           chunks = [];
-          // The pinned model is Astra's own preference; empty hands the
+          // The pinned model is the app's own preference; empty hands the
           // choice back to Handy's selected model.
           const result = await bridge.handyTranscribeFile!(wav, handyPath(), handyModel());
           if (discarded) return "";

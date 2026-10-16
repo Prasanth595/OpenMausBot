@@ -18,7 +18,7 @@ import {
 const roots: string[] = [];
 
 function tempRoot(label: string): string {
-  const dir = mkdtempSync(join(tmpdir(), `astra-piper-${label}-`));
+  const dir = mkdtempSync(join(tmpdir(), `omb-piper-${label}-`));
   roots.push(dir);
   return dir;
 }

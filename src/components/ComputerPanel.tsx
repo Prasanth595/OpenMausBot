@@ -1,6 +1,6 @@
 // The bot's computer, in the right-side slot. Where it runs decides the
 // whole flow: explicit cloud → provision the box on open (idempotent). This
-// panel carries no screen image: while Astra drives, a border-beam rides the
+// panel carries no screen image: while a bot drives, a border-beam rides the
 // frame, and the live desktop stays a separate, user-initiated window. Nothing
 // here polls, decodes, or renders a screenshot, so the panel paints at once.
 // Auto only reads an existing Box's state: opening this panel never creates,
@@ -43,7 +43,7 @@ import { LinuxLocalControl } from "./LinuxLocalControl";
 import { MacLocalControl } from "./MacLocalControl";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import {
-  astraDriving,
+  botDriving,
   autoSelectsLocalComputer,
   instanceSupportsLocalComputer,
   localComputerDisabledReason,
@@ -607,10 +607,10 @@ export function ComputerPanel({
   // The beam rides the frame for exactly the window where the agent is at the
   // wheel and nothing has taken it back — a bot that is merely selected, or a
   // person driving, gets no beam.
-  const driving = astraDriving({ held: control.held === true, busy: bot.busy === true });
+  const driving = botDriving({ held: control.held === true, busy: bot.busy === true });
   // Mirror the who-is-driving state onto the live-desktop window: main injects
   // the beam stylesheet into the viewer while this bot holds the computer, so
-  // the full-screen view glows exactly while Astra drives it.
+  // the full-screen view glows exactly while a bot drives it.
   useEffect(() => {
     const bridge = window.ogb?.desktopViewer;
     if (!bridge?.setDriving) return;
@@ -991,7 +991,7 @@ export function ComputerPanel({
             <div role="status" aria-live="polite" className="flex flex-col items-center gap-3 px-6 text-center">
               <ThinkingOrb state={control.helpReason ? "connecting" : "working"} size={64} paused={reducedMotion} />
               <span className="text-[12px] text-ink-secondary">
-                {t("computer.astraDriving", { name: bot.name })}
+                {t("computer.ombDriving", { name: bot.name })}
               </span>
             </div>
           ) : (

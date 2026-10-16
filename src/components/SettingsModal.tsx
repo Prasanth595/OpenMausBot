@@ -430,7 +430,7 @@ function BrowserProfilesRow() {
 
 const WINDOWS_CHROME_HINT = "%ProgramFiles%\\Google\\Chrome\\Application\\chrome.exe";
 
-/** Which Chrome the bots' browser launches: Astra's own managed one, or the
+/** Which Chrome the bots' browser launches: the app's own managed one, or the
  *  Chrome installed on this machine. A configured path that no longer exists
  *  stays editable (so it can be fixed) while the server quietly falls back. */
 function ChromeBrowserRow() {

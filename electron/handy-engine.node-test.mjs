@@ -57,7 +57,7 @@ test("AppleDouble companions do not count as models", () => {
 });
 
 test("the readout reports Handy's selection alongside what is actually on disk", async () => {
-  const appDataDir = mkdtempSync(join(tmpdir(), "astra-handy-engine-"));
+  const appDataDir = mkdtempSync(join(tmpdir(), "omb-handy-engine-"));
   try {
     const dir = join(appDataDir, "com.pais.handy");
     const models = join(dir, "models");
@@ -127,7 +127,7 @@ test("the catalog call is bounded and asks for JSON", async () => {
 });
 
 test("an install with nothing readable reports that honestly instead of throwing", async () => {
-  const appDataDir = mkdtempSync(join(tmpdir(), "astra-handy-engine-absent-"));
+  const appDataDir = mkdtempSync(join(tmpdir(), "omb-handy-engine-absent-"));
   try {
     const status = await readHandyEngine({
       handyPath: "",

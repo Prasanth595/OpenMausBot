@@ -1,4 +1,4 @@
-# Pictures of Astra itself
+# Pictures of OpenMausBot itself
 
 `docs/screenshots/` holds the app's product shots. They were taken by hand on a
 live workspace, which is what a README wants and what evidence cannot use:
@@ -11,16 +11,16 @@ shared control core.
 ## Run
 
 ```sh
-node --experimental-strip-types scripts/capture-astra-ui.ts
+node --experimental-strip-types scripts/capture-omb-ui.ts
 ```
 
 The recipe:
 
-1. launches the fixture (`launchVerificationServer` in `scripts/control-astra.ts`)
+1. launches the fixture (`launchVerificationServer` in `scripts/control-omb.ts`)
    with `FAKE_CLAUDE_REPLIES` set, so the engine answers with a reply written
    into the recipe (`server/testing/fake-claude-cli.ts`);
-2. creates three agents — Scout, Ledger, Astra — through `new-bot`;
-3. sends one turn to Astra with `send` and waits for it to settle with `wait`;
+2. creates three agents — Scout, Ledger, Momo — through `new-bot`;
+3. sends one turn to Momo with `send` and waits for it to settle with `wait`;
 4. mounts the real `<App/>` over a Vite preview (`scripts/testing/preview-fixture.ts`)
    at `/__threads.html` — the entry and route `pnpm control:omb ui launch`
    serves for the same page;
@@ -28,20 +28,20 @@ The recipe:
    through Node's built-in WebSocket, so no dependency is added) and photographs
    the app in the default skin, then again under Atelier.
 
-Set `ASTRA_CAPTURE_CHROME` to a Chromium binary to override the browser the
+Set `OMB_CAPTURE_CHROME` to a Chromium binary to override the browser the
 recipe finds. Pictures and a `findings.json` land in
-`docs/verification/evidence/astra-app/`.
+`docs/verification/evidence/omb-app/`.
 
 ## What the pictures show
 
-`astra-app-dark.png` and `astra-app-light.png` are the whole app at 1280×900,
+`omb-app-dark.png` and `omb-app-light.png` are the whole app at 1280×900,
 2× — sidebar, transcript, composer and window header — with the answer rendered
 as markdown: bold, bullets, italics and an inline code span.
 
 Expected: the sidebar lists the fixture's own seeded bot plus the three this run
-created, with Astra open. The app opens the newest bot, which is why the
+created, with Momo open. The app opens the newest bot, which is why the
 conversation agent is created last; that is also the order a real sidebar shows
-(newest first). The transcript holds Astra's greeting, the question, the reply,
+(newest first). The transcript holds Momo's greeting, the question, the reply,
 and a token count in the header.
 
 ## What this proves, and what it does not

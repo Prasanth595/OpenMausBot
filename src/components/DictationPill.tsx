@@ -1,7 +1,7 @@
 // Status surfaces for dictation, bottom-center:
 //   - hold-Ctrl+Space clipboard dictation (a border-beam glow marks the
 //     live hold, through capture and decoding);
-//   - the "Astra" wake word: armed indicator, listening/decoding feedback while a
+//   - the "Luna" wake word: armed indicator, listening/decoding feedback while a
 //     wake-triggered transcript is captured, and errors.
 // Renders nothing in the browser/dev (no bridge) and when there is nothing
 // to show.
@@ -135,7 +135,7 @@ export function DictationPill() {
   const live = active || wakeActive;
   const message = live
     ? decoding ? t("wake.transcribing") : active ? "Recording… release to copy" : t("wake.detected")
-    : note ?? "“Astra”";
+    : note ?? "“Luna”";
 
   return (
     <BorderBeam

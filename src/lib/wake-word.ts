@@ -143,7 +143,7 @@ export class WakeWordController {
 
 /** One wake→dictate cycle. The controller never touches the composer or the
  * transcription engine itself; this object owns the session while a
- * transcript is being captured, so a second "Astra" cannot double-open it.
+ * transcript is being captured, so a second listener cannot double-open it.
  * There is one engine now — the user's own Handy install, decoded offline —
  * so start() has no choice to make. */
 export function createWakeWordSession(callbacks: {

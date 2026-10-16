@@ -43,7 +43,7 @@ function registerTestArtifacts(): void {
 
 const roots: string[] = [];
 const temporaryRoot = (label: string) => {
-  const dir = mkdtempSync(join(tmpdir(), `astra-piper-install-${label}-`));
+  const dir = mkdtempSync(join(tmpdir(), `omb-piper-install-${label}-`));
   roots.push(dir);
   return dir;
 };

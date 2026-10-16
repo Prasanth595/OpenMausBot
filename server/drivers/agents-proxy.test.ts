@@ -343,13 +343,13 @@ beforeAll(async () => {
   child = spawn(process.execPath, [PROXY], {
     env: {
       ...process.env,
-      ASTRA_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
-      ASTRA_BOT_ID: "bot-asker",
-      ASTRA_THREAD_ID: "thread-asker-routine",
-      ASTRA_COMMS_TOKEN: TOKEN,
-      ASTRA_TURN_DEPTH: "0",
-      ASTRA_SKILL_AUTHORING_ENABLED: "1",
-      ASTRA_SELF_MODIFY_ENABLED: "1",
+      OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
+      OMB_BOT_ID: "bot-asker",
+      OMB_THREAD_ID: "thread-asker-routine",
+      OMB_COMMS_TOKEN: TOKEN,
+      OMB_TURN_DEPTH: "0",
+      OMB_SKILL_AUTHORING_ENABLED: "1",
+      OMB_SELF_MODIFY_ENABLED: "1",
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -1487,11 +1487,11 @@ describe("agents-proxy MCP surface", () => {
     const bare = spawn(process.execPath, [PROXY], {
       env: {
         ...process.env,
-        ASTRA_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
-        ASTRA_BOT_ID: "bot-asker",
-        ASTRA_THREAD_ID: "thread-asker-routine",
-        ASTRA_COMMS_TOKEN: TOKEN,
-        ASTRA_TURN_DEPTH: "0",
+        OMB_HARNESS_URL: `http://127.0.0.1:${stubPort}`,
+        OMB_BOT_ID: "bot-asker",
+        OMB_THREAD_ID: "thread-asker-routine",
+        OMB_COMMS_TOKEN: TOKEN,
+        OMB_TURN_DEPTH: "0",
       },
       stdio: ["pipe", "pipe", "inherit"],
     });

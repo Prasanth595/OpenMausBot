@@ -1933,7 +1933,7 @@ ipcMain.handle("desktop:open-external", localOnly("desktop:open-external", async
 
 // The Box VNC viewer must be a top-level page for its token exchange. A
 // sandboxed modal BrowserWindow satisfies that requirement while keeping the
-// live desktop inside Astra instead of sending the person to a browser.
+// live desktop inside the app instead of sending the person to a browser.
 ipcMain.handle("desktop-viewer:driving", localOnly("desktop-viewer:driving", (_event, contextId, driving) => {
   // Only the bot that owns the open viewer may light or dim the beam.
   const requested = Object.prototype.toString.call(contextId) === "[object String]" ? contextId : null;

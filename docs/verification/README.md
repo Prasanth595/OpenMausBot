@@ -93,7 +93,7 @@ and the one-click Piper offer — on the standard isolated fixture.
 
 The [app pictures recipe](app-pictures.md) photographs the shipped renderer — the
 whole app, both skins — on that same isolated fixture, with a conversation the
-run itself created, so a picture of Astra can be re-taken and trusted.
+run itself created, so a picture of OpenMausBot can be re-taken and trusted.
 
 The [sidebar fixture](sidebar.md) checks archive and delete confirmations, their
 default focus, keyboard wrapping and focus return against two disposable bots.

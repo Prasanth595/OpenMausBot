@@ -8,7 +8,7 @@ import {
   localComputerSelectable,
   persistedComputerSelectionMatches,
   resolveBoxPanelAction,
-  astraDriving,
+  botDriving,
   cloudDesktopReady,
 } from "./local-computer";
 
@@ -192,11 +192,11 @@ describe("local computer UI eligibility", () => {
   });
 
   it("marks the screen only while the agent, not a person, is at the wheel", () => {
-    expect(astraDriving({ held: false, busy: true })).toBe(true);
+    expect(botDriving({ held: false, busy: true })).toBe(true);
     // A person who took control drives; the agent's beam has to go out.
-    expect(astraDriving({ held: true, busy: true })).toBe(false);
+    expect(botDriving({ held: true, busy: true })).toBe(false);
     // An idle bot owns nothing, even with the wheel.
-    expect(astraDriving({ held: false, busy: false })).toBe(false);
+    expect(botDriving({ held: false, busy: false })).toBe(false);
   });
 
   it("refuses cloud desktop actions when a stale ready phase belongs to Auto or another destination", () => {

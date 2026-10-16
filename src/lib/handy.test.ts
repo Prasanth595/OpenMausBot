@@ -1,6 +1,6 @@
-// Handy is both Astra's dictation engine and another application's install, so
-// two things are worth pinning here: where Astra thinks Handy lives, and which
-// model Astra asks it to run. The advice rule is pinned by hardware tier — a
+// Handy is both the app's dictation engine and another application's install, so
+// two things are worth pinning here: where the app thinks Handy lives, and which
+// model the app asks it to run. The advice rule is pinned by hardware tier — a
 // model that cannot decode faster than the user speaks is a broken feature on
 // the machine that picked it, so the tiers are the contract.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

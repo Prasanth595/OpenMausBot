@@ -21,12 +21,12 @@ export const CREDENTIAL_ENV_NAMES = [
   "VISION_URL",
   "BOX_TOKEN",
   "OPENCODE_API_KEY",
-  "ASTRA_TTS_KEY",
+  "OMB_TTS_KEY",
   // Legacy Deepgram secret: old logs/env dumps still need redaction.
-  "ASTRA_DICTATION_KEY",
-  "ASTRA_PICOVOICE_KEY",
-  "ASTRA_OPENAI_IMAGE_KEY",
-  "ASTRA_CUSTOM_IMAGE_KEY",
+  "OMB_DICTATION_KEY",
+  "OMB_PICOVOICE_KEY",
+  "OMB_OPENAI_IMAGE_KEY",
+  "OMB_CUSTOM_IMAGE_KEY",
   "COMPOSIO_API_KEY",
   "OMB_COMPOSIO_BROKER_TOKEN",
   // Browser capability files and app-owned state paths are private even

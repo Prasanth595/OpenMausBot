@@ -20,7 +20,7 @@ import { VoiceSettings } from "../../src/components/VoiceSettings";
 import { DesktopCapabilitiesProvider } from "../../src/components/DesktopCapabilities";
 import { StoreProvider, useStore, type Bot } from "../../src/state/store";
 import type { HandyEngineStatus } from "../../src/types/ogb";
-import { ASTRA_COLOR_NAMES } from "../../src/lib/mascot";
+import { OMB_COLOR_NAMES } from "../../src/lib/mascot";
 import { applySkin, type SkinId } from "../../src/lib/skins";
 import "../../src/styles.css";
 
@@ -29,11 +29,11 @@ import "../../src/styles.css";
 const PREVIEW_BOT: Bot = {
   id: "voice-preview-bot",
   threadId: "voice-preview-thread",
-  name: "Astra",
+  name: "Momo",
   title: "Voice preview",
   description: "",
   notifications: false,
-  color: ASTRA_COLOR_NAMES[0],
+  color: OMB_COLOR_NAMES[0],
   unread: false,
   modelSelection: { instanceId: "claude", model: "" },
   /** Piper's default voice: the model the one-click install brings, so the

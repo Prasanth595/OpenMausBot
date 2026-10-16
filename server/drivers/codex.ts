@@ -42,21 +42,21 @@ import { codexAccountEmail } from "./codex-identity.ts";
 export { decodeCodexSelection, readCodexModelCatalog, STATIC_CODEX_MODELS } from "./codex-catalog.ts";
 
 const DRIVER_KIND = "codex";
-const ASTRA_MODEL_ID = "gpt-6-astra";
-const ASTRA_MIN_CODEX_VERSION = [0, 153, 1] as const;
+const OMB_MODEL_ID = "gpt-6-astra";
+const OMB_MIN_CODEX_VERSION = [0, 153, 1] as const;
 
 /** Whether an installed Codex predates the release that exposes GPT-6 Astra
  * through app-server. Unknown version formats stay quiet: a bad guess should
  * never nag someone whose custom build may already support the model. */
-export function codexPredatesAstra(version: string): boolean {
+export function codexPredatesOmb(version: string): boolean {
   const value = version.trim();
   const match = /\bcodex-cli\s+v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9a-z.-]+)?(?![\d.])\b/i.exec(value)
     ?? /^v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9a-z.-]+)?$/i.exec(value);
   if (!match) return false;
   const installed = match.slice(1, 4).map(Number);
-  for (let i = 0; i < ASTRA_MIN_CODEX_VERSION.length; i += 1) {
-    if (installed[i] !== ASTRA_MIN_CODEX_VERSION[i]) {
-      return installed[i] < ASTRA_MIN_CODEX_VERSION[i];
+  for (let i = 0; i < OMB_MIN_CODEX_VERSION.length; i += 1) {
+    if (installed[i] !== OMB_MIN_CODEX_VERSION[i]) {
+      return installed[i] < OMB_MIN_CODEX_VERSION[i];
     }
   }
   return false;
@@ -81,18 +81,18 @@ export function codexUpdateCommand(cli: string, platform: NodeJS.Platform = proc
   return platform === "win32" ? `& ${command} update` : `${command} update`;
 }
 
-function codexAstraUpdate(
+function codexOmbUpdate(
   version: string,
   models: typeof STATIC_CODEX_MODELS,
   cli: string,
 ): ProviderSnapshot["update"] | undefined {
-  if (models.options.some((model) => model.id === ASTRA_MODEL_ID) || !codexPredatesAstra(version)) {
+  if (models.options.some((model) => model.id === OMB_MODEL_ID) || !codexPredatesOmb(version)) {
     return undefined;
   }
   return {
     title: "Update Codex for GPT-6 Astra",
     message:
-      "This Codex version predates Astra support. Update it, then refresh models. Astra must also be available to your signed-in ChatGPT account.",
+      "This Codex version predates the bundled model support. Update it, then refresh models. It must also be available to your signed-in ChatGPT account.",
     command: codexUpdateCommand(cli),
   };
 }
@@ -1230,7 +1230,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
       version,
       authenticated,
       ...(email ? { account: { email } } : {}),
-      update: codexAstraUpdate(version, models, config.cli),
+      update: codexOmbUpdate(version, models, config.cli),
       billing: "subscription",
     };
   };

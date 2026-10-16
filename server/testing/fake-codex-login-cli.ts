@@ -31,7 +31,7 @@ if (args === "--version") {
     process.stderr.write("Successfully logged in\n");
   }, 100);
 } else if (process.argv[2] === "app-server") {
-  process.env.FAKE_CODEX_ASTRA = "1";
+  process.env.FAKE_CODEX_OMB = "1";
   process.env.FAKE_CODEX_MODE = "happy";
   delete process.env.FAKE_CODEX_DUMP;
   await import("./fake-codex-app-server.ts");

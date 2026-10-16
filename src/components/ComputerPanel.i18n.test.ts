@@ -16,12 +16,12 @@ describe("computer panel copy", () => {
   it("translates the driving status in every pack that carries it", () => {
     for (const [code, pack] of Object.entries(locales)) {
       setLocale(code);
-      const copy = t("computer.astraDriving", { name: "Astra" });
+      const copy = t("computer.ombDriving", { name: "Momo" });
       // A pack without the key falls back to English, never to the raw key.
-      expect(copy, code).toContain("Astra");
-      expect(copy, code).not.toBe("computer.astraDriving");
-      if (code !== "en" && pack["computer.astraDriving"]) {
-        expect(pack["computer.astraDriving"], code).not.toBe(en["computer.astraDriving"]);
+      expect(copy, code).toContain("Momo");
+      expect(copy, code).not.toBe("computer.ombDriving");
+      if (code !== "en" && pack["computer.ombDriving"]) {
+        expect(pack["computer.ombDriving"], code).not.toBe(en["computer.ombDriving"]);
       }
     }
   });

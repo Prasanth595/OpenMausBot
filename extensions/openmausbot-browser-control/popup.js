@@ -6,7 +6,7 @@ const errorBox = $("error");
 function render(state) {
   const on = Boolean(state?.connected);
   dot.className = `dot ${on ? "on" : "off"}`;
-  status.textContent = on ? "Connected to Astra" : "Not connected";
+  status.textContent = on ? "Connected to OpenMausBot" : "Not connected";
   errorBox.textContent = state?.lastError || "";
 }
 

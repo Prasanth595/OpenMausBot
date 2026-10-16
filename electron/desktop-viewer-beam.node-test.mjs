@@ -6,8 +6,8 @@ test("the driving beam rides the viewport edge as a rotating conic ring", () => 
   const css = drivingBeamStylesheet();
   assert.match(css, /body::after/);
   assert.match(css, /conic-gradient/);
-  assert.match(css, /animation:\s*astra-beam-spin/);
-  assert.match(css, /@keyframes astra-beam-spin/);
+  assert.match(css, /animation:\s*omb-beam-spin/);
+  assert.match(css, /@keyframes omb-beam-spin/);
 });
 
 test("the beam never intercepts input meant for the VNC canvas", () => {

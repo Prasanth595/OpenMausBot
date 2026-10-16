@@ -1,6 +1,6 @@
-// One-shot icon generator for Astra Browser Control.
-// Renders a rounded-square indigo tile with an "A" glyph to
-// astra-16/32/48/128.png using only Node's zlib (unbreakable, no deps).
+// One-shot icon generator for OpenMausBot Browser Control.
+// Renders a rounded-square indigo tile with an "M" glyph to
+// omb-16/32/48/128.png using only Node's zlib (unbreakable, no deps).
 // Delete this file after regenerating if you prefer a designer-supplied set.
 import { deflateSync } from "node:zlib";
 import { writeFileSync, mkdirSync } from "node:fs";
@@ -9,13 +9,13 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-// 5x7 bitmap "A" scaled by integer factor per size.
+// 5x7 bitmap "M" scaled by integer factor per size.
 // Rows top→bottom, 1 = filled.
 const GLYPH = [
-  "01110",
   "10001",
+  "11011",
+  "10101",
   "10001",
-  "11111",
   "10001",
   "10001",
   "10001",
@@ -99,6 +99,6 @@ function render(size) {
 }
 
 for (const size of [16, 32, 48, 128]) {
-  writeFileSync(join(here, `astra-${size}.png`), render(size));
-  console.log(`astra-${size}.png written`);
+  writeFileSync(join(here, `omb-${size}.png`), render(size));
+  console.log(`omb-${size}.png written`);
 }

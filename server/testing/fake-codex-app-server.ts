@@ -149,16 +149,16 @@ process.stdin.on("data", (chunk) => {
             },
           });
         } else {
-          const hasAstra = process.env.FAKE_CODEX_ASTRA === "1";
+          const hasOmbModel = process.env.FAKE_CODEX_OMB === "1";
           out({
             jsonrpc: "2.0",
             id: msg.id,
             result: {
               data: [
-                ...(hasAstra
+                ...(hasOmbModel
                   ? [{ id: "gpt-6-astra", displayName: "GPT-6 Astra", hidden: false, isDefault: true }]
                   : []),
-                { id: "gpt-fake-default", displayName: "GPT Fake Default", hidden: false, isDefault: !hasAstra },
+                { id: "gpt-fake-default", displayName: "GPT Fake Default", hidden: false, isDefault: !hasOmbModel },
               ],
               nextCursor: "page-2",
             },

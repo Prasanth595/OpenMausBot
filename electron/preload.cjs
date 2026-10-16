@@ -186,8 +186,8 @@ const bridge = {
    * { ok: false, error } when the executable is missing. */
   handyToggle: (handyPath) => ipcRenderer.invoke("handy:toggle", handyPath),
   /** Read-only view of Handy's engine: selected model, installed models and
-   * this device. Astra never writes Handy's settings file; pass `model` to
-   * pin an engine for Astra's own calls instead. */
+   * this device. the app never writes Handy's settings file; pass `model` to
+   * pin an engine for the app's own calls instead. */
   handyModels: (handyPath) => ipcRenderer.invoke("handy:models", handyPath),
   handyTranscribeFile: (wavPath, handyPath, model) => ipcRenderer.invoke("handy:transcribe-file", wavPath, handyPath, model),
 

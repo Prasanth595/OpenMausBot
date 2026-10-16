@@ -214,15 +214,15 @@ const __APP_VERSION__: string;
       /** Toggle Handy (the offline speech-to-text app) on or off. Resolves
        * { ok: false, error } when the executable is missing. */
       handyToggle?(handyPath: string): Promise<{ ok: boolean; error?: string }>;
-      /** Read-only view of Handy's engine, for Settings. Astra never writes
+      /** Read-only view of Handy's engine, for Settings. the app never writes
        * Handy's settings file — see HandyEngineStatus. */
       handyModels?(handyPath: string): Promise<HandyEngineStatus>;
       /** Headless transcription of WAV bytes through the user's Handy
        * install (offline model). `model` pins the engine for this call;
        * omitted, Handy uses the model selected in its own window. */
       handyTranscribeFile?(wav: ArrayBuffer, handyPath: string, model?: string): Promise<{ ok: boolean; text?: string; error?: string }>;
-      /** The Picovoice AccessKey for the "Astra" wake word, from the OS-backed
-       * encrypted store (or ASTRA_PICOVOICE_KEY in dev). Null when none is
+      /** The Picovoice AccessKey for the "Luna" wake word, from the OS-backed
+       * encrypted store (or OMB_PICOVOICE_KEY in dev). Null when none is
        * saved — the wake word then stays off and Settings explains why. */
       picovoiceAccessKey?(): Promise<string | null>;
       /** In-app auto-update (packaged app only; dormant in dev). onState

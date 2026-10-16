@@ -776,10 +776,10 @@ describe("credential env preference", () => {
     "OPENAI_COMPAT_PROVIDER",
     "BOX_TOKEN",
     "OPENCODE_API_KEY",
-    "ASTRA_TTS_KEY",
-    "ASTRA_DICTATION_KEY",
-    "ASTRA_PICOVOICE_KEY",
-    "ASTRA_OPENAI_IMAGE_KEY",
+    "OMB_TTS_KEY",
+    "OMB_DICTATION_KEY",
+    "OMB_PICOVOICE_KEY",
+    "OMB_OPENAI_IMAGE_KEY",
     "COMPOSIO_API_KEY",
   ] as const;
   let saved: Record<string, string | undefined>;
@@ -802,9 +802,9 @@ describe("credential env preference", () => {
     const path = join(DATA_DIR, "config.json");
     const legacy = { dictation: { key: "fixture-legacy-file" } };
     writeFileSync(path, JSON.stringify(legacy));
-    process.env.ASTRA_DICTATION_KEY = "fixture-legacy-env";
-    process.env.ASTRA_PICOVOICE_KEY = "fixture-wake-env";
-    process.env.ASTRA_TTS_KEY = "fixture-tts-env";
+    process.env.OMB_DICTATION_KEY = "fixture-legacy-env";
+    process.env.OMB_PICOVOICE_KEY = "fixture-wake-env";
+    process.env.OMB_TTS_KEY = "fixture-tts-env";
     expect(parseStoredConfig(legacy)).toEqual({});
     const patch = parseConfigPatch({
       dictation: { key: "fixture-new-ignored" },
@@ -817,13 +817,13 @@ describe("credential env preference", () => {
     expect(loadConfig().tts?.key).toBe("fixture-tts-env");
     saveConfig(patch);
     syncCredentialEnv(patch);
-    expect(process.env.ASTRA_DICTATION_KEY).toBe("fixture-legacy-env");
+    expect(process.env.OMB_DICTATION_KEY).toBe("fixture-legacy-env");
     expect(loadConfig().wakeWord?.accessKey).toBe("fixture-wake-new");
     expect(loadConfig().tts).toMatchObject({ key: "fixture-tts-new", provider: "system" });
     // Unknown raw stored fields survive unrelated saves, but are never live config.
     expect(JSON.parse(readFileSync(path, "utf8")).dictation).toEqual(legacy.dictation);
     expect(loadConfig()).not.toHaveProperty("dictation");
-    const childEnv = { ASTRA_DICTATION_KEY: "fixture-legacy-env", PATH: "keep" };
+    const childEnv = { OMB_DICTATION_KEY: "fixture-legacy-env", PATH: "keep" };
     stripWorkspaceCredentialEnv(childEnv);
     expect(childEnv).toEqual({ PATH: "keep" });
     rmSync(path);

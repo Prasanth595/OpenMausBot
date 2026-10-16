@@ -1,16 +1,16 @@
 # Workshop: agents creating their own resources
 
-The workshop is Astra's smallest answer to "a place where a bot can create
-stuff": a sandbox crate at `~/.astra/workshop/` where an opted-in bot can
+The workshop is OpenMausBot's smallest answer to "a place where a bot can create
+stuff": a sandbox crate at `~/.openmausbot/workshop/` where an opted-in bot can
 create, read, replace, and delete plain text resources during a turn —
 prompt fragments, runbooks, drafts, skill notes, generated reference
 material — without touching anything else on disk.
 
 It is deliberately NOT self-modify. Self-modify rewrites the app's source
 and earns its rollback machinery because a bad edit can bring the server
-down. The workshop holds data the way `~/.astra` already holds data: the
+down. The workshop holds data the way `~/.openmausbot` already holds data: the
 operator can open it in an editor, delete files by hand, and nothing about
-running Astra changes. The safety story is therefore the rules themselves,
+running OpenMausBot changes. The safety story is therefore the rules themselves,
 enforced in `server/workshop.ts` before a single write reaches disk:
 
 - **Names** are a single path segment, 1–64 chars, `[A-Za-z0-9._-]` only,
@@ -36,14 +36,14 @@ that a bot can iterate on drafts cheaply.
 
 ## Where it is controlled
 
-- **Feature flag:** `features.workshop` in `~/.astra/config.json`, or
-  `ASTRA_WORKSHOP=1`. Opt-in only — a bot writing files at all is an
+- **Feature flag:** `features.workshop` in `~/.openmausbot/config.json`, or
+  `OMB_WORKSHOP=1`. Opt-in only — a bot writing files at all is an
   operator decision — and read per request, so the switch takes effect
   without a restart. The agents-proxy is offered the tool per turn via
-  `ASTRA_WORKSHOP_ENABLED`, so a stale process env can only narrow what it
+  `OMB_WORKSHOP_ENABLED`, so a stale process env can only narrow what it
   sees, never widen it.
 - Files land in `DATA_DIR/workshop` and are visible to the operator like
-  any other file in `~/.astra`. Rounded stopping: turning the feature off
+  any other file in `~/.openmausbot`. Rounded stopping: turning the feature off
   revokes the door and hides the tool; whatever was written stays on disk.
 
 ## Relationship to existing primitives

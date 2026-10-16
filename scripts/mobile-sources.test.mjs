@@ -13,26 +13,26 @@ import { describe, expect, it } from "vitest";
 const root = fileURLToPath(new URL("../", import.meta.url));
 
 /** The mascot palette/face sources the Android app module compiles. */
-const ANDROID_UI = "android/app/src/main/kotlin/com/astra/companion/ui";
+const ANDROID_UI = "android/app/src/main/kotlin/com/openmausbot/companion/ui";
 const ANDROID_SOURCES = [
-  "AstraAvatar.kt",
-  "AstraComets.kt",
-  "AstraFaceData.kt",
-  "AstraFaceEngine.kt",
-  "AstraPalette.kt",
-  "AstraSilhouette.kt",
+  "MausAvatar.kt",
+  "MausComets.kt",
+  "MausFaceData.kt",
+  "MausFaceEngine.kt",
+  "MausPalette.kt",
+  "MausSilhouette.kt",
 ];
 
 /** The Swift copies, by the target that owns them (project.yml mirrors this). */
 const IOS_SOURCES = {
-  "ios/App": ["AstraAvatar.swift", "AstraFaceData.swift"],
+  "ios/App": ["MausAvatar.swift", "MausFaceData.swift"],
   "ios/AppShared": [
-    "AstraSharedConfiguration.swift",
-    "AstraSharedConnectionStore.swift",
-    "AstraSharedInbox.swift",
-    "AstraSharedKeychain.swift",
+    "OpenMausSharedConfiguration.swift",
+    "OpenMausSharedConnectionStore.swift",
+    "OpenMausSharedInbox.swift",
+    "OpenMausSharedKeychain.swift",
   ],
-  "ios/Widgets": ["AstraWidgets.swift"],
+  "ios/Widgets": ["OpenMausWidgets.swift"],
 };
 
 /** A copy at the repository root is never compiled by anything. */
@@ -46,7 +46,7 @@ describe("mobile mascot sources live where their projects read them", () => {
       expect(
         readFileSync(path, "utf8").replace(/^\uFEFF/, ""),
         `${name} must stay in the module's package`,
-      ).toMatch(/^package com\.astra\.companion\.ui\b/);
+      ).toMatch(/^package com\.openmausbot\.companion\.ui\b/);
     }
   });
 

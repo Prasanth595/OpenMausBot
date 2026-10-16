@@ -61,7 +61,7 @@ afterEach(() => {
 
 const entry = (overrides: Partial<SelfModifyEntry> = {}): SelfModifyEntry => ({
   id: "edit-1",
-  proposedBy: "Astra",
+  proposedBy: "OpenMausBot",
   reason: "fix the empty state copy",
   status: "applied",
   appliedAt: "2026-09-20T00:00:00.000Z",
@@ -76,7 +76,7 @@ const entry = (overrides: Partial<SelfModifyEntry> = {}): SelfModifyEntry => ({
 const proposal = (overrides: Partial<SelfModifyPending> = {}): SelfModifyPending => ({
   file: "edit-1.json",
   id: "edit-1",
-  proposedBy: "Astra",
+  proposedBy: "OpenMausBot",
   reason: "add a status pill",
   bytes: 2048,
   ...overrides,
@@ -105,7 +105,7 @@ describe("pending proposals list", () => {
       }),
     );
     expect(html).toContain("add a status pill");
-    expect(html).toContain("proposed by Astra");
+    expect(html).toContain("proposed by OpenMausBot");
     expect(html).toContain("edit-1");
     expect(html).toContain("2 KB");
     // the second press is the one that applies

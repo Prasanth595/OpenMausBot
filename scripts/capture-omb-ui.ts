@@ -1,4 +1,4 @@
-// Pictures of Astra itself: the real renderer against the disposable fixture.
+// Pictures of OpenMausBot itself: the real renderer against the disposable fixture.
 //
 // docs/screenshots/ holds the app's product shots, taken by hand on a live
 // workspace. That is right for a README and useless as evidence — nobody can
@@ -8,19 +8,19 @@
 // created, so every element in the frame is reproducible and nothing real is in
 // it. The clock is real, so a re-run matches in content rather than in bytes.
 //
-//   node --experimental-strip-types scripts/capture-astra-ui.ts
+//   node --experimental-strip-types scripts/capture-omb-ui.ts
 //
 // The page is the shipped <App/> (scripts/testing/threads-preview.tsx) — the
 // same entry the control surface's `ui launch` serves — and the turns are sent
 // through the shared control core, not by typing into the screen. Set
-// ASTRA_CAPTURE_CHROME to override the browser. Pictures land in
-// docs/verification/evidence/astra-app/ with a findings.json beside them.
+// OMB_CAPTURE_CHROME to override the browser. Pictures land in
+// docs/verification/evidence/omb-app/ with a findings.json beside them.
 import { writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { runControlOmb, launchVerificationServer } from "./control-astra.ts";
+import { runControlOmb, launchVerificationServer } from "./control-omb.ts";
 import {
   closeChrome,
   launchChrome,
@@ -32,7 +32,7 @@ import {
 import { mountPreview } from "./testing/preview-fixture.ts";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
-const EVIDENCE_DIR = join(REPO_ROOT, "docs", "verification", "evidence", "astra-app");
+const EVIDENCE_DIR = join(REPO_ROOT, "docs", "verification", "evidence", "omb-app");
 const READY_TIMEOUT_MS = 120_000;
 /** The renderer must catch up with the server; the data-mid row is the proof. */
 const RENDER_TIMEOUT_MS = 60_000;
@@ -42,7 +42,7 @@ const WHAT_I_ASKED =
 const WHAT_IT_ANSWERED = [
   "**Voice pipeline, end to end**",
   "",
-  "- Dictation is decoded on this machine: Handy owns the model, and Astra hands it a finished WAV.",
+  "- Dictation is decoded on this machine: Handy owns the model, and the app hands it a finished WAV.",
   "- Piper installs from Settings in one click, and every artifact is checked against a pinned SHA-256 before it is unpacked.",
   "- The engine lands last, so an interrupted install reports *not installed* rather than half-working.",
   "",
@@ -55,7 +55,7 @@ const WHAT_IT_ANSWERED = [
 const AGENTS: Array<{ name: string; title: string }> = [
   { name: "Scout", title: "Research" },
   { name: "Ledger", title: "Numbers" },
-  { name: "Astra", title: "Chief of staff" },
+  { name: "Momo", title: "Chief of staff" },
 ];
 /** The control core returns the created bot wrapped differently per tool; read
  * the id wherever it is rather than pinning a shape that may drift. */
@@ -124,7 +124,7 @@ try {
   preview = await mountPreview(fixture, {
     entry: "/scripts/testing/threads-preview.tsx",
     route: "/__threads.html",
-    title: "Isolated Astra Chat",
+    title: "Isolated OMB Chat",
   });
   chrome = await launchChrome();
   page = await openCdpPage(chrome);
@@ -167,7 +167,7 @@ try {
     `the frame was checked before the shutter: the sidebar row for ${front.name}, the newest transcript row (data-mid ${newest.id}) and a resolved model chip were all on screen`,
   );
   await settle(page);
-  await shot("Astra, dark (default skin)", "astra-app-dark.png");
+  await shot("OpenMausBot, dark (default skin)", "omb-app-dark.png");
 
   // The skin is read from storage at boot, so the light picture is a reload —
   // exactly what a user gets after picking it in Settings.
@@ -177,7 +177,7 @@ try {
   await page.waitFor(modelChip, RENDER_TIMEOUT_MS, "the model chip to resolve again");
   findings.push("the light picture is the same page reloaded with omb-skin=atelier");
   await settle(page);
-  await shot("Astra, light (Atelier)", "astra-app-light.png");
+  await shot("OpenMausBot, light (Atelier)", "omb-app-light.png");
 
   const report = {
     ok: true,

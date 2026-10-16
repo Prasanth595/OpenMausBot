@@ -1,12 +1,12 @@
-// Voice & Handy: the two engines behind Astra's voice. The first card is the
+// Voice & Handy: the two engines behind the app's voice. The first card is the
 // workspace's spoken-reply voice — engine, credential, and the voice every
 // agent falls back to. The cards under it own the user's own Handy app: the
-// offline dictation engine, the model Astra pins for its own calls, and the
+// offline dictation engine, the model the app pins for its own calls, and the
 // wake word that feeds the composer.
 //
 // The voice list comes from the harness, which holds the provider key — the
 // renderer never talks to ElevenLabs itself. Handy is read-only apart from
-// that per-call pin on purpose: Astra never rewrites Handy's own settings
+// that per-call pin on purpose: the app never rewrites Handy's own settings
 // file, which would change dictation in every other app on this machine.
 import { useCallback, useEffect, useState } from "react";
 import { Check, Loader2, Volume2 } from "lucide-react";
@@ -351,7 +351,7 @@ function VoiceCard() {
   );
 }
 
-/** The user's own Handy install: where it lives and which of its models Astra
+/** The user's own Handy install: where it lives and which of its models the app
  *  pins for its own dictation and calls. Read-only on Handy's side — the pin
  *  is passed per call, never written into Handy's own settings. */
 function HandyCard() {

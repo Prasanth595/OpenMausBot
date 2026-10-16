@@ -5,13 +5,13 @@
 //
 // There is no cloud engine to choose between any more, so the only thing that
 // needs remembering here is where Handy lives, and — optionally — which model
-// Astra's own calls should pin. Astra captures audio; Handy owns decoding, and
+// the app's own calls should pin. The app captures audio; Handy owns decoding, and
 // Handy owns its selected model too: it rewrites its own settings file on exit,
 // and silently changing the engine there would alter dictation in every app on
 // the machine, not just this one. Pinning is per-call (`--model`) instead.
 
-const HANDY_PATH_KEY = "astra.handy-path.v1";
-const HANDY_MODEL_KEY = "astra.handy-model.v1";
+const HANDY_PATH_KEY = "omb.handy-path.v1";
+const HANDY_MODEL_KEY = "omb.handy-model.v1";
 
 function storage(): Storage | null {
   try {
@@ -38,7 +38,7 @@ export function setHandyPath(path: string): void {
   } catch {}
 }
 
-/** The Handy model id Astra pins for its own dictation and calls. Empty means
+/** The Handy model id the app pins for its own dictation and calls. Empty means
  * "whatever Handy has selected in its own window". */
 export function handyModel(): string {
   try {

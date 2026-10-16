@@ -896,14 +896,14 @@ function agentsIntegration(
     args: [agentsProxyPath],
     env: {
       ...AGENTS_NODE_FLAG,
-      ASTRA_HARNESS_URL: `http://127.0.0.1:${PORT}`,
-      ASTRA_BOT_ID: botId,
-      ASTRA_THREAD_ID: threadId,
-      ASTRA_COMMS_TOKEN: token,
-      ASTRA_TURN_DEPTH: String(depth),
-      ASTRA_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
-      ASTRA_SELF_MODIFY_ENABLED: selfModifyEnabled(cfg) ? "1" : "0",
-      ASTRA_WORKSHOP_ENABLED: workshopEnabled(cfg) ? "1" : "0",
+      OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+      OMB_BOT_ID: botId,
+      OMB_THREAD_ID: threadId,
+      OMB_COMMS_TOKEN: token,
+      OMB_TURN_DEPTH: String(depth),
+      OMB_SKILL_AUTHORING_ENABLED: skillAuthoring ? "1" : "0",
+      OMB_SELF_MODIFY_ENABLED: selfModifyEnabled(cfg) ? "1" : "0",
+      OMB_WORKSHOP_ENABLED: workshopEnabled(cfg) ? "1" : "0",
     },
   };
 }

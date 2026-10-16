@@ -373,7 +373,7 @@ export function openMausStatusSystemPrompt(options: OpenMausStatusReadOptions = 
         .join(",")
     : "none";
   return [
-    "TRUSTED ASTRA STATUS (read-only, validated, no transcript or credential data):",
+    "TRUSTED APP STATUS (read-only, validated, no transcript or credential data):",
     `schema=${status.schema}; freshness=${status.freshness}${status.reason ? `; reason=${status.reason}` : ""}`,
     receipt || "receipt=unavailable",
     runtime,

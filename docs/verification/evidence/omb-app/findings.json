@@ -1,0 +1,30 @@
+{
+  "ok": true,
+  "platform": "win32",
+  "url": "http://127.0.0.1:20530",
+  "dataDir": "C:\\Users\\User\\AppData\\Local\\Temp\\openmausbot-verify-data-YGjKyw",
+  "logPath": "C:\\Users\\User\\AppData\\Local\\Temp\\openmausbot-verification-evidence\\server-1792180139785-15468.log",
+  "previewUrl": "http://127.0.0.1:5173/__threads.html",
+  "chrome": "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "newestMessageId": "770abfa8-f0e5-4e97-af87-25d9b6d39d1f",
+  "screenshots": [
+    {
+      "state": "OpenMausBot, dark (default skin)",
+      "file": "C:\\Users\\User\\OpenMausBot\\docs\\verification\\evidence\\omb-app\\omb-app-dark.png",
+      "bytes": 197610
+    },
+    {
+      "state": "OpenMausBot, light (Atelier)",
+      "file": "C:\\Users\\User\\OpenMausBot\\docs\\verification\\evidence\\omb-app\\omb-app-light.png",
+      "bytes": 217720
+    }
+  ],
+  "findings": [
+    "created Scout (335deb55-62c7-4ebd-9c93-12ae65451b07), Ledger (24136bcc-aa21-4616-8125-0f6ffdd8e738), Momo (ce9d1b2a-28ad-42fa-a1b6-e9f44aa55e1d) in the fixture",
+    "the fixture answered through the fake engine: 4 message(s) on Momo, newest 770abfa8-f0e5-4e97-af87-25d9b6d39d1f",
+    "the frame was checked before the shutter: the sidebar row for Momo, the newest transcript row (data-mid 770abfa8-f0e5-4e97-af87-25d9b6d39d1f) and a resolved model chip were all on screen",
+    "OpenMausBot, dark (default skin): omb-app-dark.png (197610 bytes)",
+    "the light picture is the same page reloaded with omb-skin=atelier",
+    "OpenMausBot, light (Atelier): omb-app-light.png (217720 bytes)"
+  ]
+}

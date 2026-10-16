@@ -63,6 +63,6 @@ test("remote preload exposes neither local transcription nor cloud STT", () => {
 test("main and bridge declarations have no retired cloud STT wiring", () => {
   for (const file of ["./main.mjs", "./preload.cjs", "../src/types/ogb.d.ts"]) {
     const text = readFileSync(new URL(file, import.meta.url), "utf8");
-    assert.doesNotMatch(text, /Deepgram|dictation-stt|callStt|call-stt:|["']dictation:|dictationApiKey|ASTRA_DICTATION_KEY/);
+    assert.doesNotMatch(text, /Deepgram|dictation-stt|callStt|call-stt:|["']dictation:|dictationApiKey|OMB_DICTATION_KEY/);
   }
 });

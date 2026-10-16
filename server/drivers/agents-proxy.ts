@@ -38,14 +38,14 @@ import readline from "node:readline";
 import { CREDENTIAL_TARGETS, isCredentialTargetId } from "../../shared/credential-request.ts";
 import { agentToolAnnotations } from "../agent-tool-policy.ts";
 
-const HARNESS = process.env.ASTRA_HARNESS_URL ?? "http://127.0.0.1:8799";
-const BOT_ID = process.env.ASTRA_BOT_ID ?? "";
-const THREAD_ID = process.env.ASTRA_THREAD_ID ?? "";
-const TOKEN = process.env.ASTRA_COMMS_TOKEN ?? "";
-const DEPTH = Number(process.env.ASTRA_TURN_DEPTH ?? "0") || 0;
-const SKILL_AUTHORING_ENABLED = process.env.ASTRA_SKILL_AUTHORING_ENABLED === "1";
-const SELF_MODIFY_ENABLED = process.env.ASTRA_SELF_MODIFY_ENABLED === "1";
-const WORKSHOP_ENABLED = process.env.ASTRA_WORKSHOP_ENABLED === "1";
+const HARNESS = process.env.OMB_HARNESS_URL ?? "http://127.0.0.1:8799";
+const BOT_ID = process.env.OMB_BOT_ID ?? "";
+const THREAD_ID = process.env.OMB_THREAD_ID ?? "";
+const TOKEN = process.env.OMB_COMMS_TOKEN ?? "";
+const DEPTH = Number(process.env.OMB_TURN_DEPTH ?? "0") || 0;
+const SKILL_AUTHORING_ENABLED = process.env.OMB_SKILL_AUTHORING_ENABLED === "1";
+const SELF_MODIFY_ENABLED = process.env.OMB_SELF_MODIFY_ENABLED === "1";
+const WORKSHOP_ENABLED = process.env.OMB_WORKSHOP_ENABLED === "1";
 // Plain text resources only, capped in the server; a turn that deletes
 // four has stopped drafting and started churning, like the skill/creation
 // caps above.
@@ -745,7 +745,7 @@ const TOOLS = [
   {
     name: "workshop",
     description:
-      "Create and manage reusable text resources in Astra's workshop — a small sandbox the user has opted into, where drafts, runbooks, prompt fragments, and skill notes can live between turns. Files are .md, .txt, or .json, at most 24, each at most 64 KiB. Use action=\"list\" first to avoid overwriting something you did not read; a write replaces the whole file. Nothing here is shared with other bots until you point them at it.",
+      "Create and manage reusable text resources in the workshop — a small sandbox the user has opted into, where drafts, runbooks, prompt fragments, and skill notes can live between turns. Files are .md, .txt, or .json, at most 24, each at most 64 KiB. Use action=\"list\" first to avoid overwriting something you did not read; a write replaces the whole file. Nothing here is shared with other bots until you point them at it.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -770,7 +770,7 @@ const TOOLS = [
   {
     name: "self_modify",
     description:
-      "Edit Astra's own source code — the app you are running inside — only when the user asked for a change to the app itself (a bug fix, a feature, a wording change in the product). Every edit is journaled byte-for-byte, preflight-checked, and auto-reverted when a check fails; server/shared changes take effect on the next restart and are rolled back automatically if the app cannot boot. The self-modify machinery, CI config, package.json scripts, and other protected paths are refused by the server. Use action=\"list\" to see the journal and the inbox before proposing or when the user refers to an earlier proposal. After applying, tell the user exactly what changed and that server changes need a restart.",
+      "Edit the app's own source code — the app you are running inside — only when the user asked for a change to the app itself (a bug fix, a feature, a wording change in the product). Every edit is journaled byte-for-byte, preflight-checked, and auto-reverted when a check fails; server/shared changes take effect on the next restart and are rolled back automatically if the app cannot boot. The self-modify machinery, CI config, package.json scripts, and other protected paths are refused by the server. Use action=\"list\" to see the journal and the inbox before proposing or when the user refers to an earlier proposal. After applying, tell the user exactly what changed and that server changes need a restart.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

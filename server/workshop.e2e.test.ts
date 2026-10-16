@@ -16,7 +16,7 @@
 // answer.
 import { describe, expect, it } from "vitest";
 
-import { launchVerificationServer } from "../scripts/control-astra.ts";
+import { launchVerificationServer } from "../scripts/control-omb.ts";
 
 describe("workshop server wiring", () => {
   it("is off by default, refuses the internal door while off, and config-flips on live", async () => {

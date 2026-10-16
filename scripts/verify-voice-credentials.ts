@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { launchVerificationServer } from "./control-astra.ts";
+import { launchVerificationServer } from "./control-omb.ts";
 
 const fixture = await launchVerificationServer();
 try {
