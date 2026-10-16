@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { launchVerificationServer, runControlOmb, verificationServerEnvironment } from "../scripts/control-omb.ts";
@@ -57,6 +58,67 @@ it("after a restart, re-runs a cut-off wake once, reports it and the cut-off ses
     await fixture.close();
   }
   // nothing of the drill is still running
+  expect(restarted?.exitCode !== null || restarted?.signalCode !== null).toBe(true);
+}, 60_000);
+
+// This fork: a wake whose turn a restart cut AFTER it had already acted
+// outward (here a `git -C … push`, the form bots use from a worktree) is not
+// run again — it would push, merge or send twice. The bot gets a question
+// instead (its reports turn: the note with what it did, and the wake's
+// note), and the Chief's desk counts one turn to confirm, none resumed.
+it("after a restart, does not re-run a cut-off wake whose turn had already pushed: the bot is asked and the Chief told", async () => {
+  const parentEnv = { ...process.env, OMB_AUTONOMY_MINUTE_MS: "200", OMB_AUTONOMY_TICK_MS: "100", OMB_AUTONOMY_TURN_GAP_MS: "50" };
+  const fixture = await launchVerificationServer(parentEnv);
+  const { url, dataDir, logPath } = fixture.info;
+  const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, url) as Promise<any>;
+  let restarted: ChildProcess | undefined;
+  try {
+    const chief = (await runControlOmb(["new-bot", "--name", "Chief", "--url", url]) as any).bot;
+    await api(`/api/bots/${chief.id}`, { chiefOfStaff: true }, "PATCH");
+    const worker = (await runControlOmb(["new-bot", "--name", "Monitor", "--url", url]) as any).bot;
+    const thread = worker.activeTaskId as string;
+    await waitForExit(fixture.child, { signal: "SIGTERM" });
+
+    // What a process killed mid-turn leaves on disk: the leased wake, and the
+    // push its turn ran before the cut — a Bash row on the thread's branch.
+    const at = Date.now() - 60_000;
+    const wake = { botId: worker.id, threadId: thread, dueAt: at, createdAt: at - 60_000, reason: "EMPURRAR_9320 mandar a branch da correção" };
+    writeFileSync(join(dataDir, "bot-autonomy.json"), JSON.stringify({ wakes: [], goals: [], inFlight: [{ kind: "wake", botId: worker.id, threadId: thread, startedAt: at, wake }] }));
+    const db = new DatabaseSync(join(dataDir, "messages.db"));
+    const leaf = (db.prepare("SELECT active_leaf_id AS id FROM thread_state WHERE thread_id = ?").get(thread) as { id: string | null } | undefined)?.id
+      ?? (db.prepare("SELECT id FROM messages WHERE thread_id = ? ORDER BY rowid DESC LIMIT 1").get(thread) as { id: string } | undefined)?.id
+      ?? null;
+    const command = "git -C /tmp/omb-wt/9320 push origin fix/9320";
+    const push = { id: "cut-turn-push", parentId: leaf, at: at + 1_000, role: "bot", kind: "activity", tool: { name: "Bash", ok: true, itemId: "toolu_cut_turn_push", input: JSON.stringify({ command }), summary: command } };
+    db.prepare("INSERT INTO messages (thread_id, id, at, role, kind, text, json) VALUES (?, ?, ?, ?, ?, ?, ?)").run(thread, push.id, push.at, push.role, push.kind, null, JSON.stringify(push));
+    db.prepare("INSERT INTO thread_state (thread_id, active_leaf_id) VALUES (?, ?) ON CONFLICT(thread_id) DO UPDATE SET active_leaf_id = excluded.active_leaf_id").run(thread, push.id);
+    db.close();
+
+    const log = openSync(logPath, "a", 0o600);
+    restarted = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)), env: verificationServerEnvironment(parentEnv, dataDir, Number(new URL(url).port)), stdio: ["ignore", log, log],
+    });
+    closeSync(log);
+    await expect.poll(async () => {
+      if (restarted?.exitCode !== null) throw new Error(readFileSync(logPath, "utf8"));
+      return fetch(url + "/api/health").then((r) => r.ok).catch(() => false);
+    }, { timeout: 15_000, interval: 150 }).toBe(true);
+
+    const chips = async (threadId: string) => ((await api(`/api/threads/${threadId}/messages`, undefined, "GET")).messages as any[])
+      .filter((message) => message.kind === "activity").map((message) => String(message.tool?.name ?? ""));
+    // the Chief's desk: one turn left to confirm, none resumed
+    await expect.poll(async () => (await chips(chief.activeTaskId)).filter((chip) => chip.startsWith("Servidor reiniciado")), { timeout: 15_000 }).toEqual(["Servidor reiniciado: 1 turno para confirmar"]);
+    // the bot is asked once (the note with the push, and the wake's note), and the lease is settled
+    await expect.poll(async () => (await chips(thread)).filter((chip) => chip === "Chegaram 2 relatórios").length, { timeout: 15_000 }).toBe(1);
+    await expect.poll(() => JSON.parse(readFileSync(join(dataDir, "bot-autonomy.json"), "utf8")).inFlight ?? [], { timeout: 15_000 }).toEqual([]);
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    // the wake itself never fired again ("Acordou — … EMPURRAR_9320 …")
+    expect((await chips(thread)).some((chip) => chip.includes("EMPURRAR_9320"))).toBe(false);
+    expect((await chips(thread)).filter((chip) => chip === "Chegaram 2 relatórios")).toHaveLength(1);
+  } finally {
+    await waitForExit(restarted, { signal: "SIGTERM" });
+    await fixture.close();
+  }
   expect(restarted?.exitCode !== null || restarted?.signalCode !== null).toBe(true);
 }, 60_000);
 

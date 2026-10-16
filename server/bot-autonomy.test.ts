@@ -55,6 +55,11 @@ import {
   answerToAsk,
   answeredInConversationReport,
   ANSWER_WINDOW_MS,
+  INTERRUPTED_PREFIX,
+  STALE_PREFIX,
+  OUTWARD_CUT_PREFIX,
+  outwardCutNote,
+  leaseRecoveryFor,
 } from "./bot-autonomy.ts";
 
 let dir: string;
@@ -369,6 +374,10 @@ describe("leases across a restart", () => {
     autonomy.leaseWake(wake);
     expect(autonomy.wakeFor("t1")).toBeNull();
     const reloaded = make(); // restart mid-turn
+    // this fork: held until the host has looked at the cut turn (resumeCutLeases)
+    expect(reloaded.wakeFor("t1")).toBeNull();
+    expect(reloaded.recoveringLeases().map((lease) => lease.threadId)).toEqual(["t1"]);
+    reloaded.reconcileRecoveredLeases(() => ({ kind: "rerun" }));
     const back = reloaded.wakeFor("t1")!;
     expect(back.reason).toContain("interrompida por um restart");
     expect(back.reason).toContain("checar o deploy");
@@ -387,6 +396,7 @@ describe("leases across a restart", () => {
     expect(autonomy.leaseReports("t2")?.items).toEqual(["PR #9300 pronta"]);
     expect(autonomy.hasReports("t2")).toBe(false);
     const reloaded = make();
+    reloaded.reconcileRecoveredLeases(() => ({ kind: "rerun" }));
     const back = reloaded.takeReports("t2")!;
     expect(back.items[0]).toContain("interrompida por um restart");
     expect(back.items).toContain("PR #9300 pronta");
@@ -441,6 +451,7 @@ describe("leases across a restart", () => {
     now += 7 * 3_600_000;
     autonomy.leaseWake(autonomy.setWake("bot", "t2", 1, "checar o deploy de novo"));
     const reloaded = make();
+    reloaded.reconcileRecoveredLeases(() => ({ kind: "rerun" }));
     expect(reloaded.wakeFor("t1")).toBeNull();
     const asked = reloaded.takeReports("t1")!;
     expect(asked.items[0]).toContain("NÃO foi repetido automaticamente");
@@ -454,6 +465,144 @@ describe("leases across a restart", () => {
     const watch = autonomy.setWatch("bot", "t1", { command: "gog chat messages list", argv: ["gog"], everyMinutes: 3, maxMinutes: 60, reason: "chat", baseline: "m1", standing: true });
     autonomy.leaseWake(watch);
     expect(make().standingFor("t1")?.watch?.baseline).toBe("m1");
+  });
+});
+
+// This fork: a turn a restart cut off with its wake or reports leased is
+// given back only after the host looked at it (resumeCutLeases in index.ts):
+// one that already acted outward is never run again, and one whose own root
+// goes on (teammates' results, the person's cards) is not run a second way.
+describe("cut leases, looked at before they are given back", () => {
+  const ledger = () => JSON.parse(readFileSync(join(dir, "bot-autonomy.json"), "utf8")) as { inFlight?: Array<{ threadId: string }>; reports?: Array<{ threadId: string; items: string[] }> };
+
+  it("decides from what the host found: its own live root wins, then an outward action, else a rerun", () => {
+    const lease = { startedAt: 1_000 };
+    expect(leaseRecoveryFor(lease, { roots: [], outward: [] })).toEqual({ kind: "rerun" });
+    expect(leaseRecoveryFor(lease, { roots: [], outward: ["git push", "npm run pr:merge"] })).toEqual({ kind: "outward", labels: ["git push", "npm run pr:merge"] });
+    // a root of an earlier autonomous turn in the conversation is not this one's
+    expect(leaseRecoveryFor(lease, { roots: [{ createdAt: 999 }], outward: [] })).toEqual({ kind: "rerun" });
+    expect(leaseRecoveryFor(lease, { roots: [{ createdAt: 999 }, { createdAt: 1_000 }], outward: [] })).toEqual({ kind: "continued" });
+    // the root goes on by itself: even after an outward action nothing is given back (its resume is the one path)
+    expect(leaseRecoveryFor(lease, { roots: [{ createdAt: 1_500 }], outward: ["git push"] })).toEqual({ kind: "continued" });
+  });
+
+  it("writes the question with what the turn did, capped, or that it could not be read", () => {
+    const note = outwardCutNote(["git push", "npm run pr:merge"]);
+    expect(note.startsWith(OUTWARD_CUT_PREFIX)).toBe(true);
+    expect(note).toContain("NÃO foi repetido automaticamente");
+    expect(note).toContain("já tinha agido para fora antes do corte: git push, npm run pr:merge.");
+    expect(note).toContain("Não repita nada disso");
+    const many = Array.from({ length: 11 }, (_, i) => `gh pr comment ${i}`);
+    expect(outwardCutNote(many)).toContain("gh pr comment 7 e mais 3.");
+    expect(outwardCutNote(many)).not.toContain("gh pr comment 8");
+    expect(outwardCutNote([])).toContain("não deu para conferir o que ele já tinha feito para fora");
+  });
+
+  it("holds a cut lease as a lease on disk until it is looked at: a second restart loses nothing", () => {
+    const autonomy = make();
+    autonomy.leaseWake(autonomy.setWake("bot", "t1", 1, "checar a tag"));
+    now += 60_000;
+    const first = make();
+    expect(first.wakeFor("t1")).toBeNull();
+    expect(first.reportThreads()).toEqual([]);
+    expect(first.wakeHold(60 * 60_000)).toMatchObject({ hold: true, reason: "running" });
+    expect(ledger().inFlight?.map((lease) => lease.threadId)).toEqual(["t1"]);
+    // the server died again before its first tick
+    const second = make();
+    expect(second.recoveringLeases().map((lease) => lease.threadId)).toEqual(["t1"]);
+    expect(second.recoveredOnLoad.map((lease) => [lease.threadId, lease.stale])).toEqual([["t1", false]]);
+    second.reconcileRecoveredLeases(() => ({ kind: "rerun" }));
+    expect(second.wakeFor("t1")?.reason).toBe(`${INTERRUPTED_PREFIX} checar a tag`);
+    expect(second.recoveringLeases()).toEqual([]);
+    expect(ledger().inFlight).toEqual([]);
+    // looked at once: a later call gives nothing back again
+    second.reconcileRecoveredLeases(() => { throw new Error("never asked again"); });
+    expect(second.reportThreads()).toEqual([]);
+  });
+
+  it("does not run again a cut turn that acted outward: the bot is asked, with what it did, and the report says so", () => {
+    const autonomy = make();
+    autonomy.leaseWake(autonomy.setWake("chief", "t1", 1, "mesclar a PR #9300 quando o gate passar"));
+    autonomy.addReport("monitor", "t2", "Relatório da sessão #9301");
+    autonomy.leaseReports("t2");
+    now += 60_000;
+    const reloaded = make();
+    const labels: Record<string, string[]> = { t1: ["npm run pr:merge", "git push"], t2: ["gog chat send"] };
+    const asked: string[] = [];
+    reloaded.reconcileRecoveredLeases((lease) => {
+      asked.push(lease.threadId);
+      return { kind: "outward", labels: labels[lease.threadId]! };
+    });
+    expect(asked).toEqual(["t1", "t2"]);
+    // never run again: no wake comes back
+    expect(reloaded.wakeFor("t1")).toBeNull();
+    expect(reloaded.dueWakes()).toEqual([]);
+    const wake = reloaded.takeReports("t1")!;
+    expect(wake.items).toEqual([outwardCutNote(["npm run pr:merge", "git push"]), "Wake-up note: mesclar a PR #9300 quando o gate passar"]);
+    expect(wake.items.some((item) => item.includes(INTERRUPTED_PREFIX))).toBe(false);
+    const reports = reloaded.takeReports("t2")!;
+    expect(reports.items).toEqual([outwardCutNote(["gog chat send"]), "Relatório da sessão #9301"]);
+    expect(reloaded.recoveredOnLoad.map((lease) => [lease.threadId, lease.outward, lease.continued])).toEqual([["t1", ["npm run pr:merge", "git push"], undefined], ["t2", ["gog chat send"], undefined]]);
+    expect(ledger().inFlight).toEqual([]);
+  });
+
+  it("asks about a stale lease whose turn acted outward with what it did, not the stale note alone", () => {
+    const autonomy = make();
+    autonomy.leaseWake(autonomy.setWake("bot", "t1", 1, "responder ao cliente ACME"));
+    now += 7 * 3_600_000;
+    const reloaded = make();
+    reloaded.reconcileRecoveredLeases(() => ({ kind: "outward", labels: ["gog gmail send"] }));
+    const asked = reloaded.takeReports("t1")!;
+    expect(asked.items[0]).toBe(outwardCutNote(["gog gmail send"]));
+    expect(asked.items[0]).not.toBe(STALE_PREFIX);
+    expect(asked.items[1]).toContain("responder ao cliente ACME");
+  });
+
+  it("gives nothing back when the cut turn's own root goes on: one path, not a second turn beside it", () => {
+    const autonomy = make();
+    autonomy.leaseWake(autonomy.setWake("chief", "t1", 1, "delegar a revisão da #9302"));
+    autonomy.addReport("chief", "t2", "QA terminou a #9303");
+    autonomy.leaseReports("t2");
+    now += 60_000;
+    const reloaded = make();
+    reloaded.reconcileRecoveredLeases(() => ({ kind: "continued" }));
+    expect(reloaded.wakeFor("t1")).toBeNull();
+    expect(reloaded.dueWakes()).toEqual([]);
+    expect(reloaded.reportThreads()).toEqual([]);
+    expect(reloaded.recoveredOnLoad.map((lease) => lease.continued)).toEqual([true, true]);
+    expect(reloaded.wakeHold(60 * 60_000)).toEqual({ hold: false });
+    expect(ledger().inFlight).toEqual([]);
+    // and the next restart finds nothing to give back
+    expect(make().recoveringLeases()).toEqual([]);
+  });
+
+  it("does not run a cut turn whose rows could not be read: asked, as one that may have acted", () => {
+    const autonomy = make();
+    autonomy.leaseWake(autonomy.setWake("bot", "t1", 1, "publicar o release"));
+    now += 60_000;
+    const reloaded = make();
+    reloaded.reconcileRecoveredLeases(() => { throw new Error("runtime.db is locked"); });
+    expect(reloaded.wakeFor("t1")).toBeNull();
+    expect(reloaded.takeReports("t1")?.items).toEqual([outwardCutNote([]), "Wake-up note: publicar o release"]);
+    expect(reloaded.recoveredOnLoad[0]?.outward).toEqual([]);
+  });
+
+  it("drops a held lease the person stopped, or whose conversation went, before it is looked at", () => {
+    const autonomy = make();
+    autonomy.leaseWake(autonomy.setWake("bot", "t1", 1, "checar o chat"));
+    autonomy.addReport("bot", "t2", "relatório");
+    autonomy.leaseReports("t2");
+    now += 60_000;
+    const reloaded = make();
+    expect(reloaded.dropRecoveredLeases("t1").map((lease) => lease.kind)).toEqual(["wake"]);
+    expect(reloaded.dropRecoveredLeases("t1")).toEqual([]);
+    reloaded.forgetThread("t2");
+    expect(ledger().inFlight).toEqual([]);
+    reloaded.reconcileRecoveredLeases(() => ({ kind: "rerun" }));
+    expect(reloaded.wakeFor("t1")).toBeNull();
+    expect(reloaded.reportThreads()).toEqual([]);
+    expect(reloaded.recoveredOnLoad.map((lease) => [lease.threadId, lease.dropped])).toEqual([["t1", true], ["t2", true]]);
+    expect(make().recoveringLeases()).toEqual([]);
   });
 });
 

@@ -190,9 +190,64 @@ export const STALE_PREFIX = "[Este turno foi interrompido por um restart do serv
 /** The longest wait between retries of a turn that failed to start. */
 export const DISPATCH_RETRY_MAX_MINUTES = 10;
 
-/** What a restart found cut off, for the resumption report. */
-export interface RecoveredLease { botId: string; threadId: string; kind: InFlight["kind"]; startedAt: number; stale: boolean; what: string }
+/** What a restart found cut off, for the resumption report. This fork: and
+ * what became of it once the host looked at its turn
+ * (reconcileRecoveredLeases): `outward`, the outward actions its turn had
+ * already done (empty: they could not be read), so it was not run again;
+ * `continued`, its own root goes on, so nothing was given back; `dropped`,
+ * the person stopped it or its conversation went before that look. */
+export interface RecoveredLease { botId: string; threadId: string; kind: InFlight["kind"]; startedAt: number; stale: boolean; what: string; outward?: string[]; continued?: boolean; dropped?: boolean }
 export const INTERRUPTED_PREFIX = "[A execução anterior foi interrompida por um restart do servidor antes de terminar; retome daqui.]";
+/** This fork: the start of what the bot is asked, instead of a rerun, when
+ * its cut turn had already acted outward (outwardCutNote). */
+export const OUTWARD_CUT_PREFIX = "[Este turno foi interrompido por um restart do servidor e NÃO foi repetido automaticamente,";
+/** How many of the cut turn's outward actions the note names. */
+const OUTWARD_CUT_LABELS = 8;
+
+/** This fork: the note a lease whose cut turn had already acted outward
+ * comes back with — a question, never a rerun: what the turn did (the
+ * labels of turn-outcome.ts outwardActions; none: they could not be read),
+ * and that nothing of it is to be done again before the real state is
+ * checked. */
+export function outwardCutNote(labels: readonly string[]): string {
+  const shown = labels.slice(0, OUTWARD_CUT_LABELS).join(", ");
+  const more = labels.length > OUTWARD_CUT_LABELS ? ` e mais ${labels.length - OUTWARD_CUT_LABELS}` : "";
+  const why = labels.length
+    ? ` porque já tinha agido para fora antes do corte: ${shown}${more}.`
+    : " porque não deu para conferir o que ele já tinha feito para fora antes do corte.";
+  return `${OUTWARD_CUT_PREFIX}${why} Não repita nada disso: confira antes o estado real (o push, o merge, o release, a mensagem enviada) e faça só o que ainda falta; se não der para confirmar, pergunte ao dono.]`;
+}
+
+/** This fork: what becomes of a lease a restart cut off, once the host
+ * knows its turn (leaseRecoveryFor). */
+export type LeaseRecovery =
+  /** nothing outward, nothing that goes on: due again, once (as before) */
+  | { kind: "rerun" }
+  /** its turn already acted outward: not run again; the bot is asked, with what it did */
+  | { kind: "outward"; labels: string[] }
+  /** its own root goes on (the work it handed out, the person's cards): that is the continuation */
+  | { kind: "continued" };
+
+/** This fork: what to do with a lease a restart cut off, from what the
+ * host found of its turn. Pure; reconcileRecoveredLeases applies it.
+ * - `roots`: the roots autonomous turns opened in the lease's conversation
+ *   that go on (lease-resume.ts cutTurnRoots): live (cut after handing out
+ *   work, or parked on the person's cards) or already run again, even to
+ *   their end. One begun with or after the lease is this turn's own: it
+ *   resumes by itself, and a second turn from the lease would be a second
+ *   path (two final answers, a hand-off made twice), so nothing comes back.
+ * - `outward`: the outward actions the turn's rows show (turn-outcome.ts
+ *   outwardActions). Any: it is not run again — it would merge, push,
+ *   release or send twice.
+ * - Else it runs once more, as a cut wake always did. */
+export function leaseRecoveryFor(
+  lease: Pick<InFlight, "startedAt">,
+  found: { roots: ReadonlyArray<{ createdAt: number }>; outward: readonly string[] },
+): LeaseRecovery {
+  if (found.roots.some((root) => root.createdAt >= lease.startedAt)) return { kind: "continued" };
+  if (found.outward.length) return { kind: "outward", labels: [...found.outward] };
+  return { kind: "rerun" };
+}
 
 /** Something the bot owes by a time; see the header. */
 export interface BotPromise {
@@ -856,6 +911,9 @@ export class BotAutonomy {
   private goals = new Map<string, BotGoal>();
   private reports = new Map<string, PendingReports>();
   private inFlight: InFlight[] = [];
+  /** This fork: leases a restart cut off, held (and saved as leases) until
+   * the host has looked at their turns (reconcileRecoveredLeases). */
+  private recovering: Array<{ lease: InFlight; found: RecoveredLease }> = [];
   private standingLost = new Map<string, StandingLost>();
   private promises: BotPromise[] = [];
   private ownerPending: OwnerPending[] = [];
@@ -945,7 +1003,11 @@ export class BotAutonomy {
       for (const check of raw.diskPushChecks ?? []) {
         if (check && typeof check.botId === "string" && typeof check.threadId === "string" && typeof check.marker === "string" && Number.isFinite(check.at) && Array.isArray(check.folders)) this.pushChecks.push(check);
       }
-      // Turns a restart cut off: what woke them is due again, marked as such.
+      // Turns a restart cut off. This fork: held, not given back yet — the
+      // host first looks at what each turn did (reconcileRecoveredLeases):
+      // one that acted outward is not run again, and one whose own root
+      // goes on is not run a second way. Until then they stay leases on
+      // disk, so a second restart in between loses none.
       const at = this.now();
       let recovered = false;
       for (const lease of raw.inFlight ?? []) {
@@ -953,23 +1015,9 @@ export class BotAutonomy {
         recovered = true;
         const what = (lease.kind === "wake" ? lease.wake?.reason : lease.items?.join(" / ")) ?? "";
         const stale = at - lease.startedAt > IN_FLIGHT_STALE_MS;
-        this.recoveredOnLoad.push({ botId: lease.botId, threadId: lease.threadId, kind: lease.kind, startedAt: lease.startedAt, stale, what: what.slice(0, 200) });
-        if (stale) {
-          // not re-run: handed over as a question, with what it was about
-          const items = [STALE_PREFIX, lease.kind === "wake" ? `Wake-up note: ${lease.wake?.reason ?? "(none)"}` : "", ...(lease.kind === "reports" ? lease.items ?? [] : [])].filter(Boolean);
-          const current = this.reports.get(lease.threadId);
-          this.reports.set(lease.threadId, { botId: lease.botId, threadId: lease.threadId, items: [...items, ...(current?.items ?? [])] });
-          continue;
-        }
-        if (lease.kind === "wake" && lease.wake && !this.wakes.has(lease.threadId)) {
-          this.wakes.set(lease.threadId, { ...lease.wake, dueAt: at, reason: `${INTERRUPTED_PREFIX} ${lease.wake.reason}`.slice(0, WAKE_REASON_MAX + INTERRUPTED_PREFIX.length + 1) });
-          continue;
-        }
-        const items = lease.kind === "reports" && lease.items?.length
-          ? lease.items
-          : [`Wake-up note: ${lease.wake?.reason ?? "(none)"}`];
-        const current = this.reports.get(lease.threadId);
-        this.reports.set(lease.threadId, { botId: lease.botId, threadId: lease.threadId, items: [INTERRUPTED_PREFIX, ...items, ...(current?.items ?? [])] });
+        const found: RecoveredLease = { botId: lease.botId, threadId: lease.threadId, kind: lease.kind, startedAt: lease.startedAt, stale, what: what.slice(0, 200) };
+        this.recoveredOnLoad.push(found);
+        this.recovering.push({ lease, found });
       }
       // saved once the whole ledger is read: an earlier save would drop what is not loaded yet
       if (recovered || folded) this.save();
@@ -980,7 +1028,7 @@ export class BotAutonomy {
 
   private save(): void {
     if (!this.path) return;
-    const ledger: Ledger = { ...(this.promises.length ? { promises: this.promises } : {}), ...(this.ownerPending.length ? { ownerPending: this.ownerPending } : {}), ...(this.resolvedOwnerPending.length ? { resolvedOwnerPending: this.resolvedOwnerPending } : {}), wakes: [...this.wakes.values()], goals: [...this.goals.values()], reports: [...this.reports.values()], inFlight: this.inFlight, standingLost: [...this.standingLost.values()], ...(this.askPromotions.length ? { askPromotions: this.askPromotions } : {}), ...(this.pushChecks.length ? { diskPushChecks: this.pushChecks } : {}), ...(this.ownerPendingSeq.size ? { ownerPendingSeq: Object.fromEntries(this.ownerPendingSeq) } : {}) };
+    const ledger: Ledger = { ...(this.promises.length ? { promises: this.promises } : {}), ...(this.ownerPending.length ? { ownerPending: this.ownerPending } : {}), ...(this.resolvedOwnerPending.length ? { resolvedOwnerPending: this.resolvedOwnerPending } : {}), wakes: [...this.wakes.values()], goals: [...this.goals.values()], reports: [...this.reports.values()], inFlight: [...this.inFlight, ...this.recovering.map((held) => held.lease)], standingLost: [...this.standingLost.values()], ...(this.askPromotions.length ? { askPromotions: this.askPromotions } : {}), ...(this.pushChecks.length ? { diskPushChecks: this.pushChecks } : {}), ...(this.ownerPendingSeq.size ? { ownerPendingSeq: Object.fromEntries(this.ownerPendingSeq) } : {}) };
     writeFileAtomic(this.path, `${JSON.stringify(ledger, null, 2)}\n`, { mode: 0o600 });
   }
 
@@ -1915,6 +1963,88 @@ export class BotAutonomy {
     return this.inFlight.filter((lease) => lease.threadId === threadId);
   }
 
+  /** This fork: the leases a restart cut off that the host has not looked at yet. */
+  recoveringLeases(): InFlight[] {
+    return this.recovering.map((held) => held.lease);
+  }
+
+  /** This fork: the person stopped the conversation before its cut lease
+   * was looked at — Stop means stop, so it is never given back (a wake
+   * already given back is cancelled by cancelWake). Returns what went. */
+  dropRecoveredLeases(threadId: string): InFlight[] {
+    const dropped = this.takeRecovering(threadId);
+    if (dropped.length) this.save();
+    return dropped;
+  }
+
+  /** The held cut leases of a conversation, taken out and marked dropped (unsaved). */
+  private takeRecovering(threadId: string): InFlight[] {
+    const taken = this.recovering.filter((held) => held.lease.threadId === threadId);
+    if (!taken.length) return [];
+    this.recovering = this.recovering.filter((held) => held.lease.threadId !== threadId);
+    for (const { found } of taken) found.dropped = true;
+    return taken.map((held) => held.lease);
+  }
+
+  /** This fork: give back each lease a restart cut off, as the host found
+   * its turn (`decide`, from leaseRecoveryFor): its own root goes on →
+   * nothing (that root is the continuation); it acted outward → the bot is
+   * asked, with what it did (outwardCutNote), never run again; older than
+   * 6 h → asked (STALE_PREFIX); else due again, once, marked as cut. A
+   * `decide` that throws leaves the turn unknown: asked, not run again.
+   * What became of each is set on its recoveredOnLoad entry. Saved once;
+   * nothing is held after. */
+  reconcileRecoveredLeases(decide: (lease: InFlight) => LeaseRecovery): void {
+    if (!this.recovering.length) return;
+    const held = this.recovering;
+    this.recovering = [];
+    const at = this.now();
+    for (const { lease, found } of held) {
+      let recovery: LeaseRecovery;
+      try {
+        recovery = decide(lease);
+      } catch (error) {
+        console.error(`[autonomy] what the cut turn in ${lease.threadId} did could not be read; it is not run again: ${error instanceof Error ? error.message : String(error)}`);
+        recovery = { kind: "outward", labels: [] };
+      }
+      if (recovery.kind === "continued") {
+        found.continued = true;
+        continue;
+      }
+      if (recovery.kind === "outward") {
+        found.outward = [...recovery.labels];
+        this.askAboutLease(lease, outwardCutNote(recovery.labels));
+      } else if (found.stale) {
+        this.askAboutLease(lease, STALE_PREFIX);
+      } else {
+        this.giveLeaseBack(lease, at);
+      }
+    }
+    this.save();
+  }
+
+  /** A cut lease that is not run again: handed to the bot as a question —
+   * `note` first, then what it was about. */
+  private askAboutLease(lease: InFlight, note: string): void {
+    const items = [note, lease.kind === "wake" ? `Wake-up note: ${lease.wake?.reason ?? "(none)"}` : "", ...(lease.kind === "reports" ? lease.items ?? [] : [])].filter(Boolean);
+    const current = this.reports.get(lease.threadId);
+    this.reports.set(lease.threadId, { botId: lease.botId, threadId: lease.threadId, items: [...items, ...(current?.items ?? [])] });
+  }
+
+  /** A cut lease run once more: its wake due now (or, when the conversation
+   * has a wake of its own by now, as reports), marked as cut. */
+  private giveLeaseBack(lease: InFlight, at: number): void {
+    if (lease.kind === "wake" && lease.wake && !this.wakes.has(lease.threadId)) {
+      this.wakes.set(lease.threadId, { ...lease.wake, dueAt: at, reason: `${INTERRUPTED_PREFIX} ${lease.wake.reason}`.slice(0, WAKE_REASON_MAX + INTERRUPTED_PREFIX.length + 1) });
+      return;
+    }
+    const items = lease.kind === "reports" && lease.items?.length
+      ? lease.items
+      : [`Wake-up note: ${lease.wake?.reason ?? "(none)"}`];
+    const current = this.reports.get(lease.threadId);
+    this.reports.set(lease.threadId, { botId: lease.botId, threadId: lease.threadId, items: [INTERRUPTED_PREFIX, ...items, ...(current?.items ?? [])] });
+  }
+
   wakeFor(threadId: string): BotWake | null {
     return this.wakes.get(threadId) ?? null;
   }
@@ -2106,7 +2236,7 @@ export class BotAutonomy {
   /** Should the Mac stay awake for self-paced work? A goal running, reports
    * or a leased turn in flight, or a wake/watch due within `horizonMs`. */
   wakeHold(horizonMs: number): { hold: boolean; reason?: "running" | "due"; at?: number } {
-    if (this.activeGoals().length || this.reportThreads().length || this.inFlight.length) return { hold: true, reason: "running" };
+    if (this.activeGoals().length || this.reportThreads().length || this.inFlight.length || this.recovering.length) return { hold: true, reason: "running" };
     const at = this.now();
     const due = [
       ...[...this.wakes.values()].map((wake) => wake.watch && !wake.watch.trigger ? Math.min(wake.dueAt, wake.watch.lastRunAt + wake.watch.everyMs) : wake.dueAt),
@@ -2130,7 +2260,9 @@ export class BotAutonomy {
     const hadPending = this.ownerPending.some((open) => open.threadId === threadId);
     this.ownerPending = this.ownerPending.filter((open) => open.threadId !== threadId);
     this.inFlight = this.inFlight.filter((lease) => lease.threadId !== threadId);
-    if (hadWake || hadGoal || hadReports || hadPromises || hadPending) this.save();
+    // a cut lease not looked at yet goes too: nothing gives it back to a conversation that is gone
+    const hadRecovering = this.takeRecovering(threadId).length > 0;
+    if (hadWake || hadGoal || hadReports || hadPromises || hadPending || hadRecovering) this.save();
   }
 }
 

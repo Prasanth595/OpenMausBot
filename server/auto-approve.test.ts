@@ -53,6 +53,17 @@ describe("autoVerdict", () => {
     }
     expect(autoVerdict("full", "Bash", { commandAllowed: true, requiresExplicitApproval: true }).source).toBe("full-access");
   });
+  it("applies an exact saved MCP read grant without bypassing outbound or sandbox guards", () => {
+    for (const mode of ["ask", "edits", "auto", "custom"] as const) {
+      expect(autoVerdict(mode, "mcp__linear__list_issues", { toolAllowed: true })).toEqual({
+        approve: "approved mcp__linear__list_issues (always allowed)",
+        source: "tool-allowlist",
+      });
+      expect(autoVerdict(mode, "mcp__linear__list_issues", { toolAllowed: true, requiresExplicitApproval: true }).approve).toBeNull();
+      expect(autoVerdict(mode, "mcp__linear__create_comment", { toolAllowed: true }).approve).toBeNull();
+      expect(autoVerdict(mode, "AskUserQuestion", { toolAllowed: true }).approve).toBeNull();
+    }
+  });
   it("answers only for Full access, and then answers everything", () => {
     expect(autoVerdict("full", "Bash")).toEqual({ approve: "approved Bash (full access)", source: "full-access" });
     expect(autoVerdict("full", "Bash", { requiresExplicitApproval: true })).toEqual({
@@ -202,9 +213,9 @@ describe("delegatedApprovalMode", () => {
     expect(delegatedApprovalMode({ ...base, recipientMode: "custom", recipientDriverKind: "codex" })).toBeNull();
   });
   it("steps down to the next level the teammate's engine has", () => {
-    // No Full mode (hermes): the Chief's Full becomes Approve for me.
-    expect(delegatedApprovalMode({ ...base, recipientDriverKind: "hermes" })).toBe("auto");
-    expect(delegatedApprovalMode({ ...base, recipientDriverKind: undefined })).toBe("auto");
+    // Every engine runs Full, the default level, so a Chief's Full arrives whole.
+    expect(delegatedApprovalMode({ ...base, recipientDriverKind: "hermesAgent" })).toBe("full");
+    expect(delegatedApprovalMode({ ...base, recipientDriverKind: undefined })).toBe("full");
     // Codex has no Auto-accept edits (its Ask already writes the workspace).
     expect(delegatedApprovalMode({ ...base, senderMode: "edits", recipientDriverKind: "codex" })).toBeNull();
     expect(delegatedApprovalMode({ ...base, senderMode: "auto", recipientDriverKind: "codex" })).toBe("auto");

@@ -47,6 +47,7 @@ function messageText(message: Message): string {
   if (message.tool) parts.push(`[${message.tool.name}${message.tool.ok === false ? ": failed" : ""}]`);
   if (message.kind === "connector") parts.push("[Connection card — reconnect in Settings]");
   if (message.kind === "secret") parts.push("[Secret request — not restored]");
+  if (message.kind === "signin") parts.push("[Sign-in request — not restored]");
   if (message.routineRun) parts.push(`[Routine: ${message.routineRun.routineName} — ${message.routineRun.status}]`, message.routineRun.summary ?? "", message.routineRun.error ?? "");
   if (message.goalRun) parts.push(`[Room goal: ${message.goalRun.status}]`, message.goalRun.goal, message.goalRun.detail ?? "");
   if (message.kind === "screen" || message.attachments?.length) parts.push("[Image or attachment — file not included in this backup]");
@@ -193,7 +194,7 @@ export function importTeamBackup(store: Store, routines: RoutineManager, input: 
       }, { seedMessages: false });
       bots.push(bot);
       botIds.set(source.key, bot.id);
-      store.patchBot(bot.id, { composio: false, computer: "off", browser: false, approvalMode: "ask", autoApprove: false,
+      store.patchBot(bot.id, { composio: false, computer: "off", browser: false, autoApprove: false,
         connectorTools: {}, toolScope: source.toolScope, hidden: source.hidden, chiefOfStaff: source.chiefOfStaff, playbooks: source.playbooks });
       if (source.memory) restoreMemory(bot.id, source.memory);
     }

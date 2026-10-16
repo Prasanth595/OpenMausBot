@@ -578,21 +578,29 @@ posixOnly("per-bot visibility on a shared workspace", () => {
   }, 90_000);
 
   it("gives a bot a restricted Chief creates the Chief's own audience", async () => {
-    expect((await api("PATCH", `/api/bots/${ids.board}`, { chiefOfStaff: true }, BOSS)).status).toBe(200);
+    expect((await api("PATCH", `/api/bots/${ids.board}`, { chiefOfStaff: true, approvalMode: "ask" }, BOSS)).status).toBe(200);
     const bob = openStream(BOB);
     try {
       expect(await bob.ready()).toBeTruthy();
+      const boardThread = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((b: any) => b.id === ids.board).threadId;
       const minted = await fetch(`${BASE}/api/testing/internal-capability`, {
         method: "POST", headers: { "content-type": "application/json", "x-openmausbot-test-capability": CAPABILITY_KEY },
-        body: JSON.stringify({ botId: ids.board, threadId: (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((b: any) => b.id === ids.board).threadId }),
+        body: JSON.stringify({ botId: ids.board, threadId: boardThread }),
       });
       const { token } = await minted.json() as { token: string };
+      const engine = (await api("GET", "/api/instances", undefined, BOSS)).body.instances.find((instance: any) => instance.instanceId === "grok");
       const created = await fetch(`${BASE}/api/internal/create-bot`, {
         method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name: "Layoff Modeler", role: "Models RIF scenarios", instructions: "SECRET-INSTR model the reduction" }),
+        body: JSON.stringify({ name: "Layoff Modeler", role: "Models RIF scenarios", instructions: "SECRET-INSTR model the reduction",
+          modelSelection: { instanceId: "grok", model: engine.models.default } }),
       });
-      const made = await created.json() as { id: string };
-      expect(created.status, JSON.stringify(made)).toBe(201);
+      const card = await created.json() as { requestId: string; state: string };
+      expect(created.status, JSON.stringify(card)).toBe(201);
+      // Below Full Access the bot exists only once its review card is applied.
+      expect(card.state).toBe("pending");
+      const applied = await api("POST", `/api/threads/${boardThread}/respond`, { requestId: card.requestId, behavior: "allow" }, BOSS);
+      expect(applied.status, JSON.stringify(applied.body)).toBe(200);
+      const made = applied.body.result.bots[0] as { id: string };
       const admin = (await api("GET", "/api/bots?messages=0", undefined, BOSS)).body.bots.find((b: any) => b.id === made.id);
       expect(admin.visibility).toBe("admins");
       await new Promise((r) => setTimeout(r, 500));
@@ -602,6 +610,7 @@ posixOnly("per-bot visibility on a shared workspace", () => {
       await api("DELETE", `/api/bots/${made.id}`, undefined, BOSS);
     } finally {
       bob.close();
+      // fork: Board stays at Ask, which is also the no-level default.
       await api("PATCH", `/api/bots/${ids.board}`, { chiefOfStaff: false }, BOSS);
     }
   }, 60_000);

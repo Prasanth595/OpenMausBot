@@ -4,7 +4,8 @@
 // provider's own permission mode passed straight through (Claude `auto`,
 // Grok `--permission-mode`, Codex `approvalsReviewer`, …), and a request that
 // reaches this process is one the provider left for a person. The grants the
-// app applies are Full access and the person's exact saved commands. Approve
+// app applies are Full access and the person's exact saved commands and
+// explicitly remembered MCP read tools. Approve
 // for me also allows a web search, and that is the one action the app itself
 // grants. Questions never come through here: a bot's question always reaches
 // a human.
@@ -52,12 +53,12 @@ const LEVEL_RANK: Partial<Record<ApprovalMode, number>> = { ask: 0, edits: 1, au
 /** The level work a bot hands to a teammate starts at, or null to keep the
  * teammate's own. A Chief of Staff's level flows down: the person set it on
  * the Chief so the team's work runs that way, and switching every thread the
- * Chief opens with a teammate back off "Ask for approval" was the friction
- * people reported. Only a Chief passes its level on, only the level of the
+ * Chief opens with a teammate someone set lower was the friction people
+ * reported. Only a Chief passes its level on, only the level of the
  * conversation it delegates from, and only upward: a teammate already on a
  * higher level keeps it, and one on Custom keeps its own config. The level
- * is capped at what the teammate's engine implements (Full or Auto-accept
- * edits are not everywhere), stepping down to the next level it has. A bot
+ * is capped at what the teammate's engine implements (Auto-accept edits is
+ * not everywhere), stepping down to the next level it has. A bot
  * never raises itself this way. */
 export function delegatedApprovalMode(input: {
   senderIsChief: boolean;
@@ -113,6 +114,7 @@ function bareToolName(tool: string): string {
 export type AutoVerdictSource =
   | "full-access"
   | "command-allowlist"
+  | "tool-allowlist"
   | "web-search"
   | "native-approval"
   | "explicit-approval-block"
@@ -136,6 +138,8 @@ export function autoVerdict(
     requiresExplicitApproval?: boolean;
     /** Exact bot/provider/folder/command match against the person's saved rules. */
     commandAllowed?: boolean;
+    /** Exact provider/server/tool/config match against a person's saved MCP read grant. */
+    toolAllowed?: boolean;
   },
 ): AutoVerdict {
   // A question is for a person, whatever channel it arrived on — and
@@ -151,6 +155,7 @@ export function autoVerdict(
   if (context?.requiresExplicitApproval) return { approve: null, source: "explicit-approval-block" };
   if (isOutboundTool(tool)) return { approve: null, source: "outbound-guard" };
   if (context?.commandAllowed) return { approve: `approved ${tool} (saved command)`, source: "command-allowlist" };
+  if (context?.toolAllowed) return { approve: `approved ${tool} (always allowed)`, source: "tool-allowlist" };
   // The one action the app itself grants. A fetch of an arbitrary URL is not
   // a search and stays a prompt, in this mode and every other.
   if (mode === "auto" && WEB_SEARCH.has(bareToolName(tool))) {

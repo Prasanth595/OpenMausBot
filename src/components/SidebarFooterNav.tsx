@@ -18,6 +18,8 @@ import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { ccAlertState } from "@/lib/thread-signals";
 import { useStore } from "@/state/store";
 
+import { SidebarSectionHeader } from "./SidebarSectionHeader";
+
 
 function NavRow({
   id,
@@ -48,13 +50,13 @@ function NavRow({
       title={iconsOnly ? label : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "relative flex w-full items-center rounded-xl text-left transition-colors",
-        iconsOnly ? "min-h-10 justify-center px-2 py-2" : "min-h-9 gap-3 px-3 py-1.5",
+        "relative flex items-center rounded-xl transition-colors",
+        iconsOnly ? "mx-auto size-[46px] shrink-0 justify-center" : "w-full min-h-9 gap-3 px-3 py-1.5 text-left",
         active ? "bg-raised text-ink" : "text-ink hover:bg-raised/50",
       )}
     >
       {icon(active)}
-      {!iconsOnly && <span className="flex-1 truncate text-[14px]">{label}</span>}
+      {!iconsOnly && <span className="flex-1 truncate text-[14px] font-medium leading-5">{label}</span>}
       {attention && (
         <span
           data-testid="routines-attention"
@@ -79,7 +81,7 @@ export function SidebarAppsButton() {
       title={label}
       aria-pressed={state.pluginsOpen}
       className={cn(
-        "flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors",
+        "flex size-[46px] shrink-0 items-center justify-center rounded-xl transition-colors",
         state.pluginsOpen ? "bg-raised text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
       )}
     >
@@ -88,7 +90,15 @@ export function SidebarAppsButton() {
   );
 }
 
-export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
+export function SidebarFooterNav({
+  density,
+  collapsed = false,
+  onToggleCollapsed,
+}: {
+  density: SidebarDensity;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
+}) {
   const { state, dispatch } = useStore();
   const advanced = useAdvancedMode();
   const iconsOnly = density === "icons";
@@ -100,9 +110,8 @@ export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
   // the profile row is the foot's first line (#2384).
   if (!advanced && !iconsOnly) return null;
 
-  return (
-    // `tools` is the guided tour's anchor for "the places down here".
-    <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">
+  const rows = (
+    <>
       {advanced && <NavRow
         id="routines"
         label={t("sidebar.nav.routines")}
@@ -168,6 +177,27 @@ export function SidebarFooterNav({ density }: { density: SidebarDensity }) {
           onClick={() => dispatch({ type: "switchTask", botId: bot.id, threadId: task.threadId })}
         />
       ))}
-    </nav>
+    </>
+  );
+
+  // `tools` is the guided tour's anchor for "the places down here".
+  if (iconsOnly) {
+    return <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col items-center gap-1">{rows}</nav>;
+  }
+  // The label stays visible when the rows fold away, so the header says what is inside.
+  // local/patches: a Claude Code session that needs a look also lights the
+  // folded header, so folding Tools never hides it.
+  return (
+    <div data-tour="tools">
+      <SidebarSectionHeader
+        name={t("sidebar.tools")}
+        collapsed={collapsed}
+        alert={collapsed && (routinesNeedYou || ccAlerts.some(({ alert }) => alert.state !== "stalled"))}
+        onToggle={onToggleCollapsed}
+        reorderable={false}
+        dragging={false}
+      />
+      {!collapsed && <nav aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">{rows}</nav>}
+    </div>
   );
 }

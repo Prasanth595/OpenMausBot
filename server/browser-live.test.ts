@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import type { ServerResponse } from "node:http";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserRuntime } from "./browser-runtime.ts";
-import { BrowserLive, browserStreamPort, normalizeBrowserLiveMessage, parseBrowserLiveAction } from "./browser-live.ts";
+import { BrowserActionFailedError, BrowserLive, browserStreamPort, normalizeBrowserLiveMessage, parseBrowserLiveAction } from "./browser-live.ts";
 
 const execute = vi.hoisted(() => vi.fn());
 const nativeClose = vi.hoisted(() => vi.fn());
@@ -41,8 +41,9 @@ class SocketFixture extends EventTarget {
   readyState = 1;
   bufferedAmount = 0;
   messages: unknown[] = [];
-  constructor(readonly url: string) {
-    super(); SocketFixture.instances.push(this);
+  readonly url: string;
+  constructor(url: string) {
+    super(); this.url = url; SocketFixture.instances.push(this);
     queueMicrotask(() => {
       this.dispatchEvent(new Event(SocketFixture.failOpen ? "error" : "open"));
       for (const message of SocketFixture.initialMessages) this.receive(message);
@@ -72,6 +73,8 @@ beforeEach(() => {
     abandonHumanInput: vi.fn(),
     interrupted: vi.fn(() => false),
     withHumanAction: vi.fn(async (_session: string, _owner: string, fn: () => unknown) => fn()),
+    watch: vi.fn(() => () => {}),
+    settled: vi.fn(async () => {}),
   } as unknown as BrowserRuntime;
   live = new BrowserLive({ runtime });
   SocketFixture.instances = [];
@@ -205,6 +208,34 @@ describe("authenticated browser viewer relay", () => {
     expect(res.writableEnded).toBe(false);
     expect(res.chunks).toHaveLength(0);
   });
+  // "google" typed in the address bar opened https://google/; the engine
+  // answered that the navigation failed, and the view then asked for a restart.
+  it("reports a page that would not open as settled, without the engine's own error, and keeps the view usable", async () => {
+    const { action } = await open();
+    await action({ type: "take" });
+    const failed = Object.assign(new Error("Command failed: agent-browser open https://google/"), {
+      code: 1, stdout: JSON.stringify({ success: false, data: null, error: "Navigation failed: net::ERR_NAME_NOT_RESOLVED" }) + "\n", stderr: "",
+    });
+    execute.mockRejectedValueOnce(failed);
+    const refused = action({ type: "navigate", url: "https://google/" });
+    await expect(refused).rejects.toMatchObject({ status: 422, settled: true, message: "This page could not be opened. Check the address and try again." });
+    await expect(refused).rejects.toBeInstanceOf(BrowserActionFailedError);
+    // The engine answered with success:false and exit 0 too.
+    execute.mockResolvedValueOnce({ stdout: JSON.stringify({ success: false, error: "element not found" }), stderr: "" });
+    await expect(action({ type: "tab-new" })).rejects.toMatchObject({ settled: true, message: "The browser could not do that. Try again." });
+    execute.mockResolvedValueOnce(output({ url: "https://duckduckgo.com/?q=google" }));
+    await expect(action({ type: "navigate", url: "https://duckduckgo.com/?q=google" })).resolves.toEqual({ ok: true });
+  });
+
+  it("still treats a command with no answer (killed, aborted) as interrupted, not settled", async () => {
+    const { action } = await open();
+    await action({ type: "take" });
+    execute.mockRejectedValueOnce(Object.assign(new Error("Command failed"), { code: null, signal: "SIGTERM", stdout: "", stderr: "" }));
+    const refused = action({ type: "navigate", url: "https://example.com/" });
+    await expect(refused).rejects.not.toHaveProperty("settled");
+    await expect(refused).rejects.toMatchObject({ status: 503 });
+  });
+
   it("resets a daemon stuck on a failed launch so reconnecting starts a fresh session (#1383)", async () => {
     const openS = () => live.open({ botId: "a", session: "s", owner: "a", isCurrent: () => true,
       res: new ResponseFixture() as unknown as ServerResponse, spec: { command: "/engine", env: { AGENT_BROWSER_SESSION: "s" } } });
@@ -406,6 +437,36 @@ describe("authenticated browser viewer relay", () => {
     expect(b.res.writableEnded).toBe(false);
     expect(held.get("profile-a")).toBe(b.res.id);
   });
+  it("sends a typed password to the page only: never logged, echoed or sent to another view", async () => {
+    const secret = "hunter2-correct-horse";
+    const logs = (["log", "info", "warn", "error", "debug"] as const).map((level) => vi.spyOn(console, level).mockImplementation(() => {}));
+    const a = await open(); const b = await open({ botId: "bot-b" });
+    await a.action({ type: "take" });
+    const reply = await a.action({ type: "input_keyboard", eventType: "char", text: secret });
+    expect(reply).toEqual({ ok: true });
+    expect(nativeInput.mock.calls.map((call) => JSON.parse(call[1].body))).toEqual([{ action: "keyboard", subaction: "insertText", text: secret }]);
+    // A failing page does not repeat it either, in its error or in a log.
+    nativeInput.mockImplementationOnce(async () => Response.json({ success: false, error: `bad input ${secret}` }));
+    const failure = await a.action({ type: "input_keyboard", eventType: "char", text: secret }).catch((error: Error) => error);
+    expect(String(failure)).not.toContain(secret);
+    for (const log of logs) expect(JSON.stringify(log.mock.calls)).not.toContain(secret);
+    expect([...a.res.chunks, ...b.res.chunks].join("")).not.toContain(secret);
+    expect(JSON.stringify([a.socket.messages, b.socket.messages])).not.toContain(secret);
+  });
+  it("hands back whichever view holds the browser when its sign-in card is answered elsewhere", async () => {
+    const a = await open(); const b = await open({ botId: "bot-b" });
+    await a.action({ type: "take" });
+    live.handBack("profile-b");
+    expect(held.get("profile-a")).toBe(a.res.id);
+    live.handBack("profile-a");
+    expect(held.has("profile-a")).toBe(false);
+    expect(a.res.events("control").at(-1)).toEqual({ held: false, owned: false, controlling: false });
+    expect(b.res.events("control").at(-1)).toEqual({ held: false, owned: false, controlling: false });
+    // The view stays open: the person can take it again.
+    expect(a.res.writableEnded).toBe(false);
+    await a.action({ type: "take" });
+    expect(held.get("profile-a")).toBe(a.res.id);
+  });
   it("inserts pasted text literally and preserves modifier shortcuts via native acknowledged actions", async () => {
     const a = await open(); await a.action({ type: "take" });
     await a.action({ type: "input_keyboard", eventType: "char", text: "--cdp=secret\nhello" });
@@ -477,6 +538,35 @@ describe("authenticated browser viewer relay", () => {
     ]);
     expect(runtime.abandonHumanInput).not.toHaveBeenCalled();
   });
+  // An idle close would end the stream under the person watching it.
+  it("keeps the browser it shows from closing while the view is open, and starts its idle time when it closes", async () => {
+    const closeBrowser = vi.fn(async () => true);
+    runtime = new BrowserRuntime({ closeBrowser }); live = new BrowserLive({ runtime });
+    const a = await open();
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(await runtime.closeIfIdle("profile-a", 10)).toBe(false);
+    a.socket.close();
+    expect(await runtime.closeIfIdle("profile-a", 10)).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(await runtime.closeIfIdle("profile-a", 10)).toBe(true);
+    expect(closeBrowser).toHaveBeenCalledWith("profile-a", expect.objectContaining({ command: "/trusted/agent-browser" }));
+  });
+  it("waits out an idle close in progress before starting a view", async () => {
+    let finish!: (closed: boolean) => void;
+    runtime = new BrowserRuntime({ closeBrowser: () => new Promise<boolean>((resolve) => { finish = resolve; }) }); live = new BrowserLive({ runtime });
+    const first = await open();
+    first.socket.close();
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    const closing = runtime.closeIfIdle("profile-a", 10);
+    execute.mockClear();
+    const opening = open();
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    expect(execute).not.toHaveBeenCalled();
+    finish(true);
+    expect(await closing).toBe(true);
+    await opening;
+    expect(execute.mock.calls[0]![1]).toEqual(["stream", "status", "--json", "--no-webmcp"]);
+  });
   it("still requires restart when a held modifier has not been released after a chord", async () => {
     runtime = new BrowserRuntime(); live = new BrowserLive({ runtime });
     const a = await open(); await a.action({ type: "take" });
@@ -504,17 +594,22 @@ describe("authenticated browser viewer relay", () => {
     await a.action({ type: "release" });
     await expect(a.action({ type: "take" })).rejects.toThrow("Choose Restart browser… in the browser menu");
   });
-  it("tells the panel when a take had to wait for the bot's own action", async () => {
+  it("tells the panel when a take had to wait for a bot command", async () => {
     runtime = new BrowserRuntime(); live = new BrowserLive({ runtime });
     const a = await open();
     expect(await a.action({ type: "take" })).toEqual({ ok: true, waited: false });
     await a.action({ type: "release" });
+    // A frame, not a bot command, held the browser: the person's input stands.
     let finish!: () => void;
-    const agent = runtime.withAgentAction("profile-a", () => new Promise<boolean>((resolve) => { finish = () => resolve(true); }));
-    const discarded = expect(agent).rejects.toThrow("paused");
+    const frame = runtime.previewFrame("profile-a", () => new Promise<boolean>((resolve) => { finish = () => resolve(true); }));
+    const discarded = expect(frame).rejects.toThrow("paused");
     const taking = a.action({ type: "take" });
     finish(); await discarded;
-    expect(await taking).toEqual({ ok: true, waited: true });
+    expect(await taking).toEqual({ ok: true, waited: false });
+    await a.action({ type: "release" });
+    // The runtime decides when a bot command was in the engine (browser-runtime.test.ts).
+    vi.spyOn(runtime, "take").mockResolvedValueOnce(true);
+    expect(await a.action({ type: "take" })).toEqual({ ok: true, waited: true });
   });
   it("releases Shift-only printable keys even when keyUp contains no text", async () => {
     const a = await open(); await a.action({ type: "take" });

@@ -50,6 +50,9 @@ writeFileSync(
       license: "Apache-2.0",
       type: "module",
       bin: { openmausbot: "cli.js" },
+      // Never bundled (server/onepassword.ts): plain JS with a WebAssembly
+      // core, the same on every platform, so npm installs it beside the server.
+      dependencies: { "@1password/sdk": app.dependencies["@1password/sdk"] },
       files: ["cli.js", "dist-server", "dist", "skills", "enterprise", "LICENSE", "README.md"],
       engines: { node: ">=24" },
       repository: { type: "git", url: "https://github.com/milind-soni/OpenMausBot.git" },
@@ -140,7 +143,18 @@ For a service, use \`serve --tunnel\` after \`login\` for managed HTTPS,
 \`login\` command signs in to an OpenMausBot account, not an AI provider;
 it does not start the tunnel itself.
 
+Scripts, CI and other agents can drive a running workspace without a screen:
+set a team up from a file, give a bot one job and wait until it and every
+teammate it asked are done, and export what they made.
+
+\`\`\`sh
+openmausbot team apply team.yaml
+openmausbot run "Room Lead" "Rehearse the launch of https://example.com" --export ./out
+openmausbot help run       # every verb: doctor, run, wait, send, export, events, team, engine, connect, mcp
+\`\`\`
+
 [Setup guide](https://github.com/milind-soni/OpenMausBot/blob/main/docs/cli-onboarding.md)
+· [Scripts and CI](https://github.com/milind-soni/OpenMausBot/blob/main/docs/headless-cli.md)
 · [Hosting guide](https://github.com/milind-soni/OpenMausBot/blob/main/docs/self-hosting.md)
 `,
 );

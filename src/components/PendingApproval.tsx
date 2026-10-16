@@ -72,7 +72,7 @@ export function pendingApprovals(messages: Message[]): Pending[] {
  * 20,000 characters). Calls should announce the concise, visible title and
  * let the user review those details on screen instead of reading them all. */
 export function spokenApprovalPrompt(pending: Pending, requester: string): string {
-  if (pending.message.card?.teamSetupRequest) return `${requester}: ${pending.message.card.title} Review the details and choose ${pending.message.card.options[0]} or Cancel.`;
+  if (pending.message.card?.teamSetupRequest) return `${requester}: ${pending.message.card.title} Review the details and choose ${pending.message.card.options[0]} or ${pending.message.card.options[1] ?? "Cancel"}.`;
   const isRoutineRequest = isRoutineApproval(pending);
   const isSkillRequest = isSkillApproval(pending);
   const isProfileRequest = isProfileApproval(pending);
@@ -247,7 +247,7 @@ export function approvalChoices(pending: Pending, opts: { bot?: Pick<Bot, "id" |
   if (!durableRequest) choices.push({ id: "cancelTurn", label: t("approval.action.cancelTurn"), look: "quiet" });
   choices.push({
     id: "deny",
-    label: isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny"),
+    label: pending.message.card?.teamSetupRequest?.suggestion ? t("approval.action.notNow") : isRoutineRequest || isProfileRequest || isTeamSetup ? t("approval.action.cancel") : t("approval.action.deny"),
     look: "danger",
     ...(isTeamSetup ? { autoFocus: true } : {}),
   });

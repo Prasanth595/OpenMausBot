@@ -61,27 +61,6 @@ export interface NotifyBot {
   notifications?: boolean;
 }
 
-/** The room a bot is holding while it works, as this module needs it. */
-export interface NotifyRoom {
-  id: string;
-  name: string;
-  threadId: string;
-  busyBotId?: string | null;
-}
-
-/** Where a "blocked on you" notification has to open. A bot speaking in a
- * room is not reachable in its own 1:1 thread — the turn, its screen and the
- * card all live in the room — so the room wins while it owns that bot. A
- * room it merely belongs to, or one another member is speaking in, is not
- * where this bot is: those fall back to its own thread. */
-export function blockedTarget(
-  bot: NotifyBot,
-  room?: NotifyRoom | null,
-): { threadId: string; group?: { id: string; name: string } } {
-  if (!room || room.busyBotId !== bot.id) return { threadId: bot.threadId };
-  return { threadId: room.threadId, group: { id: room.id, name: room.name } };
-}
-
 /** A workspace spend notice (server/spend.ts decides when). It opens the
  * thread whose turn crossed the line, so clicking it lands somewhere real,
  * but it is the workspace's news, not that bot's: the bot's notification
@@ -103,7 +82,7 @@ export function buildNotification(
   bot: NotifyBot,
   threadId: string,
   detail: string,
-  extra?: { avatarUrl?: string; group?: { id: string; name: string } },
+  extra?: { avatarUrl?: string; group?: { id: string; name: string }; site?: string },
 ): Notification | null {
   // The toggle means what it says: off is off, including for approvals.
   // A bot whose notifications you turned off can still block waiting for
@@ -121,8 +100,8 @@ export function buildNotification(
       ? `${who} precisa de aprovação`
       : kind === "question"
         ? `${who} tem uma pergunta`
-        : kind === "takeover"
-          ? `${who} precisa das suas mãos`
+        : kind === "sign-in"
+          ? `${who} precisa que você entre em ${extra?.site ?? "um site"}`
           : kind === "routine-failed"
             ? `A rotina de ${who} falhou`
             : kind === "routine-deferred"
