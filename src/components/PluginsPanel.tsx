@@ -8,6 +8,8 @@ import type { LocaleKey } from "@/locales";
 import { readCachedInventory, writeCachedInventory } from "@/lib/connected-apps-cache";
 import { reserveConnectionPage, reusableConnectionUrl, type PendingAuthorization } from "@/lib/connector-oauth";
 import { mcpSignInLink } from "@/lib/mcp-sign-in";
+import { pollConnector } from "@/lib/connector-poll";
+import { connectorConnect } from "@/lib/product-events";
 import { managedConnectorUnavailableReason } from "../../shared/connector-availability";
 import { connectorServiceAccess, isConnectorToolGrantShape } from "@/lib/connector-grants";
 import {
@@ -26,6 +28,7 @@ import { BotAvatar } from "./Avatar";
 import { PopoverMenu } from "./popover/PopoverMenu";
 import { CATEGORY_SECTION_SIZE, catalogSections, inCategory, rankCategories } from "@/lib/app-catalog";
 import { McpServersPanel } from "./McpServersPanel";
+import { HighLevelCard } from "./HighLevelCard";
 
 export interface ToolkitCard {
   slug: string;
@@ -254,8 +257,10 @@ export function PluginsPanel() {
   const [whopConnected, setWhopConnected] = useState<boolean | null>(null);
   const [whopRefresh, setWhopRefresh] = useState(0);
   const [category, setCategory] = useState<string | null>(null);
+  // Appended after the older state so tests that seed state by call order keep their indices.
+  const [highLevelConnected, setHighLevelConnected] = useState<boolean | null>(null);
 
-  const pollTimers = useRef(new Map<string, ReturnType<typeof setInterval>>());
+  const polls = useRef(new Map<string, () => void>());
   const statusGenerations = useRef(new Map<string, number>());
   const latestStatusRequests = useRef(new Map<string, number>());
   const opening = useRef<ReturnType<typeof reserveConnectionPage> | null>(null);
@@ -343,8 +348,8 @@ export function PluginsPanel() {
   useEffect(() => () => {
     opening.current?.cancel();
     opening.current = null;
-    for (const timer of pollTimers.current.values()) clearInterval(timer);
-    pollTimers.current.clear();
+    for (const stop of polls.current.values()) stop();
+    polls.current.clear();
   }, []);
 
   useEffect(() => {
@@ -436,20 +441,13 @@ export function PluginsPanel() {
     }
   };
 
-  const startPolling = (slug: string) => {
-    const old = pollTimers.current.get(slug);
-    if (old) clearInterval(old);
-    let tries = 0;
-    const timer = setInterval(() => {
-      void refreshStatus([slug]).then((services) => {
-        const state = services[slug];
-        if (++tries >= 24 || (state?.connected && !state.pending) || (state?.status && /^(expired|failed)$/i.test(state.status))) {
-          clearInterval(timer);
-          pollTimers.current.delete(slug);
-        }
-      });
-    }, 5000);
-    pollTimers.current.set(slug, timer);
+  const startPolling = (slug: string, before: ConnectorStatus | undefined) => {
+    polls.current.get(slug)?.();
+    const stop = pollConnector(before, () => refreshStatus([slug]).then((services) => services[slug]), (result) => {
+      if (polls.current.get(slug) === stop) polls.current.delete(slug);
+      connectorConnect(slug, result);
+    });
+    polls.current.set(slug, stop);
   };
 
   const connect = async (slug: string, alias?: string, replacing?: ConnectorAccount) => {
@@ -480,7 +478,7 @@ export function PluginsPanel() {
       }));
       setAliasSlug(null);
       setAliasDraft("");
-      startPolling(slug);
+      startPolling(slug, status[slug]);
       if (!await launch.open(url) && opening.current === launch) {
         setError({ key: "connectors.popupBlockedContinue" });
       }
@@ -519,11 +517,13 @@ export function PluginsPanel() {
   const filter: AppsFilter = surface === "mcp" ? "mcp" : tab === "connected" ? "connected" : "all";
   const whopMatches = !search || `whop ${t("whop.description")}`.toLowerCase().includes(search.toLowerCase().trim());
   const showWhop = whopMatches && (filter === "all" || (filter === "connected" && whopConnected !== false));
+  const highLevelMatches = !search || `highlevel high level growably crm ${t("highlevel.description")}`.toLowerCase().includes(search.toLowerCase().trim());
+  const showHighLevel = highLevelMatches && (filter === "all" || (filter === "connected" && highLevelConnected !== false));
   const visible = (filter === "connected" ? matching.filter((card) => isConnected(card.slug)) : matching)
     .map((card, index) => ({ card, index }))
     .sort((a, b) => Number(isConnected(b.card.slug)) - Number(isConnected(a.card.slug)) || a.index - b.index)
     .map(({ card }) => card);
-  const connectedCount = Object.values(status).filter(hasActiveConnection).length + Number(whopConnected === true);
+  const connectedCount = Object.values(status).filter(hasActiveConnection).length + Number(whopConnected === true) + Number(highLevelConnected === true);
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
   const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
@@ -544,6 +544,7 @@ export function PluginsPanel() {
   const moreCategories = ranked.more;
   const categoryInMore = category !== null && moreCategories.includes(category);
   const inCategoryView = filter === "all" && category !== null;
+  const nativeCardsShown = !inCategoryView && (showWhop || showHighLevel);
   const categoryCards = inCategoryView ? visible.filter((card) => inCategory(card, category)) : visible;
   const sectioned = filter === "all" && !search && category === null;
   const sections = sectioned ? catalogSections(visible, isConnected, ranked.inline) : [];
@@ -814,7 +815,7 @@ export function PluginsPanel() {
                         </button>
                       </div>
                     )}
-                    {cards !== null && allShown.length === 0 && !(showWhop && !inCategoryView) && sections.length <= 1 && (
+                    {cards !== null && allShown.length === 0 && !nativeCardsShown && sections.length <= 1 && (
                       <div className="flex min-h-40 flex-col items-center justify-center text-center">
                         <div className="text-[14px] font-medium text-ink">
                           {filter === "connected" ? connectedEmptyCopy.title : t("connectors.noAppsFound")}
@@ -840,6 +841,9 @@ export function PluginsPanel() {
               >
                 <div className={showWhop && !inCategoryView ? "contents" : "hidden"}>
                   <McpServersPanel whopCard refreshKey={whopRefresh} onWhopConnection={setWhopConnected} />
+                </div>
+                <div data-native-card="highlevel" className={showHighLevel && !inCategoryView ? "contents" : "hidden"}>
+                  <HighLevelCard refreshKey={whopRefresh} onConnection={setHighLevelConnected} />
                 </div>
                 {allShown.map((card) => renderTile(card))}
               </AppsSection>
