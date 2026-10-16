@@ -11,6 +11,7 @@
 // next sync. Nothing here blocks the server: every call is an async child.
 import { execFile } from "node:child_process";
 import { PRODUCTION_REPO, type IssuePriority, type IssueType } from "../shared/productivity.ts";
+import { augmentedPath } from "./env-path.ts";
 import { PRODUCTION_TAG } from "./prod-delivery.ts";
 
 export type GhRunner = (args: string[]) => Promise<string>;
@@ -155,10 +156,23 @@ export function explicitReferences(text: string | null | undefined, options: { c
   return [...found];
 }
 
+/** The environment `gh` runs in. The PATH is the augmented one (Homebrew, ~/.local/bin, the login
+ * shell's): an app opened from the Finder inherits only /usr/bin:/bin:/usr/sbin:/sbin, where `gh`
+ * is not, and the sync failed with "spawn gh ENOENT" while every other gh call in the server worked. */
+export function ghEnv(base: NodeJS.ProcessEnv = process.env, path: string = augmentedPath()): NodeJS.ProcessEnv {
+  return { ...base, PATH: path, GH_PROMPT_DISABLED: "1", NO_COLOR: "1" };
+}
+
+/** What a failed `gh` call says: gh's own words, or, when gh is not there at all, that in plain words. */
+export function ghErrorMessage(error: { code?: string | number | null; message: string }, stderr: string): string {
+  if (error.code === "ENOENT") return "GitHub CLI (gh) not found on the app's PATH: install it (brew install gh) or add its folder to OMB_EXTRA_PATH";
+  return (String(stderr || "").trim() || error.message).slice(0, 400);
+}
+
 /** Run `gh` without a shell; output capped, a slow call cut at 90 s. */
 export const execGh: GhRunner = (args) => new Promise((resolve, reject) => {
-  execFile("gh", args, { timeout: 90_000, maxBuffer: 96 * 1024 * 1024, env: { ...process.env, GH_PROMPT_DISABLED: "1", NO_COLOR: "1" } }, (error, stdout, stderr) => {
-    if (error) reject(new Error((String(stderr || "").trim() || error.message).slice(0, 400)));
+  execFile("gh", args, { timeout: 90_000, maxBuffer: 96 * 1024 * 1024, env: ghEnv() }, (error, stdout, stderr) => {
+    if (error) reject(new Error(ghErrorMessage(error, String(stderr))));
     else resolve(String(stdout));
   });
 });

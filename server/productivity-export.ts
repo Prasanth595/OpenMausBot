@@ -221,8 +221,8 @@ function botsLine(report: ProductivityReport, lang: SummaryLang): string {
     : `engineering ${formatMoney(k.costEngineeringUsd ?? 0, lang)}, operations ${formatMoney(k.costOperationsUsd ?? 0, lang)}${k.costOtherUsd !== null ? `, other (bots not in the role list) ${formatMoney(k.costOtherUsd, lang)}` : ""}`;
   const turns = pt ? `${formatNumber(k.turns, lang)} ${k.turns === 1 ? "turno" : "turnos"}` : `${formatNumber(k.turns, lang)} ${k.turns === 1 ? "turn" : "turns"}`;
   return pt
-    ? `Bots: ${turns} em ${days} dias registrados; custo ${formatMoney(k.costUsd, lang)} (${split}); custo de engenharia por entrega ${costPerDeliveryText(report, lang)}.`
-    : `Bots: ${turns} over ${days} recorded days; cost ${formatMoney(k.costUsd, lang)} (${split}); engineering cost per delivery ${costPerDeliveryText(report, lang)}.`;
+    ? `Bots: ${turns} em ${days} dias registrados; custo ${formatMoney(k.costUsd, lang)} (${split}); custo de engenharia: ${costPerDeliveryText(report, lang)}.`
+    : `Bots: ${turns} over ${days} recorded days; cost ${formatMoney(k.costUsd, lang)} (${split}); engineering cost: ${costPerDeliveryText(report, lang)}.`;
 }
 
 // ── executive summary ───────────────────────────────────────────────────────
@@ -431,7 +431,7 @@ export function reportMarkdown(report: ProductivityReport): string {
   for (const kpi of boardKpis(report)) lines.push(`| ${md(kpi.label)} | ${md(kpi.value)}${kpi.detail ? `<br>${md(kpi.detail)}` : ""} | ${md(kpi.previous)} | ${md(kpi.comparison)} | ${md(goalText(kpi))} | ${md(kpi.short)} |`);
   lines.push("", "## DORA", "", "| Métrica | Valor | Como é contado |", "|---|---|---|");
   for (const [name, value, how] of doraRows(report)) lines.push(`| ${md(name)} | ${md(value)} | ${md(how)} |`);
-  lines.push("", `## Por ${granularityName(g, "pt-BR")}`, "", "| Período | Entregas | PRs entregues | PRs mergeadas | Issues fechadas | Bugs fechados | Falhas que rodaram | Turnos dos bots |", "|---|---:|---:|---:|---:|---:|---:|---:|");
+  lines.push("", `## Por ${granularityName(g, "pt-BR")}`, "", "| Período | Entregas | PRs entregues | PRs mergeadas | Issues resolvidas | Bugs fechados | Falhas que rodaram | Turnos dos bots |", "|---|---:|---:|---:|---:|---:|---:|---:|");
   for (const bucket of report.buckets) {
     const known = bucket.releaseCoverage !== "none";
     const delivered = !known ? "s/ fonte" : `${bucket.unknownContentReleases ? "≥" : ""}${bucket.deliveredPrs}`;
@@ -879,7 +879,7 @@ export function reportPdf(report: ProductivityReport): Buffer {
     title: `Vazão por ${granularityName(g, "pt-BR")}`, buckets: report.buckets, granularity: g,
     series: [
       { label: "PRs mergeadas", color: ACCENT, value: (bucket) => bucket.mergedPrs },
-      { label: "Issues fechadas", color: ACCENT_SOFT, value: (bucket) => bucket.closedIssues },
+      { label: "Issues resolvidas", color: ACCENT_SOFT, value: (bucket) => bucket.closedIssues },
     ],
   });
   // indicators, with the definition beside each one

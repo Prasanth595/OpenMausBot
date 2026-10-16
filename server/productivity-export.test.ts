@@ -140,7 +140,7 @@ describe("executive summary", () => {
       "Lead time issue até produção: mediana 43 h, p90 2,6 d (n=2; sem base comparável); merge até produção 1,8 h.",
       "Backlog agora: 2 issues abertas; P1 1 e P0 1 (1 ainda com o rótulo antigo); a mais antiga #104, 22 d; 1 PR esperando o gate.",
       "Releases: sucesso 60%, 3 de 5 que rodaram; 1 recusado. Fora da conta: 1 trocado por um commit mais novo e 1 abortado antes de rodar. Pipeline parado 5 h com produção no ar, 0 min em fim de semana.",
-      "Bots: 3 turnos em 4,5 dias registrados; custo US$ 0,75 (engenharia US$ 0,00, operação US$ 0,75); custo de engenharia por entrega — (nenhum custo de bot de engenharia registrado).",
+      "Bots: 3 turnos em 4,5 dias registrados; custo US$ 0,75 (engenharia US$ 0,00, operação US$ 0,75); custo de engenharia: — (nenhum custo de bot de engenharia registrado).",
     ]);
   });
 
@@ -154,6 +154,17 @@ describe("executive summary", () => {
     const enough = { ...few, kpis: { ...few.kpis, deliveriesInUsageDays: 6, costPerDelivery: 0.2 } };
     expect(costPerDeliveryText(enough)).toBe("US$ 0,20 por entrega (6 entregas nos dias registrados)");
     expect(executiveSummary(few)[5]).toContain("custo US$ 1,95 (engenharia US$ 1,20, operação US$ 0,75)");
+  });
+
+  it("says \"por entrega\" once in the bots' line (report-fixes: it read \"US$ 10,95 por entrega por entrega\")", () => {
+    const base = report();
+    const enough = { ...base, kpis: { ...base.kpis, usageDays: 4, deliveriesInUsageDays: 6, costPerDelivery: 0.2, costEngineeringUsd: 1.2 } };
+    const pt = executiveSummary(enough)[5]!;
+    expect(pt).toContain(`custo de engenharia: ${costPerDeliveryText(enough)}.`);
+    expect(pt.match(/por entrega/g)).toHaveLength(1);
+    const en = executiveSummary(enough, "en")[5]!;
+    expect(en).toContain(`engineering cost: ${costPerDeliveryText(enough, "en")}.`);
+    expect(en.match(/per delivery/g)).toHaveLength(1);
   });
 
   it("reads a closed month's backlog at its end, and labels today apart (INSP-V r2 #7)", () => {

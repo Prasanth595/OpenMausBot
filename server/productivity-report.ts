@@ -277,7 +277,8 @@ function buildIndex(input: ReportInputs): ReportIndex {
     declines: series([...new Map(input.declines.map((decline) => [decline.sha, decline.at])).values()]),
     merged: series(prs.filter((pr) => !isCarrier(pr)).map((pr) => pr.mergedAt)),
     carriers: series(prs.filter(isCarrier).map((pr) => pr.mergedAt)),
-    closed: series(issues.map((issue) => issue.closedAt)),
+    // done only: not planned and duplicates stay out, as on the "Issues resolvidas" card (closedAll keeps the backlog)
+    closed: series(issues.filter((issue) => !notPlanned(issue)).map((issue) => issue.closedAt)),
     closedBugs: series(issues.filter((issue) => !notPlanned(issue) && issueType(issue.labels) === "bug").map((issue) => issue.closedAt)),
     created: series(issues.map((issue) => issue.createdAt)),
     closedAll: series(issues.map((issue) => issue.closedAt)),
