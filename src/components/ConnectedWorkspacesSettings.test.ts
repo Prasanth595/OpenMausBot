@@ -89,14 +89,12 @@ it("creates an environment with the chosen folder — and without one when the f
   forms()[0]!.props.onSubmit!({ preventDefault: () => {} });
   await flush();
   expect(environments.create).toHaveBeenCalledWith("Work", "/data/work");
-  // The form is empty again, so a second create without a path sends none.
   expect(envFormFields()[0]!.props.value).toBe("");
   expect(envFormFields()[1]!.props.value).toBe("");
   envFormFields()[0]!.props.onChange!({ target: { value: "Solo" } });
   forms()[0]!.props.onSubmit!({ preventDefault: () => {} });
   await flush();
   expect(environments.create).toHaveBeenLastCalledWith("Solo", undefined);
-  // A failed create says one generic thing, whatever main's reason was.
   environments.create.mockResolvedValueOnce({ ok: false, error: "duplicate" });
   envFormFields()[0]!.props.onChange!({ target: { value: "Work" } });
   forms()[0]!.props.onSubmit!({ preventDefault: () => {} });
@@ -122,7 +120,6 @@ it("asks what to do with the folder when forgetting a local environment, and del
   await mount();
   expect(render().html).not.toContain("Also delete this folder");
   expect(environments.forget).not.toHaveBeenCalled();
-  // Keep the files (default): no purge argument at all.
   rowButton("Forget Work")!.props.onClick!();
   await mount();
   textButton("Forget")!.props.onClick!();

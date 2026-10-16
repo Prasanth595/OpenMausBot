@@ -1,5 +1,3 @@
-// Simple mode's Settings: at most five pages, several of them stacking what
-// Advanced shows as separate pages, and every old deep link still landing.
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -92,7 +90,6 @@ describe("Settings in Simple mode", () => {
     const html = render();
     expect(pages(html)).toEqual(["general", "appearance", "ai", "computers"]);
     expect(SIMPLE_PAGES.length).toBeLessThanOrEqual(5);
-    // a flat list: no group headings, no per-section rail entries
     expect(html).not.toContain("data-settings-group=");
     expect(html).not.toContain("data-settings-section=");
     for (const hidden of ["usage", "backups", "experimental", "workspaces", "skills"]) expect(html).not.toContain(`value="${hidden}"`);
@@ -144,7 +141,6 @@ describe("Settings in Simple mode", () => {
   });
 
   it("drops Account when nothing on it is shown", () => {
-    // an OMB Cloud home in a browser: no desktop account pages, nobody to invite, not an admin
     vi.stubGlobal("window", {});
     fixture.config = { ...fixture.config, cloudHome: true };
     expect(pages(render())).toEqual(["general", "appearance", "ai", "computers"]);
@@ -208,7 +204,6 @@ describe("the built-in browser switch", () => {
     fixture.section = "computer";
     const html = render();
     if (advanced) {
-      // Advanced: it heads the Local VM page
       expect(html.indexOf('aria-label="Enable the built-in browser"')).toBeLessThan(html.indexOf("MARKER:computer;"));
     } else {
       expect(html.indexOf("MARKER:computer;")).toBeLessThan(html.indexOf('aria-label="Enable the built-in browser"'));

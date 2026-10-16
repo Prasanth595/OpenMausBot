@@ -84,6 +84,7 @@ import {
   type RoutineCalendarItem,
 } from "@/lib/routine-calendar";
 import { DAY_NAMES, durationLabel, intervalLabel, niceDate, niceTime, scheduleLabel } from "@/lib/schedule-label";
+import { Select } from "./Select";
 import { Switch } from "./SettingsPrimitives";
 import {
   isRoutineProblemRun,
@@ -396,7 +397,6 @@ export function EventEditor({
     ? toLocalDateInput(schedule.endsAt)
     : toLocalDateInput(addDays(startOfDay(Math.max(Date.now(), initialAt)), 7)));
   const [botIds, setBotIds] = useState(lockedBotId ? [lockedBotId] : existingRoutine ? [existingRoutine.botId] : existingCall?.botIds ?? seed.botIds);
-  // A routine without a thread of its own reports into the bot's main thread.
   const [resultsThreadId, setResultsThreadId] = useState<string | null | undefined>((existingRoutine ? existingRoutine.resultsThreadId : seed.resultsThreadId) ?? null);
   const selectBots = (ids: string[]) => {
     if (ids[0] !== botIds[0]) setResultsThreadId(null);
@@ -465,7 +465,6 @@ export function EventEditor({
       setIntervalTimeoutDefaultApplied(true);
     }
     if (isCronChoice(choice)) {
-      // Switching from a preset to Advanced starts with what the person chose.
       if (choice === "cron" && cron?.schedule) setCronDraft((draft) => ({ ...draft, expression: cron.schedule!.expression }));
       setCronChanged(true);
     }
@@ -551,7 +550,6 @@ export function EventEditor({
           durationMinutes,
           timeoutMinutes,
           overlap,
-          // Room goals can't carry a report yet, and a one-time run has no next run.
           continuity: routineTarget === "bot" && recurrence !== "none" && continuity,
           runOnStartup: recurrence !== "none" && runOnStartup,
           attachments: routineTarget === "room-goal" ? [] : attachments as RoutineContextAttachment[],
@@ -604,8 +602,6 @@ export function EventEditor({
   );
   const canSwitchKind = !routinesOnly && !existingRoutine && !existingCall && !lockedBotId;
   const advanced = useAdvancedMode();
-  // Simple mode keeps the basics up front. A schedule or setting the basics
-  // cannot show opens More options straight away, so nothing saved is hidden.
   const [moreOpen, setMoreOpen] = useState(() => !(["none", "daily", "weekdays", "weekly"] as RecurrenceChoice[]).includes(recurrence)
     || routineTarget === "room-goal"
     || attachments.length > 0
@@ -654,16 +650,16 @@ export function EventEditor({
                   {kind === "call" && <>
                     <span className="text-[12px] text-ink-secondary">to</span>
                     <span className="rounded-lg border border-hairline/40 bg-inset/60 px-3 py-2 text-[13px] text-ink">{niceTime(endAt)}</span>
-                    <select aria-label="Call duration" value={durationMinutes} onChange={(event) => setDurationMinutes(Number(event.target.value))} className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[12px] text-ink outline-none focus:border-accent">
+                    <Select aria-label="Call duration" value={durationMinutes} onChange={(event) => setDurationMinutes(Number(event.target.value))}>
                       {EVENT_DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{durationLabel(minutes)}</option>)}
-                    </select>
+                    </Select>
                   </>}
                 </div>
               );
   const repeatSelect = (
               <div className="flex flex-wrap items-center gap-2">
                 <Repeat2 size={14} className="text-ink-secondary" />
-                <select aria-label="Repeat" value={recurrence} onChange={(event) => selectRecurrence(event.target.value as RecurrenceChoice)} className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[12.5px] text-ink outline-none focus:border-accent">
+                <Select aria-label="Repeat" value={recurrence} onChange={(event) => selectRecurrence(event.target.value as RecurrenceChoice)}>
                   <option value="none">Does not repeat</option>
                   {kind === "routine" && <option value="interval">Every X minutes</option>}
                   <option value="daily">Daily</option>
@@ -671,7 +667,7 @@ export function EventEditor({
                   <option value="weekly">Weekly on {DAY_NAMES[new Date(at).getDay()]}</option>
                   <option value="custom">Selected weekdays</option>
                   {kind === "routine" && <><option value="monthly">Monthly</option><option value="yearly">Yearly</option><option value="cron">Custom cron (advanced)</option></>}
-                </select>
+                </Select>
               </div>
   );
   const scheduleNote = kind === "routine" && (
@@ -691,15 +687,14 @@ export function EventEditor({
                 <div className="space-y-3">
                   <div className="flex flex-wrap items-center gap-2 text-[12.5px] text-ink">
                     <span className="font-medium">Runs every</span>
-                    <select
+                    <Select
                       value={INTERVAL_PRESETS.includes(intervalMinutes) ? String(intervalMinutes) : "custom"}
                       onChange={(event) => setIntervalMinutes(event.target.value === "custom" ? 0 : Number(event.target.value))}
                       aria-label="How often this routine runs"
-                      className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[12.5px] tabular-nums text-ink outline-none focus:border-accent"
                     >
                       {INTERVAL_PRESETS.map((minutes) => <option key={minutes} value={minutes}>{minutes}</option>)}
                       <option value="custom">Custom…</option>
-                    </select>
+                    </Select>
                     {!INTERVAL_PRESETS.includes(intervalMinutes) && (
                       <input
                         type="number"
@@ -721,48 +716,45 @@ export function EventEditor({
                   <div className="grid items-center gap-2 text-[12.5px] text-ink sm:flex sm:flex-wrap">
                     <span className="inline-flex items-center gap-2 whitespace-nowrap">
                       <span className="font-medium">On</span>
-                      <select
+                      <Select
                         value={intervalDays}
                         onChange={(event) => selectIntervalDays(event.target.value as IntervalDayChoice)}
                         aria-label="Days this interval runs"
                         aria-invalid={intervalDaysInvalid}
                         aria-describedby={intervalDaysInvalid ? "routine-interval-days-error" : undefined}
-                        className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[12.5px] text-ink outline-none focus:border-accent"
                       >
                         <option value="every-day">Every day</option>
                         <option value="weekdays">Weekdays</option>
                         <option value="custom">Custom…</option>
-                      </select>
+                      </Select>
                     </span>
                     <span aria-hidden="true" className="hidden text-ink-secondary sm:inline">·</span>
                     <span className="inline-flex items-center gap-2 whitespace-nowrap">
                       <span className="font-medium">During</span>
-                      <select
+                      <Select
                         value={intervalWindow}
                         onChange={(event) => setIntervalWindow(event.target.value as IntervalWindowChoice)}
                         aria-label="Hours this interval runs"
                         aria-invalid={intervalWindowInvalid}
                         aria-describedby={intervalWindowInvalid ? "routine-interval-window-error" : undefined}
-                        className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[12.5px] text-ink outline-none focus:border-accent"
                       >
                         <option value="all-day">All day</option>
                         <option value="custom">Custom hours…</option>
-                      </select>
+                      </Select>
                     </span>
                     <span aria-hidden="true" className="hidden text-ink-secondary sm:inline">·</span>
                     <span className="inline-flex items-center gap-2 whitespace-nowrap">
                       <span className="font-medium">Ends</span>
-                      <select
+                      <Select
                         value={intervalEnd}
                         onChange={(event) => setIntervalEnd(event.target.value as IntervalEndChoice)}
                         aria-label="When this interval ends"
                         aria-invalid={intervalEndInvalid}
                         aria-describedby={intervalEndInvalid ? "routine-interval-end-error" : undefined}
-                        className="rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[12.5px] text-ink outline-none focus:border-accent"
                       >
                         <option value="never">Never</option>
                         <option value="on-date">On a date…</option>
-                      </select>
+                      </Select>
                     </span>
                   </div>
 
@@ -835,19 +827,19 @@ export function EventEditor({
                   <div className="mt-3 border-t border-hairline/35 pt-3">
                     <label className="flex flex-wrap items-center gap-2 text-[12px] text-ink">
                       <span>Stop if still running after</span>
-                      <select aria-label="Routine safety limit" value={timeoutMinutes ?? ""} onChange={(event) => setTimeoutMinutes(event.target.value ? Number(event.target.value) : null)} className="rounded-lg border border-hairline/50 bg-panel px-3 py-2 text-[12px] text-ink outline-none focus:border-accent">
+                      <Select aria-label="Routine safety limit" value={timeoutMinutes ?? ""} onChange={(event) => setTimeoutMinutes(event.target.value ? Number(event.target.value) : null)}>
                         <option value="">No limit</option>
                         {EVENT_DURATION_OPTIONS.map((minutes) => <option key={minutes} value={minutes}>{durationLabel(minutes)}</option>)}
-                      </select>
+                      </Select>
                     </label>
                     <div className="mt-1.5 text-[10.5px] leading-relaxed text-ink-secondary">Optional. The clock starts when work actually begins and does not control how often the routine starts.</div>
                     {recurrence !== "none" && <div className="mt-3">
                       <label className="flex flex-wrap items-center gap-2 text-[12px] text-ink">
                         <span>{t("routines.overlapLabel")}</span>
-                        <select aria-label={t("routines.overlapLabel")} value={overlap} onChange={event => setOverlap(event.target.value === "queue" ? "queue" : "skip")} className="rounded-lg border border-hairline/50 bg-panel px-3 py-2 text-[12px] text-ink outline-none focus:border-accent">
+                        <Select aria-label={t("routines.overlapLabel")} value={overlap} onChange={event => setOverlap(event.target.value === "queue" ? "queue" : "skip")}>
                           <option value="skip">{t("routines.overlapSkip")}</option>
                           <option value="queue">{t("routines.overlapQueue")}</option>
-                        </select>
+                        </Select>
                       </label>
                       <p className="mt-1.5 text-[10.5px] leading-relaxed text-ink-secondary">{t(overlap === "queue" ? "routines.overlapQueueHelp" : "routines.overlapSkipHelp")}</p>
                     </div>}
@@ -983,10 +975,10 @@ export function EventEditor({
                   <div>
                     <label htmlFor="routine-goal-room" className="mb-2 block text-[12.5px] font-medium text-ink">Choose a group</label>
                     {rooms.length > 0 ? (
-                      <select id="routine-goal-room" value={groupId} onChange={(event) => selectRoom(event.target.value)} className="w-full rounded-lg border border-hairline/50 bg-inset px-3 py-2.5 text-[12.5px] text-ink outline-none focus:border-accent">
+                      <Select id="routine-goal-room" value={groupId} onChange={(event) => selectRoom(event.target.value)} className="w-full">
                         <option value="">Select a group</option>
                         {rooms.map((room) => <option key={room.id} value={room.id}>{room.name}</option>)}
-                      </select>
+                      </Select>
                     ) : (
                       <div className="rounded-xl border border-dashed border-hairline/60 bg-inset px-3.5 py-3 text-[11.5px] leading-relaxed text-ink-secondary">Create a group from the sidebar first, then come back to schedule its goal.</div>
                     )}
@@ -1203,10 +1195,10 @@ function QuickComposer({
               <div className="mt-0.5 text-[10.5px] text-ink-secondary">Then come back to schedule it.</div>
             </button>
           ) : kind === "routine" ? (
-            <select value={botIds[0] ?? ""} onChange={(event) => selectBots([event.target.value])} className="min-w-0 flex-1 rounded-lg border border-hairline/50 bg-inset px-3 py-2 text-[12.5px] text-ink outline-none focus:border-accent">
+            <Select value={botIds[0] ?? ""} onChange={(event) => selectBots([event.target.value])} className="flex-1">
               <option value="">Assign a bot</option>
               {bots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}
-            </select>
+            </Select>
           ) : (
             <div className="min-w-0 flex-1"><BotPicker bots={bots} selected={botIds} multiple onChange={selectBots} /></div>
           )}
@@ -1256,9 +1248,7 @@ function CalendarEventCard({
   const ownerBots = ownerIds.flatMap((id) => bots.find((bot) => bot.id === id) ?? []);
   const primary = ownerBots[0];
   const name = isCall ? item.call.name : run?.routineName ?? routine?.name ?? "Routine";
-  // The bot's own colour tints the chip; calls and unknown bots use theme tokens.
   const color = isCall ? "var(--color-accent)" : primary ? MAUS_COLORS[primary.color] : "var(--color-ink-tertiary)";
-  // A paused routine's projected occurrence: shown, but it will not run.
   const paused = Boolean(routine && !run && !routine.enabled);
   const [previewDuration, setPreviewDuration] = useState(item.durationMinutes);
   useEffect(() => setPreviewDuration(item.durationMinutes), [item.durationMinutes]);
@@ -1413,7 +1403,6 @@ function CalendarGrid({
       const item = JSON.parse(raw) as { kind: EventKind; id: string; at: number };
       onMove(item, at);
     } catch {
-      // Ignore drags from another application.
     }
   };
 
@@ -1477,7 +1466,6 @@ export function EventDetails({
   onEdit: () => void;
   onCallChanged: (id: string | null) => void;
   onOpenRoom: (id: string) => void;
-  /** Opens one of the routine's recent runs in this drawer. */
   onOpenRun?: (run: RoutineRun) => void;
 }) {
   const { state, dispatch } = useStore();
@@ -1486,7 +1474,6 @@ export function EventDetails({
   const [working, setWorking] = useState(false);
   const runNowPending = useRef(false);
   const [starting, setStarting] = useState(false);
-  // undefined preserves the selected historical run; null clears it for a new attempt.
   const [submittedRun, setSubmittedRun] = useState<RoutineRun | null | undefined>(undefined);
   const [error, setError] = useState("");
   const isCall = item.kind === "call";
@@ -1504,9 +1491,6 @@ export function EventDetails({
   const primary = invited[0];
   const executionOwner = isRoomGoal ? goalGroup : primary;
   const canOpenExecution = Boolean(executionThreadId && (executionOwner?.threadId === executionThreadId || executionOwner?.tasks?.some((task) => task.threadId === executionThreadId)));
-  // A run snapshots where it reported (older runs: the chat that made the
-  // routine). A routine without a chosen thread reports to the main thread,
-  // which its own view opens; a run never redirects to it.
   const resultsThreadId = run ? run.resultsThreadId ?? run.sourceThreadId : routine?.resultsThreadId;
   const openResultsId = resultsThreadId ?? (!run && routine?.target === "bot" ? primary?.mainThreadId : undefined);
   const canOpenResults = openResultsId && [...state.bots, ...state.groups].some((owner) => owner.threadId === openResultsId || owner.tasks?.some((task) => task.threadId === openResultsId));
@@ -1548,13 +1532,11 @@ export function EventDetails({
     setSubmittedRun(null);
     setWorking(true);
     setError("");
-    // The store flushes pending model and approval-level changes before it
-    // starts the run. Keep this button pending through that barrier and the
-    // POST so a double-click cannot create two routine runs.
+    // Stays pending through the store's settings flush and the POST, so a double-click cannot create two runs.
     dispatch({
       type: "runRoutine",
       routineId: routine.id,
-      // Prefer subsequent SSE records over this response, which may already be stale.
+      // Prefer later SSE records over this response, which may already be stale.
       onStarted: setSubmittedRun,
       onError: (cause) => setError(cause instanceof Error ? cause.message : String(cause)),
       onSettled: () => {
@@ -1824,7 +1806,6 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   const [webhookCreateRequest, setWebhookCreateRequest] = useState(0);
   const [error, setError] = useState("");
   const visibleBots = state.bots.filter((bot) => !bot.hidden);
-  // Webhooks are an Advanced-mode tool; Simple mode keeps triggers elsewhere.
   const webhooksAvailable = advanced && !routinesOnly;
   const shownSection = section === "webhooks" && !webhooksAvailable ? "calendar" : section;
   const viewDays = layout === "day" ? 1 : 7;
@@ -1856,8 +1837,6 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
 
   const items = useMemo<CalendarEventItem[]>(() => {
     const routineItems = projectedRoutineItems(state.routines, state.routineRuns, rangeStart, rangeEnd).map((item) => ({ ...item, kind: "routine" as const }));
-    // Paused routines keep their place on the grid, muted, so they are easy
-    // to find and resume. Only upcoming slots: a paused slot never ran.
     const now = Date.now();
     const pausedRoutines = state.routines.filter((routine) => !routine.enabled);
     const pausedItems = projectedRoutineItems(pausedRoutines.map((routine) => ({ ...routine, enabled: true })), state.routineRuns, rangeStart, rangeEnd)
@@ -1925,8 +1904,6 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
     setSelected(null);
     setQuick({ kind: "routine", at: nextHour(), durationMinutes: 30, botIds: [], ...seed });
   }, []);
-  // Advanced keeps the quick popover (with its Routine / Call switch); Simple
-  // goes straight to the plain editor, which has a time and Repeat choices.
   const createRoutine = () => {
     if (section === "webhooks") setSection("calendar");
     if (advanced) return openCreate({ kind: "routine" });
@@ -2042,7 +2019,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           {unseenFailures > 0 && <button type="button" onClick={() => dispatch({ type: "showRoutines", section: "logs", runStatus: "problems" })} className="flex items-center gap-1.5 rounded-full bg-danger/10 px-2.5 py-1.5 text-[10.5px] text-danger" title="Open problem run logs" aria-label="Open problem run logs"><CircleAlert size={11} />{unseenFailures}</button>}
           {paused.length > 0 && <button type="button" onClick={() => setPausedOpen(true)} aria-label="View paused routines" className="flex items-center gap-1.5 rounded-full border border-hairline/50 px-2.5 py-1.5 text-[10.5px] text-ink-secondary hover:bg-raised"><Pause size={11} />{paused.length}</button>}
           <div className="ml-auto flex items-center gap-2">
-            <select aria-label="Filter schedule by bot" value={botFilter} onChange={(event) => { setBotFilter(event.target.value); setRoutineFilter(undefined); }} className="max-w-[180px] rounded-lg border border-hairline/50 bg-panel px-2.5 py-1.5 text-[11.5px] text-ink outline-none focus:border-accent"><option value="all">All bots</option>{visibleBots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}</select>
+            <Select size="sm" aria-label="Filter schedule by bot" value={botFilter} onChange={(event) => { setBotFilter(event.target.value); setRoutineFilter(undefined); }} className="max-w-[180px]"><option value="all">All bots</option>{visibleBots.map((bot) => <option key={bot.id} value={bot.id}>{bot.name}</option>)}</Select>
           </div>
           {error && <button type="button" onClick={() => setError("")} className="flex items-center gap-1.5 rounded-lg bg-danger/10 px-2.5 py-1.5 text-[10.5px] text-danger"><CircleAlert size={11} />{error}<X size={11} /></button>}
           {datedView && state.routinesLoadState === "error" && <p role="alert" className="w-full text-[11.5px] text-danger">{t("routines.loadError")}</p>}
@@ -2058,7 +2035,7 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
           ) : layout === "list" ? (
             <div className="min-h-0 flex-1 overflow-y-auto"><div className="mx-auto w-full max-w-4xl space-y-5 p-4 sm:p-6">
               <div><h2 className="text-[17px] font-semibold text-ink">{t("routines.title")}</h2><p className="mt-1 text-[12px] text-ink-secondary">All schedules, including paused and finished routines.</p></div>
-              <RoutineList routines={filteredRoutines} runs={state.routineRuns} bots={state.bots} loading={state.routinesLoadState === "loading" && filteredRoutines.length === 0} error={state.routinesLoadState === "error"} onOpen={openRoutine} onLogs={openLogs} />
+              <RoutineList routines={filteredRoutines} runs={state.routineRuns} bots={state.bots} loading={state.routinesLoadState === "loading" && filteredRoutines.length === 0} error={state.routinesLoadState === "error"} onOpen={openRoutine} onLogs={openLogs} onToggle={(routine) => dispatch({ type: "updateRoutine", routineId: routine.id, patch: { enabled: !routine.enabled } })} />
               {!routinesOnly && calls.some((call) => botFilter === "all" || call.botIds.includes(botFilter)) && <section className="space-y-2" aria-label="Scheduled calls"><h2 className="text-[15px] font-semibold text-ink">Scheduled calls</h2>{calls.filter((call) => botFilter === "all" || call.botIds.includes(botFilter)).map((call) => <button key={call.id} type="button" onClick={() => setSelected({ kind: "call", id: call.id, at: call.schedule.type === "once" ? call.schedule.at : atLocalTime(Date.now(), call.schedule.time), durationMinutes: call.durationMinutes, call })} className="flex w-full items-center gap-3 rounded-xl border border-hairline/40 bg-card p-4 text-left hover:bg-raised"><Video size={17} className="text-accent" /><span><span className="block text-[13px] font-medium text-ink">{call.name}</span><span className="mt-1 block text-[11.5px] text-ink-secondary">{scheduleLabel(call.schedule)}</span></span></button>)}</section>}
             </div></div>
           ) : (
@@ -2068,7 +2045,6 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
             </div>
           )}
         </div>
-        {/* Beside the grid when there is room; over it on a narrow window. */}
         {drawerOpen && liveSelected && (
           <div className="absolute inset-y-0 right-0 z-20 flex shadow-2xl @min-[760px]/routines:static @min-[760px]/routines:shadow-none">
             <EventDetails key={`${liveSelected.kind}:${liveSelected.id}`} item={liveSelected} bots={state.bots} onClose={() => setSelected(null)} onEdit={editSelected} onOpenRun={openRun} onCallChanged={(id) => { if (id) setCalls((current) => current.filter((call) => call.id !== id)); else void loadCalls(); }} onOpenRoom={onOpenRoom} />
@@ -2083,10 +2059,10 @@ export function RoutinesPage({ onBack, onOpenRoom }: { onBack: () => void; onOpe
   );
 }
 
-/** Desktop only: the one lever the app has against a sleeping computer.
- * The scheduler runs inside the local server, so while the Mac sleeps no
- * routine fires; the shell holds a power assertion for the hour before a
- * due routine and while one runs, plugged in only, and this row shows it. */
+/**
+ * While the Mac sleeps no routine fires: the shell holds a power assertion the hour before a due routine and while one
+ * runs, plugged in only.
+ */
 function RoutineWakeBar() {
   const bridge = typeof window !== "undefined" ? window.ogb?.routines : undefined;
   const [state, setState] = useState<DesktopRoutineWake | null>(null);

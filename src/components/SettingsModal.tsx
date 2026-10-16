@@ -1,7 +1,3 @@
-// App settings, as a real modal with sections rather than one long panel.
-// Per-bot settings (persona, model, computer) live in BotSettingsDialog — this
-// is the stuff shared by every bot: who you are, your keys, and the
-// machine your bots can borrow.
 import { useEffect, useRef, useState } from "react";
 import { Archive, Coins, KeyRound, LockKeyhole, Monitor, Palette, Search, Sparkles, TabletSmartphone, Terminal, User, X, Building2, BookOpen } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
@@ -12,6 +8,7 @@ import { t } from "@/lib/i18n";
 import { withTourReset } from "@/lib/guided-tour";
 import { completionPatch } from "@/lib/onboarding";
 import { AnthropicEveryClaudeBot, ApiKeyRow, OpenAiCompatUrl, OpenCodeProviderKeys } from "./ApiKeys";
+import { OtherOpenAiCompatServers } from "./OpenAiCompatServers";
 import { useUpdaterState } from "@/lib/updater";
 import { brand } from "../lib/brand";
 import { EnginesSettings } from "./EnginesSettings";
@@ -31,7 +28,7 @@ import { UsageSection } from "./UsageSection";
 import { SkillsSection } from "./SkillsSection";
 import { LicenseExpiryBanner } from "./LicenseExpiryBanner";
 import { SkinPicker } from "./SkinPicker";
-import { FONT_IDS, applyFont, readFont, type FontId } from "@/lib/fonts";
+import { ChatWidthRow, FontRow, SidebarToolsLayoutRow } from "./AppearanceSelectRows";
 import { setColorUserBubbles, useColorUserBubbles } from "@/lib/user-bubble-preference";
 import { RoomTurnTimeoutSettings } from "./RoomTurnTimeoutSettings";
 import { McpCallTimeoutSettings } from "./McpCallTimeoutSettings";
@@ -44,22 +41,19 @@ import { WorkspaceBackupSettings } from "./WorkspaceBackupSettings";
 import { CompanyBackupSettings } from "./CompanyBackupSettings";
 import { cn } from "@/lib/cn";
 import { glassPopupFrameStyle } from "@/lib/glass-popup";
-import { setNotificationSounds, useNotificationSounds } from "@/lib/notification-preferences";
-import { setPinnedCircles, setUniversalPins, usePinnedCircles, useUniversalPins } from "@/lib/sidebar-preferences";
+import { NotificationRows } from "./NotificationSettingsRows";
 import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
-import { parseSidebarDensity, setSidebarDensity, SIDEBAR_DENSITIES, useSidebarDensity, type SidebarDensity } from "@/lib/sidebar-preferences";
+import { parseSidebarDensity, setPinnedCircles, setSidebarDensity, setUniversalPins, SIDEBAR_DENSITIES, usePinnedCircles, useSidebarDensity, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
+import { Select } from "./Select";
 
-// `labelKey`, not a label: t() reads the active pack when it is called, so a
-// label resolved here at module scope would freeze the language the app booted
-// in. The English keywords stay untranslated — they are a search index, and a
-// pack that omits them still matches what people type.
+// labelKey, not a label: t() reads the active pack when called, so a label resolved at module scope would freeze the
+// boot language.
 export type SettingsGroup = "you" | "ai" | "computers" | "account";
 
-/** The rail's labelled groups, in the order they are drawn. */
 export const SETTINGS_GROUPS: Array<{ id: SettingsGroup; labelKey: LocaleKey }> = [
   { id: "you", labelKey: "settings.group.you" },
   { id: "ai", labelKey: "settings.group.ai" },
@@ -75,7 +69,7 @@ export const SECTIONS: Array<{
   keywords: string[];
 }> = [
   { id: "general", group: "you", labelKey: "settings.section.general", icon: User, keywords: ["profile", "name", "email", "about me", "about", "suggestions", "suggested", "memory", "analytics", "updates", "effort", "new bots", "reasoning", "threads", "parallel", "concurrency", "cleanup", "retention", "event log", "event-log", "log size", "automatic recovery", "backup model", "fallback", "routines", "conversation", "schedule"] },
-  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "send", "enter", "return", "shift+enter", "ctrl+enter", "cmd+enter", "⌘+enter", "new line", "keyboard", "ime", "japanese", "bubble", "bubbles", "message color", "my messages"] },
+  { id: "appearance", group: "you", labelKey: "settings.section.appearance", icon: Palette, keywords: ["skin", "theme", "appearance", "chat width", "width", "wide", "full width", "bubble", "bubbles", "tools", "tool calls", "threads", "show threads", "hide threads", "sidebar", "density", "compact", "comfortable", "avatars", "display", "run", "this run", "run card", "commands", "notifications", "sound", "sounds", "mute", "silent", "chime", "pinned", "circles", "universal", "groups", "top", "send", "enter", "return", "shift+enter", "ctrl+enter", "cmd+enter", "⌘+enter", "new line", "keyboard", "ime", "japanese", "message color", "my messages", "toolbar", "tools layout", "footer", "routines", "triggers", "team map"] },
   { id: "companion", group: "you", labelKey: "settings.section.companion", icon: TabletSmartphone, keywords: ["companion", "device", "phone", "desktop", "client", "host", "pair", "pairing", "mobile", "https", "secure", "tailscale", "wifi", "remote", "advanced", "domain", "dns", "self-hosted", "server", "caddy"] },
   { id: "engines", group: "ai", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "model providers", "engines", "claude", "codex", "grok", "providers", "cli", "sign in", "subscription"] },
   { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "opencode", "provider"] },
@@ -87,7 +81,6 @@ export const SECTIONS: Array<{
   { id: "backups", group: "account", labelKey: "settings.section.backups", icon: Archive, keywords: ["export", "import", "restore", "full backup", "password", "recovery"] },
 ];
 
-/** A page of the Simple rail: one or more of the pages above, stacked. */
 export type SimpleSettingsPage = {
   id: string;
   labelKey: LocaleKey;
@@ -95,8 +88,6 @@ export type SimpleSettingsPage = {
   sections: AppSettingsSection[];
 };
 
-/** Simple mode's rail: at most five pages. A page is drawn only when one of
- * its sections passes the same visibility filters the Advanced rail uses. */
 export const SIMPLE_PAGES: SimpleSettingsPage[] = [
   { id: "general", labelKey: "settings.section.general", icon: User, sections: ["general"] },
   { id: "appearance", labelKey: "settings.section.appearance", icon: Palette, sections: ["appearance"] },
@@ -104,12 +95,8 @@ export const SIMPLE_PAGES: SimpleSettingsPage[] = [
   { id: "computers", labelKey: "settings.group.computers", icon: Monitor, sections: ["companion", "desktopWorkspaces", "computer", "logins"] },
 ];
 
-/** Advanced-only pages. A deep link to one still opens it in Simple mode, as
- * a page of its own for as long as it is the open one. */
 export const SIMPLE_HIDDEN_SECTIONS: readonly AppSettingsSection[] = ["usage", "backups", "experimental", "workspaces", "skills"];
 
-/** The Simple pages to draw, given the sections the filters allow and the
- * one that is open. Each page keeps only its allowed sections, in order. */
 export function simpleSettingsPages(
   available: ReadonlyArray<(typeof SECTIONS)[number]>,
   open: AppSettingsSection,
@@ -123,8 +110,6 @@ export function simpleSettingsPages(
   return pages;
 }
 
-/** Simple mode: a deep link to a later section of a stacked page scrolls
- * that section into view; opening a page (its first section) starts at the top. */
 export function revealSettingsBlock(
   scroller: { scrollTop: number; querySelector: (selector: string) => { scrollIntoView?: (options: ScrollIntoViewOptions) => void } | null },
   section: AppSettingsSection,
@@ -151,7 +136,6 @@ export function sectionMatches(section: (typeof SECTIONS)[number], query: string
   return [t(section.labelKey), ...section.keywords].some((part) => part.toLowerCase().includes(query));
 }
 
-/** Name and email save on blur; shared context has its own autosave. */
 function ProfileFields() {
   const { state, dispatch } = useStore();
   const [name, setName] = useState(state.config?.profile?.name ?? "");
@@ -193,10 +177,6 @@ function ProfileFields() {
   );
 }
 
-/** This app's updates, which download by themselves. Shown once the desktop
- * app answers: on this computer's page and the person's own Cloud page, never
- * on another server's, where its buttons would do nothing. "Ready" names the
- * app: on My Cloud's Settings it is this app that restarts, not the Cloud. */
 export function UpdatesRow() {
   const s = useUpdaterState();
   const updater = window.ogb?.updater;
@@ -255,12 +235,6 @@ export function UpdatesRow() {
   );
 }
 
-/** Usage analytics, on by default and switchable here. Naming what is sent
- * matters more than the switch: people who cannot see the scope assume the
- * worst, and the worst — conversation text — is exactly what this never
- * sends (autocapture is off; see lib/analytics.ts). */
-/** The effort every new bot starts with. The server skips a level the new
- * bot's engine does not offer, and a bot's own choice always wins. */
 function NewBotEffortRow() {
   const { state, dispatch } = useStore();
   const current = state.config?.newBots?.effort ?? "";
@@ -290,12 +264,11 @@ function NewBotEffortRow() {
       subtitle={t("settings.newBotEffort.subtitle")}
       message={error ? <p role="alert" className="text-danger">{error}</p> : null}
     >
-      <select
+      <Select size="sm" className="w-full max-w-[240px]"
         value={current}
         disabled={saving}
         aria-label={t("settings.newBotEffort.aria")}
         onChange={(event) => void save(event.target.value)}
-        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.newBotEffort.default")}</option>
         {EFFORT_LEVELS.map((level) => (
@@ -303,7 +276,7 @@ function NewBotEffortRow() {
             {effortLabel(level)}
           </option>
         ))}
-      </select>
+      </Select>
     </SettingRow>
   );
 }
@@ -325,7 +298,6 @@ function AnalyticsRow() {
   );
 }
 
-/** Clears the tour's steps and opens it again on the live interface. */
 function ReplayAppTourButton() {
   const { state, dispatch } = useStore();
   const [saving, setSaving] = useState(false);
@@ -340,7 +312,6 @@ function ReplayAppTourButton() {
           void api("/api/config", {
             method: "PUT",
             body: JSON.stringify({ onboarding: {
-              // Upgraded users may have completed only the legacy browser gate.
               ...(!state.config?.onboarding?.completedAt ? completionPatch().onboarding : {}),
               hintsSeen: withTourReset(state.config?.onboarding),
             } }),
@@ -381,9 +352,6 @@ function ReplayTourRow() {
 
 function LanguageRow() {
   const { state } = useStore();
-  // Saved on this device only: anyone can switch, including a chat-only
-  // teammate, and nobody changes another person's screen. The server's
-  // language is the default until this device picks one.
   const current = effectiveLanguage(useLanguageChoice(), state.config?.language);
 
   return (
@@ -391,11 +359,10 @@ function LanguageRow() {
       title={t("settings.language.title")}
       subtitle={t("settings.language.subtitle")}
     >
-      <select
+      <Select size="sm" className="w-full max-w-[240px]"
         value={current}
         aria-label={t("settings.language.aria")}
         onChange={(event) => setLanguageChoice(event.target.value)}
-        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus disabled:cursor-wait disabled:opacity-50"
       >
         <option value="">{t("settings.language.system")}</option>
         {localeChoices.map(({ code, label }) => (
@@ -403,43 +370,7 @@ function LanguageRow() {
             {label}
           </option>
         ))}
-      </select>
-    </SettingRow>
-  );
-}
-
-function NotificationSoundsRow() {
-  const enabled = useNotificationSounds();
-  return (
-    <SettingRow title={t("settings.notificationSounds.title")} subtitle={t("settings.notificationSounds.subtitle")}>
-      <Switch
-        checked={enabled}
-        aria-label={t("settings.notificationSounds.play")}
-        onClick={() => setNotificationSounds(!enabled)}
-      />
-    </SettingRow>
-  );
-}
-
-function FontRow() {
-  const [current, setCurrent] = useState<FontId>(readFont);
-  return (
-    <SettingRow title={t("settings.font.title")} subtitle={t("settings.font.subtitle")}>
-      <select
-        value={current}
-        aria-label={t("settings.font.aria")}
-        onChange={(event) => {
-          // SAFETY: the options are rendered from FONT_IDS, so the value is always a member.
-          const id = event.target.value as FontId;
-          applyFont(id);
-          setCurrent(id);
-        }}
-        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
-      >
-        {FONT_IDS.map((id) => (
-          <option key={id} value={id}>{t(`settings.font.${id}`)}</option>
-        ))}
-      </select>
+      </Select>
     </SettingRow>
   );
 }
@@ -448,16 +379,15 @@ function SendKeyRow() {
   const sendKey = useSendKey();
   return (
     <SettingRow title={t("settings.sendKey.title")} subtitle={t("settings.sendKey.subtitle", { key: sendKeyLabel("mod-enter") })}>
-      <select
+      <Select size="sm" className="w-full max-w-[240px]"
         value={sendKey}
         aria-label={t("settings.sendKey.title")}
         onChange={(event) => setSendKey(parseSendKey(event.target.value))}
-        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
       >
         {SEND_KEYS.map((mode) => (
           <option key={mode} value={mode}>{sendKeyLabel(mode)}</option>
         ))}
-      </select>
+      </Select>
     </SettingRow>
   );
 }
@@ -524,16 +454,15 @@ function SidebarDensityRow() {
   const density = useSidebarDensity();
   return (
     <SettingRow title={t("sidebar.density.title")} subtitle={t("settings.sidebarDensity.subtitle")}>
-      <select
+      <Select size="sm" className="w-full max-w-[240px]"
         value={density}
         aria-label={t("sidebar.density.chooseAria")}
         onChange={(event) => setSidebarDensity(parseSidebarDensity(event.target.value))}
-        className="cursor-pointer min-h-8 w-full max-w-[240px] rounded-lg border border-hairline/40 bg-inset px-2.5 py-1.5 text-[13px] text-ink focus:border-focus"
       >
         {SIDEBAR_DENSITIES.map((option) => (
           <option key={option} value={option}>{t(SIDEBAR_DENSITY_LABEL_KEYS[option])}</option>
         ))}
-      </select>
+      </Select>
     </SettingRow>
   );
 }
@@ -707,9 +636,7 @@ function BrowserProfilesRow() {
   );
 }
 
-/** Writes a redacted diagnostics file to a location the user picks. The
- * report holds versions, configured-or-not booleans and the server.log tail —
- * never credential values (the desktop shell does not read secret fields). */
+/** Security: the report never holds credential values; the desktop shell does not read secret fields. */
 function DiagnosticsRow() {
   const [exporting, setExporting] = useState(false);
   const [result, setResult] = useState<{ kind: "success" | "error"; message: string } | null>(null);
@@ -771,8 +698,6 @@ export function SettingsModal() {
   const availableSections = baseSections.filter((entry) => entry.id !== "skills" || skillsLibraryEnabled(state.config));
   const visibleSections = availableSections.filter((entry) => sectionMatches(entry, q));
 
-  // Simple mode stacks several sections on one page. The open section picks
-  // the page; scrolling brings that section into view.
   const simplePages = advanced ? [] : simpleSettingsPages(availableSections, section);
   const visiblePages = simplePages.filter((page) => simplePageMatches(page, q));
   const currentPage = simplePages.find((page) => page.sections.includes(section));
@@ -787,16 +712,11 @@ export function SettingsModal() {
       : visiblePages[0] && (visiblePages[0].sections.find((id) => visibleSections.some((entry) => entry.id === id)) ?? visiblePages[0].sections[0]);
 
   useEffect(() => {
-    // Translated matches can change without the query changing. Follow the
-    // rendered results instead of a second filter with stale effect inputs.
     if (nextVisibleSection) dispatch({ type: "toggleAppSettings", open: true, section: nextVisibleSection });
   }, [dispatch, nextVisibleSection]);
 
   const sectionIndex = currentPage?.sections.indexOf(section) ?? 0;
   useEffect(() => {
-    // Advanced mode gives every section its own page, so a new one starts at
-    // the top instead of at the last page's scroll offset (MOCA-292: "Change
-    // key" landed on API keys scrolled past the key it was opened for).
     if (scrollRef.current) revealSettingsBlock(scrollRef.current, section, advanced ? 0 : sectionIndex);
   }, [advanced, section, sectionIndex]);
 
@@ -850,8 +770,6 @@ export function SettingsModal() {
 
   const openSection = (id: AppSettingsSection) => dispatch({ type: "toggleAppSettings", open: true, section: id });
 
-  /** One section's content, as its own Advanced page or one block of a
-   * stacked Simple page. */
   const renderSection = (id: AppSettingsSection) => {
     switch (id) {
       case "desktopWorkspaces":
@@ -895,18 +813,17 @@ export function SettingsModal() {
             <Card title={t("settings.skin.title")} subtitle={t("settings.skin.subtitle")}>
               <SkinPicker />
             </Card>
-            {/* A paired remote client has no General page; keep the switch reachable. */}
             {remoteActive && <AdvancedModeRow />}
             <FontRow />
+            <ChatWidthRow />
             <ColorUserBubblesRow />
             <SendKeyRow />
             <SidebarDensityRow />
-            {/* Simple mode keeps one conversation per bot, so the switch
-                only means something in Advanced. */}
+            {advanced && <SidebarToolsLayoutRow />}
             {advanced && <ShowThreadsRow />}
             <PinnedCirclesRow />
             <UniversalPinsRow />
-            <NotificationSoundsRow />
+            <NotificationRows />
             {!remoteActive && <ToolCallsRow />}
             <RunCardRow />
           </>
@@ -933,15 +850,13 @@ export function SettingsModal() {
                 <div className="mt-3 flex flex-col gap-4">
                   <ApiKeyRow section="openaiCompat" testProvider="openaiCompat" />
                   <OpenAiCompatUrl />
+                  <OtherOpenAiCompatServers />
                 </div>
               </details>
               <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
               <ApiKeyRow section="opencodeGo" />
-              {/* A Cloud owner has no terminal there: the keys for other
-                  providers, just below, are the way on. */}
               {state.config?.cloudHome !== true && (
                 <p className="-mt-2 text-[11.5px] leading-relaxed text-ink-secondary">
-                  {/* {command} marks where the code chip goes, so a translator can move it */}
                   {t("keys.opencode.providersHint").split("{command}").flatMap((part, index) =>
                     index === 0 ? [part] : [<code key={index} className="font-mono">opencode auth login</code>, part])}
                 </p>
@@ -961,8 +876,6 @@ export function SettingsModal() {
       case "backups":
         return <><WorkspaceBackupSettings /><CompanyBackupSettings /></>;
       case "companion": {
-        // "Connect your phone" lands on the one pairing that fits this window:
-        // this computer's phone flow, or this server's (or Cloud's) pairing code.
         const phoneFocus = state.appSettingsPhonePairing;
         const computerPairs = currentPhonePairingTarget(state.config?.cloudHome === true) === "computer";
         return (
@@ -980,8 +893,6 @@ export function SettingsModal() {
         );
       }
       case "computer":
-        // Advanced: the built-in browser switch heads the Local VM page.
-        // Simple stacks it as its own block after Local VM instead.
         return advanced
           ? <><BuiltInBrowserRow /><BrowserProfilesRow /><LocalComputerSection /></>
           : <LocalComputerSection />;
@@ -990,7 +901,6 @@ export function SettingsModal() {
       case "usage":
         return <UsageSection />;
       case "skills":
-        // the shared skills library exists only where features.skillsLibrary is on
         return skillsLibraryEnabled(state.config) ? <SkillsSection /> : null;
       default:
         return null;
@@ -1007,8 +917,7 @@ export function SettingsModal() {
       style={glassPopupFrameStyle()}
       onMouseDown={(e) => e.target === e.currentTarget && dispatch({ type: "toggleAppSettings", open: false })}
     >
-      {/* A sibling, not the parent: a backdrop-filter on an ancestor would
-          stop the pop-up's own glass from seeing the app behind it. */}
+      {/* A sibling, not the parent: a backdrop-filter on an ancestor would stop the pop-up's own glass from seeing the app behind it. */}
       <div aria-hidden="true" className="glass-scrim pointer-events-none absolute inset-0" />
       <div
         ref={dialogRef}
@@ -1018,7 +927,6 @@ export function SettingsModal() {
         tabIndex={-1}
         className="glass-surface glass-popup animate-pop-in relative flex overflow-hidden rounded-[24px] outline-none"
       >
-        {/* section nav */}
         <span id="app-settings-title" className="sr-only">{t("settings.title")}</span>
         <nav className="glass-rail hidden min-h-0 w-[200px] shrink-0 flex-col gap-1 overflow-y-auto border-r border-hairline/30 p-3 sm:flex">
           <div className="shrink-0 px-2 py-3 text-[15px] font-semibold text-ink">
@@ -1099,14 +1007,13 @@ export function SettingsModal() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="flex shrink-0 items-center justify-between gap-3 border-b border-hairline/30 px-3 py-3 sm:pl-9">
             {advanced ? (
-              <select
+              <Select className="min-w-0 sm:hidden"
                 aria-label={t("settings.title")}
                 value={section}
                 onChange={(event) => {
                   setQuery("");
                   openSection(event.target.value as AppSettingsSection);
                 }}
-                className="cursor-pointer min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
               >
                 {SETTINGS_GROUPS.map((group) => {
                   const entries = availableSections.filter((entry) => entry.group === group.id);
@@ -1118,9 +1025,9 @@ export function SettingsModal() {
                     </optgroup>
                   );
                 })}
-              </select>
+              </Select>
             ) : (
-              <select
+              <Select className="min-w-0 sm:hidden"
                 aria-label={t("settings.title")}
                 value={currentPage?.id ?? ""}
                 onChange={(event) => {
@@ -1128,12 +1035,11 @@ export function SettingsModal() {
                   const page = simplePages.find((candidate) => candidate.id === event.target.value);
                   if (page) openSection(page.sections[0]!);
                 }}
-                className="cursor-pointer min-w-0 rounded-lg bg-control px-3 py-2 text-[14px] text-ink sm:hidden"
               >
                 {simplePages.map((page) => (
                   <option key={page.id} value={page.id}>{t(page.labelKey)}</option>
                 ))}
-              </select>
+              </Select>
             )}
             <span className="hidden text-[15px] font-semibold text-ink sm:block">
               {sectionLabelKey ? t(sectionLabelKey) : null}
@@ -1160,7 +1066,6 @@ export function SettingsModal() {
                   <section key={id} data-settings-block={id} className="flex scroll-mt-2 flex-col gap-4">
                     {stacked && labelKey ? blockHeading(labelKey) : null}
                     {renderSection(id)}
-                    {/* Simple: the built-in browser is its own block after Local VM. */}
                     {id === "computer" && (
                       <div data-settings-block="browser" className="flex flex-col gap-4 pt-2">
                         {blockHeading("settings.experimental.browser")}
