@@ -236,7 +236,8 @@ describe("toolbar tools layout", () => {
 
   it("toolbar shows Team map only in Advanced mode", () => {
     fixture.advanced = true;
-    expect(render("comfortable", { toolsLayout: "toolbar" }).html.match(/data-sidebar-nav="/g)).toHaveLength(3);
+    // This fork: Report and Esteira are rows wherever there are rows (3 upstream + 2)
+    expect(render("comfortable", { toolsLayout: "toolbar" }).html.match(/data-sidebar-nav="/g)).toHaveLength(5);
     fixture.advanced = false;
     expect(render("comfortable", { toolsLayout: "toolbar" }).html).toBe("");
   });

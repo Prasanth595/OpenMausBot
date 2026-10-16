@@ -1022,7 +1022,14 @@ function RequestDetail({ item, request, more }: { item: NeedsYouItem; request: M
       <h3 id="needs-you-request" className={sectionHeading}>{t(approval ? "needsYou.approval.heading" : "needsYou.question.heading", { name })}</h3>
       <div className="mt-2 overflow-hidden rounded-xl border border-accent/40 bg-card">
         {approval ? (
-          <PendingApprovalPanel pending={approval} count={1} index={0} locale={activeLocale()} />
+          <>
+            <PendingApprovalPanel pending={approval} count={1} index={0} locale={activeLocale()} defaultOpen />
+            {request.card?.tool && (
+              <p data-resolver-request-tool="" className="px-3.5 pb-2.5 text-[12px] text-ink-secondary">
+                <code className="font-mono text-[11.5px] text-ink">{request.card.tool}</code>
+              </p>
+            )}
+          </>
         ) : (
           <div className="px-4 py-3">
             <p className="text-[13.5px] font-medium text-ink">{request.card?.title}</p>

@@ -162,10 +162,11 @@ async function taskRoutes() {
   const other = store.createTask(bot.id, "Another conversation", false)!;
   const order: string[] = [];
   const state = { busy: false };
-  const realDelete = store.deleteTask.bind(store);
-  vi.spyOn(store, "deleteTask").mockImplementation((botId, threadId) => {
-    order.push(`deleteTask:${threadId}`);
-    return realDelete(botId, threadId);
+  // upstream v0.1.112 deletes through deleteTasks (one or a bulk selection)
+  const realDelete = store.deleteTasks.bind(store);
+  vi.spyOn(store, "deleteTasks").mockImplementation((botId, threadIds) => {
+    for (const threadId of threadIds) order.push(`deleteTask:${threadId}`);
+    return realDelete(botId, threadIds);
   });
   const deps = {
     store,

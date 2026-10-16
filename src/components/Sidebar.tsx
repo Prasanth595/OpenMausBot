@@ -1317,7 +1317,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
               ) : (
                 // "Precisa de você" stays whole; since when goes to the tooltip,
                 // where a narrow row cannot cut the hour off
-                <span className="truncate" data-bot-status dir="auto" title={needsYou ? needsYouLabel(bot.goalNeedsInputSince ?? activityTasks.find((task) => task.goalNeedsInput)?.goalNeedsInputSince) : undefined}>{waiting ? t("sidebar.preview.waiting") : needsYou ? t("sidebar.preview.needsYou") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : botPreview(bot, visible, instances, advanced)}</span>
+                <span data-bot-status dir="auto" title={needsYou ? needsYouLabel(bot.goalNeedsInputSince ?? activityTasks.find((task) => task.goalNeedsInput)?.goalNeedsInputSince) : undefined} className="truncate">{waiting ? t("sidebar.preview.waiting") : needsYou ? t("sidebar.preview.needsYou") : teammateWait ? t("sidebar.preview.waitingOnTeammate") : queued ? t("task.queued") : botPreview(bot, visible, instances, advanced)}</span>
               )}
             </span>
           )}

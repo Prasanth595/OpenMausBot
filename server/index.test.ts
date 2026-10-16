@@ -8989,11 +8989,15 @@ describe("harness HTTP API", () => {
 
   it("tells a /setup turn to connect an app itself when its connected-apps tools are mounted, and names the switch when they are off", async () => {
     // This suite's server has the managed connected-apps service (the stub broker).
-    type Dump = { systemPrompt: string; mcpConfig: { mcpServers: Record<string, unknown> } };
+    type Dump = { systemPrompt: string; prompt?: { message?: { content?: unknown } }; mcpConfig: { mcpServers: Record<string, unknown> } };
     const setupTurn = async (botId: string) => {
       rmSync(fakeClaudeDump, { force: true });
       expect((await api("POST", `/api/bots/${botId}/messages`, { text: "/setup set up my Gmail" })).status).toBe(202);
-      return readJsonFileWhenReady<Dump>(fakeClaudeDump, 15_000);
+      const dump = await readJsonFileWhenReady<Dump>(fakeClaudeDump, 15_000);
+      // This fork: a Claude turn's setup section is a per-turn section, so it
+      // arrives in the first message instead of the cached system prompt.
+      const first = dump.prompt?.message?.content;
+      return { ...dump, systemPrompt: `${dump.systemPrompt}\n${typeof first === "string" ? first : JSON.stringify(first ?? "")}` };
     };
     const on = (await api("POST", "/api/bots", { name: "Inbox" })).body.bot;
     const off = (await api("POST", "/api/bots", { name: "Quiet inbox" })).body.bot;

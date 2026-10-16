@@ -145,6 +145,7 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   botName,
   actions,
   more,
+  defaultOpen = false,
 }: {
   pending: Pending;
   count: number;
@@ -153,8 +154,10 @@ export const PendingApprovalPanel = memo(function PendingApprovalPanel({
   actions?: ReactNode;
   more?: ReactNode;
   locale?: string;
+  /** This fork: "Precisa de você" shows the exact detail without a click. */
+  defaultOpen?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(defaultOpen);
   const outbound = pending.message.card ? outboundSummary(pending.message.card) : undefined;
   const heldNote = outbound?.opaque && pending.heldCode === "approval.held.outbound"
     ? t("approval.opaqueCode")

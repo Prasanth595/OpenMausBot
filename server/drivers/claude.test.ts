@@ -1750,7 +1750,7 @@ describe("ClaudeDriver turns (fake CLI)", () => {
     const settings = withUserPreToolUse({ apiKeyHelper: "helper", hooks: claudeHookSettings("/omb/hook.mjs") }, entries);
     expect((settings.hooks as Record<string, unknown>).PreToolUse).toEqual([review]);
     // the harness's own hooks stay; the person's other keys never come along
-    expect(Object.keys(settings.hooks as Record<string, unknown>).sort()).toEqual(["PostToolUse", "PreCompact", "PreToolUse", "SessionStart", "Stop"]);
+    expect(Object.keys(settings.hooks as Record<string, unknown>).sort()).toEqual(["PostToolUse", "PostToolUseFailure", "PreCompact", "PreToolUse", "SessionStart", "Stop"]);
     expect(settings.apiKeyHelper).toBe("helper");
     expect(settings).not.toHaveProperty("permissions");
     expect(settings).not.toHaveProperty("mcpServers");

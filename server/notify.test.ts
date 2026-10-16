@@ -42,7 +42,7 @@ describe("buildNotification", () => {
       botName: "Scout",
       threadId: "room-thread",
       groupId: "group-1",
-      title: "Scout in Launch mentioned you",
+      title: "Scout em Launch mencionou você",
       body: "@you three open questions are blocking Section 2",
     });
     expect(buildNotification("mention", { ...bot, notifications: undefined }, "room-thread", "@you", { group })).not.toBeNull();
