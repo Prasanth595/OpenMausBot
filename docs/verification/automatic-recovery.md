@@ -12,7 +12,12 @@ Direct bot threads, Chief and direct coordinated work use this path. Channels
 and drivers without the startup-proof contract do not. Credential-card
 continuations are excluded. This is not recovery from an accepted prompt that
 has gone silent: even without output, the engine might have performed actions.
-No automatic replay follows authentication, quota, invalid-model, safety or
+Claude can also recover an initial quota refusal when the turn reports zero
+usage and no assistant, tool, permission or other work was observed. Its process
+must stop before the backup starts. Recovery remains disabled after partial
+work or when usage is missing.
+
+No automatic replay follows authentication, other quota failures, invalid-model, safety or
 approval failures, a failed backup, Stop, or newer queued input.
 
 Existing approval, organisation-model and spend-limit gates run again. An
@@ -24,7 +29,7 @@ runner changes require a manual choice. Backup provider charges may apply.
 ## Repeatable checks
 
 ```sh
-pnpm exec vitest run server/automatic-recovery.test.ts server/automatic-recovery.e2e.test.ts server/drivers/acp/acp.test.ts server/drivers/retry.test.ts server/turn-dispatch-guard.test.ts server/config.test.ts src/components/AutomaticRecoverySettings.test.ts src/state/store.test.ts
+pnpm exec vitest run server/automatic-recovery.test.ts server/automatic-recovery.e2e.test.ts server/drivers/acp/acp.test.ts server/drivers/retry.test.ts server/drivers/claude-quota-recovery.test.ts server/drivers/claude.test.ts server/turn-dispatch-guard.test.ts server/config.test.ts src/components/AutomaticRecoverySettings.test.ts src/state/store.test.ts
 pnpm exec vitest run server/direct-coordination.e2e.test.ts server/guarded-messages-api.test.ts server/acp-recovery.e2e.test.ts --maxWorkers=2
 pnpm typecheck
 pnpm lint

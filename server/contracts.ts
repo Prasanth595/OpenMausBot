@@ -47,6 +47,18 @@ export class TurnNotStartedError extends Error {
 }
 
 
+/** The provider refused the prompt for quota before any work, reported zero usage, and its process stopped. */
+export class TurnQuotaRefusedError extends Error {
+  readonly turnId: TurnId;
+
+  constructor(turnId: TurnId, message: string) {
+    super(message);
+    this.name = "TurnQuotaRefusedError";
+    this.turnId = turnId;
+  }
+}
+
+
 /** Variants are opaque provider IDs, not the cross-engine effort enum. */
 export function isModelVariant(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= 256 &&
@@ -103,7 +115,7 @@ export interface SendTurnInput {
   resumeCursor?: unknown;
   /** Start without the previous native context or retained process; wins over resumeCursor. */
   sessionReset?: boolean;
-  /** Hold the startup ACK until prompt dispatch; a retired transient setup failure may reject with TurnNotStartedError. */
+  /** Hold the startup ACK until prompt dispatch; a retired setup failure or zero-work quota refusal may reject with TurnNotStartedError or TurnQuotaRefusedError. */
   startupRecovery?: boolean;
   /** The turn with the conversation replayed inline, sent once on a fresh session when the provider refuses resumeCursor before reading the prompt. */
   recoveryText?: string;

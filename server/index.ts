@@ -208,6 +208,7 @@ import { buildMentionNotification, buildNotification, buildSpendNotification, ty
 import {
   isModelVariant,
   TurnNotStartedError,
+  TurnQuotaRefusedError,
   type ModelSelection,
   type RequestOutcome,
   type RuntimeEvent,
@@ -9216,10 +9217,11 @@ async function startTurn(
       }
     } catch (cause) {
       let e = cause;
-      // Only the driver can prove a task was never submitted; an error string is not that proof.
-      const mayRecover = e instanceof TurnNotStartedError &&
+      // Only the driver can prove that replay will not repeat work; an error string is not that proof.
+      const recoverable = e instanceof TurnNotStartedError || e instanceof TurnQuotaRefusedError;
+      const mayRecover = recoverable &&
         directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId);
-      if (e instanceof TurnNotStartedError) {
+      if (e instanceof TurnNotStartedError || e instanceof TurnQuotaRefusedError) {
         retireProviderTurn(e.turnId);
         if (!mayRecover) e = new DirectTurnSetupCancelled("turn stopped during provider setup");
       }
@@ -9297,7 +9299,7 @@ async function startTurn(
               ...hostedModels?.resetTask(current.modelSelection, checked.selection), rewound: true,
             });
             store.appendMessage(threadId, { role: "bot", kind: "activity", tool: {
-              name: `recovery: Automatic recovery: ${instance.displayName || instance.driverKind} could not start. Trying ${target.displayName || target.driverKind} · ${checked.selection.model} once in this thread.`, ok: true,
+              name: `recovery: Automatic recovery: ${instance.displayName || instance.driverKind} ${e instanceof TurnQuotaRefusedError ? "refused the turn because its quota was exhausted" : "could not start"}. Trying ${target.displayName || target.driverKind} · ${checked.selection.model} once in this thread.`, ok: true,
             } });
             if (opts?.coordination) directCoordinationSettlers.delete(dispatchClaimId);
             else settleDirectCoordination(dispatchClaimId, { ok: false, text: message });

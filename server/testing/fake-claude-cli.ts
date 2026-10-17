@@ -650,7 +650,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
       error: "rate_limit", is_api_error_message: true, api_error: "usage_limit_reached",
       ...(rateLimit ? { api_error_params: { rate_limit_info: rateLimit } } : {}),
     });
-    out({ type: "result", subtype: "success", is_error: true, stop_reason: "stop_sequence", terminal_reason: "api_error", api_error: "usage_limit_reached", result: text });
+    out({ type: "result", subtype: "success", is_error: true, stop_reason: "stop_sequence", terminal_reason: "api_error", api_error: "usage_limit_reached", result: text, usage: { input_tokens: 0, output_tokens: 0 } });
     turnRunning = false;
     finishIfDone();
     return;

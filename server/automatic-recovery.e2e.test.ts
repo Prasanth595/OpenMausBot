@@ -18,7 +18,7 @@ const CATALOG_PROBE_FOLDER = ["", "providers", "opencode", "discovery"].join(sep
 const turnCalls = (path: string) => jsonLines(path).filter((call) => !String(call.cwd ?? "").endsWith(CATALOG_PROBE_FOLDER));
 
 async function withRecoveryFixture(
-  options: { enabled?: boolean; method?: string; error?: unknown; afterOutput?: boolean; backupFails?: boolean; gated?: boolean; scripted?: boolean },
+  options: { claudeQuota?: boolean; enabled?: boolean; method?: string; error?: unknown; afterOutput?: boolean; backupFails?: boolean; gated?: boolean; scripted?: boolean },
   check: (fixture: {
     api: (method: string, path: string, body?: unknown, expectedStatus?: number) => Promise<any>;
     control: (...args: string[]) => Promise<any>;
@@ -77,6 +77,14 @@ async function withRecoveryFixture(
       FAKE_CLAUDE_PROMPTS: backupFile, FAKE_CLAUDE_TOOL_CALLS: "[]",
       FAKE_CLAUDE_MODE: options.backupFails ? "not-logged-in" : "happy",
     };
+    if (options.claudeQuota) {
+      config.instances.opencodeGo = {
+        ...config.instances.claude, displayName: "Quota-refused Claude",
+        environment: { ...config.instances.claude.environment, FAKE_CLAUDE_MODE: "usage-limit", FAKE_CLAUDE_PROMPTS: join(dataDir, "quota-prompts.jsonl"),
+          FAKE_CLAUDE_RATE_LIMIT: JSON.stringify({ status: "rejected", rateLimitType: "seven_day", resetsAt: Math.floor(Date.now() / 1000) + 3600, isUsingOverage: false }),
+        },
+      };
+    }
     config.automaticRecovery = { enabled: options.enabled !== false, backup };
     writeFileSync(configPath, JSON.stringify(config));
     const log = openSync(logPath, "a", 0o600);
@@ -108,6 +116,31 @@ async function withRecoveryFixture(
     console.info(JSON.stringify({ logPath, evidencePath, fixtureRemoved: !existsSync(dataDir) }));
   }
 }
+
+it.each([true, false])("handles an initial Claude quota refusal with recovery enabled=%s", async (enabled) => {
+  await withRecoveryFixture({ claudeQuota: true, enabled }, async ({ api, control, backupPrompts, dataDir, evidence }) => {
+    const { bot } = await control("new-bot", "--name", "Quota recovery");
+    const threadId = bot.activeTaskId;
+    const source = { instanceId: primary.instanceId, model: backup.model };
+    await api("PATCH", `/api/bots/${bot.id}/tasks/${threadId}`, { modelSelection: source, updateBotDefault: true, approvalMode: "ask" });
+    await control("send", "--bot", bot.id, "--task", threadId, "--text", "Recover this initial quota refusal exactly once");
+    await control("wait", "--bot", bot.id, "--task", threadId, "--timeout", "30");
+    const messages = (await api("GET", `/api/threads/${threadId}/messages?limit=100`)).messages as any[];
+    const after = (await api("GET", "/api/bots")).bots.find((entry: any) => entry.id === bot.id);
+    const task = after.tasks.find((entry: any) => entry.threadId === threadId);
+    expect(jsonLines(join(dataDir, "quota-prompts.jsonl"))).toHaveLength(1);
+    expect(backupPrompts()).toHaveLength(enabled ? 1 : 0);
+    expect(task.modelSelection).toEqual(enabled ? backup : source);
+    expect(task.approvalMode).toBe("ask");
+    expect(after.modelSelection).toEqual(source);
+    expect(messages.filter(message => message.role === "user")).toHaveLength(1);
+    if (enabled) {
+      expect(messages.filter(message => message.tool?.name?.startsWith("recovery:"))).toHaveLength(1);
+      expect(messages.findLast(message => message.role === "bot" && message.kind === "text")).toMatchObject({ text: "hello from fake claude", turnSucceeded: true });
+    }
+    evidence.push({ task, messages });
+  });
+}, 90_000);
 
 it("recovers once on the same thread with its history and permissions, leaving the bot default and sibling unchanged", async () => {
   await withRecoveryFixture({}, async ({ api, control, calls, backupPrompts, backupReceipt, evidence }) => {
