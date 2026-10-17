@@ -1,4 +1,9 @@
 // @vitest-environment happy-dom
+// Settings → Appearance → Send messages with, in every box that sends on
+// Enter: the composer (1:1 and rooms), editing a sent message, a citation's
+// comment and the Cloud's first job; the hints and the tour name it. Ctrl/⌘+Enter
+// always sends, and an input method's confirming Enter never sends nor picks
+// from the composer's menus.
 import { createElement, type ComponentProps, type ReactElement, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
@@ -82,6 +87,9 @@ function press(input: Element, init: KeyboardEventInit & { keyCode?: number } = 
 
 const sends = () => fixture.dispatch.mock.calls.map(([action]) => action).filter((action) => ["send", "sendGroup", "editMessage"].includes(action.type));
 
+/** The same presses in each box, and what each one does in each mode: the
+ * chosen key sends once, every other Enter is left to the browser as a new
+ * line, and nothing sends while an input method composes. */
 function expectSendKey(mode: SendKey, input: () => HTMLTextAreaElement, sent: () => number) {
   const ime = [{ isComposing: true }, { keyCode: 229 }, { isComposing: true, shiftKey: true }, { keyCode: 229, shiftKey: true }, { isComposing: true, ctrlKey: true }, { keyCode: 229, metaKey: true }];
   for (const init of ime) {
@@ -141,8 +149,10 @@ describe.each(SEND_KEYS)("in %s mode", (mode) => {
 
   it("editing a sent message submits on the same key", () => {
     render(createElement(ChatView, { bot: { ...bot, messages: [{ id: "ask", role: "user", kind: "text", at: 1, text: "Try the new model" }] } }));
+    // Edit lives in the row's more menu (#2574), whose sheet is portaled to
+    // the body, so read the open menu document-wide.
     flushSync(() => host.querySelector<HTMLButtonElement>('[data-mid="ask"] button[aria-haspopup="menu"]')!.click());
-    const edit = [...host.querySelectorAll<HTMLButtonElement>('[data-mid="ask"] [role=menuitem]')].find((item) => (item.textContent ?? "").startsWith("Edit"))!;
+    const edit = [...document.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].find((item) => (item.textContent ?? "").startsWith("Edit"))!;
     flushSync(() => edit.click());
     const editor = () => host.querySelector<HTMLTextAreaElement>("textarea:not([aria-label])")!;
     expect(editor().value).toBe("Try the new model");

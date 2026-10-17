@@ -7,6 +7,7 @@ import { useSpeakAction } from "@/components/SpeakButton";
 
 export type PinAction = { pinned: boolean; onToggle: () => void; hint?: string };
 
+/** Builds the pin/unpin menu entry for a message, if pinning applies. */
 function pinItem(pin: PinAction | undefined): MessageMenuItem[] {
   if (!pin) return [];
   return [{
@@ -18,6 +19,7 @@ function pinItem(pin: PinAction | undefined): MessageMenuItem[] {
   }];
 }
 
+/** Builds the copy-message-id menu entry for a message. */
 function idItem(messageId: string): MessageMenuItem {
   return { key: "copy-id", icon: <Copy {...ACTION_ICON} />, label: t("chat.copyMessageId"), onSelect: () => { void copyText(messageId); } };
 }
@@ -65,9 +67,12 @@ export function useBotMessageMenu({
       icon: viewRaw ? <Eye {...ACTION_ICON} /> : <Code {...ACTION_ICON} />,
       label: t(viewRaw ? "chat.showRenderedMarkdown" : "chat.showRawMarkdown"),
       onSelect: onToggleRaw,
+      // A hairline between the modes above and what follows: reading, then
+      // viewing raw, then acting on the answer.
+      separatorBefore: items.length > 0,
     });
   }
-  if (onRegenerate) items.push({ key: "regenerate", icon: <RefreshCw {...ACTION_ICON} />, label: t("chat.regenerate"), onSelect: onRegenerate });
+  if (onRegenerate) items.push({ key: "regenerate", icon: <RefreshCw {...ACTION_ICON} />, label: t("chat.regenerate"), onSelect: onRegenerate, separatorBefore: items.length > 0 });
   items.push(...pinItem(pin), idItem(messageId));
   return items;
 }

@@ -105,7 +105,7 @@ import { CompactionChip, DigestChip } from "./DigestChip";
 import { RenameTitle } from "./RenameTitle";
 import { BotActivityPicker } from "./TaskPicker";
 import { ModelPicker } from "./ModelPicker";
-import { SidebarPopoverMenu, type SidebarMenuItem } from "./SidebarPopoverMenu";
+import { PopoverMenu, type PopoverMenuItem } from "./popover/PopoverMenu";
 import { ShortcutHint } from "./ShortcutHint";
 import {
   copyTranscriptToClipboard,
@@ -1520,11 +1520,11 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
   const [copyStatus, setCopyStatus] = useState<"copied" | "failed" | null>(null);
   const hasMessages = messages.length > 0;
   const transcript = () => formatTranscriptMarkdown({ title: bot.name, messages, botName: bot.name, isGroup: false });
-  const items: SidebarMenuItem[] = [
+  const items: PopoverMenuItem[] = [
     {
       key: "find",
-      label: t("chat.find"),
-      icon: <Search size={16} />,
+      title: t("chat.find"),
+      leading: <Search size={16} />,
       active: findOpen,
       trailing: <ShortcutHint id="find-conversation" />,
       onSelect: onFind,
@@ -1533,8 +1533,8 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
       key: "copy",
       heading: t("chat.export.heading"),
       separatorBefore: true,
-      label: t("chat.export.copy"),
-      icon: <Copy size={16} />,
+      title: t("chat.export.copy"),
+      leading: <Copy size={16} />,
       disabled: !hasMessages,
       keepOpen: true,
       trailing: copyStatus && <span role="status" className="text-[11px] text-ink-secondary">{t(copyStatus === "copied" ? "chat.export.copied" : "chat.export.copyFailed")}</span>,
@@ -1542,46 +1542,46 @@ function ChatHeaderMenu({ bot, messages, findOpen, onFind }: {
     },
     {
       key: "download",
-      label: t("chat.export.download"),
-      icon: <Download size={16} />,
+      title: t("chat.export.download"),
+      leading: <Download size={16} />,
       disabled: !hasMessages,
       onSelect: () => downloadMarkdownTranscript(slugifyTranscriptFilename(bot.name), transcript()),
     },
     ...(usage ? [{
       key: "usage",
-      label: t("chat.usage.menu"),
-      icon: <Gauge size={16} />,
+      title: t("chat.usage.menu"),
+      leading: <Gauge size={16} />,
       separatorBefore: true,
       heading: advancedOnly,
       disabled: !advanced,
       trailing: <span title={usage.detail} data-testid="usage-chip" className={cn("tabular-nums text-[12px]", usage.tone === "danger" ? "text-danger" : usage.tone === "warning" ? "text-warning" : "text-ink-secondary")}>{usage.short}</span>,
       onSelect: () => dispatch({ type: "toggleSettings", open: true, section: "usage" }),
-    } satisfies SidebarMenuItem] : []),
+    } satisfies PopoverMenuItem] : []),
     ...(remoteClient ? [] : [{
       key: "activity",
-      label: "Activity",
-      icon: <ListChecks size={16} />,
+      title: "Activity",
+      leading: <ListChecks size={16} />,
       active: state.activityOpen,
       separatorBefore: !usage,
       onSelect: () => dispatch({ type: "toggleActivity" }),
-    } satisfies SidebarMenuItem, {
+    } satisfies PopoverMenuItem, {
       key: "inspector",
-      label: t("chat.inspector"),
-      icon: <Bug size={16} />,
+      title: t("chat.inspector"),
+      leading: <Bug size={16} />,
       active: advanced && state.inspectorOpen,
       separatorBefore: true,
       heading: usage ? undefined : advancedOnly,
       disabled: !advanced,
       onSelect: () => dispatch({ type: "toggleInspector" }),
-    } satisfies SidebarMenuItem]),
+    } satisfies PopoverMenuItem]),
   ];
   return (
-    <SidebarPopoverMenu
+    <PopoverMenu
       items={items}
       ariaLabel={t("chat.more")}
-      openOnHover
       placement="below"
-      renderTrigger={({ open }) => (
+      align="end"
+      trigger={({ open }) => (
         <span
           data-testid="chat-more"
           className={cn(

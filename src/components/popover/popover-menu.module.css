@@ -1,0 +1,169 @@
+/* PopoverMenu chrome: submenu sheets, rows and item furniture. Every rule
+   here is a plain Tailwind composition: `@reference` pulls in the app's
+   stylesheet for its `@theme` tokens (menu, hairline, ink, …) without
+   emitting any of its output, so `@apply` below resolves exactly the same
+   utilities the TSX used to spell out inline. The outer shell layers live in
+   popover.module.css; motion keyframes in popover-motion.module.css. */
+@reference "../../styles.css";
+
+/* Non-portal submenu beside its parent row. */
+.subInline {
+  @apply absolute start-full top-0 z-50 ms-1;
+}
+
+/* Submenu layers mirror the main menu split: look outside, padding inside. */
+.subShell {
+  @apply overflow-hidden rounded-md border border-hairline/50 bg-menu shadow-xl;
+}
+
+.subShellBare {
+  @apply overflow-hidden;
+}
+
+.subInner {
+  @apply overflow-x-hidden p-1;
+}
+
+/* A menu row button. The top band carries leading | title | value, trailing,
+   the attention dot and the submenu chevron, all aligned with the title's
+   line; content sits under the title in the same column. Hover and the
+   active/submenu-open state share one fill — rowFill is a separate class so
+   a caller's overrideClassNames.row can drop it; keyboard focus keeps only
+   the global :focus-visible ring, never a fill of its own. */
+.row {
+  @apply flex min-h-8 w-full items-start gap-2 rounded-md px-3 py-2 text-start text-sm leading-5 outline-none disabled:opacity-60;
+}
+
+/* The shared hover fill. A row the caller disabled takes none of it: the
+   browser still matches `:hover` on a disabled button, and the fill would
+   claim the row is pickable. The guard sits after the fill, which picks it
+   over the fill's own hit. */
+.rowFill {
+  @apply hover:bg-raised-hover disabled:hover:bg-transparent;
+}
+
+.rowActive {
+  @apply bg-raised-hover;
+}
+
+/* Unavailable-but-reachable rows: quiet tone and no hover fill, but still in
+   the arrow path so their reason can be read out. Source order after the
+   base fill picks these over it. */
+.rowOff {
+  @apply text-ink-tertiary hover:bg-transparent;
+}
+
+/* The leading slot: a fixed 20px band so titles line up whatever the icon
+   size, and the icons inside default to 16px. An overrideClassNames.leading
+   drops the tone and the size default together; the box stays. Source order
+   decides the tone, so modifiers come after the base. */
+.rowLeading {
+  @apply flex size-5 shrink-0 items-center justify-center;
+}
+
+.rowLeadingTone {
+  @apply text-ink-secondary;
+}
+
+.rowLeadingRoomy {
+  @apply text-ink;
+}
+
+.rowLeadingActive {
+  @apply text-accent;
+}
+
+.rowLeadingMedia {
+  @apply [&_svg]:size-4;
+}
+
+/* The title column: the title over an optional content line. */
+.rowMain {
+  @apply flex min-w-0 flex-1 flex-col;
+}
+
+.rowTitle {
+  @apply min-w-0;
+}
+
+.rowContent {
+  @apply text-[12px] font-normal leading-4;
+}
+
+.rowContentTone {
+  @apply text-ink-secondary;
+}
+
+/* The tail band: value, trailing, the attention dot and the chevron, centered
+   on the title's line rather than the row's full height. */
+.rowTail {
+  @apply flex h-5 shrink-0 items-center gap-2;
+}
+
+.rowTailSlot {
+  @apply flex items-center;
+}
+
+.rowValue {
+  @apply shrink-0 text-[14px] font-normal tabular-nums leading-5 text-ink-secondary;
+}
+
+/* Title/content line clamp: the limit arrives as a variable (values stay in
+   JS) and -1 renders without this class so the text wraps freely. */
+.clamp {
+  @apply overflow-hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: var(--row-lines, 1);
+}
+
+/* Update/status dot: the base carries the shape, the tone its fill. */
+.dot {
+  @apply size-2 shrink-0 rounded-full;
+}
+
+.dotAccent {
+  @apply bg-accent;
+}
+
+.dotDanger {
+  @apply bg-danger;
+}
+
+/* Submenu chevron flips with the document direction like the menus do. */
+.chev {
+  @apply shrink-0 text-ink-secondary rtl:-scale-x-100;
+}
+
+.separator {
+  @apply my-1.5 h-px bg-hairline/50;
+}
+
+.separatorRoomy {
+  @apply mx-3;
+}
+
+/* A header band: a group marker between rows, not a row itself. Its padding
+   starts where a row does, so the title lines up with the leading slot of the
+   rows under it (the inner layer's own p-1 adds the rest of the old px-4). */
+.header {
+  @apply px-3 pb-2 pt-2;
+}
+
+.headerDivider {
+  @apply border-b border-hairline/20;
+}
+
+.headerTitle {
+  @apply text-[14px] font-medium leading-5 text-ink;
+}
+
+/* The band's second line: plain text, a link, a button or icons. It keeps
+   whatever the caller renders, so no tone lands on the descendants. */
+.headerContent {
+  @apply mt-1 text-[12px] leading-snug text-ink-secondary;
+}
+
+.heading {
+  @apply px-3 pb-0.5 pt-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-ink-secondary;
+}

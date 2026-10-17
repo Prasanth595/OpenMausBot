@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { Children, createElement, isValidElement, type MemoExoticComponent, type MouseEvent, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,14 +7,15 @@ import { formatTime, initialState, type Bot } from "@/state/store";
 vi.mock("./DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({}),
 }));
-// Advanced mode's rows: Simple mode keeps one conversation per bot, so its rows have no thread controls.
+// These rows are Advanced mode's: Simple mode keeps one conversation per bot,
+// so its rows have no thread controls (useShowThreads).
 vi.mock("@/lib/interface-mode", async (original) => ({
   ...await original<typeof import("@/lib/interface-mode")>(),
   useAdvancedMode: () => true,
 }));
 
 import { ConfirmDialogCard } from "./ConfirmDialog";
-import { BotDeleteMenuItem, BotListItem, botConfirmCopy, botRowProps, currentArchivableBot } from "./Sidebar";
+import { BotListItem, botConfirmCopy, botRowProps, currentArchivableBot, type BotRowProps } from "./Sidebar";
 import { endCall } from "@/lib/call";
 import { configureLiveMedia, resetLiveMedia, startLiveCall } from "@/lib/live-call-media";
 
@@ -99,14 +100,64 @@ describe("BotListItem", () => {
     expect(markup).toContain('aria-label="Actions for Atlas"');
     expect(markup).toContain('aria-haspopup="menu"');
   });
+
+  /** The row's returned controls, under React's hook dispatcher. */
+  type ActionProps = {
+    children?: ReactNode;
+    "aria-label"?: string;
+    "aria-expanded"?: boolean;
+    onClick?: (event: MouseEvent) => void;
+    ref?: unknown;
+  };
+  function handle(
+    layout: { menuOpen?: boolean; menuButtonRef?: { current: HTMLButtonElement | null }; onMenu?: (menu: unknown) => void } = {},
+  ) {
+    const onMenu = layout.onMenu ?? vi.fn();
+    let tree!: ReactNode;
+    function Capture() {
+      tree = (BotListItem as MemoExoticComponent<(props: BotRowProps) => ReactNode>).type(
+        botRowProps(initialState, vi.fn(), bot(), { density: "comfortable", quiet: false, query: "", onMenu, menuOpen: layout.menuOpen, menuButtonRef: layout.menuButtonRef }),
+      );
+      return null;
+    }
+    renderToStaticMarkup(createElement(Capture));
+    const nodes: ReactElement<ActionProps>[] = [];
+    const visit = (node: ReactNode) => Children.toArray(node).forEach((child) => {
+      if (!isValidElement<ActionProps>(child)) return;
+      nodes.push(child);
+      visit(child.props.children);
+    });
+    visit(tree);
+    return { handle: nodes.find((node) => node.props["aria-label"] === "Actions for Atlas")!, onMenu };
+  }
+
+  it("opens the bot menu from the hover handle", () => {
+    const { handle: actions, onMenu } = handle();
+    expect(actions.props["aria-expanded"]).toBe(false);
+    actions.props.onClick!({ currentTarget: { getBoundingClientRect: () => ({ left: 12, bottom: 34 }) } } as unknown as MouseEvent);
+    expect(onMenu).toHaveBeenCalledWith({ botId: "atlas", x: 12, y: 34 });
+  });
+
+  it("closes the open bot menu from the same handle instead of re-opening it", () => {
+    const menuButtonRef = { current: null };
+    const { handle: actions, onMenu } = handle({ menuOpen: true, menuButtonRef });
+    expect(actions.props["aria-expanded"]).toBe(true);
+    // the open menu counts the handle as inside, so its press is not the
+    // outside press that would close it a moment before this click
+    expect(actions.props.ref).toBe(menuButtonRef);
+    actions.props.onClick!({ currentTarget: { getBoundingClientRect: () => ({ left: 12, bottom: 34 }) } } as unknown as MouseEvent);
+    expect(onMenu).toHaveBeenCalledWith(null);
+  });
   const twoThreads = (): Partial<Bot> => ({
     tasks: [{ threadId: "thread-atlas", title: "Current", createdAt: 2 }, { threadId: "thread-earlier", title: "Earlier", createdAt: 1 }],
   });
 
   it("shows the thread toggle only once there is a list to open", () => {
+    // one thread is the bot itself: no disclosure, no duplicate row
     expect(renderRow(bot())).not.toContain("Expand Atlas threads");
     expect(renderRow(bot())).not.toContain('data-sidebar-thread-row=');
     expect(renderRow(bot(twoThreads()))).toContain("Expand Atlas threads");
+    // a folder is a list too, even with one thread in it
     expect(renderRow(bot({ projects: [{ id: "p1", name: "Research" }] }))).toContain("Expand Atlas threads");
   });
 
@@ -119,6 +170,8 @@ describe("BotListItem", () => {
     expect(toggle).not.toContain("hover:bg-");
   });
 
+  // Phase 0 writes a digest row after every turn, so the last row of an idle
+  // chat is now a receipt; the preview must still be the reply a person reads.
   it("previews the last reply, not the digest receipt that follows it", () => {
     const markup = renderRow(bot({
       messages: [
@@ -131,6 +184,8 @@ describe("BotListItem", () => {
     expect(markup).not.toContain("[digest]");
   });
 
+  // Hanging up appends the call's record as the chat's last row. Like the
+  // digest receipt, it is not what the row says about the chat.
   describe("the record of a live call that ended last", () => {
     const at = (minute: number) => new Date(2026, 9, 6, 10, minute).getTime();
     const record = {
@@ -168,6 +223,7 @@ describe("BotListItem", () => {
     });
 
     it("names the step the bot is on while it works, when the call ended under it", () => {
+      // hung up mid-turn: the record landed after the step that is still running
       const markup = draw(bot({
         busy: true,
         tasks: [{ threadId: "thread-atlas", title: "Current", createdAt: 2, busy: true, activity: "working" }, { threadId: "thread-earlier", title: "Earlier", createdAt: 1 }],
@@ -176,11 +232,15 @@ describe("BotListItem", () => {
           { id: "a1", role: "bot", kind: "activity", at: at(1), requestMessageId: "u1", tool: { name: "Bash", spoken: "running the tests" } },
           record,
         ] as Bot["messages"],
+        // a search opens the thread list only when it matches a thread
+        // (MOCA-293), which puts the open thread's row, and its step, on screen
       }), { query: "current" });
       expect(markup).toContain("Running the tests");
     });
   });
 
+  // A failed turn's row is stored as "error: …"; the preview reads like the
+  // chat row (src/lib/failed-turn.ts), not like a log line.
   it("previews a failed turn without its error marker", () => {
     const markup = renderRow(bot({
       messages: [
@@ -192,6 +252,9 @@ describe("BotListItem", () => {
     expect(markup).not.toContain("error:");
   });
 
+  // A turn can end on the approval card itself: Stop while it is open, or a
+  // provider that settles the ask without writing more. The card then reads
+  // Allowed or Denied, and the row must say the same, not "Approval needed".
   describe("an approval card that ends the chat", () => {
     const approval = (card: Partial<NonNullable<Bot["messages"][number]["card"]>>): Bot => bot({
       messages: [
@@ -240,7 +303,9 @@ describe("BotListItem", () => {
     expect(markup).toContain('data-testid="chief-crown"');
     expect(markup).toContain('aria-label="Chief of Staff"');
     expect(markup.indexOf('data-testid="chief-crown"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
+    // no "Chief of Staff" label line under the name
     expect(markup).not.toContain("Chief of Staff</span>");
+    // the words stay in the portrait's tooltip
     expect(markup).toContain('title="Atlas · Developer · Chief of Staff"');
 
     expect(renderRow(bot())).not.toContain("Chief of Staff");
@@ -255,6 +320,7 @@ describe("BotListItem", () => {
     expect(untitled).toContain('title="Atlas"');
   });
 
+  // the title line the row used to draw above the name
   const titleLine = /<div class="truncate text-\[11px\][^"]*">([^<]*)<\/div>/;
 
   it("keeps the bot's title out of the row and reads it out with the name", () => {
@@ -263,6 +329,7 @@ describe("BotListItem", () => {
     expect(markup).not.toContain(">Developer<");
     expect(markup).toContain('<span class="sr-only">, Developer</span>');
     expect(markup).toContain('title="Atlas · Developer"');
+    // the rename hint is unrelated to the bot's title
     expect(markup).toContain('title="Double-click to rename"');
 
     expect(renderRow(bot())).not.toContain('class="sr-only">, ');
@@ -310,16 +377,20 @@ describe("BotListItem", () => {
     expect(renderRow(bot())).not.toContain('data-testid="live-call-badge"');
 
     vi.stubGlobal("window", { ogb: { speechStop: vi.fn(async () => {}) } });
+    // the microphone prompt never answers: the call stays "starting"
     configureLiveMedia({ getUserMedia: () => new Promise<MediaStream>(() => {}) });
     void startLiveCall({ botId: "atlas", threadId: "thread-atlas" });
 
     const markup = renderRow(bot());
     expect(markup).toContain('data-testid="live-call-badge"');
     expect(markup).toContain('aria-label="On a Live call"');
+    // in the name line, after the name
     expect(markup.indexOf('data-testid="live-call-badge"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
     expect(renderRow(bot({ id: "other" }))).not.toContain('data-testid="live-call-badge"');
     expect(renderRow(bot(), true)).toContain('data-testid="live-call-badge"');
 
+    // icons-only rows have no name line: the badge sits on the avatar and
+    // the row's accessible name says it
     const icons = renderRow(bot(), false, "icons");
     expect(icons).toContain('data-testid="live-call-badge"');
     expect(icons).toContain('aria-label="Atlas · On a Live call"');
@@ -395,70 +466,47 @@ describe("archive / delete confirmation", () => {
   });
 });
 
-describe("bot deletion feedback", () => {
-  it("disables the destructive action while the bot and its computer are deleted", () => {
-    const markup = renderToStaticMarkup(createElement(BotDeleteMenuItem, {
-      deleting: true,
-      onClick: vi.fn(),
-    }));
+describe("quiet rows", () => {
+  const titleLine = /<div class="truncate text-\[11px\][^"]*">([^<]*)<\/div>/;
 
-    expect(markup).toContain("Deleting bot and owned computer…");
-    expect(markup).toContain('title="Deleting this bot and any computer it owns"');
-    expect(markup).toContain('disabled=""');
-    expect(markup).toContain('aria-busy="true"');
+  it("reduces an idle bot to its name: no title line, no Chief line, no preview", () => {
+    const markup = renderRow(bot({
+      title: "Developer",
+      chiefOfStaff: true,
+      messages: [{ id: "b1", role: "bot", kind: "text", text: "Created notes.txt with three lines.", at: 2 }] as Bot["messages"],
+    }), true);
+    expect(titleLine.test(markup)).toBe(false);
+    expect(markup).not.toContain("Chief of Staff</span>");
+    expect(markup).not.toContain("Created notes.txt with three lines.");
+    expect(markup).toContain(">Atlas<");
+    // the crown stays, beside the name, with its label for assistive tech
+    expect(markup).toContain('data-testid="chief-crown"');
+    expect(markup).toContain('aria-label="Chief of Staff"');
   });
 
-  it("offers Delete again after the check settles", () => {
-    const markup = renderToStaticMarkup(createElement(BotDeleteMenuItem, {
-      deleting: false,
-      onClick: vi.fn(),
-    }));
-
-    expect(markup).toContain(">Delete</button>");
-    expect(markup).not.toContain('disabled=""');
+  it("keeps the status line while something is happening", () => {
+    expect(renderRow(bot({ busy: true }), true)).toContain('class="sr-only">Working…');
+    expect(renderRow(bot({ activity: "waiting-on-you" }), true)).toContain("Waiting for you…");
+    expect(renderRow(bot({ waitingForTeammates: true, busy: false }), true)).toContain("Waiting on a teammate…");
   });
 
-  describe("quiet rows", () => {
-    const titleLine = /<div class="truncate text-\[11px\][^"]*">([^<]*)<\/div>/;
+  it("keeps the unread dot in the name line when the preview line is gone", () => {
+    const markup = renderRow(bot({ unread: true, messages: [{ id: "b1", role: "bot", kind: "text", text: "hello", at: 1 }] as Bot["messages"] }), true);
+    expect(markup).toContain('aria-label="Unread threads"');
+    expect(markup).not.toContain(">hello<");
+  });
 
-    it("reduces an idle bot to its name: no title line, no Chief line, no preview", () => {
-      const markup = renderRow(bot({
-        title: "Developer",
-        chiefOfStaff: true,
-        messages: [{ id: "b1", role: "bot", kind: "text", text: "Created notes.txt with three lines.", at: 2 }] as Bot["messages"],
-      }), true);
-      expect(titleLine.test(markup)).toBe(false);
+  it("puts the crown right after the name, inside the name line", () => {
+    const markup = renderRow(bot({ chiefOfStaff: true }), true);
+    expect(markup.indexOf('data-testid="chief-crown"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
+  });
+
+  it("draws the same crown as a full row", () => {
+    const quiet = renderRow(bot({ title: "Developer", chiefOfStaff: true }), true);
+    const full = renderRow(bot({ title: "Developer", chiefOfStaff: true }));
+    for (const markup of [quiet, full]) {
+      expect(markup.match(/data-testid="chief-crown"/g)).toHaveLength(1);
       expect(markup).not.toContain("Chief of Staff</span>");
-      expect(markup).not.toContain("Created notes.txt with three lines.");
-      expect(markup).toContain(">Atlas<");
-      expect(markup).toContain('data-testid="chief-crown"');
-      expect(markup).toContain('aria-label="Chief of Staff"');
-    });
-
-    it("keeps the status line while something is happening", () => {
-      expect(renderRow(bot({ busy: true }), true)).toContain('class="sr-only">Working…');
-      expect(renderRow(bot({ activity: "waiting-on-you" }), true)).toContain("Waiting for you…");
-      expect(renderRow(bot({ waitingForTeammates: true, busy: false }), true)).toContain("Waiting on a teammate…");
-    });
-
-    it("keeps the unread dot in the name line when the preview line is gone", () => {
-      const markup = renderRow(bot({ unread: true, messages: [{ id: "b1", role: "bot", kind: "text", text: "hello", at: 1 }] as Bot["messages"] }), true);
-      expect(markup).toContain('aria-label="Unread threads"');
-      expect(markup).not.toContain(">hello<");
-    });
-
-    it("puts the crown right after the name, inside the name line", () => {
-      const markup = renderRow(bot({ chiefOfStaff: true }), true);
-      expect(markup.indexOf('data-testid="chief-crown"')).toBeGreaterThan(markup.indexOf(">Atlas<"));
-    });
-
-    it("draws the same crown as a full row", () => {
-      const quiet = renderRow(bot({ title: "Developer", chiefOfStaff: true }), true);
-      const full = renderRow(bot({ title: "Developer", chiefOfStaff: true }));
-      for (const markup of [quiet, full]) {
-        expect(markup.match(/data-testid="chief-crown"/g)).toHaveLength(1);
-        expect(markup).not.toContain("Chief of Staff</span>");
-      }
-    });
+    }
   });
 });

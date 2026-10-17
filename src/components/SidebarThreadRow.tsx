@@ -1,17 +1,15 @@
-import { memo, useEffect, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Archive, ArchiveRestore, BellOff, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
 import type { AppState, BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
-import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
 import { nextRename } from "@/lib/rename";
 import { isTickable, opensRowMenuFromKey } from "@/lib/bulk-select";
 import { threadRefUrl } from "@/lib/thread-refs";
 import { copyText } from "@/lib/copy-text";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { PopoverMenu, type PopoverMenuItem } from "./popover/PopoverMenu";
 import { threadLinkLabel } from "../../shared/thread-link";
-import { Select } from "./Select";
 
 type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link"> & {
   queued?: boolean;
@@ -239,13 +237,16 @@ const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { ta
 
 export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, activityLabel, now, selectMode = false, checked = false, onToggleSelect }: ThreadRowProps) {
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
-  const menuMotion = useHeldMenuMotion(menu);
+  // The sheet plays its own close, so the point it opened at must outlive the
+  // open: a reopen always carries a fresh one.
+  const [lastPoint, setLastPoint] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => { if (menu) setLastPoint(menu); }, [menu]);
+  const menuPoint = menu ?? lastPoint;
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const [deleting, setDeleting] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const finishing = useRef(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWaitingOnTeammate(task) ? t("task.waitingOnTeammate") : isWorking(task) ? activityLabel ?? t("chat.activity.working") : task.queued ? t("task.queued") : null;
   const byline = threadByline(task);
@@ -258,7 +259,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const tickable = isTickable(task);
   const choose = (event: React.MouseEvent) => { if (!selectMode) onSelect(task); else if (tickable) onToggleSelect?.(task, event.shiftKey); };
   const contextMenu = (event: React.MouseEvent) => { event.preventDefault(); if (!selectMode) openMenu(event.clientX, event.clientY); };
-  const openMenu = (x: number, y: number) => setMenu({ left: Math.max(8, Math.min(x, window.innerWidth - 228)), top: Math.max(8, Math.min(y, window.innerHeight - 230)) });
+  const openMenu = (x: number, y: number) => setMenu({ left: x, top: y });
   const startRename = () => { finishing.current = false; setDraft(task.title); setRenaming(true); setMenu(null); };
   const copyLink = () => {
     setMenu(null);
@@ -276,29 +277,103 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
     setRenaming(false);
     if (title) onRename(task, title);
   };
-  useEffect(() => {
-    if (!menu) return;
-    menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
-    const outside = (event: MouseEvent) => {
-      if (event.target instanceof Node && !menuRef.current?.contains(event.target) && !actionRef.current?.contains(event.target)) setMenu(null);
-    };
-    window.addEventListener("mousedown", outside);
-    return () => window.removeEventListener("mousedown", outside);
-  }, [menu]);
-  useEffect(() => {
-    if (!menu || !menuRef.current) return;
-    const keepOnScreen = () => {
-      const el = menuRef.current;
-      if (!el) return;
-      const top = Math.max(8, window.innerHeight - el.offsetHeight - 8);
-      setMenu((current) => (current && current.top > top ? { ...current, top } : current));
-    };
-    keepOnScreen();
-    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(keepOnScreen);
-    observer?.observe(menuRef.current);
-    window.addEventListener("resize", keepOnScreen);
-    return () => { observer?.disconnect(); window.removeEventListener("resize", keepOnScreen); };
-  }, [menu]);
+  const insideRefs = useMemo(() => [actionRef], []);
+  const items: PopoverMenuItem[] = [];
+  items.push(
+    { key: "copy-link", title: t("task.copyLink"), leading: <Link2 size={16} />, onSelect: copyLink },
+    { key: "rename", title: t("task.renameAria"), leading: <Pencil size={16} />, onSelect: startRename },
+  );
+  if (onRegenerateTitle) {
+    // "Regenerating…" keeps the menu open until the answer lands; a failure
+    // keeps it open behind the error so the person can rename by hand.
+    items.push({
+      key: "regenerate-title",
+      title: regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle"),
+      leading: regenerating ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />,
+      ariaDisabled: regenerating,
+      busy: regenerating,
+      keepOpen: true,
+      onSelect: regenerateTitle,
+    });
+  }
+  if (onMove && folders?.length) {
+    items.push({
+      key: "move-to-folder",
+      title: t("folder.move"),
+      leading: <FolderInput size={16} />,
+      submenu: [
+        { key: "move-none", title: t("folder.none"), active: !task.projectId, onSelect: () => onMove(task, null) },
+        ...folders.map((folder) => ({
+          key: `move-${folder.id}`,
+          title: `${folder.emoji ? `${folder.emoji} ` : ""}${folder.name}`,
+          active: folder.id === task.projectId,
+          onSelect: () => onMove(task, folder.id),
+        })),
+      ],
+    });
+  }
+  if (onPin) {
+    items.push({
+      key: "pin",
+      title: task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
+      leading: task.pinned === true ? <PinOff size={16} /> : <Pin size={16} />,
+      onSelect: () => onPin(task, task.pinned !== true),
+    });
+  }
+  if (onLink && task.link) {
+    items.push({ key: "remove-link", title: t("task.removeLink"), leading: <Link2Off size={16} />, onSelect: () => onLink(task, null) });
+  }
+  if (onArchive) {
+    items.push({
+      key: "archive",
+      title: archived ? t("task.unarchive") : t("task.archive"),
+      leading: archived ? <ArchiveRestore size={16} /> : <Archive size={16} />,
+      disabled: isWorking(task),
+      onSelect: () => onArchive(task, archived ? null : Date.now()),
+    });
+  }
+  if (onSnooze) {
+    items.push({
+      key: "snooze",
+      title: t("task.snooze"),
+      leading: <Clock size={16} />,
+      submenu: [
+        ...[
+          { label: t("task.snoozeUntilActivity"), at: 0 },
+          { label: t("task.snoozeTonight"), at: nextSixPm() },
+          { label: t("task.snoozeTomorrow"), at: tomorrowNineAm() },
+        ].map((preset) => ({
+          key: `snooze-${preset.at}`,
+          title: preset.label,
+          disabled: isWorking(task),
+          onSelect: () => onSnooze(task, preset.at),
+        })),
+        ...(snoozed
+          ? [{ key: "snooze-stop", title: t("task.stopSnoozing"), leading: <BellOff size={16} />, separatorBefore: true, onSelect: () => onSnooze(task, null) }]
+          : []),
+      ],
+    });
+  }
+  if (onRefreshPermissions) {
+    items.push({
+      key: "refresh-permissions",
+      title: t("task.refreshPermissions"),
+      leading: <RefreshCw size={16} />,
+      disabled: isWorking(task),
+      hint: t("task.refreshPermissionsHint"),
+      onSelect: () => onRefreshPermissions(task),
+    });
+  }
+  items.push({
+    key: "delete",
+    title: t("task.deleteAria"),
+    leading: <Trash2 size={16} />,
+    // The override replaces the row's fill, so the danger tone brings its
+    // own — and none of it while the row is disabled.
+    overrideClassNames: { row: "text-danger hover:bg-danger/10 disabled:hover:bg-transparent", leading: "text-danger" },
+    disabled: isWorking(task),
+    onSelect: () => setDeleting(true),
+  });
   return <>
     <div className={cn("group/thread relative flex min-w-0 items-center rounded-md", selectMode && checked ? "bg-accent/10" : current ? "bg-raised" : "hover:bg-raised/50")}>
       {renaming ? <input autoFocus value={draft} maxLength={80} aria-label={t("task.renameAria")}
@@ -336,33 +411,19 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         <MoreHorizontal size={13} />
       </button>}
     </div>
-    {menuMotion.shown && menuMotion.value && createPortal(<div ref={menuRef} data-thread-overlay role="group" aria-label={t("task.actions", { title: task.title })} style={menuMotion.value}
-      className={cn("fixed z-50 max-h-[calc(100vh-16px)] w-[220px] overflow-y-auto rounded-lg border border-hairline/50 bg-card p-1 shadow-xl", menuMotion.className)} {...menuMotion.exitProps}
-      onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setMenu(null); actionRef.current?.focus(); } }}>
-      <button type="button" onClick={copyLink} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Link2 size={12} />{t("task.copyLink")}</button>
-      <button type="button" onClick={startRename} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Pencil size={12} />{t("task.renameAria")}</button>
-      {onRegenerateTitle && <button type="button" disabled={regenerating} aria-busy={regenerating} onClick={regenerateTitle} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{regenerating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}{regenerating ? t("task.regeneratingTitle") : t("task.regenerateTitle")}</button>}
-      {onMove && Boolean(folders?.length) && <label className="block rounded px-2.5 py-2 text-[12px] text-ink"><span className="mb-1 flex items-center gap-2 text-ink-secondary"><FolderInput size={12} />{t("folder.move")}</span>
-        <Select size="sm" className="w-full" aria-label={t("folder.moveNamed", { title: task.title })} value={folders?.some((folder) => folder.id === task.projectId) ? task.projectId : ""}
-          onChange={(event) => { onMove(task, event.target.value || null); setMenu(null); }}>
-          <option value="">{t("folder.none")}</option>{folders?.map((folder) => <option key={folder.id} value={folder.id}>{folder.emoji ? `${folder.emoji} ` : ""}{folder.name}</option>)}
-        </Select>
-      </label>}
-      {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task, task.pinned !== true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised">{task.pinned === true ? <PinOff size={12} /> : <Pin size={12} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
-      {onLink && task.link && <button type="button" onClick={() => { setMenu(null); onLink(task, null); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Link2Off size={12} />{t("task.removeLink")}</button>}
-      {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(task, isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
-      {onSnooze && <div className="px-2.5 pt-1">
-        <span className="flex items-center gap-2 text-[11px] text-ink-secondary"><Clock size={12} />{t("task.snooze")}</span>
-        <div className="mt-0.5 flex flex-col">
-          {[{ label: t("task.snoozeUntilActivity"), at: 0 }, { label: t("task.snoozeTonight"), at: nextSixPm() }, { label: t("task.snoozeTomorrow"), at: tomorrowNineAm() }].map((preset) => (
-            <button key={preset.label} type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onSnooze(task, preset.at); }} className="flex w-full items-center rounded px-2.5 py-1.5 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{preset.label}</button>
-          ))}
-        </div>
-      </div>}
-      {onSnooze && snoozed && <button type="button" onClick={() => { setMenu(null); onSnooze(task, null); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><BellOff size={12} />{t("task.stopSnoozing")}</button>}
-      {onRefreshPermissions && <button type="button" disabled={isWorking(task)} title={t("task.refreshPermissionsHint")} onClick={() => { setMenu(null); onRefreshPermissions(task); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40"><RefreshCw size={12} />{t("task.refreshPermissions")}</button>}
-      <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); setDeleting(true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-danger hover:bg-raised disabled:opacity-40"><Trash2 size={12} />{t("task.deleteAria")}</button>
-    </div>, document.body)}
+    {menuPoint && (
+      <PopoverMenu
+        items={items}
+        ariaLabel={t("task.actions", { title: task.title })}
+        anchor={{ kind: "point", x: menuPoint.left, y: menuPoint.top }}
+        open={menu !== null}
+        onOpenChange={(open) => { if (!open) setMenu(null); }}
+        extraInsideRefs={insideRefs}
+        focusFirstOnOpen
+        restoreFocusOnClose
+        zIndex={50}
+      />
+    )}
     <ConfirmDialog open={deleting} title={t("task.deleteConfirm")} body={t("task.deleteBody", { title: task.title })} confirmLabel={t("task.deleteAria")}
       onCancel={() => setDeleting(false)} onConfirm={() => { if (!isWorking(task)) onDelete(task); setDeleting(false); }} returnFocusRef={actionRef} />
   </>;

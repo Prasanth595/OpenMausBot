@@ -12,8 +12,10 @@ const row = () => host.querySelector<HTMLElement>(`[${MESSAGE_ROW}]`)!;
 const body = () => host.querySelector<HTMLElement>("p")!;
 const tray = () => host.querySelector<HTMLElement>('[data-testid="message-actions"]')!;
 const shown = () => tray().dataset.shown === "true";
+/** The tray's More menu button that opens the message-action sheet. */
 const more = () => tray().querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!;
-const items = () => [...host.querySelectorAll<HTMLButtonElement>("[role=menuitem]")];
+/** All message-action rows in the open menu sheet. */
+const items = () => [...document.querySelectorAll<HTMLButtonElement>("[role=menuitem]")];
 
 const pointer = (type: string, target: Element, pointerType: string) =>
   act(async () => {
@@ -22,6 +24,7 @@ const pointer = (type: string, target: Element, pointerType: string) =>
 
 let picked: string[] = [];
 
+/** Mounts the message-action tray, optionally forced open. */
 async function render(forceOpen = false) {
   await act(async () => {
     root.render(
@@ -44,6 +47,9 @@ async function render(forceOpen = false) {
 beforeEach(() => {
   setLocale("en");
   picked = [];
+  // The sheet's exit is a motion nicety: with reduced motion it unmounts on
+  // the render that closes it, which is when these tests read the DOM.
+  document.documentElement.dataset.reducedMotion = "true";
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -52,6 +58,7 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount());
   host.remove();
+  delete document.documentElement.dataset.reducedMotion;
   vi.useRealTimers();
 });
 

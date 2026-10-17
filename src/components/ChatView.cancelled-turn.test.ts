@@ -29,9 +29,9 @@ vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
   useShowThreads: () => true,
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => true, setAdvancedMode: vi.fn() }));
-vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
-  ...await importOriginal<typeof import("./SidebarPopoverMenu")>(),
-  SidebarPopoverMenu: (props: { renderTrigger: (state: { open: boolean }) => unknown }) => props.renderTrigger({ open: false }),
+vi.mock("./popover/PopoverMenu", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./popover/PopoverMenu")>(),
+  PopoverMenu: (props: { trigger: (state: { open: boolean }) => unknown }) => props.trigger({ open: false }),
 }));
 vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => null }));
 vi.mock("./CitationUI", async (importOriginal) => ({

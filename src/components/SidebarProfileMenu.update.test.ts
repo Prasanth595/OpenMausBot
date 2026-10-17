@@ -29,3 +29,13 @@ it.each([false, true])("retains error attention when no separate update button i
   expect(html).toContain("bg-danger");
   if (!iconOnly) expect(html).toContain('aria-label="Fixture update failed"');
 });
+
+it.each([false, true])("uses consistent trigger chrome, iconOnly=%s", (iconOnly) => {
+  fixture.update = { status: "idle" };
+  const html = renderToStaticMarkup(createElement<{ iconOnly: boolean }>(SidebarProfileMenu, { iconOnly }));
+  expect(html).toContain("rounded-md");
+  expect(html).toContain("hover:bg-raised-hover");
+  expect(html).toContain("focus-within:bg-raised-hover");
+  expect(html).not.toContain("hover:bg-raised/50");
+  expect(html).not.toContain("rounded-xl");
+});

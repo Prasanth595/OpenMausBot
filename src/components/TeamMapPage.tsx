@@ -21,8 +21,11 @@ import { TeamMemoryDialog } from "./TeamMemoryDialog";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { t } from "@/lib/i18n";
 import { CanvasComputers } from "./CanvasComputers";
+import { PopoverMenu } from "./popover/PopoverMenu";
 import type { TeamComputer } from "../../shared/team-computer";
 
+/** One hand-off between two bots. It opens the thread doing the work, the
+ * room it ran in, or else the bot it went to, as its own row would. */
 export function EdgeRow({ edge, bots }: { edge: TeamMapEdge; bots: Bot[] }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
@@ -69,6 +72,7 @@ interface SectionContextResponse {
   maxBytes: number;
 }
 
+/** Dialog editing a team section's context note within its byte budget. */
 function SectionContextDialog({ section, label, onClose }: { section: string; label: string; onClose: () => void }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -258,6 +262,7 @@ function SectionContextDialog({ section, label, onClose }: { section: string; la
   );
 }
 
+/** Full-page team map with sections, context editors, and bot-move flows. */
 export function TeamMapPage() {
   const { state, dispatch } = useStore();
   const { dragProps } = useCaptionChrome();
@@ -339,18 +344,20 @@ export function TeamMapPage() {
         </div>
         {!remoteClient && <div className="flex items-center gap-2">
           <button onClick={() => setComputersOpen((value) => !value)} aria-label="Computers" aria-expanded={computersOpen} className="rounded-lg p-2 text-ink-secondary hover:bg-control hover:text-ink"><Monitor size={17} /></button>
-          <details className="relative" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.removeAttribute("open"); }} onKeyDown={(event) => {
-            if (event.key === "Escape") { event.currentTarget.removeAttribute("open"); event.currentTarget.querySelector("summary")?.focus(); }
-          }}>
-            <summary aria-label="Add to team map" className="flex cursor-pointer list-none items-center gap-1.5 rounded-lg border border-hairline/60 bg-panel px-3 py-2 text-[12px] font-medium hover:bg-control [&::-webkit-details-marker]:hidden"><Plus size={14} /> Add</summary>
-            <div className="absolute right-0 top-full z-40 mt-2 w-52 rounded-xl border border-hairline/60 bg-panel p-1.5 shadow-xl" onClick={(event) => {
-              const details = event.currentTarget.closest("details"); details?.querySelector("summary")?.focus(); details?.removeAttribute("open");
-            }}>
-              <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => setTeamEditor({})}><Users size={14} />{t("team.create")}</button>
-              <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => { setComputersOpen(true); setCreateComputerRequest((value) => value + 1); }}><Box size={14} />Cloud computer</button>
-              {placeOffered("vm", state.config) && <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] hover:bg-control" onClick={() => dispatch({ type: "toggleAppSettings", section: "computer", open: true })}><Monitor size={14} />Local VM…</button>}
-            </div>
-          </details>
+          <PopoverMenu
+            items={[
+              { key: "team", title: t("team.create"), leading: <Users />, onSelect: () => setTeamEditor({}) },
+              { key: "cloud", title: "Cloud computer", leading: <Box />, onSelect: () => { setComputersOpen(true); setCreateComputerRequest((value) => value + 1); } },
+              // An OMB Cloud home has no Local VM (shared/cloud-home.ts).
+              ...(placeOffered("vm", state.config) ? [{ key: "local-vm", title: "Local VM…", leading: <Monitor />, onSelect: () => dispatch({ type: "toggleAppSettings", section: "computer", open: true }) }] : []),
+            ]}
+            ariaLabel="Add to team map"
+            placement="below"
+            align="end"
+            width={208}
+            triggerClassName="flex items-center gap-1.5 rounded-lg border border-hairline/60 bg-panel px-3 py-2 text-[12px] font-medium hover:bg-control"
+            trigger={() => <><Plus size={14} aria-hidden="true" /> Add</>}
+          />
         </div>}
       </header>
       {(error || refreshError) && <div role="alert" className="flex shrink-0 items-center justify-between gap-3 border-b border-danger/20 bg-danger/10 px-6 py-2 text-[12px] text-danger">

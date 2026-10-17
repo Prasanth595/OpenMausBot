@@ -10,6 +10,7 @@ import {
   Loader2,
   MoreHorizontal,
   Pause,
+  Pencil,
   Play,
   Plus,
   RotateCw,
@@ -20,6 +21,7 @@ import {
 } from "lucide-react";
 
 import { BotAvatar } from "@/components/Avatar";
+import { PopoverMenu } from "./popover/PopoverMenu";
 import { cn } from "@/lib/cn";
 import type { RoutineRun, RoutineRunOn } from "@/lib/routines";
 import {
@@ -373,7 +375,20 @@ export function WebhooksPanel({
                 </div>
                 <div className="flex items-center gap-2">
                   {!selected.verificationPending && <button disabled={Boolean(working)} onClick={() => void invoke(selected, "toggle")} className={cn("flex items-center gap-1.5 rounded-lg px-3 py-2 text-[11.5px] font-medium", selected.enabled ? "bg-raised text-ink-secondary hover:text-ink" : "bg-accent text-white hover:brightness-110")}>{selected.enabled ? <Pause size={13} /> : <Play size={13} />}{selected.enabled ? "Pause" : "Enable"}</button>}
-                  <details className="relative"><summary className="list-none rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"><MoreHorizontal size={17} /></summary><div className="absolute right-0 top-full z-20 mt-1 w-[180px] rounded-xl border border-hairline/50 bg-card p-1.5 shadow-2xl"><button onClick={() => setEditor(selected)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-ink hover:bg-raised">Edit settings</button><button onClick={() => void invoke(selected, "delete")} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] text-danger hover:bg-danger/10"><Trash2 size={13} />Delete</button></div></details>
+                  <PopoverMenu
+                    items={[
+                      { key: "edit", title: "Edit settings", leading: <Pencil />, onSelect: () => setEditor(selected) },
+                      // The override replaces the row's fill, so the danger tone
+                      // brings its own — and none of it while the row is disabled.
+                      { key: "delete", title: "Delete", leading: <Trash2 />, overrideClassNames: { row: "text-danger hover:bg-danger/10 disabled:hover:bg-transparent", leading: "text-danger" }, onSelect: () => void invoke(selected, "delete") },
+                    ]}
+                    ariaLabel="Webhook actions"
+                    placement="below"
+                    align="end"
+                    width={180}
+                    triggerClassName="rounded-lg p-2 text-ink-secondary hover:bg-raised hover:text-ink"
+                    trigger={() => <MoreHorizontal size={17} aria-hidden="true" />}
+                  />
                 </div>
               </div>
 

@@ -1,7 +1,13 @@
-// `control-omb ui`: drives the real renderer headlessly against the fake-engine
-// fixture through the agent-browser binary the harness pins. It touches
-// control-omb.ts's bindings only inside functions, so the import cycle is
-// harmless whichever loads first.
+// `control-omb ui`: drive the real React renderer headlessly against the
+// isolated fake-engine fixture, through the agent-browser binary the harness
+// already pins (server/browser-engine-release.ts). One launch owns a fixture
+// server, a Vite preview of the full <App/>, and one headless browser session
+// whose HOME is the fixture's disposable data directory; every other verb
+// attaches to that session through the handle file the launch printed.
+//
+// Imported by scripts/control-omb.ts, which owns HELP and the MUTATING set;
+// this file touches that module's bindings only inside functions so the
+// import cycle is harmless whichever file is loaded first.
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, extname, join, resolve } from "node:path";
@@ -215,11 +221,22 @@ async function requireLiveSession(handle: UiHandle): Promise<void> {
   }
 }
 
+/** Captures an agent-browser snapshot of the UI session. */
 async function snapshot(handle: UiHandle, interactive: boolean): Promise<Record<string, unknown>> {
   return agentBrowser(handle.binary, sessionEnv(handle), ["snapshot", ...(interactive ? ["-i"] : [])]);
 }
 
+/** How long `--name` waits for its element to be rendered before giving up. */
 const TARGET_WAIT_MS = 5_000;
+/** A `--name` hit must repeat across consecutive snapshots before it is used:
+ * a portaled menu (the header More menu) appears in the tree a frame before
+ * its sheet finishes positioning, so the first single match can still be
+ * under the transcript when agent-browser hit-tests it. */
+const TARGET_STABLE_POLLS = 2;
+/** How many times `click`/`type` retry after a hit-test failure ("is covered
+ * by …") with a fresh resolve before surfacing the error. */
+const ACTION_ATTEMPTS = 3;
+const ACTION_RETRY_DELAY_MS = 300;
 
 /** `--ref @eN` verbatim, or the one element whose accessible name is `--name`. */
 async function resolveTarget(handle: UiHandle, values: Record<string, unknown>, verb: string): Promise<{ target: string; name?: string }> {
@@ -230,22 +247,113 @@ async function resolveTarget(handle: UiHandle, values: Record<string, unknown>, 
     if (!/^@?e\d+$/.test(ref)) throw new ControlOmbError(`--ref must look like @e12, got ${JSON.stringify(ref)}`, "refs come from `ui snapshot`");
     return { target: ref.startsWith("@") ? ref : `@${ref}` };
   }
-  // React paints after the previous command returns, so one snapshot races the
-  // UI: wait for the name. Two matches are still reported the moment seen.
+  // An element appears when React renders it, not when the previous command
+  // returned, so a single snapshot races the UI: the model row this drives is
+  // painted from an API read, and a name looked up one tick early is simply
+  // absent. Wait for it, the way every UI driver has an implicit wait — this
+  // is what made the smoke fail on ~1 run in 8, always as "no element is
+  // named", on four unrelated branches. Ambiguity is not a race, so two
+  // matches are still reported the moment they are seen, and a name that
+  // never arrives fails with the same error as before, just later.
+  //
+  // A single match is not yet enough: a portaled sheet is in the snapshot a
+  // frame before it finishes positioning (the header More menu opens under
+  // the transcript's day separator for a moment), and clicking that first
+  // sighting fails as "is covered by …". Require the same single match on
+  // consecutive snapshots so the click lands after the sheet settles.
   const deadline = Date.now() + TARGET_WAIT_MS;
   let matches: Array<[string, { name?: unknown; role?: unknown }]> = [];
+  let stableTarget: string | null = null;
+  let stablePolls = 0;
   for (;;) {
     const refs = (await snapshot(handle, false)).refs as Record<string, { name?: unknown; role?: unknown }> | undefined;
     matches = Object.entries(refs ?? {}).filter(([, element]) => element?.name === name);
-    if (matches.length === 1) return { target: `@${matches[0]![0]}`, name };
-    if (matches.length > 1 || Date.now() >= deadline) break;
+    if (matches.length > 1) break;
+    if (matches.length === 1) {
+      const target = `@${matches[0]![0]}`;
+      if (target === stableTarget) {
+        stablePolls += 1;
+      } else {
+        stableTarget = target;
+        stablePolls = 1;
+      }
+      if (stablePolls >= TARGET_STABLE_POLLS) return { target, name };
+    } else {
+      stableTarget = null;
+      stablePolls = 0;
+    }
+    if (Date.now() >= deadline) break;
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+  // The sheet never settled on one ref within the budget: fall back to the
+  // latest single match rather than failing a target the page does have. The
+  // click/type retry below still gets its chance at a covered first attempt.
+  if (matches.length === 1) return { target: `@${matches[0]![0]}`, name };
   if (matches.length === 0) throw new ControlOmbError(`no element is named ${JSON.stringify(name)}`, "run `ui snapshot` and use the exact accessible name, or --ref");
   throw new ControlOmbError(
     `${matches.length} elements are named ${JSON.stringify(name)}: ${matches.map(([id, element]) => `@${id} (${String(element.role)})`).join(", ")}`,
     "pass --ref to pick one",
   );
+}
+
+/** Reports whether a UI driver error is a hit-test or stability failure worth retrying. */
+function isHitTestFailure(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /is covered by|covering element|is not visible|is not stable|detached|stale|intercepted|obscur/i.test(message);
+}
+
+/** Click or type, re-resolving a `--name` target when agent-browser reports
+ * the resolved ref is covered. Refs go stale after the page updates (the
+ * hint on every such error), and a menu sheet can still be settling under
+ * the transcript on the first attempt, so one stale/covered attempt is not
+ * proof the element is unusable. A `--ref` has nothing to re-resolve to, so
+ * it retries the same ref after the same pause. A failed `type` replays only
+ * when the target reads empty: agent-browser writes character by character
+ * without undoing a partial attempt, so replaying over existing text would
+ * append the string a second time. */
+async function clickOrType(
+  handle: UiHandle,
+  values: Record<string, unknown>,
+  verb: "click" | "type",
+  text?: string,
+): Promise<{ target: string; name?: string; data: Record<string, unknown> }> {
+  let resolved = await resolveTarget(handle, values, verb);
+  const env = sessionEnv(handle);
+  let attempt = 0;
+  for (;;) {
+    try {
+      const data = await agentBrowser(
+        handle.binary,
+        env,
+        verb === "click" ? ["click", resolved.target] : ["type", resolved.target, text as string],
+      );
+      return { ...resolved, data };
+    } catch (error) {
+      attempt += 1;
+      if (!isHitTestFailure(error) || attempt >= ACTION_ATTEMPTS) throw error;
+      await new Promise((resolve) => setTimeout(resolve, ACTION_RETRY_DELAY_MS));
+      // Fresh refs: the failed attempt's ref may point at a node the page
+      // has since replaced. `--ref` keeps its explicit ref; `--name`
+      // re-resolves (which itself waits for the settled sheet).
+      if (typeof values.name === "string" && values.name) {
+        resolved = await resolveTarget(handle, values, verb);
+      }
+      // An unreadable target is not proof that nothing was written, so it
+      // takes the same path as readable text: surface the failure.
+      if (verb === "type" && !(await targetIsEmpty(handle, env, resolved.target))) throw error;
+    }
+  }
+}
+
+/** Whether the target's value reads as empty; a target `get value` cannot
+ * read (a ref the page has since replaced, say) is not proof of emptiness. */
+async function targetIsEmpty(handle: UiHandle, env: NodeJS.ProcessEnv, target: string): Promise<boolean> {
+  try {
+    const data = await agentBrowser(handle.binary, env, ["get", "value", target]);
+    return data.value === "";
+  } catch {
+    return false;
+  }
 }
 
 function parseFlagPatch(raw: unknown): { features: Record<string, boolean | number | string> } {
@@ -332,8 +440,7 @@ export async function runControlOmbUi(args: string[]): Promise<unknown> {
     const text = verb === "type" ? values.text : undefined;
     if (verb === "type" && typeof text !== "string") throw new ControlOmbError("ui type requires --text TEXT");
     await requireLiveSession(handle);
-    const { target, name } = await resolveTarget(handle, values, verb);
-    const data = await agentBrowser(handle.binary, sessionEnv(handle), verb === "click" ? ["click", target] : ["type", target, text as string]);
+    const { target, name, data } = await clickOrType(handle, values, verb, text as string | undefined);
     return { ok: true, target, ...(name ? { name } : {}), ...data };
   }
 

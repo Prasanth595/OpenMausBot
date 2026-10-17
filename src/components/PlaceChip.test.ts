@@ -1,15 +1,13 @@
-import { createElement, type ComponentProps } from "react";
+// @vitest-environment happy-dom
+// The chip's trigger and its place picker (the shared PopoverMenu): a real
+// click opens the sheet, so the rows proved here are the ones a person sees.
+import { act, createElement, type ComponentProps } from "react";
+import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
 
-vi.stubGlobal("window", {});
-const fixture = vi.hoisted(() => ({ config: null as unknown, menuOpen: false, computerMcp: true }));
-// Static markup never runs the click that opens the menu; this renders it open.
-vi.mock("./MenuMotion", async (importOriginal) => ({
-  ...await importOriginal<typeof import("./MenuMotion")>(),
-  useMenuMotion: () => ({ shown: fixture.menuOpen, closing: false, className: "", exitProps: {} }),
-}));
+const fixture = vi.hoisted(() => ({ config: null as unknown, computerMcp: true }));
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return {
@@ -43,7 +41,6 @@ vi.mock("./DesktopCapabilities", async (importOriginal) => ({
 }));
 
 const { PlaceChip, usePlaceAvailability } = await import("./PlaceChip");
-afterAll(() => vi.unstubAllGlobals());
 
 const bot = {
   id: "bot",
@@ -60,6 +57,49 @@ const bot = {
   modelSelection: { instanceId: "test", model: "grok-4.6" },
 } as Bot;
 
+let host: HTMLDivElement;
+let root: Root;
+beforeEach(() => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  // Nothing here talks to the server; a real stack would reach for it.
+  vi.stubGlobal("fetch", () => new Promise(() => {}));
+  document.documentElement.dataset.reducedMotion = "true";
+  host = document.createElement("div");
+  document.body.appendChild(host);
+  root = createRoot(host);
+});
+afterEach(() => {
+  act(() => root.unmount());
+  host.remove();
+  delete document.documentElement.dataset.reducedMotion;
+  vi.unstubAllGlobals();
+  fixture.config = null;
+  fixture.computerMcp = true;
+});
+
+/** The place-chip trigger button in the test host. */
+const trigger = () => host.querySelector<HTMLButtonElement>('button[aria-label^="Where this conversation works"]')!;
+/** The open menu's radio rows: whether each is checked, its words and its
+ * native tooltip. The words read the row's own column (title, then the
+ * content line under it), so the icon contributes nothing. */
+const rows = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].map((row) => {
+  const column = row.querySelector<HTMLElement>("span > span")?.parentElement;
+  return {
+    checked: row.getAttribute("aria-checked") === "true",
+    disabled: row.hasAttribute("disabled"),
+    hint: row.getAttribute("title") ?? undefined,
+    text: [...(column?.children ?? [])].map((slot) => slot.textContent ?? "").join(" "),
+  };
+});
+/** Mounts the chip and opens its place menu with a real click. */
+const open = async (props: Partial<ComponentProps<typeof PlaceChip>> = {}) => {
+  act(() => {
+    root.render(createElement(PlaceChip, { bot, live: false, onPin: () => {}, ...props }));
+  });
+  await act(async () => trigger().click());
+  return rows();
+};
+
 describe("PlaceChip composer trigger", () => {
   it("is icon-only, with the place name in the accessible name and tooltip", () => {
     const html = renderToStaticMarkup(createElement(PlaceChip, {
@@ -75,40 +115,33 @@ describe("PlaceChip composer trigger", () => {
 });
 
 describe("the menu's first row", () => {
-  afterEach(() => { fixture.menuOpen = false; });
-  const rows = (props: Partial<ComponentProps<typeof PlaceChip>>) => {
-    fixture.menuOpen = true;
-    const html = renderToStaticMarkup(createElement(PlaceChip, { bot, live: false, onPin: () => {}, ...props }));
-    return {
-      html,
-      rows: html.split('role="menuitemradio"').slice(1).map((row) => ({
-        checked: row.startsWith(' aria-checked="true"'),
-        text: row.slice(row.indexOf(">") + 1, row.indexOf("</button>"))
-          .replace(/<[^>]*>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ").trim(),
-      })),
-    };
-  };
-
-  it("is Auto itself for a bot on Auto, selected while the conversation has no pin", () => {
-    const { html, rows: menu } = rows({ bot: { ...bot, computer: undefined } });
-    expect(menu[0]).toEqual({ checked: true, text: "Auto Picks the right place for each task" });
-    expect(html).not.toContain("Follow this bot");
-    expect(html).toContain('aria-label="Where this conversation works: Auto"');
+  it("is Auto itself for a bot on Auto, selected while the conversation has no pin", async () => {
+    const menu = await open({ bot: { ...bot, computer: undefined } });
+    expect(menu[0]).toMatchObject({ checked: true, text: "Auto Picks the right place for each task" });
+    expect(host.innerHTML).not.toContain("Follow this bot");
+    expect(trigger().getAttribute("aria-label")).toBe("Where this conversation works: Auto");
+    // Auto once, then the four places as before: no second Auto row.
     expect(menu).toHaveLength(5);
     expect(menu.filter((row) => row.text.startsWith("Auto"))).toHaveLength(1);
   });
 
-  it("stays Auto, unchecked, when the conversation is pinned elsewhere", () => {
-    const { html, rows: menu } = rows({ bot: { ...bot, computer: undefined }, task: { surface: "vm" } });
-    expect(menu[0]).toEqual({ checked: false, text: "Auto Picks the right place for each task" });
+  it("stays Auto, unchecked, when the conversation is pinned elsewhere", async () => {
+    const menu = await open({ bot: { ...bot, computer: undefined }, task: { surface: "vm" } });
+    expect(menu[0]).toMatchObject({ checked: false, text: "Auto Picks the right place for each task" });
     expect(menu.find((row) => row.checked)?.text).toBe("Local VM Isolated local desktop");
-    expect(html).toContain('aria-label="Where this conversation works: Local VM"');
+    expect(host.querySelector('button[aria-label="Where this conversation works: Local VM"]')).not.toBeNull();
   });
 
-  it("keeps following the bot's setting when the bot works on a specific place", () => {
-    const { html, rows: menu } = rows({ bot: { ...bot, computer: "local" } });
-    expect(menu[0]).toEqual({ checked: true, text: "Follow this bot's setting Currently This computer" });
-    expect(html).not.toContain("Picks the right place for each task");
+  it("keeps following the bot's setting when the bot works on a specific place", async () => {
+    const menu = await open({ bot: { ...bot, computer: "local" } });
+    expect(menu[0]).toMatchObject({ checked: true, text: "Follow this bot's setting Currently This computer" });
+    expect(host.innerHTML).not.toContain("Picks the right place for each task");
+  });
+
+  it("names the band the chip's own title", async () => {
+    await open();
+    const band = document.querySelector<HTMLElement>("[data-popover-header]")!;
+    expect(band.textContent).toBe("Where this conversation works");
   });
 });
 
@@ -119,7 +152,6 @@ describe("the places a conversation can be pinned to", () => {
     renderToStaticMarkup(createElement(Probe));
     return seen!;
   };
-  afterEach(() => { fixture.config = null; });
 
   it("reaches this computer and a Local VM on a desktop or self-hosted server", () => {
     expect(availability()).toMatchObject({ cloud: true, vm: true, local: true });
@@ -132,15 +164,12 @@ describe("the places a conversation can be pinned to", () => {
 });
 
 describe("J11: the chip names a place's problem in the panel's words", () => {
-  afterEach(() => { fixture.menuOpen = false; fixture.computerMcp = true; });
-
-  it("greys out the cloud computer for a model that can't use one, with the same few words and line", () => {
+  it("greys out the cloud computer for a model that can't use one, with the same few words and line", async () => {
     fixture.computerMcp = false;
-    fixture.menuOpen = true;
-    const html = renderToStaticMarkup(createElement(PlaceChip, { bot, live: false, onPin: () => {} }));
-    const row = html.split('role="menuitemradio"').slice(1).find((entry) => entry.includes("Cloud computer"))!;
-    expect(row).toContain('disabled=""');
-    expect(row).toContain("Not with this model");
-    expect(row).toContain("title=\"grok-4.6 can&#x27;t use a computer. Choose a model that can, such as Claude or ChatGPT.\"");
+    const menu = await open();
+    const cloud = menu.find((row) => row.text.startsWith("Cloud computer"))!;
+    expect(cloud.disabled).toBe(true);
+    expect(cloud.text).toBe("Cloud computer Not with this model");
+    expect(cloud.hint).toContain("grok-4.6 can't use a computer. Choose a model that can, such as Claude or ChatGPT.");
   });
 });

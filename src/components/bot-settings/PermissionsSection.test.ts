@@ -20,6 +20,7 @@ const dispatch = vi.fn();
 let host: HTMLDivElement;
 let root: Root;
 
+/** Mounts the permissions section for a bot in the test host. */
 function render(bot: Bot, trustedModesAvailable = false) {
   const derived = {
     patch: (patch: object) => dispatch({ type: "updateBot", botId: bot.id, patch }),
@@ -33,9 +34,11 @@ function render(bot: Bot, trustedModesAvailable = false) {
     children: createElement(PermissionsSection, { bot, derived }),
   })));
 }
+/** Picks an approval level by its leading label text. */
 const choose = (label: string) => {
   flushSync(() => host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
-  const item = [...host.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+  // The sheet is portalled to the document, outside the mount host.
+  const item = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
     .find((button) => button.textContent?.startsWith(label));
   if (!item) throw new Error(`No ${label} level offered`);
   flushSync(() => item.click());

@@ -1,6 +1,6 @@
 import { track } from "@/lib/analytics";
 import { OrganizationIdentity } from "./OrganizationIdentity";
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type Dispatch, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import {
   Activity,
@@ -43,7 +43,7 @@ import { BotAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
 import { cn } from "@/lib/cn";
 import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
-import { useHeldMenuMotion, useMenuMotion } from "./MenuMotion";
+import { useHeldMenuMotion } from "./MenuMotion";
 import { lastNonReceipt } from "@/lib/receipts";
 import { botPreview, groupPreview } from "./sidebar-preview";
 import { activeLocale, t } from "@/lib/i18n";
@@ -71,6 +71,7 @@ import { useOwnerOrAdmin } from "@/lib/use-owner-or-admin";
 import { draggedFolder, FOLDER_DRAG_TYPE, moveFolder, placeFolder } from "@/lib/folder-order";
 import { botUnreadThreadIds, folderUnreadThreadIds, markBotRead, markFolderRead } from "@/lib/folder-read";
 import { HelperThreadGroup, orderedThreadList, partitionHelperThreads, SidebarThreadRow, stampClock, threadRecency, useRelativeNow, useRevealedThreadRow, useSnoozeExpiry, visibleSidebarThreads } from "./SidebarThreadRow";
+import { PopoverMenu, type PopoverMenuItem } from "./popover/PopoverMenu";
 import {
   loadCollapsedSections,
   loadSectionOrder,
@@ -123,14 +124,13 @@ import { UpdateIndicator } from "./UpdateIndicator";
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
-import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
+import { attentionHasRunningWork, attentionJumpAction, attentionOwnerName, attentionRowStatus, attentionTriggerLabel, attentionUnpinAction, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
 import { useLiveMedia } from "@/lib/live-call-media";
 import { LiveCallPill, liveBadgeFor } from "./LiveCallPill";
 import { ShortcutHint } from "./ShortcutHint";
 import { roomThreadSpeakerId, roomThreadWorking } from "@/lib/room-threads";
-import { usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { PinnedBotRoster, PinnedCircleThreadSection } from "./PinnedCircleThreads";
 
@@ -642,6 +642,7 @@ function SectionPicker({
   );
 }
 
+/** Context menu for a sidebar bot row: archive, delete, and section moves. */
 export function BotContextMenu({
   menu,
   onClose,
@@ -650,6 +651,7 @@ export function BotContextMenu({
   onMoveToSection,
   onNewFolder,
   onNewTaskFolder,
+  openerRef,
 }: {
   menu: MenuState | null;
   onClose: () => void;
@@ -658,15 +660,21 @@ export function BotContextMenu({
   onMoveToSection: (botId: string) => void;
   onNewFolder: (botId: string) => void;
   onNewTaskFolder: (botId: string) => void;
+  /** The row's "…" button, when the caller keeps one: pressing it must reach
+   * its own toggle instead of counting as a press outside the menu. */
+  openerRef?: RefObject<HTMLButtonElement | null>;
 }) {
-  const motion = useHeldMenuMotion(menu);
-  const shown = motion.value;
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
   const canChooseFolder = useOwnerOrAdmin();
   const remoteClient = window.ogb?.remoteClient?.active === true;
-  const bot = shown ? state.bots.find((b) => b.id === shown.botId) : undefined;
-  const menuRef = useRef<HTMLDivElement>(null);
+  // The sheet owns its own exit; the anchor must outlive the open so the
+  // held close still has a point to sit at. The last point is enough — a
+  // reopen always carries a fresh one.
+  const [lastOpen, setLastOpen] = useState<MenuState | null>(null);
+  useEffect(() => { if (menu) setLastOpen(menu); }, [menu]);
+  const point = menu ?? lastOpen;
+  const bot = point ? state.bots.find((b) => b.id === point.botId) : undefined;
   const latestMenu = useRef(menu);
   useLayoutEffect(() => { latestMenu.current = menu; }, [menu]);
   const readInFlight = useRef(false);
@@ -690,43 +698,7 @@ export function BotContextMenu({
       setReadingBotId(null);
     }
   };
-  useLayoutEffect(() => {
-    const element = menuRef.current;
-    if (!element || !shown) return;
-    const place = () => {
-      const { width, height } = element.getBoundingClientRect();
-      element.style.top = `${Math.max(8, Math.min(shown.y, window.innerHeight - height - 8))}px`;
-      element.style.left = `${Math.max(8, Math.min(shown.x, window.innerWidth - width - 8))}px`;
-    };
-    place();
-    window.addEventListener("resize", place);
-    return () => window.removeEventListener("resize", place);
-  });
-  // Kept apart from the listeners: onClose is fresh every render, and re-running this would pull focus back to the
-  // first item.
-  useEffect(() => {
-    if (!menu) return;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    menuRef.current?.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus();
-    return () => { if (opener?.isConnected) opener.focus(); };
-  }, [menu]);
-  useEffect(() => {
-    if (!menu) return;
-    const onDown = (e: MouseEvent) => {
-      if (!(e.target instanceof Element) || !e.target.closest("[data-bot-menu]")) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("blur", onClose);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("blur", onClose);
-    };
-  }, [menu, onClose]);
-
-  if (!motion.shown || !bot || !shown) return null;
+  if (!bot || !point) return null;
   const deleting = state.deletingBots[bot.id] === true;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const canCoordinate = engine?.capabilities?.agentsMcp === true;
@@ -741,125 +713,97 @@ export function BotContextMenu({
     if (state.selectedId === bot.id) dispatch({ type: "select", id: bot.id });
     else openBot(dispatch, bot, showThreads);
   };
-  const item = (
-    icon: React.ReactNode,
-    label: string,
-    onClick?: () => void,
-    opts?: { danger?: boolean; disabled?: boolean; hint?: string; keepOpen?: boolean },
-  ) => (
-    <button
-      key={label}
-      type="button"
-      role="menuitem"
-      disabled={opts?.disabled}
-      onClick={() => {
-        onClick?.();
-        if (!opts?.keepOpen) onClose();
-      }}
-      title={opts?.hint}
-      className={cn(
-        "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px]",
-        opts?.danger ? "text-danger" : "text-ink",
-        opts?.disabled ? "cursor-default opacity-40" : "hover:bg-raised/70",
-      )}
-    >
-      {icon}
-      {label}
-    </button>
-  );
-  const divider = (key: string) => <div key={key} className="mx-2 my-1 border-t border-hairline/40" />;
+  const items: PopoverMenuItem[] = [];
+  if (showThreads) {
+    items.push(
+      { key: "new-task", title: t("task.newShort"), leading: <Plus size={16} />, onSelect: () => dispatch({ type: "newTask", botId: bot.id }) },
+      ...(canChooseFolder
+        ? [{ key: "new-task-folder", title: t("task.folder.new"), leading: <FolderOpen size={16} />, onSelect: () => onNewTaskFolder(bot.id) }]
+        : []),
+      { key: "new-folder", title: t("folder.new"), leading: <FolderPlus size={16} />, onSelect: () => onNewFolder(bot.id) },
+    );
+  }
+  const openProfile = () => {
+    openForSettings();
+    if (!state.settingsOpen) dispatch({ type: "toggleSettings", open: true });
+  };
+  if (remoteClient) {
+    items.push(
+      { key: "move-to-section", title: t("sidebar.bot.moveToSection"), leading: <FolderPlus size={16} />, separatorBefore: showThreads, onSelect: () => onMoveToSection(bot.id) },
+      { key: "edit-profile", title: t("sidebar.bot.editProfile"), leading: <Pencil size={16} />, onSelect: openProfile },
+      { key: "copy-conversation-id", title: t("sidebar.copyConversationId"), leading: <ClipboardCopy size={16} />, onSelect: () => { void copyText(bot.threadId); } },
+    );
+  } else {
+    items.push(
+      {
+        key: "pin",
+        title: bot.pinned ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
+        leading: bot.pinned ? <PinOff size={16} /> : <Pin size={16} />,
+        onSelect: () => dispatch({ type: "updateBot", botId: bot.id, patch: { pinned: !bot.pinned } }),
+      },
+      {
+        key: "chief",
+        title: bot.chiefOfStaff ? t("sidebar.bot.removeChief") : t("sidebar.bot.makeChief"),
+        leading: <Crown size={16} className={bot.chiefOfStaff ? "text-accent" : undefined} />,
+        disabled: !bot.chiefOfStaff && !canCoordinate,
+        hint: !bot.chiefOfStaff && !canCoordinate ? t("sidebar.bot.chiefNeedsEngine") : undefined,
+        onSelect: () => dispatch({ type: "updateBot", botId: bot.id, patch: { chiefOfStaff: !bot.chiefOfStaff } }),
+      },
+      { key: "move-to-section", title: t("sidebar.bot.moveToSection"), leading: <FolderPlus size={16} />, separatorBefore: showThreads, onSelect: () => onMoveToSection(bot.id) },
+      { key: "mark-unread", title: t("sidebar.bot.markUnread"), leading: <BellDot size={16} />, onSelect: () => dispatch({ type: "markUnread", botId: bot.id }) },
+      {
+        key: "mark-all-read",
+        title: readingBotId === bot.id ? t("sidebar.bot.markingAllRead") : t("sidebar.bot.markAllRead"),
+        leading: readingBotId === bot.id ? <Loader2 size={16} className="animate-spin" /> : <CheckCheck size={16} />,
+        disabled: readingBotId !== null || botUnreadThreadIds(bot).length === 0,
+        keepOpen: true,
+        onSelect: () => { void readAll(bot); },
+      },
+      { key: "edit-profile", title: t("sidebar.bot.editProfile"), leading: <Pencil size={16} />, separatorBefore: true, onSelect: openProfile },
+      { key: "duplicate", title: t("sidebar.bot.duplicate"), leading: <Copy size={16} />, onSelect: () => dispatch({ type: "duplicateBot", botId: bot.id }) },
+      { key: "copy-conversation-id", title: t("sidebar.copyConversationId"), leading: <ClipboardCopy size={16} />, separatorBefore: true, onSelect: () => { void copyText(bot.threadId); } },
+      {
+        key: "archive",
+        title: t("sidebar.bot.archive"),
+        leading: <Archive size={16} />,
+        separatorBefore: true,
+        disabled: archiveBlocked,
+        hint: archiveHint,
+        onSelect: () => onArchive(bot),
+      },
+      {
+        key: "delete",
+        title: deleting ? t("sidebar.bot.deleteChecking") : t("common.delete"),
+        leading: deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />,
+        disabled: deleting,
+        busy: deleting,
+        hint: deleting ? t("sidebar.bot.deleteCheckingTitle") : undefined,
+        // The override replaces the row's fill, so the danger tone brings
+        // its own — and none of it while the delete is under way.
+        overrideClassNames: { row: "text-danger hover:bg-danger/10 disabled:hover:bg-transparent", leading: "text-danger" },
+        onSelect: () => onDelete(bot),
+      },
+    );
+  }
+  if (readError?.botId === bot.id) {
+    items.push({
+      key: "read-error",
+      render: <p role="alert" className="px-3.5 py-2 text-[12px] text-danger">{readError.message}</p>,
+    });
+  }
 
-  return createPortal(
-    <div
-      ref={menuRef}
-      data-bot-menu
-      data-sidebar
-      role="menu"
-      aria-label={t("sidebar.bot.actions", { name: bot.name })}
-      onKeyDown={navigateThreadMenu}
-      style={{ top: shown.y, left: shown.x }}
-      className={cn("fixed z-40 max-h-[calc(100dvh-16px)] w-[228px] max-w-[calc(100vw-16px)] overflow-y-auto overscroll-contain rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60", motion.className)} {...motion.exitProps}
-    >
-      {showThreads && <>
-        {item(<Plus size={16} className="text-ink-secondary" />, t("task.newShort"), () => dispatch({ type: "newTask", botId: bot.id }))}
-        {canChooseFolder && item(<FolderOpen size={16} className="shrink-0 text-ink-secondary" />, t("task.folder.new"), () => onNewTaskFolder(bot.id))}
-        {item(<FolderPlus size={16} className="text-ink-secondary" />, t("folder.new"), () => onNewFolder(bot.id))}
-        {divider("threads")}
-      </>}
-      {remoteClient ? [
-        item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
-          onClose();
-          onMoveToSection(bot.id);
-        }),
-        item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.editProfile"), () => {
-          openForSettings();
-          if (!state.settingsOpen) dispatch({ type: "toggleSettings", open: true });
-        }),
-        item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
-          void copyText(bot.threadId);
-        }),
-      ] : [
-        item(
-          bot.pinned ? <PinOff size={16} className="text-ink-secondary" /> : <Pin size={16} className="text-ink-secondary" />,
-          bot.pinned ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
-          () => dispatch({ type: "updateBot", botId: bot.id, patch: { pinned: !bot.pinned } }),
-        ),
-        item(
-          <Crown size={16} className={bot.chiefOfStaff ? "text-accent" : "text-ink-secondary"} />,
-          bot.chiefOfStaff ? t("sidebar.bot.removeChief") : t("sidebar.bot.makeChief"),
-          () => dispatch({ type: "updateBot", botId: bot.id, patch: { chiefOfStaff: !bot.chiefOfStaff } }),
-          {
-            disabled: !bot.chiefOfStaff && !canCoordinate,
-            hint: !bot.chiefOfStaff && !canCoordinate ? t("sidebar.bot.chiefNeedsEngine") : undefined,
-          },
-        ),
-        item(<FolderPlus size={16} className="text-ink-secondary" />, t("sidebar.bot.moveToSection"), () => {
-          onClose();
-          onMoveToSection(bot.id);
-        }),
-        item(<BellDot size={16} className="text-ink-secondary" />, t("sidebar.bot.markUnread"), () =>
-          dispatch({ type: "markUnread", botId: bot.id }),
-        ),
-        item(
-          readingBotId === bot.id ? <Loader2 size={16} className="animate-spin text-ink-secondary" /> : <CheckCheck size={16} className="text-ink-secondary" />,
-          readingBotId === bot.id ? t("sidebar.bot.markingAllRead") : t("sidebar.bot.markAllRead"),
-          () => { void readAll(bot); },
-          { disabled: readingBotId !== null || botUnreadThreadIds(bot).length === 0, keepOpen: true },
-        ),
-        divider("d1"),
-        item(<Pencil size={16} className="text-ink-secondary" />, t("sidebar.bot.editProfile"), () => {
-          openForSettings();
-          if (!state.settingsOpen) dispatch({ type: "toggleSettings", open: true });
-        }),
-        item(<Copy size={16} className="text-ink-secondary" />, t("sidebar.bot.duplicate"), () =>
-          dispatch({ type: "duplicateBot", botId: bot.id }),
-        ),
-        divider("d2"),
-        item(<ClipboardCopy size={16} className="text-ink-secondary" />, t("sidebar.copyConversationId"), () => {
-          void copyText(bot.threadId);
-        }),
-        divider("d3"),
-        item(
-          <Archive size={16} className="text-ink-secondary" />,
-          t("sidebar.bot.archive"),
-          () => onArchive(bot),
-          {
-            disabled: archiveBlocked,
-            hint: archiveHint,
-          },
-        ),
-        <BotDeleteMenuItem
-          key="delete"
-          deleting={deleting}
-          onClick={() => {
-            onClose();
-            onDelete(bot);
-          }}
-        />,
-      ]}
-      {readError?.botId === bot.id && <p role="alert" className="px-3.5 py-2 text-[12px] text-danger">{readError.message}</p>}
-    </div>,
-    document.body,
+  return (
+    <PopoverMenu
+      items={items}
+      ariaLabel={t("sidebar.bot.actions", { name: bot.name })}
+      anchor={{ kind: "point", x: point.x, y: point.y }}
+      open={menu !== null}
+      onOpenChange={(open) => { if (!open) onClose(); }}
+      extraInsideRefs={openerRef ? [openerRef] : undefined}
+      focusFirstOnOpen
+      restoreFocusOnClose
+      zIndex={40}
+    />
   );
 }
 
@@ -888,6 +832,7 @@ export function botConfirmCopy(kind: BotConfirmKind, name: string) {
       };
 }
 
+/** Copy for the delete-everything archived-bots confirmation dialog. */
 export function archivedDeleteAllCopy() {
   return {
     title: t("sidebar.archived.deleteAllTitle"),
@@ -897,25 +842,7 @@ export function archivedDeleteAllCopy() {
   };
 }
 
-export function BotDeleteMenuItem({ deleting, onClick }: { deleting: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      disabled={deleting}
-      aria-busy={deleting || undefined}
-      onClick={onClick}
-      title={deleting ? t("sidebar.bot.deleteCheckingTitle") : undefined}
-      className={cn(
-        "flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-danger",
-        deleting ? "cursor-default opacity-40" : "hover:bg-raised/70",
-      )}
-    >
-      {deleting ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
-      {deleting ? t("sidebar.bot.deleteChecking") : t("common.delete")}
-    </button>
-  );
-}
-
+// one empty list, so a bot without folders hands its rows the same array
 const NO_FOLDERS: BotProject[] = [];
 
 export function BotThreadList({ bot, selected, density, query, pendingQueued, reveal, locale, generatedTitles, dispatch, activityLabel, hidden = false }: BotRowProps & {
@@ -1131,14 +1058,21 @@ export interface BotRowProps {
   quiet: boolean;
   query: string;
   dispatch: Dispatch<Action>;
-  onMenu: (menu: MenuState) => void;
+  onMenu: (menu: MenuState | null) => void;
+  /** Whether this row's own "…" menu is the open one: the button toggles it
+   * shut instead of re-opening it where it already sits. */
+  menuOpen?: boolean;
+  /** The "…" button itself. Its press counts as inside the menu, so the
+   * outside-press dismissal cannot close the menu a moment before the click
+   * that follows re-opens it. */
+  menuButtonRef?: RefObject<HTMLButtonElement | null>;
 }
 
 export function botRowProps(
   state: AppState,
   dispatch: Dispatch<Action>,
   bot: Bot,
-  layout: Pick<BotRowProps, "density" | "quiet" | "query" | "onMenu">,
+  layout: Pick<BotRowProps, "density" | "quiet" | "query" | "onMenu"> & Partial<Pick<BotRowProps, "menuOpen" | "menuButtonRef">>,
 ): BotRowProps {
   const selected = state.activeView === "chat" && state.selectedId === bot.id;
   const reveal = state.revealThread;
@@ -1165,7 +1099,7 @@ function useVisibleMessages(bot: Bot): Message[] {
 
 export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const advanced = useAdvancedMode();
-  const { bot, selected, deleting, mascotMotion, reveal, pendingQueued, instances, liveCall, density, quiet, query, dispatch, onMenu } = props;
+  const { bot, selected, deleting, mascotMotion, reveal, pendingQueued, instances, liveCall, density, quiet, query, dispatch, onMenu, menuOpen = false, menuButtonRef } = props;
   const showThreads = useShowThreads();
   const liveMedia = useLiveMedia();
   const remoteClient = typeof window !== "undefined" && window.ogb?.remoteClient?.active === true;
@@ -1362,7 +1296,14 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
           className="pointer-events-none absolute right-[3.75rem] top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><Plus size={14} /></button>}
         {showThreads && <button type="button" aria-label={t("folder.newNamed", { name: bot.name })} title={t("folder.new")} onClick={() => { setThreadsOpen(true); setCreatingProject(true); }}
           className="pointer-events-none absolute right-8 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><FolderPlus size={14} /></button>}
-        <button type="button" aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); onMenu({ botId: bot.id, x: rect.left, y: rect.bottom }); }}
+        <button type="button" ref={menuOpen ? menuButtonRef : undefined} aria-label={t("sidebar.bot.actions", { name: bot.name })} title={t("sidebar.bot.actions", { name: bot.name })} aria-haspopup="menu" aria-expanded={menuOpen}
+          onClick={(event) => {
+            // Pressing the open menu's own button closes it. Re-anchoring
+            // would only look like the menu refused to close.
+            if (menuOpen) { onMenu(null); return; }
+            const rect = event.currentTarget.getBoundingClientRect();
+            onMenu({ botId: bot.id, x: rect.left, y: rect.bottom });
+          }}
           className="pointer-events-none absolute right-1 top-1/2 flex size-7 -translate-y-1/2 items-center justify-center rounded text-ink-secondary opacity-0 hover:bg-raised hover:text-ink group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 max-md:pointer-events-auto max-md:opacity-70 touch:pointer-events-auto touch:opacity-70"><MoreHorizontal size={15} /></button>
       </>}
       {deleting && iconOnly && (
@@ -1380,6 +1321,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   );
 });
 
+/** One archived bot row with restore and permanent-delete actions. */
 export function ArchivedBotRow({
   bot,
   restoring,
@@ -1426,6 +1368,7 @@ export function ArchivedBotRow({
   );
 }
 
+/** Dialog listing archived bots with restore and permanent-delete flows. */
 export function ArchivedBotsPanel({
   bots,
   onClose,
@@ -1516,7 +1459,7 @@ export function ArchivedBotsPanel({
         aria-modal="true"
         aria-labelledby="archived-bots-title"
         tabIndex={-1}
-        className="animate-pop-in flex max-h-[min(680px,calc(100dvh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-[24px] border border-hairline/50 bg-panel shadow-2xl shadow-black/50 outline-none"
+        className="animate-pop-in flex max-h-[min(680px,calc(100dvh-2rem))] w-full max-w-[760px] flex-col overflow-hidden rounded-md border border-hairline/50 bg-panel shadow-xl outline-none"
       >
         <header className="flex items-start justify-between gap-4 px-6 pb-4 pt-6 sm:px-8 sm:pt-7">
           <div>
@@ -1615,6 +1558,7 @@ export function TeamMenuItems({ onAddBots, onRename, onShare, onDelete, onSetFor
   );
 }
 
+/** Primary navigation sidebar: bots, groups, archived bots, and team menus. */
 export function Sidebar({ open, onClose, collapseToIcons = false }: {
   open: boolean;
   onClose: () => void;
@@ -1635,6 +1579,10 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const [confirm, setConfirm] = useState<{ kind: BotConfirmKind; bot: Bot } | null>(null);
   const cancelConfirm = useCallback(() => setConfirm(null), []);
   const [menu, setMenu] = useState<MenuState | null>(null);
+  /** The row "…" button whose menu is open. Its press counts as inside the
+   * menu, so the outside-press dismissal cannot close it a moment before the
+   * click re-opens it — the button then toggles it shut instead. */
+  const botMenuButton = useRef<HTMLButtonElement | null>(null);
   const [sectionPicker, setSectionPicker] = useState<MenuState | null>(null);
   const [newTeam, setNewTeam] = useState(false);
   const [teamMenu, setTeamMenu] = useState<{ name: string; x: number; y: number } | null>(null);
@@ -1666,11 +1614,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const [roomSectionPicker, setRoomSectionPicker] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const [deletingRoomId, setDeletingRoomId] = useState<string | null>(null);
   const deletingRoom = deletingRoomId ? state.groups.find((g) => g.id === deletingRoomId) : undefined;
-  const [plusOpen, setPlusOpen] = useState(false);
-  const plusMotion = useMenuMotion(plusOpen);
   const advanced = useAdvancedMode();
-  const [attentionOpen, setAttentionOpen] = useState(false);
-  const attentionMotion = useMenuMotion(attentionOpen);
   const [attentionPinned, setAttentionPinnedState] = useState(() => loadSidebarAttentionPinned());
   const setAttentionPinned = (pinned: boolean) => {
     setAttentionPinnedState(pinned);
@@ -1746,11 +1690,6 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     document.addEventListener("keydown", closeOnEscape);
     return () => document.removeEventListener("keydown", closeOnEscape);
   }, [open, onClose, confirm, deletingRoom]);
-
-  const attentionMenuRef = useRef<HTMLDivElement>(null);
-  const plusMenuRef = useRef<HTMLDivElement>(null);
-  usePopoverDismiss(attentionOpen, attentionMenuRef, () => setAttentionOpen(false));
-  usePopoverDismiss(plusOpen, plusMenuRef, () => setPlusOpen(false));
 
   useEffect(() => {
     if (remoteClient) return;
@@ -1941,9 +1880,42 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   };
   const archivedBots = state.bots.filter((bot) => bot.hidden);
   const attention = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups);
+  // The bell's menu as data: the pinned band, then a row per thread that
+  // needs the person. Pressing a row jumps to it and closes the menu.
+  const attentionItems: PopoverMenuItem[] = [
+    {
+      key: "band",
+      header: {
+        title: t("attention.title"),
+        content: <button type="button" onClick={() => setAttentionPinned(!attentionPinned)}
+          aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
+          title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
+          className="flex size-6 shrink-0 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
+          {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
+        </button>,
+      },
+    },
+    ...(attention.length === 0
+      ? [{ key: "empty", render: <div className="px-3.5 py-2.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div> }]
+      : attention.map((entry): PopoverMenuItem => {
+          const { Icon, colorClass, label: status } = attentionRowStatus(entry.task);
+          const name = attentionOwnerName(entry);
+          const label = t("attention.item", { title: entry.task.title, name, status });
+          return {
+            key: `${entry.kind}-${entry.kind === "bot" ? entry.botId : entry.groupId}-${entry.task.threadId}`,
+            title: entry.task.title,
+            content: `${name} · ${status}`,
+            leading: <Icon size={15} aria-hidden="true" className={cn("shrink-0", colorClass)} />,
+            hint: label,
+            onSelect: () => dispatch(attentionJumpAction(entry)),
+          };
+        })),
+  ];
+  // Every pinned thread across every bot and room — the thread-level twin
+  // of the built-in pinned-bots section, which only ever covered whole bots.
   const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
-  const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, quiet: quietRows, query: q, onMenu: setMenu });
+  const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, quiet: quietRows, query: q, onMenu: setMenu, menuOpen: menu?.botId === bot.id, menuButtonRef: botMenuButton });
 
   return (
     <aside
@@ -2020,140 +1992,71 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
           >
             <Search size={20} strokeWidth={2} />
           </button>}
-          {advanced && <div ref={attentionMenuRef} className={density === "icons" ? "relative" : "contents"}>
-            <button
-              type="button"
-              onClick={() => setAttentionOpen((o) => !o)}
-              aria-label={attentionTriggerLabel(attention.length)}
-              title={attentionTriggerLabel(attention.length)}
-              className={cn(
-                "relative flex items-center justify-center text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-                density === "icons" ? "size-[46px] shrink-0 rounded-xl" : "size-8 rounded-md",
-              )}
-            >
-              <Activity size={density === "icons" ? 20 : 17} strokeWidth={2} />
+          {advanced && <PopoverMenu
+            items={attentionItems}
+            ariaLabel={attentionTriggerLabel(attention.length)}
+            sheetAriaLabel={t("attention.title")}
+            placement="below"
+            align={density === "icons" ? "start" : "end"}
+            width={density === "compact" ? 240 : 288}
+            zIndex={40}
+            triggerTitle={attentionTriggerLabel(attention.length)}
+            // The pin rides the band's own line, as it does on the docked panel.
+            renderHeader={(header, defaults) => (
+              <div data-popover-header className={cn(defaults.className, "flex items-center gap-1")}>
+                <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">{header.title}</span>
+                {header.content}
+              </div>
+            )}
+            triggerClassName={cn(
+              "relative flex items-center justify-center text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+              density === "icons" ? "size-[46px] shrink-0 rounded-xl" : "size-8 rounded-md",
+            )}
+            trigger={() => <>
+              <Activity size={density === "icons" ? 20 : 17} strokeWidth={2} aria-hidden="true" />
               {attention.length > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-0.5 text-[9.5px] font-semibold leading-4 text-ink">{attention.length > 9 ? "9+" : attention.length}</span>
               )}
               {attentionHasRunningWork(attention) && (
                 <span data-header-activity="" className="absolute bottom-0.5 right-0.5 size-1.5 rounded-full bg-success" aria-hidden="true" />
               )}
-            </button>
-            {attentionMotion.shown && (
-              <>
-                <div className={cn(
-                  "absolute top-full z-40 mt-1 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
-                  density === "icons" ? "left-0" : "right-0",
-                  density === "icons" ? "w-72" : density === "compact" ? "w-60 md:w-[min(240px,calc(var(--sidebar-width)_-_32px))]" : "w-72 md:w-[min(288px,calc(var(--sidebar-width)_-_32px))]",
-                  attentionMotion.className,
-                )} {...attentionMotion.exitProps}>
-                  <div className="flex items-center gap-1 pb-1 pl-3.5 pr-2 pt-1.5">
-                    <span className="flex-1 text-[13px] font-medium text-ink">{t("attention.title")}</span>
-                    <button
-                      type="button"
-                      onClick={() => setAttentionPinned(!attentionPinned)}
-                      aria-label={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                      title={t(attentionPinned ? "attention.unpin" : "attention.pin")}
-                      className="flex size-6 items-center justify-center rounded text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                    >
-                      {attentionPinned ? <PinOff size={14} /> : <Pin size={14} />}
-                    </button>
-                  </div>
-                  {attention.length === 0 ? (
-                    <div className="px-3.5 py-2.5 text-[13px] text-ink-secondary">{t("attention.empty")}</div>
-                  ) : (
-                    <AttentionThreadRows entries={attention} onJump={(entry) => { setAttentionOpen(false); dispatch(attentionJumpAction(entry)); }} />
-                  )}
-                </div>
-              </>
-            )}
-          </div>}
-          <div ref={plusMenuRef} className="contents">
-          <button
-            ref={importReturnRef}
-            onClick={() => setPlusOpen((o) => !o)}
-            aria-label={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
-            className={cn(
+            </>}
+          />}
+          {/* The + menu is the profile menu's sibling: a trigger Popover owns
+              (so the dialog it can open gets its button back), anchored to
+              the button itself instead of to the header cluster. */}
+          <PopoverMenu
+            items={[
+              { key: "new-chat", title: t("sidebar.newChat.title"), leading: <MessageSquarePlus />, onSelect: () => setNewChatOpen(true) },
+              { key: "new-bot", title: t("sidebar.newBot"), leading: <BotIcon />, trailing: <ShortcutHint id="new-bot" />, onSelect: () => dispatch({ type: "toggleNewBot", open: true }) },
+              { key: "new-group", title: t("sidebar.newChannel.title"), leading: <Users />, onSelect: () => setNewRoom(true) },
+              ...(!remoteClient ? [
+                { key: "create-team", title: t("team.create"), leading: <FolderPlus />, onSelect: () => setNewTeam(true) },
+                { key: "templates", title: t("sidebar.teamLibrary"), leading: <Library />, onSelect: () => setTeamLibraryOpen(true) },
+                ...(archivedBots.length > 0
+                  ? [{
+                      key: "archived",
+                      title: t("sidebar.archived.title"),
+                      leading: <Archive />,
+                      value: String(archivedBots.length),
+                      onSelect: () => setArchivedBotsOpen(true),
+                    } satisfies PopoverMenuItem]
+                  : []),
+              ] : []),
+            ] satisfies PopoverMenuItem[]}
+            ariaLabel={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
+            placement="below"
+            align={density === "icons" ? "start" : "end"}
+            width={208}
+            zIndex={40}
+            triggerRef={importReturnRef}
+            triggerTitle={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
+            triggerClassName={cn(
               "flex items-center justify-center text-ink-secondary hover:bg-raised hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
               density === "icons" ? "size-[46px] shrink-0 rounded-xl" : "size-8 rounded-md",
             )}
-            title={remoteClient ? t("sidebar.new") : t("sidebar.newOrShare")}
-          >
-            <Plus size={density === "icons" ? 20 : 17} strokeWidth={2} />
-          </button>
-          {plusMotion.shown && (
-            <>
-              <div className={cn(
-                "absolute top-full z-40 mt-1 w-52 overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/60",
-                density === "icons" ? "left-0" : "right-0",
-                plusMotion.className,
-              )} {...plusMotion.exitProps}>
-                <button
-                  onClick={() => {
-                    setPlusOpen(false);
-                    setNewChatOpen(true);
-                  }}
-                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                >
-                  <MessageSquarePlus size={16} className="text-ink-secondary" />
-                  {t("sidebar.newChat.title")}
-                </button>
-                <button
-                  onClick={() => {
-                    setPlusOpen(false);
-                    dispatch({ type: "toggleNewBot", open: true });
-                  }}
-                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                >
-                  <BotIcon size={16} className="text-ink-secondary" />
-                  <span className="flex-1">{t("sidebar.newBot")}</span>
-                  <ShortcutHint id="new-bot" />
-                </button>
-                <button
-                  onClick={() => {
-                    setPlusOpen(false);
-                    setNewRoom(true);
-                  }}
-                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                >
-                  <Users size={16} className="text-ink-secondary" />
-                  {t("sidebar.newChannel.title")}
-                </button>
-                {!remoteClient && <button
-                  onClick={() => { setPlusOpen(false); setNewTeam(true); }}
-                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                >
-                  <FolderPlus size={16} className="text-ink-secondary" /> {t("team.create")}
-                </button>}
-                {!remoteClient && <>
-                <button
-                  onClick={() => {
-                    setPlusOpen(false);
-                    setTeamLibraryOpen(true);
-                  }}
-                  className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                >
-                  <Library size={16} className="text-ink-secondary" />
-                  {t("sidebar.teamLibrary")}
-                </button>
-                {archivedBots.length > 0 && (
-                  <button
-                    onClick={() => {
-                      setPlusOpen(false);
-                      setArchivedBotsOpen(true);
-                    }}
-                    className="flex w-full items-center gap-3 px-3.5 py-2 text-left text-[14px] text-ink hover:bg-raised/70"
-                  >
-                    <Archive size={16} className="text-ink-secondary" />
-                    <span className="flex-1">{t("sidebar.archived.title")}</span>
-                    <span className="text-[11.5px] text-ink-secondary">{archivedBots.length}</span>
-                  </button>
-                )}
-                </>}
-              </div>
-            </>
-          )}
-          </div>
+            trigger={() => <Plus size={density === "icons" ? 20 : 17} strokeWidth={2} />}
+          />
         </div>
       </div>
 
@@ -2428,6 +2331,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
       <BotContextMenu
           menu={menu}
           onClose={() => setMenu(null)}
+          openerRef={botMenuButton}
           onArchive={requestArchive}
           onDelete={(bot) => setConfirm({ kind: "delete", bot })}
           onMoveToSection={(botId) => {

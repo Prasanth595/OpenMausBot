@@ -16,7 +16,7 @@ import {
   type HighLevelStatus,
 } from "@/lib/highlevel-sign-in";
 import { forgetHighLevelStatus, rememberHighLevelStatus } from "@/lib/highlevel-status";
-import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
+import { PopoverMenu } from "./popover/PopoverMenu";
 
 const pill = "inline-flex h-7 min-w-[64px] shrink-0 items-center justify-center gap-2 rounded-full bg-control/80 px-3 text-[13px] font-medium leading-5 text-ink transition-colors hover:bg-raised-hover disabled:opacity-40";
 const field = "h-8 w-full min-w-0 rounded-lg bg-inset px-2.5 text-[13px] text-ink placeholder:text-ink-secondary focus:outline-none focus:ring-1 focus:ring-accent/50";
@@ -200,12 +200,12 @@ export function HighLevelCard({ refreshKey = 0, onConnection }: {
         ? t("connectors.signedOut")
         : t("highlevel.description");
   const menu = (connected || needsSignIn) && (
-    <SidebarPopoverMenu
+    <PopoverMenu
       placement="below"
       ariaLabel={t("highlevel.menu")}
       triggerClassName="shrink-0"
-      items={[{ key: "disconnect", label: t("connectors.disconnect"), disabled: busy !== null, onSelect: () => void disconnect() }]}
-      renderTrigger={() => (
+      items={[{ key: "disconnect", title: t("connectors.disconnect"), disabled: busy !== null, onSelect: () => void disconnect() }]}
+      trigger={() => (
         <span className="inline-flex size-7 items-center justify-center rounded-full bg-control/80 text-ink hover:bg-raised-hover">
           {busy === "disconnect" ? <Loader2 size={14} className="animate-spin" /> : <MoreHorizontal size={15} aria-hidden="true" />}
         </span>

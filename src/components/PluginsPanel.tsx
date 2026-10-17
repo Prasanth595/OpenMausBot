@@ -25,7 +25,7 @@ import {
   type ConnectorStatus,
 } from "@/lib/connector-status";
 import { BotAvatar } from "./Avatar";
-import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
+import { PopoverMenu } from "./popover/PopoverMenu";
 import { CATEGORY_SECTION_SIZE, catalogSections, inCategory, rankCategories } from "@/lib/app-catalog";
 import { McpServersPanel } from "./McpServersPanel";
 import { HighLevelCard } from "./HighLevelCard";
@@ -224,6 +224,7 @@ export function botsUsingService(bots: Bot[], instances: InstanceInfo[], slug: s
     connectorServiceAccess(bot.connectorTools, slug).level !== "none");
 }
 
+/** Marketplace and connected-apps panel with install, connect, and disconnect flows. */
 export function PluginsPanel() {
   const { state, dispatch } = useStore();
   const remoteClient = window.ogb?.remoteClient?.active === true;
@@ -679,11 +680,10 @@ export function PluginsPanel() {
               </button>
             ))}
             {moreCategories.length > 0 && (
-              <SidebarPopoverMenu
-                placement="below"
-                ariaLabel={t("apps.moreCategories")}
-                items={moreCategories.map((name) => ({ key: name, label: name, active: category === name, onSelect: () => pickCategory(name) }))}
-                renderTrigger={({ open }) => (
+              <PopoverMenu
+                placement="below" align="end" ariaLabel={t("apps.moreCategories")}
+                items={moreCategories.map((name) => ({ key: name, title: name, active: category === name, onSelect: () => pickCategory(name) }))}
+                trigger={({ open }) => (
                   <span className={cn(pill, pillTone(filter === "all" && categoryInMore), open && !categoryInMore && "bg-raised-hover text-ink")}>
                     {categoryInMore ? category : t("apps.more")}
                     <ChevronDown size={14} aria-hidden="true" />

@@ -8,6 +8,7 @@ import { teamMapStatus, type TeamMapSection } from "@/lib/team-map";
 import { COMPUTER_DRAG_TYPE, fitTeams, layoutTeams, orderBots, parseBotOrders, parsePositions, reorderBot, zoomAt, type Point, type View } from "@/lib/team-canvas";
 import { BotAvatar } from "./Avatar";
 import { InstanceProviderMark, ProviderMark } from "./ProviderIcons";
+import { PopoverMenu, type PopoverMenuItem } from "./popover/PopoverMenu";
 
 type Gesture = {
   id: number;
@@ -18,8 +19,8 @@ type Gesture = {
 } & ({ kind: "pan" } | { kind: "team"; key: string; origin: Point } | { kind: "bot"; bot: Bot });
 
 const iconButton = "flex size-9 shrink-0 items-center justify-center rounded-lg text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline-2 focus-visible:outline-accent";
-const menuButton = "flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-[12px] text-ink-secondary hover:bg-control hover:text-ink";
 
+/** One bot card on the team canvas: identity, status, and quick actions. */
 function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
   bot: Bot;
   selected: boolean;
@@ -72,6 +73,7 @@ function BotCard({ bot, selected, moving, connected, onComputer, onArrange }: {
   </article>;
 }
 
+/** Zoomable team canvas rendering sections, bot cards, and drag-to-move gestures. */
 export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemory, onEditTeam, onDeleteTeam, onComputer, onComputerDrop, onTeamComputer, teamComputers = {}, connectedBotIds = [] }: {
   sections: TeamMapSection<Bot>[];
   canManage: boolean;
@@ -103,7 +105,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
   const [moving, setMoving] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [layoutLoaded, setLayoutLoaded] = useState(false);
-  const [menuAbove, setMenuAbove] = useState<string | null>(null);
+  const [openMenu, setOpenMenu] = useState<string | null>(null);
   const tiles = useMemo(() => layoutTeams(sections, positions), [sections, positions]);
   const current = useRef({ view, positions, tiles, selectedId: state.selectedId, settingsOpen: state.settingsOpen });
   current.current = { view, positions, tiles, selectedId: state.selectedId, settingsOpen: state.settingsOpen };
@@ -175,18 +177,15 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
   }, [fit]);
   const teamSizes = JSON.stringify(tiles.map(({ key, width, height }) => [key, width, height]));
   useEffect(() => { fit(); }, [fit, teamSizes, layoutLoaded]);
-  useEffect(() => {
-    const open = viewport.current?.querySelector<HTMLDetailsElement>("details[open]");
-    const bounds = viewport.current?.getBoundingClientRect();
-    if (open && bounds) setMenuAbove(open.getBoundingClientRect().bottom > bounds.bottom - 210 * view.scale
-      ? open.closest<HTMLElement>("[data-team-key]")?.dataset.teamKey ?? null : null);
-  }, [view, teamSizes]);
+  // A team's menu sheet is portal-anchored to its button in the transformed
+  // world: panning or zooming slides the button out from under it, so the
+  // open menu goes down instead of hanging where the button used to be.
+  useEffect(() => { setOpenMenu(null); }, [view]);
 
   useEffect(() => {
     const element = viewport.current;
     if (!element) return;
     const wheel = (event: WheelEvent) => {
-      if ((event.target as HTMLElement).closest("details[open]")) return;
       event.preventDefault();
       if (gesture.current) return;
       const previous = current.current.view;
@@ -209,7 +208,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
     const botId = element.closest<HTMLElement>("[data-bot-id]")?.dataset.botId;
     const teamKey = element.closest<HTMLElement>("[data-arrange-team]")?.dataset.arrangeTeam;
     const bot = botId ? sections.flatMap((section) => [...section.chiefs, ...section.members]).find((item) => item.id === botId) : undefined;
-    if (!bot && teamKey === undefined && element.closest("button, details, a, input, [data-team-key]")) return;
+    if (!bot && teamKey === undefined && element.closest("button, a, input, [data-team-key]")) return;
     if (bot && (moving || !layoutLoaded)) return;
     if (teamKey !== undefined && !layoutLoaded) return;
     const common = { id: event.pointerId, start: { x: event.clientX, y: event.clientY }, view, positions, moved: false };
@@ -324,10 +323,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
       onComputerDrop(resourceId, key);
     }}
     onDragEnd={() => setComputerDropKey(null)}
-    onPointerDownCapture={(event) => {
-      keyboardFocus.current = false;
-      if (!(event.target as HTMLElement).closest("details")) event.currentTarget.querySelectorAll("details[open]").forEach((element) => element.removeAttribute("open"));
-    }}
+    onPointerDownCapture={() => { keyboardFocus.current = false; }}
     onKeyDownCapture={(event) => { if (event.key === "Tab") keyboardFocus.current = true; }}
     onPointerLeave={() => { if (gesture.current && !gesture.current.moved) finish(undefined, true); }}
     onLostPointerCapture={() => { if (gesture.current) finish(undefined, true); }}
@@ -340,10 +336,7 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
     }}
     onClickCapture={(event) => { if (suppressClick.current) { suppressClick.current = false; event.preventDefault(); event.stopPropagation(); } }}
     onKeyDown={(event) => {
-      if (event.key === "Escape") { finish(undefined, true); event.currentTarget.querySelectorAll("details[open]").forEach((element) => {
-        element.querySelector("summary")?.focus({ preventScroll: true });
-        element.removeAttribute("open");
-      }); }
+      if (event.key === "Escape") finish(undefined, true);
       if (event.target !== event.currentTarget) return;
       const directions: Record<string, Point> = { ArrowLeft: { x: 60, y: 0 }, ArrowRight: { x: -60, y: 0 }, ArrowUp: { x: 0, y: 60 }, ArrowDown: { x: 0, y: -60 } };
       const delta = directions[event.key];
@@ -363,8 +356,25 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
           <BotCard bot={bot} selected={state.selectedId === bot.id && state.settingsOpen} moving={dragged?.bot.id === bot.id || moving === bot.id}
             connected={connectedBotIds.includes(bot.id)} onComputer={onComputer} onArrange={layoutLoaded ? arrangeBot : undefined} />
         </div>;
+        const menuItems: PopoverMenuItem[] = [
+          { key: "move", title: t("team.moveTo", { name: section.name }), leading: <Users />, onSelect: () => onEditTeam(section.key) },
+          { key: "instructions", title: t("team.instructions"), leading: <BookOpen />, onSelect: () => onInstructions(section.key, section.name) },
+          ...(onMemory ? [{ key: "memory", title: "Team memory", leading: <Brain />, onSelect: () => onMemory(section.key, section.name) }] : []),
+          ...(section.key ? [
+            { key: "rename", title: t("team.rename"), leading: <Pencil />, onSelect: () => onEditTeam(section.key, true) },
+            {
+              key: "delete",
+              title: t("team.delete"),
+              leading: <Trash2 />,
+              // The override replaces the row's fill, so the danger tone
+              // brings its own — and none of it while the row is disabled.
+              overrideClassNames: { row: "text-danger hover:bg-danger/10 disabled:hover:bg-transparent", leading: "text-danger" },
+              onSelect: () => onDeleteTeam(section.key),
+            },
+          ] : []),
+        ];
         return <section key={section.key} data-team-key={section.key} aria-label={t("canvas.teamRegion", { name: section.name })}
-          className={cn("absolute rounded-2xl border bg-panel/90 shadow-sm has-[details[open]]:z-20 data-[computer-dropping=true]:border-accent data-[computer-dropping=true]:ring-2 data-[computer-dropping=true]:ring-accent/25", dropping ? "border-accent ring-2 ring-accent/25" : "border-hairline/50")}
+          className={cn("absolute rounded-2xl border bg-panel/90 shadow-sm data-[computer-dropping=true]:border-accent data-[computer-dropping=true]:ring-2 data-[computer-dropping=true]:ring-accent/25", dropping ? "border-accent ring-2 ring-accent/25" : "border-hairline/50")}
           style={{ left: tile.x, top: tile.y, width: tile.width, height: tile.height }}>
           <header className="flex h-16 items-center gap-2 px-5">
             <button data-arrange-team={section.key} disabled={!layoutLoaded} aria-label={t("canvas.arrange", { name: section.name })}
@@ -384,26 +394,17 @@ export function TeamCanvas({ sections, canManage, onMove, onInstructions, onMemo
               <Monitor size={12} className="shrink-0" /><span className="truncate">{computer.name}</span>
             </button>}
             <span className="text-[11px] tabular-nums text-ink-secondary">{section.chiefs.length + section.members.length}</span>
-            {canManage && <details className="relative" onToggle={(event) => {
-              if (event.currentTarget.open) {
-                const bounds = viewport.current?.getBoundingClientRect();
-                setMenuAbove(bounds && event.currentTarget.getBoundingClientRect().bottom > bounds.bottom - 210 * view.scale ? section.key : null);
-                viewport.current?.querySelectorAll("details[open]").forEach((element) => { if (element !== event.currentTarget) element.removeAttribute("open"); });
-              }
-            }}>
-              <summary aria-label={t("canvas.manageTeam", { name: section.name })} className={cn(iconButton, "cursor-pointer list-none [&::-webkit-details-marker]:hidden")}><MoreHorizontal size={17} /></summary>
-              <div className={cn("absolute right-0 z-30 w-[220px] animate-pop-in rounded-xl border border-hairline bg-panel p-1.5 shadow-xl", menuAbove === section.key ? "bottom-10" : "top-10")} onClick={(event) => {
-                const menu = event.currentTarget.closest("details");
-                menu?.querySelector("summary")?.focus();
-                menu?.removeAttribute("open");
-              }}>
-                <button className={menuButton} onClick={() => onEditTeam(section.key)} aria-label={t("team.moveTo", { name: section.name })}><Users size={14} />{t("team.moveTo", { name: section.name })}</button>
-                <button className={menuButton} onClick={() => onInstructions(section.key, section.name)} aria-label={t("team.instructionsEdit", { name: section.name })}><BookOpen size={14} />{t("team.instructions")}</button>
-                {onMemory && <button className={menuButton} onClick={() => onMemory(section.key, section.name)} aria-label={`${section.name} team memory`}><Brain size={14} />Team memory</button>}
-                {section.key && <button className={menuButton} onClick={() => onEditTeam(section.key, true)} aria-label={t("team.renameAria", { name: section.name })}><Pencil size={14} />{t("team.rename")}</button>}
-                {section.key && <button className={cn(menuButton, "hover:text-danger")} onClick={() => onDeleteTeam(section.key)} aria-label={t("team.deleteAria", { name: section.name })}><Trash2 size={14} />{t("team.delete")}</button>}
-              </div>
-            </details>}
+            {canManage && <PopoverMenu
+              items={menuItems}
+              ariaLabel={t("canvas.manageTeam", { name: section.name })}
+              placement="below"
+              align="end"
+              width={220}
+              open={openMenu === section.key}
+              onOpenChange={(open) => setOpenMenu(open ? section.key : null)}
+              triggerClassName={iconButton}
+              trigger={() => <MoreHorizontal size={17} aria-hidden="true" />}
+            />}
           </header>
           {dropping && <div className="pointer-events-none absolute -top-7 left-2 z-30 max-w-[calc(100%-16px)] truncate rounded-md bg-accent px-2 py-1 text-[10px] text-white shadow-sm">{dropHint}</div>}
           <div className="flex items-center px-5 pb-5">

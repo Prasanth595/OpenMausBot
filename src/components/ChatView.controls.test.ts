@@ -4,13 +4,14 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import type { Bot, InstanceInfo } from "@/state/store";
 import type { ApprovalModeSelector } from "./ApprovalModeSelector";
 import type { ModelPicker } from "./ModelPicker";
+import type { PopoverDismissOptions } from "./popover/popover-types";
 import { CODEX_USAGE_LIMIT_REACHED, CODEX_USAGE_URL } from "../../shared/codex-usage-limit";
 import { failedTurnTool } from "../../shared/failed-turn";
 
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: { key: string; title?: string; disabled?: boolean; heading?: string; active?: boolean; header?: { title?: string } }[]; dismiss?: PopoverDismissOptions }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
@@ -32,12 +33,13 @@ vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
   useShowThreads: () => fixture.showThreads,
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
-// The trigger still renders, so the markup assertions in this file see the same header.
-vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
-  ...await importOriginal<typeof import("./SidebarPopoverMenu")>(),
-  SidebarPopoverMenu: (props: { ariaLabel: string; items: never[]; renderTrigger: (state: { open: boolean }) => unknown }) => {
-    fixture.menus.push({ ariaLabel: props.ariaLabel, items: props.items });
-    return props.renderTrigger({ open: false });
+// Record every popover menu's items; the trigger still renders so the markup
+// assertions elsewhere in this file see the same header.
+vi.mock("./popover/PopoverMenu", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./popover/PopoverMenu")>(),
+  PopoverMenu: (props: { ariaLabel: string; items: never[]; dismiss?: PopoverDismissOptions; trigger: (state: { open: boolean }) => unknown }) => {
+    fixture.menus.push({ ariaLabel: props.ariaLabel, items: props.items, dismiss: props.dismiss });
+    return props.trigger({ open: false });
   },
 }));
 vi.mock("@/lib/cloud-guest", () => ({ useCanWriteIn: () => fixture.canWrite }));
@@ -87,6 +89,17 @@ describe("Advanced mode in the header menu", () => {
     const item = inspector();
     expect(item.disabled).toBeFalsy();
     expect(item.heading).toBeUndefined();
+  });
+});
+
+describe("header more menu", () => {
+  it("opens on click alone: it asks for no hover-open", () => {
+    fixture.menus = [];
+    renderToStaticMarkup(createElement(ChatView, { bot }));
+    const more = fixture.menus.find((menu) => menu.ariaLabel === "More")!;
+    // PopoverMenu's hover mode is opt-in (dismiss.leave). With it, merely
+    // crossing the header springs the menu open.
+    expect(more.dismiss).toBeUndefined();
   });
 });
 
@@ -464,10 +477,15 @@ describe("thread control placement", () => {
 
   it.each([true, false])("pins a place per conversation from the composer only in Advanced (advanced: %s)", (advanced) => {
     fixture.advanced = advanced;
+    fixture.menus = [];
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
     const pill = markup.slice(markup.indexOf("rounded-3xl bg-composer"), markup.indexOf("<textarea"));
     expect(pill.match(/data-testid="place-chip"/g) ?? []).toHaveLength(advanced ? 1 : 0);
-    expect(markup.includes("Where this conversation works")).toBe(advanced);
+    // The picker's own menu, and nowhere else in the chat: Simple follows the
+    // bot's Works on. Its band carries the chip's title.
+    const placeMenu = fixture.menus.find((menu) => menu.items.some((item) => item.key === "where-works"));
+    expect(Boolean(placeMenu)).toBe(advanced);
+    expect(placeMenu?.items[0]?.header?.title ?? null).toBe(advanced ? "Where this conversation works" : null);
     fixture.advanced = true;
   });
 });

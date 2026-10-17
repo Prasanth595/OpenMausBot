@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 
@@ -183,8 +183,15 @@ describe("the phone entries", () => {
     const destinations = phoneDestinations(connectPhoneEntry(target, access), cloudPhoneDestination(account));
     return { list: phoneMenuItems({ destinations, connected, onConnect, onGetApp }), onConnect, onGetApp };
   };
-  const shown = (...args: Parameters<typeof items>) => items(...args).list.map((item) => [item.label, item.subtitle ?? null, ...(item.note ? [item.note] : [])]);
-  const APP = ["Get the phone app", null];
+  // The row's text lines as the menu builds them: the title, then the
+  // content — which an item may compose out of more than one block.
+  const lines = (node: ReactNode): string[] => {
+    if (typeof node === "string" || typeof node === "number") return [String(node)];
+    if (!isValidElement<{ children?: ReactNode }>(node)) return [];
+    return (Array.isArray(node.props.children) ? node.props.children : [node.props.children]).flatMap(lines);
+  };
+  const shown = (...args: Parameters<typeof items>) => items(...args).list.map((item) => [item.title, ...lines(item.content)]);
+  const APP = ["Get the phone app"];
 
   it("on this computer: Connect your phone, to this computer, then Get the phone app", () => {
     expect(shown("computer", null)).toEqual([["Connect your phone", "to this computer"], APP]);
@@ -234,18 +241,18 @@ describe("the phone entries", () => {
 
   it("never offers the iOS-only entry it replaced", () => {
     for (const target of ["computer", "server"] as const) {
-      expect(items(target, null).list.map((item) => item.label)).not.toContain("Get OpenMausBot for iOS");
+      expect(items(target, null).list.map((item) => item.title)).not.toContain("Get OpenMausBot for iOS");
     }
   });
 
   it("each line hands on its own destination", () => {
     const { list, onConnect, onGetApp } = items("computer", null, paid("pro", ready));
-    list[0]!.onSelect();
+    list[0]!.onSelect!();
     expect(onConnect).toHaveBeenLastCalledWith(expect.objectContaining({ id: "cloud" }));
-    list[1]!.onSelect();
+    list[1]!.onSelect!();
     expect(onConnect).toHaveBeenLastCalledWith(expect.objectContaining({ id: "here", target: "computer" }));
     expect(onGetApp).not.toHaveBeenCalled();
-    list[2]!.onSelect();
+    list[2]!.onSelect!();
     expect(onGetApp).toHaveBeenCalledOnce();
   });
 
@@ -334,7 +341,7 @@ describe("Get the phone app", () => {
 describe("profileMenuItems", () => {
   const noop = () => {};
   const build = (patch: Partial<Parameters<typeof profileMenuItems>[0]> = {}) => profileMenuItems({
-    phone: [{ key: "phone-app", label: "Get the phone app", onSelect: noop }],
+    phone: [{ key: "phone-app", title: "Get the phone app", onSelect: noop }],
     usage: true,
     update: null,
     account: "OpenMausBot Cloud",
@@ -347,7 +354,7 @@ describe("profileMenuItems", () => {
     expect(items.map((item) => item.key)).toEqual(["usage", "phone-app", "support", "settings", "account"]);
     expect(items.filter((item) => item.separatorBefore).map((item) => item.key)).toEqual(["account"]);
     expect(items.find((item) => item.key === "support")!.submenu!.map((item) => item.key)).toEqual(["help", "feedback", "shortcuts", "about"]);
-    expect(items.find((item) => item.key === "account")!.label).toBe("OpenMausBot Cloud");
+    expect(items.find((item) => item.key === "account")!.title).toBe("OpenMausBot Cloud");
   });
 
   it("only offers what this window has: no usage on a remote server, no account without one", () => {
@@ -357,15 +364,15 @@ describe("profileMenuItems", () => {
   });
 
   it("keeps the update entry beside settings", () => {
-    const update = { key: "update", label: "Check for updates", onSelect: noop };
+    const update = { key: "update", title: "Check for updates", onSelect: noop };
     expect(build({ update }).map((item) => item.key)).toEqual(["usage", "phone-app", "support", "settings", "update", "account"]);
   });
 
   it("opens the Usage and account pages of Settings", () => {
     const onUsage = vi.fn(), onAccount = vi.fn();
     const items = build({ onUsage, onAccount });
-    items.find((item) => item.key === "usage")!.onSelect();
-    items.find((item) => item.key === "account")!.onSelect();
+    items.find((item) => item.key === "usage")!.onSelect!();
+    items.find((item) => item.key === "account")!.onSelect!();
     expect(onUsage).toHaveBeenCalledOnce();
     expect(onAccount).toHaveBeenCalledOnce();
   });

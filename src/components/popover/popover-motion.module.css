@@ -1,0 +1,135 @@
+/* Popover menu motion, scoped to the generic popover. Follows
+   material-web's menu open/close: the whole container grows in height out of
+   its anchor edge and shrinks back on close, with the surface fading in
+   first on open and out last on close. Height (not scale or clip) is
+   animated on an outer shell so the box shadow grows with the box instead of
+   jumping; an inner layer only hides overflow while growing.
+   --menu-h is the measured full height in px, written from JS before first
+   paint; --menu-ty-from/to pin the far edge when opening upward.
+   Overflow is never keyframed (it is not interpolable): React toggles
+   .menuAnimating from the animation's start/end, the way the reference
+   toggles its .animating class, so the flip never lands mid-frame.
+   Rows settle individually behind the container (.rowFlow): staggered in
+   reveal order and rising a few px along the container's own sweep, so the
+   eye follows the rows instead of the slow tail of the height ease. The
+   reveal order is direction-independent: the content rides the moving clip
+   edge, so the first row is always the one the open shows first and the
+   last row the one the close retracts first, whichever way the menu ended
+   up opening. */
+.menuIn {
+  animation: popover-menu-in 500ms cubic-bezier(0.3, 0, 0, 1);
+}
+
+.menuOut {
+  /* Height runs the whole close and accelerates into its end: it never sits
+     frozen while the fade plays. The surface fade is its own animation over
+     the last 50ms, like the reference. Whichever ends first unmounts. */
+  animation:
+    popover-menu-out-height 250ms cubic-bezier(0.3, 0, 0.8, 0.15) forwards,
+    popover-menu-out-fade 50ms linear 200ms forwards;
+  pointer-events: none;
+}
+
+/* Imperative overflow gate for the scrolling layer, toggled from React while
+   a height animation runs. Also the stable hook tests assert on. */
+.menuAnimating {
+  overflow: hidden;
+}
+
+/* Row settle: the container state picks the phase and each row's own slots
+   pick its place. The close is a soft, heavily overlapping opacity fade —
+   linear like the reference, long enough against the 250ms shrink that a
+   row recedes with the closing edge instead of blinking out; the open adds
+   --row-rise, the few px rows travel along the sweep (default below: settle
+   from slightly high, downward). A menu that resolved above flips only its
+   own rows' rise (their sweep runs upward); the submenu never flips, so it
+   keeps the default. `both` holds rows hidden before their slot on open and
+   holds them gone after it on close. */
+.menuIn .rowFlow > div {
+  animation: popover-row-in 250ms cubic-bezier(0.2, 0, 0, 1) both;
+  animation-delay: calc(var(--row-open-d, 0) * 1ms);
+}
+
+.menuOut .rowFlow > div {
+  animation: popover-row-out 120ms linear both;
+  animation-delay: calc(var(--row-close-d, 0) * 1ms);
+}
+
+/* The rise is set on the main rows themselves (never the shell), so an
+   inline submenu under an above-anchored menu cannot inherit it. */
+[data-popover-placement="above"].menuIn [data-popover-menu].rowFlow > div {
+  --row-rise: 4px;
+}
+
+@keyframes popover-menu-in {
+  0% {
+    height: 0;
+    transform: translateY(var(--menu-ty-from, 0px));
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    height: var(--menu-h, auto);
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes popover-menu-out-height {
+  from {
+    height: var(--menu-h, auto);
+    transform: translateY(0);
+  }
+  to {
+    height: calc(var(--menu-h, 0px) * 0.35);
+    transform: translateY(var(--menu-ty-to, 0px));
+  }
+}
+
+@keyframes popover-menu-out-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes popover-row-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--row-rise, -4px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes popover-row-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menuIn,
+  .menuOut,
+  .menuIn .rowFlow > div,
+  .menuOut .rowFlow > div {
+    animation: none;
+  }
+}
+
+/* App-level reduced-motion flag; mirrors the media block above. */
+:root[data-reduced-motion="true"] .menuIn,
+:root[data-reduced-motion="true"] .menuOut,
+:root[data-reduced-motion="true"] .menuIn .rowFlow > div,
+:root[data-reduced-motion="true"] .menuOut .rowFlow > div {
+  animation: none;
+}

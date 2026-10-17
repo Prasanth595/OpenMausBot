@@ -1,11 +1,17 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Ellipsis } from "lucide-react";
 import { popoverClosesOnKey, usePopoverDismiss } from "@/hooks/use-popover-dismiss";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { PopoverMenu, type PopoverMenuItem } from "./popover/PopoverMenu";
 
+/** One size and stroke for every icon beside a message and in its menu:
+ * thin rounded outlines, like the rest of the chat chrome. */
 export const ACTION_ICON = { size: 17, strokeWidth: 1.5 } as const;
 
+/** Class shared by every control that lives in the row: the row decides
+ * when it is visible, so the buttons themselves never fade. One muted
+ * colour that brightens on hover. */
 export const messageActionClass =
   "inline-flex size-7 items-center justify-center rounded-full text-ink-tertiary transition-colors hover:bg-ink/10 hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent";
 
@@ -16,13 +22,18 @@ export type MessageMenuItem = {
   onSelect: () => void;
   title?: string;
   disabled?: boolean;
+  /** A hairline above this row, grouping it off from the row before it. */
+  separatorBefore?: boolean;
 };
 
+/** Where a message row starts: the element that hovering, focusing or
+ * tapping reveals the actions for. */
 export const MESSAGE_ROW = "data-message-row";
 
 const INTERACTIVE = "a, button, input, textarea, select, summary, label, [role=button], [contenteditable=true]";
 const LONG_PRESS_MS = 450;
 
+/** Reports whether the target currently holds keyboard-visible focus. */
 function focusVisible(target: EventTarget | null): boolean {
   try {
     return target instanceof Element && target.matches(":focus-visible");
@@ -31,6 +42,14 @@ function focusVisible(target: EventTarget | null): boolean {
   }
 }
 
+/** Reply, copy and a "more" menu beside a bubble. They show only while the
+ * pointer is over the message, or keyboard focus is inside it, and on a
+ * touch screen after a tap or a long press on the message. The menu holds
+ * the rest (read aloud, raw markdown, pin, regenerate, copy id) and closes
+ * on Escape or a press outside. `forceOpen` keeps the row out while a
+ * control in it has to stay reachable, like the stop button of a message
+ * being read aloud. Children render in reading order; the row mirrors on
+ * the user side so the first control stays nearest the bubble. */
 export function MessageActions({
   side,
   forceOpen = false,
@@ -46,18 +65,14 @@ export function MessageActions({
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const rowRef = useRef<HTMLElement | null>(null);
-  const moreRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const menuId = useId();
   const [hovered, setHovered] = useState(false);
   const [keyboardFocus, setKeyboardFocus] = useState(false);
   const [tapped, setTapped] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [menuAbove, setMenuAbove] = useState(false);
-  const [menuFlipped, setMenuFlipped] = useState(false);
   const mirrored = side === "user";
   const shown = forceOpen || menuOpen || hovered || keyboardFocus || tapped;
 
+  // The message row, not just this strip, reveals the actions.
   useEffect(() => {
     const row = rootRef.current?.closest<HTMLElement>(`[${MESSAGE_ROW}]`) ?? rootRef.current;
     rowRef.current = row;
@@ -92,6 +107,8 @@ export function MessageActions({
       clearTimeout(press.timer);
       const quick = Date.now() - press.at < LONG_PRESS_MS;
       press = null;
+      // a tap on a link or a button does its own thing, and a tap that
+      // ends a text selection is not asking for the actions
       if (!quick || (event.target instanceof Element && event.target.closest(INTERACTIVE))) return;
       if (window.getSelection()?.toString()) return;
       setTapped((value) => !value);
@@ -117,40 +134,20 @@ export function MessageActions({
     };
   }, []);
 
+  // a tap elsewhere puts a tap-revealed row away again
   usePopoverDismiss(tapped && !menuOpen, rowRef, () => setTapped(false));
-  usePopoverDismiss(menuOpen, rootRef, () => {
-    setMenuOpen(false);
-    if (rootRef.current?.contains(document.activeElement)) moreRef.current?.focus();
-  });
 
-  useLayoutEffect(() => {
-    if (!menuOpen) return;
-    const menuBox = menuRef.current?.getBoundingClientRect();
-    const more = moreRef.current?.getBoundingClientRect();
-    if (menuBox && more) setMenuAbove(more.bottom + 4 + menuBox.height > window.innerHeight - 8 && more.top - 4 - menuBox.height > 8);
-    const rowBox = rootRef.current?.getBoundingClientRect();
-    if (menuBox && rowBox) {
-      const rtl = getComputedStyle(rootRef.current!).direction === "rtl";
-      const fitsRight = rowBox.left + menuBox.width <= window.innerWidth - 8;
-      const fitsLeft = rowBox.right - menuBox.width >= 8;
-      const fitsStart = rtl ? fitsLeft : fitsRight;
-      const fitsEnd = rtl ? fitsRight : fitsLeft;
-      setMenuFlipped(mirrored ? !fitsEnd && fitsStart : !fitsStart && fitsEnd);
-    }
-    menuRef.current?.querySelector<HTMLButtonElement>("[role=menuitem]:not(:disabled)")?.focus();
-  }, [menuOpen]);
-
-  const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
-    const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>("[role=menuitem]:not(:disabled)") ?? [])];
-    const index = items.indexOf(document.activeElement as HTMLButtonElement);
-    const next = event.key === "ArrowDown" ? index + 1 : event.key === "ArrowUp" ? index - 1 : event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : null;
-    if (next === null || !items.length) {
-      if (event.key === "Tab") setMenuOpen(false);
-      return;
-    }
-    event.preventDefault();
-    items[(next + items.length) % items.length]?.focus();
-  };
+  // The menu is the shared PopoverMenu: its rows, its arrow keys, its Escape,
+  // its outside press and its focus return, so only the data is built here.
+  const menuItems: PopoverMenuItem[] = menu.map((item) => ({
+    key: item.key,
+    title: item.label,
+    leading: item.icon,
+    hint: item.title,
+    disabled: item.disabled,
+    separatorBefore: item.separatorBefore,
+    onSelect: item.onSelect,
+  }));
 
   return (
     <div
@@ -165,58 +162,26 @@ export function MessageActions({
       data-shown={shown ? "true" : undefined}
       onKeyDown={(event) => {
         if (menuOpen || forceOpen || !popoverClosesOnKey(event.nativeEvent) || !keyboardFocus) return;
+        // Escape from a focused control hands focus back to the message
         event.preventDefault();
         (document.activeElement as HTMLElement | null)?.blur();
       }}
     >
       {children}
       {menu.length > 0 && (
-        <button
-          ref={moreRef}
-          type="button"
-          onClick={() => setMenuOpen((value) => !value)}
-          aria-label={t("chat.messageActions")}
-          title={t("chat.messageActions")}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          aria-controls={menuOpen ? menuId : undefined}
-          className={cn(messageActionClass, menuOpen && "bg-ink/10 text-ink")}
-        >
-          <Ellipsis {...ACTION_ICON} aria-hidden="true" />
-        </button>
-      )}
-      {menuOpen && (
-        <div
-          ref={menuRef}
-          id={menuId}
-          role="menu"
-          aria-label={t("chat.messageActions")}
-          onKeyDown={moveFocus}
-          className={cn(
-            "absolute z-40 min-w-52 max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-hairline/50 bg-menu py-1.5 shadow-2xl shadow-black/50",
-            menuAbove ? "bottom-full mb-1" : "top-full mt-1",
-            mirrored !== menuFlipped ? "end-0" : "start-0",
-          )}
-        >
-          {menu.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              role="menuitem"
-              disabled={item.disabled}
-              title={item.title}
-              onClick={() => {
-                item.onSelect();
-                setMenuOpen(false);
-                moreRef.current?.focus();
-              }}
-              className="flex w-full items-center gap-3 px-3.5 py-2 text-start text-[14px] text-ink hover:bg-raised/70 focus-visible:bg-raised/70 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <span className="flex size-5 shrink-0 items-center justify-center text-ink-secondary" aria-hidden="true">{item.icon}</span>
-              <span className="min-w-0 flex-1 truncate">{item.label}</span>
-            </button>
-          ))}
-        </div>
+        <PopoverMenu
+          items={menuItems}
+          ariaLabel={t("chat.messageActions")}
+          triggerTitle={t("chat.messageActions")}
+          placement="below"
+          align={mirrored ? "end" : "start"}
+          width={208}
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          focusFirstOnOpen
+          triggerClassName={cn(messageActionClass, menuOpen && "bg-ink/10 text-ink")}
+          trigger={() => <Ellipsis {...ACTION_ICON} aria-hidden="true" />}
+        />
       )}
     </div>
   );

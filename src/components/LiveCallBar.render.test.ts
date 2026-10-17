@@ -1,4 +1,4 @@
-import { createElement, type ReactElement } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -116,42 +116,19 @@ describe("LiveCallBar", () => {
 });
 
 describe("LiveCallSettings", () => {
-  it("offers voice, typed replies, idle minutes and the key, defaulting to 5 minutes", () => {
-    const markup = render(createElement(LiveCallSettings, { onClose: vi.fn() }));
+  it("is the bar's gear: a menu trigger, closed until it is pressed", () => {
+    const markup = render(createElement(LiveCallSettings, { open: false, onOpenChange: vi.fn(), triggerClassName: "gear" }));
     expect(markup).toContain('aria-label="Call settings"');
-    expect(markup).toContain("Marin (default)");
-    expect(markup).toContain("Read replies to typed messages");
-    expect(markup).toContain(`When this is off, messages you type during a call and the bot&#x27;s answers to them are not sent to OpenAI.`);
-    expect(markup).toContain(`A Live call sends your voice to OpenAI, along with the chat&#x27;s recent messages, the bot&#x27;s answers and the details of any approval it asks for. The OpenAI key stays on your computer.`);
-    expect(markup).toMatch(/<option value="5" selected="">5<\/option>/);
-    expect(markup).toContain("Change key");
-    expect(markup).not.toContain("Remove key");
-    expect(markup).toMatch(/role="dialog" tabindex="-1"/);
+    expect(markup).toContain('aria-haspopup="menu"');
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain('title="Call settings"');
+    // the rows live in the sheet, which only a press opens
+    expect(markup).not.toContain("Read replies to typed messages");
   });
 
-  it("says the key stays on the Cloud when the chat is on the person's Cloud", () => {
-    const markup = renderOnCloud(createElement(LiveCallSettings, { onClose: vi.fn() }));
-    expect(markup).toContain(CLOUD_DISCLOSURE);
-    expect(markup).not.toContain("stays on your computer");
-  });
-
-  it("takes focus when it opens, so Escape closes it", () => {
-    const onClose = vi.fn();
-    let tree!: ReactElement<{ ref: (node: unknown) => void; onKeyDown: (event: unknown) => void }>;
-    function Capture() {
-      tree = LiveCallSettings({ onClose }) as typeof tree;
-      return tree;
-    }
-    render(createElement(Capture));
-    const first = { focus: vi.fn() };
-    const querySelector = vi.fn(() => first);
-    tree.props.ref({ querySelector });
-    expect(querySelector).toHaveBeenCalledWith("select, input, button");
-    expect(first.focus).toHaveBeenCalledOnce();
-    const stopPropagation = vi.fn();
-    tree.props.onKeyDown({ key: "Escape", stopPropagation });
-    expect(onClose).toHaveBeenCalledOnce();
-    expect(stopPropagation).toHaveBeenCalledOnce();
+  it("shows the sheet as open while the bar says so", () => {
+    const markup = render(createElement(LiveCallSettings, { open: true, onOpenChange: vi.fn(), triggerClassName: "gear" }));
+    expect(markup).toContain('aria-expanded="true"');
   });
 });
 
