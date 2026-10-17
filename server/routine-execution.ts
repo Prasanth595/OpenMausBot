@@ -1,5 +1,7 @@
+import { stopCause } from "./drivers/engine-errors.ts";
 import { classifyError } from "./drivers/retry.ts";
-import type { RoutineContextAttachment, RoutineRun, RoutineRunOn, RoutineRunTrigger } from "./routines.ts";
+import { redactSecretsInText } from "./redact.ts";
+import type { Routine, RoutineContextAttachment, RoutineRun, RoutineRunOn, RoutineRunTrigger } from "./routines.ts";
 
 export interface RoutineContinuityCarry {
   finishedAt: number;
@@ -28,6 +30,37 @@ function routineHeader(name: string, trigger: RoutineRunTrigger): string {
   if (trigger === "webhook") return "";
   const label = JSON.stringify(name.replace(/[[\]\s]+/g, " ").trim());
   return `[${trigger === "schedule" ? "Scheduled routine" : "Routine"} ${label} — do this now:]\n`;
+}
+
+const CONTINUITY_CHARS = 2_000;
+const finishedOrder = (run: RoutineRun) => run.finishedAt ?? run.createdAt;
+
+/** Redacted: a report can quote anything the run saw, and continuity carries it forward. */
+export function continuityCarry(run: RoutineRun, routines: readonly Pick<Routine, "id" | "continuity">[], runs: readonly RoutineRun[]): RoutineContinuityCarry | null {
+  const routine = routines.find((candidate) => candidate.id === run.routineId);
+  if (!routine?.continuity) return null;
+  let latest: RoutineRun | null = null;
+  for (const candidate of runs) {
+    if (candidate.routineId !== run.routineId) continue;
+    // A reassigned routine must not disclose the old bot's report to another bot or destination.
+    if (candidate.botId !== run.botId || candidate.target !== run.target || candidate.runOn !== run.runOn) continue;
+    if (candidate.id === run.id) continue;
+    // a run failed only by its declared result still did its turn: its report carries, marked
+    if (candidate.status !== "completed" && !(candidate.status === "failed" && candidate.resultFailed)) continue;
+    if (!candidate.output?.trim()) continue;
+    if (!Number.isFinite(finishedOrder(candidate))) continue;
+    if (!latest || finishedOrder(candidate) > finishedOrder(latest)) latest = candidate;
+  }
+  if (!latest) return null;
+  const report = latest.status === "failed" && latest.error ? `[${latest.error}]\n${latest.output ?? ""}` : latest.output ?? "";
+  const redacted = redactSecretsInText(report).trim();
+  if (!redacted) return null;
+  const truncated = redacted.length > CONTINUITY_CHARS;
+  return {
+    finishedAt: latest.finishedAt ?? latest.createdAt,
+    output: truncated ? `${redacted.slice(0, CONTINUITY_CHARS - 1).trimEnd()}…` : redacted,
+    truncated,
+  };
 }
 
 export function composeExecutionPrompt(
@@ -95,7 +128,29 @@ export function routineHostWarning(routine: { prompt: string; runOn: RoutineRunO
 
 export const ROUTINE_TRANSIENT_RETRY_MS = 15_000;
 
+/** Why a run failed: its own error, else its engine's stop reason in words, never a bare token like "stop_sequence". */
+export function routineFailure(error: string | undefined, stopReason: string | null | undefined): string {
+  return error ?? stopCause(stopReason) ?? "The bot did not complete this run";
+}
+
 /** A run that failed on a passing provider error before doing anything gets one more try. */
 export function retriesTransiently(run: Pick<RoutineRun, "target" | "output" | "retryAt">, detail: string, didWork: boolean): boolean {
   return run.target === "bot" && run.retryAt === undefined && !run.output && !didWork && classifyError({ text: detail }).transient;
+}
+
+/** How long a routine may be held up before it acts: a deferred run tells the owner, a waiting run gives way. */
+export const ROUTINE_DEFERRAL_NOTICE_MS = 30 * 60_000;
+export const ROUTINE_SUPERSEDED = "Stopped waiting: the next scheduled run of this routine started instead";
+export const ROUTINE_SKIPPED_WHILE_WAITING = "Skipped because the previous run of this routine is still waiting";
+
+/** Waiting since a notice window before its routine's next occurrence came due, with no hand-off still open: that occurrence starts instead. */
+export function supersededBy(dueAt: number, run: Pick<RoutineRun, "status" | "waitingSince" | "threadId">, handedOffWorkLive?: (threadId: string) => boolean): boolean {
+  return run.status === "waiting" && run.waitingSince !== undefined && run.waitingSince <= dueAt - ROUTINE_DEFERRAL_NOTICE_MS &&
+    !(run.threadId && handedOffWorkLive?.(run.threadId));
+}
+
+/** Once per wait: the first occurrence skipped after the waiting run blocking it passed the notice window. */
+export function skipNeedsNotice(dueAt: number, waitingSince: number, previousSkipAt: number | undefined): boolean {
+  const staleAt = waitingSince + ROUTINE_DEFERRAL_NOTICE_MS;
+  return dueAt >= staleAt && (previousSkipAt === undefined || previousSkipAt < staleAt);
 }

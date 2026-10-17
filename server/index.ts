@@ -20,7 +20,7 @@ import { RoomContextTracker, roomResetNote } from "./room-context.ts";
 import { createRoomTranscript, GROUP_CONTEXT_MESSAGES } from "./host/room-transcript.ts";
 import { createRoomSessions } from "./host/room-sessions.ts";
 import { provenRequestPerson, SharedComputers, sharedComputerOperation, sharedComputerRegistration } from "./shared-computers.ts";
-import { cloudHomeLendingRefusal, createCloudRoutineAuthors, ownerOnlyConversation, type CloudLendingTurn } from "./cloud-lending.ts";
+import { cloudHomeLendingRefusal, createCloudRoutineAuthors, ownerOnlyConversation, type CloudLendingTurn } from "./cloud-lending.ts"; import { assertRoomFolder } from "./room-folder.ts"; import { startCloudHomeConnectedApps, stopCloudHomeConnectedApps } from "./cloud-connected-apps.ts";
 import { botMemoryFiles, createLendingMemory } from "./lending-memory.ts";
 import { SharedComputerControl } from "./shared-computer-control.ts";
 import { createCoordinator, type ComposedTurn, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
@@ -14329,7 +14329,7 @@ routines = new RoutineManager({
   emit: broadcast,
   launchId: DESKTOP_MANAGED && /^[\w-]{1,100}$/.test(process.env.OMB_DESKTOP_LAUNCH_ID ?? "")
     ? process.env.OMB_DESKTOP_LAUNCH_ID : undefined,
-  hasPendingDelegations: runtimeWorkPending,
+  hasPendingDelegations: runtimeWorkPending, handedOffWorkLive: (threadId) => coordinator.outstandingFor(threadId).length > 0,
   // a routine run waits while the bot's intake turn (a watch) runs elsewhere
   botState: (botId, routineId) => {
     if (!intakeBusyElsewhere(botId)) return unattendedDispatchState(botId);
@@ -15919,11 +15919,11 @@ async function runClaimedGroupMemberTurn(
 
   const worksInWorkspace = supportsWorkspaceFiles(instance.driverKind);
   const workspace = worksInWorkspace ? ensureWorkspace(bot.id) : undefined;
-  if (workspace && bot.memoryEnabled !== false) beginMemoryTurn(bot.id, threadId);
   // The room's folder pins at its first dispatch, so a room that already worked somewhere never has its folder moved.
   const cwd = workspace && cloudGuestOpened(threadId)
     ? ensureTaskWorkspaceWithSkills(bot.id, threadId, skillsHost.turnImports(bot, threadId, instance))
     : groupTurnCwd(workspace, () => store.pinGroupCwd(readyGroup.id, threadId));
+  assertRoomFolder(cwd); if (workspace && bot.memoryEnabled !== false) beginMemoryTurn(bot.id, threadId);
   {
     const drift = checkSoulDrift(bot.id, bot.soul ?? "", bot.soulHash ?? "");
     if (drift.drift !== Boolean(bot.soulDrift)) store.patchBot(bot.id, { soulDrift: drift.drift });
@@ -22025,7 +22025,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       };
       if (method === "GET" && liveBrowserMatch[2] === "live") {
         req.socket.setTimeout(0);
-        return await browserLive.open({ botId: bot.id, session: browser.session, spec: browser.spec, owner, isCurrent, res });
+        return await browserLive.open({ botId: bot.id, session: browser.session, spec: browser.spec, owner, isCurrent, res, resume: url.searchParams.get("resume") });
       }
       if (method === "POST" && liveBrowserMatch[2] === "action") {
         const body = await readBody(req, 32_768);
@@ -22440,7 +22440,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return json(res, 200, {
         configured: composio.configured(cfg),
         mode: composio.connectionMode(cfg),
-        setup: composio.connectorSetup(cfg),
+        setup: composio.connectorSetup(cfg, DESKTOP_MANAGED || CLOUD_HOME !== null),
         source,
         cards,
         ...(pagination ? { pagination } : {}),
@@ -22945,7 +22945,7 @@ restoreChannelMessages();
 server.listen(PORT, "127.0.0.1", async () => {
   companyRuntimeReady();
   console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
-  browserSweep.start();
+  browserSweep.start(); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
   if (builtInBrowserEnabled(cfg)) chromeLauncher.start();
   followupsReady = true;
   drainQueuedSends();
@@ -23018,7 +23018,7 @@ const gracefulShutdown = createGracefulShutdown({
       cacheKeepWarm.dispose();
       skillReview.stop();
       webhookIngress?.server.close();
-      tunnelListener?.close();
+      tunnelListener?.close(); stopCloudHomeConnectedApps();
     },
     async () => { await managedDesktop.close(); await registry.disposeAll(); },
     async () => { await dataEngine.closeAll().catch((error) => console.warn("data: close failed", error)); },
