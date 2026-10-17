@@ -28,6 +28,8 @@ import {
   parseTrustLog,
   createDesktopSession,
   rootAnchorSession,
+  fieldClickX,
+  APP_COLD_START_MS,
   type DesktopDriver,
   type OcrLine,
 } from "./claude-desktop.ts";
@@ -631,6 +633,79 @@ describe("\"Confiar\" never with the chip on another folder, nor on an ambiguous
     expect(stale.actions.some((action) => action.startsWith("click") || action.startsWith("paste"))).toBe(false);
   });
 
+  it("2.37+ asks on every link with the chips still on the folder before (15/10 9602 over 9596, 17/10 9493 over 9599): with dialogTie the dialog that came with our link is clicked once and the brief goes in on that screen", async () => {
+    const folder = "9602-atendimentos-do-widget-sem-fila";
+    const { ours, listed } = world(folder);
+    vi.setSystemTime(new Date(2026, 9, 15, 16, 37, 52).getTime());
+    // what OCR read on 15/10 19:37:58Z, the field under the dialog read with the "+" button on its line
+    const dialog = "Leia nosso guia de segurança para mais informações. | Cancelar | Confiar no workspace | Ide Code CLI | + Descreva uma tarefa ou faça uma pergunta | • Este computador | C 9596-cache-curto-das-estatisticas-e-c | 2º omb/9596-cache-curto-das-estatis... |O worktree | Automático | Opus 5.5 Rápido Médio";
+    // after the answer (as 9453's on 15/10 10:06:20Z): the field, our chip
+    const after = `Ide Code CLI | + Descreva uma tarefa ou faça uma pergunta | • Este computador | ${folder} | 2º omb/${folder} |O worktree | Automático | Opus 5.5 Rápido Médio`;
+    const before = "Resolvi. Esse serviço é de uma bateria de testes antiga | Responder";
+    // the app's log: the composer's folder (9596) checked a second after the link — never the dialog's
+    const log = () => logLine(Date.now() - 1_000, `LocalSessions.checkTrust: cwd=${ours.alias.replace(folder, "9596-cache-curto-das-estatisticas-e-c")}`);
+    const run = async (screens: string[], opts: { dialogTie?: boolean } = { dialogTie: true }) => {
+      const app = fakeApp(screens.map(screenFrom));
+      const read = app.driver.ocr;
+      const answered = fakeApp([screenFrom(after), SENT]).driver.ocr;
+      app.driver.ocr = () => (app.actions.some((action) => action.startsWith("click")) ? answered() : read());
+      const step = await openDesktopSessionIn(app.driver, { folder: ours.alias, folderName: folder, text: "brief", expected: ours.worktree, registered: () => listed, trustLog: log, ...opts });
+      return { step, actions: app.actions };
+    };
+    // the old way (no dialogTie): another folder's chips, nothing clicked — as on 15/10
+    const old = await run([dialog, dialog], {});
+    expect(old.step).toMatchObject({ ok: false, miss: true });
+    expect(!old.step.ok && old.step.reason).toContain("trust dialog is up over another folder's chips");
+    expect(old.actions.some((action) => action.startsWith("click") || action.startsWith("paste"))).toBe(false);
+    // dialogTie: none up before the link, one with it — ours: one click on "Confiar no workspace", then the brief on that screen
+    const tied = await run([before, dialog]);
+    expect(clicksOn(tied.actions, screenFrom(dialog), /^Confiar no workspace$/)).toBe(1);
+    expect(tied.actions.filter((action) => action.startsWith("click")).length).toBeGreaterThanOrEqual(2);
+    expect(tied.actions.some((action) => action.startsWith("paste") || action.startsWith("type"))).toBe(true);
+    expect(tied.step).toMatchObject({ ok: true });
+    expect(tied.step.ok && tied.step.note).toContain("over the chips of the folder before");
+    // never the folder picker under the dialog: the only click before the answer is "Confiar"
+    const firstClick = tied.actions.findIndex((action) => action.startsWith("click"));
+    expect(clicksOn(tied.actions.slice(0, firstClick + 1), screenFrom(dialog), /^Confiar no workspace$/)).toBe(1);
+    // a dialog already up before our link: never ours, nothing clicked
+    const up = await run([dialog, dialog]);
+    expect(up.step).toMatchObject({ ok: false, miss: true });
+    expect(up.actions.some((action) => action.startsWith("click") || action.startsWith("paste"))).toBe(false);
+    // the dialog's own words naming another folder: never ours
+    const named = `Confiar em /Users/o/Projetos/outro/9596-cache-curto e iniciar uma sessão de código? | ${dialog}`;
+    const other = await run([before, named]);
+    expect(other.step).toMatchObject({ ok: false });
+    expect(other.actions.some((action) => action.startsWith("click") || action.startsWith("paste"))).toBe(false);
+    // after a click in this create already, the dialog again: the cli, as before
+    const again = fakeApp([screenFrom(before), screenFrom(dialog)]);
+    expect(await openDesktopSessionIn(again.driver, { folder: ours.alias, folderName: folder, text: "b", expected: ours.worktree, registered: () => listed, trustLog: log, trustClicks: 1, dialogTie: true })).toMatchObject({ ok: false, cliNow: true });
+    expect(again.actions.some((action) => action.startsWith("click"))).toBe(false);
+  });
+
+  it("dialogTie: the app not running is started first and the link opened once it is up (16/10 20:22:20, 17/10 11:43:46 BRT)", async () => {
+    const folder = "9493-reprovado-paginacao-de-respostas";
+    const { ours, listed } = world(folder);
+    const app = fakeApp([screenFrom("Resolvi. | Responder"), screenFrom("Resolvi. | Responder")]);
+    let running = false;
+    app.driver.claudeRunning = async () => running;
+    app.driver.activateClaude = async () => { app.actions.push("activate"); running = true; };
+    const t0 = Date.now();
+    const step = await openDesktopSessionIn(app.driver, { folder: ours.alias, folderName: folder, text: "b", expected: ours.worktree, registered: () => listed, dialogTie: true });
+    expect(app.actions[0]).toBe("activate");
+    expect(app.actions[1]).toMatch(/^open claude:\/\/code\/new\?folder=/);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(APP_COLD_START_MS);
+    expect(step).toMatchObject({ ok: false, miss: true });
+    // the app that does not come up: nothing opened, clicked or typed
+    const dead = fakeApp([screenFrom("x")]);
+    dead.driver.claudeRunning = async () => false;
+    expect(await openDesktopSessionIn(dead.driver, { folder: ours.alias, folderName: folder, text: "b", expected: ours.worktree, registered: () => listed, dialogTie: true })).toMatchObject({ ok: false, retry: true });
+    expect(dead.actions.some((action) => action.startsWith("open") || action.startsWith("click"))).toBe(false);
+    // without dialogTie the running check is not made
+    const plain = fakeApp([screenFrom("x")]);
+    plain.driver.claudeRunning = async () => { throw new Error("not asked"); };
+    await openDesktopSessionIn(plain.driver, { folder: ours.alias, folderName: folder, text: "b", expected: ours.worktree, registered: () => listed });
+  });
+
   it("ties by the newest line, never one of up to 999 ms before the link, and two folders in the newest second tie to none", () => {
     const { ours, before } = world("9378-supervisor-do-atendimento", "2026-10-05T16:00:50Z");
     const opened = new Date(2026, 9, 5, 13, 0, 6, 500).getTime();
@@ -792,5 +867,20 @@ describe("the app's records of a session opened through the alias", () => {
     expect(lastAppWorktreeFolder(sessions)).toBeNull();
     expect(lastServerSessionInRoot(new Set([local]), sessions)).toBeNull();
     expect(recordsUsingFolder(worktree, undefined, sessions, true).map((record) => record.sessionId)).toEqual([local]);
+  });
+});
+
+describe("the new session's field with the app's \"+\" button on its line (2.37+, 14/10 on)", () => {
+  it("is the field, and the click goes past the button", () => {
+    const line: OcrLine = { x: 600, y: 800, w: 420, h: 16, text: "+ Descreva uma tarefa ou faça uma pergunta" };
+    expect(fieldClickX(line)).toBeGreaterThan(600 + 20);
+    expect(fieldClickX({ ...line, text: "Descreva uma tarefa ou faça uma pergunta" })).toBe(620);
+  });
+  it("a create pastes into it", async () => {
+    const screen = ["• Local", FOLDER, "gº omb/9353-comprar-assentos", "|O worktree", "+ Descreva uma tarefa ou faça uma pergunta", "+ O v Ignorar permissões"];
+    const app = fakeApp([screen, SENT]);
+    const step = await openDesktopSessionIn(app.driver, { folder: LINK, folderName: FOLDER, text: "brief", branch: "omb/9353-comprar-assentos" });
+    expect(step).toMatchObject({ ok: true });
+    expect(app.actions.some((action) => action.startsWith("paste") || action.startsWith("type"))).toBe(true);
   });
 });

@@ -53,6 +53,8 @@ export interface DesktopDriver {
   menuNewSession(): Promise<void>;
   openUrl(url: string): Promise<void>;
   activateClaude(): Promise<void>;
+  /** The Claude app's process is running (a link that has to launch it is lost: the app restores its last view). */
+  claudeRunning?(): Promise<boolean>;
   /** Bring back the app (by bundle id) that was in front before a step. */
   activate(bundleId: string): Promise<void>;
   sleep(ms: number): Promise<void>;
@@ -84,7 +86,17 @@ const COMPOSER_PLACEHOLDER = /^(Digite \/ para comandos|Type \/ for commands|Res
  * the only one OCR read so far, up to 06/10 14:52Z) or, behind a flag of its
  * own, "Descreva algo para criar, alterar ou corrigir" (sIl97ARhWm) — both
  * taken, in pt-BR and English, until a live screen shows which (R13-dispatch). */
-const NEW_SESSION_PLACEHOLDER = /^(Descreva uma tarefa|Describe a task|Descreva algo para criar|Describe something to build)\b/i;
+// Since 2.37 (14/10) OCR reads the composer's "+" (attach) button on the
+// field's own line ("+ Descreva uma tarefa ou faça uma pergunta", every
+// create since): the mark is taken before the words, and the click goes past it.
+const NEW_SESSION_PLACEHOLDER = /^(?:[+⊕]\s*)?(Descreva uma tarefa|Describe a task|Descreva algo para criar|Describe something to build)\b/i;
+const FIELD_MARK = /^[+⊕]\s*/;
+/** Where to click in the new session's empty field: past the "+" button OCR may read on its line. */
+export function fieldClickX(field: OcrLine): number {
+  const text = field.text.trim();
+  const mark = FIELD_MARK.exec(text);
+  return field.x + (mark && text.length ? field.w * (mark[0].length / text.length) : 0) + 20;
+}
 const BACKSPACE = 51;
 /** The one character typed to tell an app suggestion from a draft. */
 const SUGGESTION_PROBE = ".";
@@ -668,29 +680,61 @@ export function folderChip(lines: OcrLine[], name: string, others: () => readonl
  * outside .claude/worktrees: the app maps folders inside it back to the
  * repository root); `folderName` is what its chip shows.
  */
-export async function openDesktopSessionIn(driver: DesktopDriver, input: { folder: string; folderName: string; text: string; expected?: string; registered?: () => readonly string[]; trustLog?: () => string; trustClicks?: number; branch?: string }): Promise<DesktopStep> {
+/** How long the app is given to come up when a create has to start it, before its link is opened. */
+export const APP_COLD_START_MS = 12_000;
+
+/** `dialogTie` (the server's creates, 17/10): the app 2.37+ asks "Confiar no
+ * workspace" on every link that names a folder, its chips still on the folder
+ * before until the answer — so a dialog that came up with our link, none up
+ * before it and none naming another folder, is ours whatever the chips say;
+ * after our one click the brief goes in on that same screen once it reads
+ * right; and an app not running is started first, the link opened only once
+ * it is up. */
+export async function openDesktopSessionIn(driver: DesktopDriver, input: { folder: string; folderName: string; text: string; expected?: string; registered?: () => readonly string[]; trustLog?: () => string; trustClicks?: number; branch?: string; dialogTie?: boolean }): Promise<DesktopStep> {
   if (!input.folder.startsWith("/") || !input.folderName) return { ok: false, reason: "invalid folder for a new session", retry: false };
   return withScreen(driver, async (screen) => {
+    const tie = input.dialogTie === true;
+    // A link that has to launch the app is lost: the app comes up on its last
+    // view — a conversation, or the composer on the folder before, even one
+    // it does not trust (16/10 20:22:20 and 17/10 11:43:46 BRT, 9599 and
+    // 9493: "no empty task field", then the chips of 9602/9599/hooks). The
+    // app is started first and the link opened once it is up.
+    if (tie && driver.claudeRunning && !(await driver.claudeRunning())) {
+      await act(screen, () => driver.activateClaude());
+      await driver.sleep(APP_COLD_START_MS);
+      if (!(await driver.claudeRunning())) return { ok: false, reason: "the Claude app did not start; nothing was clicked or typed", retry: true, touched: true };
+      const started = await guard(screen, "start the app");
+      if (started) return started;
+    }
+    const size = await driver.screenSize();
+    const inBand = (lines: OcrLine[]) => mainArea(lines).filter((line) => line.y > size.h * 0.55);
+    // a trust dialog already up before our link is never ours: nothing clicks it
+    const dialogBefore = tie ? trustDialog(inBand(await driver.ocr())) : false;
     const opened = Date.now();
     await act(screen, () => driver.openUrl(newSessionInFolderUrl(input.folder)));
     await driver.sleep(3_000);
     let stop = await guard(screen, "new session in its folder");
     if (stop) return stop;
-    const size = await driver.screenSize();
-    const band = async () => mainArea(await driver.ocr()).filter((line) => line.y > size.h * 0.55);
+    const band = async () => inBand(await driver.ocr());
+    // the first reading whole: the dialog's own words, when OCR reads them
+    // above the composer, naming another folder make it never ours
+    const first = mainArea(await driver.ocr());
+    const named = tie ? trustPromptFolder(first) : null;
+    const linkDialog = tie && !dialogBefore && (named === null || (input.expected !== undefined && realOrSelf(named) === realOrSelf(input.expected)));
     // git's list, read once and only when needed (a cut chip, a prompt to answer — INSP-R12a-r2 R2-5)
     let listed: readonly string[] | null = null;
     const registered = () => (listed ??= input.registered?.() ?? []);
     const clicked = (input.trustClicks ?? 0) > 0;
     // First the screen must be the new session of OUR folder: its empty field and the folder's chip.
-    const ours = (lines: OcrLine[]): { field: OcrLine | null } | DesktopStop => {
+    const ours = (lines: OcrLine[]): { field: OcrLine | null; stale?: true } | DesktopStop => {
       const field = lines.find((line) => NEW_SESSION_PLACEHOLDER.test(line.text.trim())) ?? null;
       // The app's trust dialog over the new session (2.31226.0, 09/10 9475,
       // 9477: "Leia nosso guia de segurança… | Cancelar | Confiar no
       // workspace" with the chips below it, no empty field): the chips are
       // judged as ever, and with ours the dialog goes to the trust rules
       // below (field null) — never pasted while it is up.
-      const dialog = !field && trustDialog(lines);
+      // the dialog over the field too: since 2.37 the field reads under it ("+ Descreva…")
+      const dialog = trustDialog(lines);
       if (!field && !dialog) return { ok: false, reason: `the app's link did not open a new session for ${input.folderName} (no empty task field); nothing was clicked or typed`, retry: true, miss: true, touched: true, seen: seenText(lines.slice(-8)) };
       // The chips on another folder — the one the app used before — or cut
       // short to a start another worktree shares: no click whatever the log
@@ -700,6 +744,10 @@ export async function openDesktopSessionIn(driver: DesktopDriver, input: { folde
       const chip = folderChip(lines, input.folderName, () => registered().map((path) => path.split("/").filter(Boolean).pop() ?? path), input.branch);
       // no folder chip read at all: a miss to try again, never "another folder" — not the cli, not the breaker (R2-2)
       if (chip === "unread") return { ok: false, reason: `could not read the new session's folder chip (expected ${input.folderName}); nothing was clicked or typed`, retry: true, miss: true, touched: true, seen: seenText(lines.slice(-8)) };
+      // 2.37+ (15/10 9602 over 9596's chips, 17/10 9493 over 9599's: the
+      // person's "Confiar" saved OUR folder each time): the dialog that came
+      // with our link is ours — the trust rules below, never the picker under it
+      if (dialog && (chip === "none" || chip === "ambiguous") && linkDialog) return { field: null, stale: true };
       if (dialog && (chip === "none" || chip === "ambiguous")) return { ok: false, reason: `the app's trust dialog is up over another folder's chips, not ${input.folderName}; nothing was clicked or typed`, retry: true, miss: true, touched: true, seen: seenText(lines.slice(-8)) };
       if (chip === "none" || chip === "ambiguous") {
         return { ok: false, reason: chip === "none" ? `the new session shows another folder in its chips (the folder before), not ${input.folderName}; nothing was clicked or typed` : `the new session's folder chip is cut short to a start that another worktree of the repository shares, not only ${input.folderName}; nothing was clicked or typed`, retry: true, miss: true, touched: true, previousFolder: true, seen: seenText(lines.slice(-8)) };
@@ -730,7 +778,7 @@ export async function openDesktopSessionIn(driver: DesktopDriver, input: { folde
       }
       return null;
     };
-    const setUp = await setUpNewSession(screen, (lines) => mainArea(lines).filter((line) => line.y > size.h * 0.55), await band(), judge, async (need, lines) => {
+    const setUp = await setUpNewSession(screen, (lines) => mainArea(lines).filter((line) => line.y > size.h * 0.55), inBand(first), judge, async (need, lines) => {
       const targets = chipTargets(lines);
       if (need.fix === "folder") {
         if (!targets.folder) return { did: "found no folder chip to click", failed: true };
@@ -744,6 +792,7 @@ export async function openDesktopSessionIn(driver: DesktopDriver, input: { folde
     const seen = ours(bottom);
     if ("ok" in seen) return afterTries(seen, setUp.tried);
     const trust = trustPrompt(bottom);
+    let afterClick: OcrLine | null = null;
     // The app asks to trust a folder it has not seen ("Confiar no workspace",
     // 05/10 #9378), with our folder's chip on screen. Clicked only when that
     // folder is a worktree git lists for the repository, by its real path;
@@ -763,8 +812,10 @@ export async function openDesktopSessionIn(driver: DesktopDriver, input: { folde
       && ownWorktreeFolder(input.folder, input.expected, registered()));
     if (trust && !leftover) {
       if (clicked) return { ok: false, reason: `the app asks to trust the workspace ${input.folderName} again after the server clicked it once in this create; no second click — the create goes on in the cli`, retry: true, miss: true, touched: true, cliNow: true, seen: seenText(bottom.slice(-8)) };
-      const tie = input.expected ? trustPromptFor(bottom, log(), opened, input.expected) : { is: "none" as const };
-      if (tie.is === "other") return { ok: false, reason: `the app asks to trust the workspace ${tie.folder}, not ${input.folderName}; nothing was clicked or typed`, retry: true, miss: true, touched: true, seen: seenText(bottom.slice(-8)) };
+      const tied = input.expected ? trustPromptFor(bottom, log(), opened, input.expected) : { is: "none" as const };
+      // over stale chips the app's log checks the folder before (its composer), never the dialog's: only words on screen naming another folder count
+      const otherByLogOnly = seen.stale === true && trustPromptFolder(bottom) === null;
+      if (tied.is === "other" && !otherByLogOnly) return { ok: false, reason: `the app asks to trust the workspace ${tied.folder}, not ${input.folderName}; nothing was clicked or typed`, retry: true, miss: true, touched: true, seen: seenText(bottom.slice(-8)) };
       // git's list is read only now, when there is a prompt to answer (INSP-R12a-r2 R2-5)
       if (!ownWorktreeFolder(input.folder, input.expected, registered())) return { ok: false, reason: `the app asks to trust the workspace ${input.folderName}, which is not a worktree the server made; nothing was clicked or typed`, retry: true, touched: true, trustNeeded: input.folder, seen: seenText(bottom.slice(-8)) };
       stop = await guard(screen, "trust the workspace");
@@ -776,15 +827,29 @@ export async function openDesktopSessionIn(driver: DesktopDriver, input: { folde
       // what the app saved, when its log says: another folder is a miss, said
       const saved = input.expected && input.trustLog ? trustPromptFor([], log(), opened, input.expected, ["save"]) : { is: "none" as const };
       if (saved.is === "other") return { ok: false, reason: `the app saved the trust for ${saved.folder}, not ${input.folderName}, after the click; nothing was typed`, retry: true, miss: true, touched: true, seen: seenText(bottom.slice(-8)) };
+      // 2.37+ asks again on every link (15/10: 9453 saved 07:00, 07:01, 07:06
+      // BRT; 9594 six times): reopening it only brings the dialog back and the
+      // create to the cli. The screen of the click is read instead, up to three
+      // times: our chip, the empty field, the worktree option off and no scratch
+      // folder — the brief goes in now; else the link is opened again, as before.
+      if (tie) {
+        for (let read = 0; read < 3 && !afterClick; read++) {
+          if (read > 0) { await driver.sleep(1_000); bottom = await band(); }
+          if (trustPrompt(bottom)) continue;
+          const now = ours(bottom);
+          if ("ok" in now) { if (now.cliNow) return now; continue; }
+          if (now.field && !now.stale && worktreeOption(chipRow(bottom)) === "off") afterClick = now.field;
+        }
+      }
       // Never pasted on the screen of the click: both times the server
       // clicked it (06/10 11:06 and 12:01 BRT) the app saved the trust and
       // then started the session in a scratch folder of its own, a second
       // later, with our chip still read. The link is opened again on the
       // next try, the folder now trusted, and checked from the start
       // (R13-dispatch R13-3).
-      return { ok: false, reason: `trusted the workspace ${input.folderName}; nothing was typed — the app's link is opened again and the folder checked before the brief goes in`, retry: true, touched: true, trusted: true, seen: seenText(bottom.slice(-8)) };
+      if (!afterClick) return { ok: false, reason: `trusted the workspace ${input.folderName}; nothing was typed — the app's link is opened again and the folder checked before the brief goes in`, retry: true, touched: true, trusted: true, seen: seenText(bottom.slice(-8)) };
     }
-    const { field } = seen;
+    const field = afterClick ?? seen.field;
     // no field and no trust line left to answer: never pasted blind
     if (!field) return { ok: false, reason: `the app's trust dialog left no empty task field for ${input.folderName}; nothing was typed`, retry: true, miss: true, touched: true, seen: seenText(bottom.slice(-8)) };
     // the folder IS the worktree: with the app's worktree option on, the app
@@ -792,12 +857,13 @@ export async function openDesktopSessionIn(driver: DesktopDriver, input: { folde
     // judged above (judge), on the reading the brief now goes on
     stop = await guard(screen, "empty session field");
     if (stop) return stop;
-    await act(screen, () => driver.click(field.x + 20, field.y + field.h / 2));
+    await act(screen, () => driver.click(fieldClickX(field), field.y + field.h / 2));
     await driver.sleep(300);
     const sent = await typeBrief(screen, input.text, size, input.folderName);
     const notes = [
       ...(setUp.tried.length ? [`set on screen first: ${setUp.tried.join("; ")}`] : []),
       ...(leftover ? [`the line "Confiar no workspace" was still on screen, the app's log already saving the trust for ${input.folderName}`] : []),
+      ...(afterClick ? [`trusted the workspace ${input.folderName} in the app's dialog${seen.stale ? " (over the chips of the folder before)" : ""} and wrote the brief on that screen`] : []),
     ];
     return sent.ok && notes.length ? { ...sent, note: notes.join("; ") } : sent;
   });
@@ -1101,7 +1167,7 @@ async function focusNewField(screen: Screen, bottom: OcrLine[], tried: readonly 
   if (!field) return afterTries({ ok: false, reason: "the new session's empty task field was not on screen after setting it up; nothing was typed", retry: true, miss: true, touched: true, seen: seenText(bottom.slice(-8)) }, tried);
   const stop = await guard(screen, "empty session field");
   if (stop) return stop;
-  await act(screen, () => screen.driver.click(field.x + 20, field.y + field.h / 2));
+  await act(screen, () => screen.driver.click(fieldClickX(field), field.y + field.h / 2));
   await screen.driver.sleep(300);
   return null;
 }
@@ -1163,7 +1229,7 @@ export async function sendToDesktopSession(driver: DesktopDriver, input: { local
     const nearField = (all: OcrLine[]) => mainArea(all).filter((line) => line.y > Math.max(size.h / 2, field.y - 200));
     stop = await guard(screen, "click field");
     if (stop) return stop;
-    await act(screen, () => driver.click(field.x + 20, field.y + field.h / 2));
+    await act(screen, () => driver.click(fieldClickX(field), field.y + field.h / 2));
     await driver.sleep(300);
     // A lone "." (or how OCR reads it alone: "·", ",") is the probe of an earlier try that stopped right after it
     // (the suggestion had given way): ours to replace. Any other text is
@@ -2076,6 +2142,9 @@ export function macDesktopDriver(helper: string, env: NodeJS.ProcessEnv): Deskto
     },
     async activateClaude() {
       await osa('tell application "Claude" to activate');
+    },
+    async claudeRunning() {
+      return run("/usr/bin/pgrep", ["-x", "Claude"], env).then(() => true, () => false);
     },
     async activate(bundleId) {
       await run(helper, ["activate", bundleId], env);

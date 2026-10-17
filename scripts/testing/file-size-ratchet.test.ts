@@ -20,7 +20,8 @@ const LINES: Record<string, number> = {
   // 1,000 lines are listed. Recorded instead of split when merging v0.1.112.
   "server/bot-autonomy.ts": 2722,
   "server/cc-sessions.ts": 1045,
-  "server/claude-desktop.ts": 2085,
+  // +69 for the app 2.37+ link trust dialog (dialogTie: our link's dialog over stale chips, the brief on the screen of the click, the app started before its link) and the "+ " field; lower again with the next move-out.
+  "server/claude-desktop.ts": 2154,
   "server/desktop-work.ts": 1225,
   "server/drivers/agents-catalog.ts": 1126,
   "server/own-worktrees.ts": 1262,
