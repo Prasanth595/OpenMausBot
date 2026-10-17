@@ -1,4 +1,4 @@
-import { CalendarDays, FolderOpen, Network, Puzzle, Zap } from "lucide-react";
+import { BarChart3, CalendarDays, FolderOpen, Network, Puzzle, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
@@ -146,6 +146,16 @@ export function SidebarFooterNav({
           active={state.activeView === "team-map"}
           icon={(active) => <Network size={iconSize} className={tone(active)} />}
           onClick={() => dispatch({ type: "showTeamMap" })}
+        />
+      )}
+      {advanced && (
+        <NavRow
+          id="report"
+          label={t("sidebar.nav.report")}
+          iconsOnly={iconsOnly || toolbar}
+          active={state.activeView === "report"}
+          icon={(active) => <BarChart3 size={iconSize} className={tone(active)} />}
+          onClick={() => dispatch({ type: "showReport" })}
         />
       )}
       {filesRow}
