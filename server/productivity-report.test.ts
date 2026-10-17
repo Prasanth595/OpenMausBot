@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { bucketStarts, presetPeriod } from "../shared/productivity.ts";
 import type { GhIssue, GhPr } from "./productivity-github.ts";
-import { buildProductivityReport, buildTimeline, businessDays, coveredBusinessDays, issuesOfPr, releasePairs, weekendMs } from "./productivity-report.ts";
+import { buildProductivityReport, buildTimeline, businessDays, coveredBusinessDays, issuesOfPr, releasePairs, wholeBusinessDays, weekendMs } from "./productivity-report.ts";
 import { brt, HOUR, run, scenario, sha } from "./testing/productivity-fixture.ts";
 
 const monthReport = () => {
@@ -135,11 +135,11 @@ describe("KPIs", () => {
   });
 
   it("DORA: deploys per business day WITH a release source; change failure rate and time to restore from the post-release check (INSP-V r2 #1)", () => {
-    // September has 21 business days (22 weekdays, Sep 7th a national holiday); Oct 1st whole, Oct 2nd half by noon
-    expect(k.businessDays).toBe(22.5);
-    // the log starts on Sep 29th: Tue 29, Wed 30, Thu 1st and half of Fri 2nd have a source — 3 deliveries in 3,5 days,
-    // not 3 in 22,5 (the days without a source are unknown, not zero)
-    expect(k).toMatchObject({ releaseBusinessDays: 3.5, deploysPerBusinessDay: 0.86, releaseCovered: "partial" });
+    // September has 21 business days (22 weekdays, Sep 7th a national holiday); Oct 1st, and Oct 2nd touched by noon: whole days
+    expect(k.businessDays).toBe(23);
+    // the log starts on Sep 29th: Tue 29, Wed 30, Thu 1st and Fri 2nd (touched) have a source — 3 deliveries in 4 whole days,
+    // not 3 in 23 (the days without a source are unknown, not zero), and not 3 in 3,5 (no rate from a fraction of a day)
+    expect(k).toMatchObject({ releaseBusinessDays: 4, deploysPerBusinessDay: 0.75, releaseCovered: "partial" });
     expect(k).toMatchObject({ changeFailures: 1, checkedReleases: 2 });
     expect(k.timeToRestore).toEqual({ n: 1, median: 10.5 * HOUR, p90: 10.5 * HOUR });
   });
@@ -304,5 +304,57 @@ describe("speed (INSP-V r1 #10)", () => {
     };
     expect(time("day", "2025-10-03T00:00:00", "2026-10-03T00:00:00")).toBeLessThan(50);
     expect(time("hour", "2026-09-19T00:00:00", "2026-10-03T00:00:00")).toBeLessThan(50);
+  });
+});
+
+describe("deploy frequency over whole business days (17/10: \"5,3/dia útil\" for 2 deliveries in 24 h)", () => {
+  // the 16–17/10 history: two releases on each side of 16/10 15:00, a source the whole time
+  const october = (granularity: "hour" | "day", from: string, to: string, goals = {}) => buildProductivityReport({
+    ...scenario(),
+    now: brt("2026-10-17T15:00:00"),
+    runs: [
+      run("p1", "released", "2026-10-16T01:16:00"),
+      run("q1", "released", "2026-10-16T06:37:00"),
+      run("f1", "failed", "2026-10-16T15:55:00"),
+      run("e1", "released", "2026-10-17T01:23:24"),
+      run("n1", "released", "2026-10-17T10:11:08"),
+    ],
+    declines: [],
+    logCoverage: { from: brt("2026-10-14T00:00:00"), to: brt("2026-10-17T15:00:00") },
+    goals,
+    granularity,
+    period: { from: brt(from), to: brt(to) },
+  });
+
+  it("rounds the business-day time up, at least 1: never a rate from a fraction", () => {
+    expect(wholeBusinessDays(0.375)).toBe(1);
+    expect(wholeBusinessDays(0)).toBe(1);
+    expect(wholeBusinessDays(1)).toBe(1);
+    expect(wholeBusinessDays(3.5)).toBe(4);
+    expect(wholeBusinessDays(5.0000001)).toBe(5);
+  });
+
+  it("the last 24 h from Friday 16/10 15:00: 2 deliveries in 1 business day, 2 a day — not 2 ÷ 0,375 = 5,3", () => {
+    const report = october("hour", "2026-10-16T15:00:00", "2026-10-17T15:00:00", { deploysPerBusinessDay: 8 });
+    expect(businessDays(brt("2026-10-16T15:00:00"), brt("2026-10-17T15:00:00"))).toBe(0.38);
+    expect(report.kpis).toMatchObject({ deliveries: 2, businessDays: 1, releaseBusinessDays: 1, deploysPerBusinessDay: 2, deployFrequencyCountOnly: false, releaseCovered: "full" });
+    // the 24 h before (Thu 15:00 – Fri 15:00) also had 2, in 1 business day
+    expect(report.previousKpis).toMatchObject({ deliveries: 2, releaseBusinessDays: 1, deploysPerBusinessDay: 2 });
+  });
+
+  it("a weekend-only window counts 1 business day, not 0 and not a fraction", () => {
+    const report = october("day", "2026-10-17T00:00:00", "2026-10-19T00:00:00");
+    expect(report.kpis).toMatchObject({ deliveries: 2, businessDays: 0, releaseBusinessDays: 1, deploysPerBusinessDay: 2 });
+  });
+
+  it("a window shorter than a day is a count, no rate", () => {
+    const report = october("hour", "2026-10-17T09:00:00", "2026-10-17T15:00:00");
+    expect(report.kpis).toMatchObject({ deliveries: 1, deploysPerBusinessDay: null, deployFrequencyCountOnly: true });
+  });
+
+  it("a whole week counts its 5 business days, a rolling 7 days from Friday 15:00 too (not 6); 12/10 is a holiday", () => {
+    expect(october("day", "2026-10-05T00:00:00", "2026-10-10T00:00:00").kpis).toMatchObject({ businessDays: 5 });
+    expect(october("day", "2026-10-02T15:00:00", "2026-10-09T15:00:00").kpis).toMatchObject({ businessDays: 5 });
+    expect(october("day", "2026-10-12T00:00:00", "2026-10-17T00:00:00").kpis).toMatchObject({ businessDays: 4 });
   });
 });

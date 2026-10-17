@@ -11,7 +11,7 @@ import {
   releaseCounts, reportMarkdown, reportPdf, reportTitle, textWidth,
 } from "./productivity-export.ts";
 import { buildProductivityReport } from "./productivity-report.ts";
-import { brt, CLIENT_NAME, scenario } from "./testing/productivity-fixture.ts";
+import { brt, CLIENT_NAME, run, scenario } from "./testing/productivity-fixture.ts";
 
 const report = (goals = {}) => buildProductivityReport({ ...scenario(), goals, granularity: "day", period: { from: brt("2026-09-28T00:00:00"), to: brt("2026-10-03T00:00:00") } });
 const CP1252: Record<number, string> = { 0x80: "€", 0x85: "…", 0x91: "‘", 0x92: "’", 0x93: "“", 0x94: "”", 0x95: "•", 0x96: "–", 0x97: "—" };
@@ -65,13 +65,13 @@ describe("board model", () => {
   });
 
   it("marks delivered totals as lower bounds when a release's contents are unknown (INSP-V r1 #4)", () => {
-    expect(by("deliveries").detail).toBe("≥4 PRs e ≥2 issues concluídas no ar · 1 release sem conteúdo lido · fonte de releases em 3,5 de 4,5 dias úteis");
+    expect(by("deliveries").detail).toBe("≥4 PRs e ≥2 issues concluídas no ar · 1 release sem conteúdo lido · fonte de releases em 4 de 5 dias úteis");
   });
 
   it("counts deliveries and their frequency only on the days a release source covers (INSP-V r2 #1)", () => {
-    // the log starts on 29/09: 28/09 is unknown, so 3 deliveries are a lower bound over 3,5 business days, not 4,5
+    // the log starts on 29/09: 28/09 is unknown, so 3 deliveries are a lower bound over 4 whole business days, not 5
     expect(by("deliveries").value).toBe("≥3");
-    expect(by("deployFrequency")).toMatchObject({ value: "0,9/dia útil", detail: "3 em 3,5 dias úteis com dados (de 4,5)" });
+    expect(by("deployFrequency")).toMatchObject({ value: "0,8/dia útil", detail: "3 em 4 dias úteis com dados (de 5)" });
   });
 
   it("success rate over the runs that ran; superseded and aborted apart (INSP-V r1 #1)", () => {
@@ -110,15 +110,16 @@ describe("board model", () => {
 
   it("lights a target only when one is set (met / close / off)", () => {
     expect(kpis.some((kpi) => kpi.goal)).toBe(false);
-    const withGoals = boardKpis(report({ deploysPerBusinessDay: 1, releaseSuccessRate: 80, leadTimeHours: 48 }));
-    expect(withGoals.find((kpi) => kpi.key === "deployFrequency")!.goal).toEqual({ target: "≥ 1/dia útil", status: "close" });
+    const withGoals = boardKpis(report({ deploysPerBusinessDay: 0.9, releaseSuccessRate: 80, leadTimeHours: 48 }));
+    // 0,75 a day against ≥ 0,9: within 20%
+    expect(withGoals.find((kpi) => kpi.key === "deployFrequency")!.goal).toEqual({ target: "≥ 0,9/dia útil", status: "close" });
     expect(withGoals.find((kpi) => kpi.key === "successRate")!.goal).toEqual({ target: "≥ 80%", status: "close" });
     expect(withGoals.find((kpi) => kpi.key === "leadTime")!.goal).toEqual({ target: "≤ 48 h", status: "met" });
   });
 
   it("DORA rows: frequency, lead time for changes, change failure rate and time to restore", () => {
     expect(doraRows(report()).map(([name, value]) => [name, value])).toEqual([
-      ["Frequência de deploy", "0,9 por dia útil (3 em 3,5 dias úteis com dados, de 4,5 no período)"],
+      ["Frequência de deploy", "0,8 por dia útil (3 em 4 dias úteis com dados, de 5 no período)"],
       ["Lead time de mudança", "1,8 h (p90 3,5 h, n=4)"],
       ["Taxa de falha de mudança", "50% (1 de 2 releases verificados)"],
       ["Tempo de restauração", "11 h (n=1)"],
@@ -135,7 +136,7 @@ describe("executive summary", () => {
   it("is six pt-BR lines with the numbers, the rules and the coverage of each; releases and bots apart (R13-visual N17)", () => {
     const lines = executiveSummary(report());
     expect(lines).toEqual([
-      "Produção: ≥3 entregas (sem base comparável), 0,9 por dia útil com dados (3,5 dias úteis), com ≥4 PRs e ≥2 issues concluídas no ar (1 release sem conteúdo lido); parte do período sem fonte de releases.",
+      "Produção: ≥3 entregas (sem base comparável), 0,8 por dia útil com dados (4 dias úteis), com ≥4 PRs e ≥2 issues concluídas no ar (1 release sem conteúdo lido); parte do período sem fonte de releases.",
       "Vazão: 5 PRs mergeadas (anterior: 0) e 2 issues resolvidas (anterior: 0), 1 bug e 1 P0/P1.",
       "Lead time issue até produção: mediana 43 h, p90 2,6 d (n=2; sem base comparável); merge até produção 1,8 h.",
       "Backlog agora: 2 issues abertas; P1 1 e P0 1 (1 ainda com o rótulo antigo); a mais antiga #104, 22 d; 1 PR esperando o gate.",
@@ -182,7 +183,7 @@ describe("executive summary", () => {
   });
 
   it("has an English version with the same numbers", () => {
-    expect(executiveSummary(report(), "en")[0]).toBe("Production: ≥3 deliveries (no comparable base), 0.9 per business day with data (3.5 business days), carrying ≥4 PRs and ≥2 completed issues live (1 release with contents not read); part of the period has no release source.");
+    expect(executiveSummary(report(), "en")[0]).toBe("Production: ≥3 deliveries (no comparable base), 0.8 per business day with data (4 business days), carrying ≥4 PRs and ≥2 completed issues live (1 release with contents not read); part of the period has no release source.");
   });
 });
 
@@ -286,7 +287,7 @@ describe("PDF", () => {
 
   it("wraps the DORA frequency value instead of cutting it (INSP-V r3 #2)", () => {
     const flat = pdfText(pdf).replace(/\s+/g, " ");
-    expect(flat).toContain("0,9 por dia útil (3 em 3,5 dias úteis com dados, de 4,5 no período)");
+    expect(flat).toContain("0,8 por dia útil (3 em 4 dias úteis com dados, de 5 no período)");
     expect(flat).not.toMatch(/dias úteis com dados…/);
   });
 
@@ -348,5 +349,38 @@ describe("PDF", () => {
 
   it("names the download by granularity and period", () => {
     expect(exportFileName(report(), "pdf")).toBe("produtividade-dia-2026-09-28_2026-10-02.pdf");
+  });
+});
+
+describe("deploy frequency over whole business days (17/10: \"5,3/dia útil\" for 2 deliveries in 24 h)", () => {
+  const october = (granularity: "hour" | "day", from: string, to: string) => buildProductivityReport({
+    ...scenario(),
+    now: brt("2026-10-17T15:00:00"),
+    runs: [
+      run("p1", "released", "2026-10-16T01:16:00"),
+      run("q1", "released", "2026-10-16T06:37:00"),
+      run("e1", "released", "2026-10-17T01:23:24"),
+      run("n1", "released", "2026-10-17T10:11:08"),
+    ],
+    declines: [],
+    logCoverage: { from: brt("2026-10-14T00:00:00"), to: brt("2026-10-17T15:00:00") },
+    goals: { deploysPerBusinessDay: 8 },
+    granularity,
+    period: { from: brt(from), to: brt(to) },
+  });
+
+  it("the last 24 h from Friday 16/10 15:00 read 2,0 a day in 1 business day, on the card, in DORA and in the summary", () => {
+    const report = october("hour", "2026-10-16T15:00:00", "2026-10-17T15:00:00");
+    expect(boardKpis(report).find((kpi) => kpi.key === "deployFrequency")).toMatchObject({ value: "2,0/dia útil", detail: "2 em 1 dia útil com dados", goal: { target: "≥ 8/dia útil", status: "off" } });
+    expect(doraRows(report)[0]![1]).toBe("2,0 por dia útil (2 em 1 dia útil com dados)");
+    expect(executiveSummary(report)[0]).toContain("Produção: 2 entregas (anterior: 2), 2,0 por dia útil com dados (1 dia útil)");
+    expect(executiveSummary(report, "en")[0]).toContain("2.0 per business day with data (1 business day)");
+  });
+
+  it("a window shorter than a day shows the count, with no rate and no target light", () => {
+    const report = october("hour", "2026-10-17T09:00:00", "2026-10-17T15:00:00");
+    expect(boardKpis(report).find((kpi) => kpi.key === "deployFrequency")).toMatchObject({ value: "1 no período", detail: "janela menor que 1 dia: a contagem, sem taxa por dia útil" });
+    expect(boardKpis(report).find((kpi) => kpi.key === "deployFrequency")!.goal?.status ?? null).toBeNull();
+    expect(executiveSummary(report)[0]).toContain("sem taxa por dia útil (janela menor que 1 dia)");
   });
 });

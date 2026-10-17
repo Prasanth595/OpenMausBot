@@ -14718,7 +14718,12 @@
       "room.holds.resume": "05f2dae7f5838c7161c94772fc285127afd6de3e26ccbb1b59fb041a8add27cd",
       "room.holds.stop": "300c88bb31db226580ea35a28b2e930ddb05f328b4e6a63601850a6643b882df",
       "room.holds.stopTitle": "839bb3d62635029c1a325673b80f91cb1f16f55ef6179bb37d54f65b634cfa90",
-      "room.holds.avatarHeld": "f11b17aba2842c436d93b02f138b32041eaed0abed7ce03e68e8aefbf671fe73"
+      "room.holds.avatarHeld": "f11b17aba2842c436d93b02f138b32041eaed0abed7ce03e68e8aefbf671fe73",
+      "report.kpi.frequency.detailOne": "a1db5ce073f627be33fd536cf5bc624790c81aa40c8eee0ae670626c1bfc97cc",
+      "report.kpi.frequency.count": "ee3d6c382ee1087c978973f6fae6dd24f42a9686117cac8fa674ef3a55ca811e",
+      "report.kpi.frequency.countDetail": "4efe1499bb2b8a19ede02d123668cb9d9cd7cf350fe327bacbaa6383ca0842b3",
+      "report.kpi.frequency.whole": "d029cbda2b4c8c32cc4c426195b3d767942eb2d7d1969a33539227822d4aed97",
+      "report.dora.frequency.count": "a8fd68713535e562f4c77cff4b02fa02acc63d4d05f942dddd52decdf74cbbc5"
     },
     "zh": {
       "pro.fromPrice": "a48a04a457d60b08b54fc83e7a6c4584ffedb1e23621859084900c8521a3af7b",

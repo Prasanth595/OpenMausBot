@@ -389,6 +389,16 @@ export function businessDays(from: number, to: number): number {
   return Math.round(total * 100) / 100;
 }
 
+/** A rate's denominator in whole business days: the business-day time rounded
+ * UP (Friday 15:00 to Saturday 15:00 is 1, never 0,375 — 17/10, "5,3/dia útil"
+ * for 2 deliveries), at least 1 — a rate is never extrapolated from a fraction
+ * of a day. Calendar-aligned periods give the days they touch. */
+export function wholeBusinessDays(fractional: number): number {
+  return Math.max(1, Math.ceil(Math.round(fractional * 100) / 100 - 1e-9));
+}
+/** A window shorter than about a day has no daily rate: only its count. */
+export const MIN_RATE_WINDOW_MS = DAY_MS - 3_600_000;
+
 /** Merge overlapping spans into disjoint ones, sorted. */
 function mergeSpans(spans: ReadonlyArray<{ from: number; to: number }>): Array<{ from: number; to: number }> {
   const merged: Array<{ from: number; to: number }> = [];
@@ -411,7 +421,8 @@ export function coveredBusinessDays(from: number, to: number, spans: ReadonlyArr
   return Math.round(total * 100) / 100;
 }
 
-export function kpisFor(input: ReportInputs, index: ReportIndex, from: number, to: number): ReportKpis {
+/** `windowMs` is the period's nominal length: the previous period, cut to the time elapsed in this one, keeps it. */
+export function kpisFor(input: ReportInputs, index: ReportIndex, from: number, to: number, windowMs = to - from): ReportKpis {
   const { github } = input;
   const end = Math.min(to, input.now);
   const releases = index.releaseList.filter((release) => within(release.at, from, to));
@@ -448,6 +459,10 @@ export function kpisFor(input: ReportInputs, index: ReportIndex, from: number, t
   // DORA — the denominator is the business days a release source covers
   const days = businessDays(from, end);
   const releaseDays = coveredBusinessDays(from, end, index.spans);
+  const releaseCovered = end > from ? coverageOf(index.spans, from, end) : "none";
+  // the rate, over whole business days with a source; a window under a day is a count only
+  const countOnly = windowMs < MIN_RATE_WINDOW_MS;
+  const rateDays = releaseCovered === "none" ? 0 : wholeBusinessDays(releaseDays);
   const checked = releases.filter((release) => isConclusive(release.postRelease));
   const failedChanges = checked.filter((release) => isChangeFailure(release.postRelease));
   const restores = failedChanges.map((release) => {
@@ -492,10 +507,11 @@ export function kpisFor(input: ReportInputs, index: ReportIndex, from: number, t
     declinedReleases: index.declines.count(from, to),
     blockedMs,
     blockedWeekendMs,
-    deploysPerBusinessDay: releaseDays > 0 ? Math.round((releases.length / releaseDays) * 100) / 100 : null,
-    businessDays: days,
-    releaseBusinessDays: releaseDays,
-    releaseCovered: end > from ? coverageOf(index.spans, from, end) : "none",
+    deploysPerBusinessDay: !countOnly && rateDays > 0 ? Math.round((releases.length / rateDays) * 100) / 100 : null,
+    deployFrequencyCountOnly: countOnly,
+    businessDays: days > 0 ? Math.ceil(days - 1e-9) : 0,
+    releaseBusinessDays: rateDays,
+    releaseCovered,
     changeFailures: failedChanges.length,
     checkedReleases: checked.length,
     timeToRestore: distribution(restores),
@@ -761,7 +777,7 @@ export function buildProductivityReport(input: ReportInputs): ProductivityReport
     kpis: kpisFor(input, index, period.from, period.to),
     // a period still under way (its last bucket runs until now) is compared with the same
     // elapsed span of the one before, not the whole: at 09:00 a steady week is not "−14%"
-    previousKpis: kpisFor(input, index, previous.from, Math.min(previous.to, previous.from + Math.max(0, Math.min(period.to, now) - period.from))),
+    previousKpis: kpisFor(input, index, previous.from, Math.min(previous.to, previous.from + Math.max(0, Math.min(period.to, now) - period.from)), period.to - period.from),
     buckets,
     releases: releaseRows(input, index, period.from, period.to),
     backlog: backlogOf(input),

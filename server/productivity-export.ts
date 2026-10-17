@@ -101,6 +101,8 @@ const granularityName = (granularity: Granularity, lang: SummaryLang) =>
 const pluralPt = (value: number, one: string, many: string) => `${formatNumber(value)} ${value === 1 ? one : many}`;
 /** Business days: whole ones without a decimal ("21"), partial ones with one ("12,4"). */
 const daysText = (value: number, lang: SummaryLang = "pt-BR") => new Intl.NumberFormat(lang, { maximumFractionDigits: 1 }).format(value);
+/** "1 dia útil", "3 dias úteis" (whole days since 17/10). */
+const businessDaysText = (value: number, lang: SummaryLang = "pt-BR") => `${daysText(value, lang)} ${lang === "pt-BR" ? (value === 1 ? "dia útil" : "dias úteis") : value === 1 ? "business day" : "business days"}`;
 
 // ── the board model ─────────────────────────────────────────────────────────
 
@@ -147,10 +149,10 @@ export function boardKpis(report: ProductivityReport): BoardKpi[] {
   const partial = k.releaseCovered !== "full";
   return [
     kpi({ key: "deliveries", label: "Entregas em produção", value: `${partial ? "≥" : ""}${formatNumber(k.deliveries)}`, current: k.deliveries, previous: p.deliveries, better: "up", release: true,
-      detail: `${lowerBound ? "≥" : ""}${pluralPt(k.deliveredPrs, "PR", "PRs")} e ${lowerBound ? "≥" : ""}${pluralPt(k.deliveredIssues, "issue concluída", "issues concluídas")} no ar${lowerBound ? ` · ${pluralPt(k.unknownContentReleases, "release sem conteúdo lido", "releases sem conteúdo lido")}` : ""}${partial ? ` · fonte de releases em ${daysText(k.releaseBusinessDays)} de ${daysText(k.businessDays)} dias úteis` : ""}`,
+      detail: `${lowerBound ? "≥" : ""}${pluralPt(k.deliveredPrs, "PR", "PRs")} e ${lowerBound ? "≥" : ""}${pluralPt(k.deliveredIssues, "issue concluída", "issues concluídas")} no ar${lowerBound ? ` · ${pluralPt(k.unknownContentReleases, "release sem conteúdo lido", "releases sem conteúdo lido")}` : ""}${partial ? ` · fonte de releases em ${daysText(k.releaseBusinessDays)} de ${businessDaysText(k.businessDays)}` : ""}`,
       short: "avanços da tag de produção (fim do deploy)" }),
-    kpi({ key: "deployFrequency", label: "Frequência de deploy", value: k.deploysPerBusinessDay === null ? "—" : `${formatNumber(k.deploysPerBusinessDay, "pt-BR", 1)}/dia útil`, current: k.deploysPerBusinessDay, previous: p.deploysPerBusinessDay, better: "up", release: true, base: p.deliveries,
-      detail: `${formatNumber(k.deliveries)} em ${daysText(k.releaseBusinessDays)} dias úteis com dados${partial ? ` (de ${daysText(k.businessDays)})` : ""}`, short: "DORA: entregas por dia útil com fonte de releases (seg–sex, sem feriados)",
+    kpi({ key: "deployFrequency", label: "Frequência de deploy", value: k.deployFrequencyCountOnly ? `${formatNumber(k.deliveries)} no período` : k.deploysPerBusinessDay === null ? "—" : `${formatNumber(k.deploysPerBusinessDay, "pt-BR", 1)}/dia útil`, current: k.deploysPerBusinessDay, previous: p.deploysPerBusinessDay, better: "up", release: true, base: p.deliveries,
+      detail: k.deployFrequencyCountOnly ? "janela menor que 1 dia: a contagem, sem taxa por dia útil" : `${formatNumber(k.deliveries)} em ${businessDaysText(k.releaseBusinessDays)} com dados${partial ? ` (de ${daysText(k.businessDays)})` : ""}`, short: "DORA: entregas por dia útil com fonte de releases (dias inteiros, seg–sex, sem feriados)",
       goal: goals.deploysPerBusinessDay !== undefined ? { key: "deploysPerBusinessDay", value: k.deploysPerBusinessDay, target: `≥ ${formatNumber(goals.deploysPerBusinessDay, "pt-BR", Number.isInteger(goals.deploysPerBusinessDay) ? 0 : 1)}/dia útil` } : undefined }),
     kpi({ key: "successRate", label: "Sucesso de release", value: formatPercent(k.releaseSuccessRate), current: k.releaseSuccessRate, previous: p.releaseSuccessRate, better: "up", release: true, kind: "percent",
       samples: { current: tries, previous: p.deliveries + p.failedReleases },
@@ -181,7 +183,7 @@ export function doraRows(report: ProductivityReport): Array<[string, string, str
   const k = report.kpis;
   const cfr = k.checkedReleases ? k.changeFailures / k.checkedReleases : null;
   return [
-    ["Frequência de deploy", k.deploysPerBusinessDay === null ? "— (nenhum dia útil com fonte de releases)" : `${formatNumber(k.deploysPerBusinessDay, "pt-BR", 1)} por dia útil (${formatNumber(k.deliveries)} em ${daysText(k.releaseBusinessDays)} dias úteis com dados${k.releaseCovered !== "full" ? `, de ${daysText(k.businessDays)} no período` : ""})`, "entregas em produção ÷ dias úteis com fonte de releases (seg–sex, sem feriados nacionais); dias sem fonte não contam como zero"],
+    ["Frequência de deploy", k.deployFrequencyCountOnly ? `${formatNumber(k.deliveries)} no período (janela menor que 1 dia — contagem, sem taxa)` : k.deploysPerBusinessDay === null ? "— (nenhum dia útil com fonte de releases)" : `${formatNumber(k.deploysPerBusinessDay, "pt-BR", 1)} por dia útil (${formatNumber(k.deliveries)} em ${businessDaysText(k.releaseBusinessDays)} com dados${k.releaseCovered !== "full" ? `, de ${daysText(k.businessDays)} no período` : ""})`, "entregas em produção ÷ dias úteis inteiros com fonte de releases (seg–sex, sem feriados nacionais; uma janela de 24 h conta 1, no mínimo 1); dias sem fonte não contam como zero"],
     ["Lead time de mudança", k.leadMergeToProd.n ? `${formatDuration(k.leadMergeToProd.median)} (p90 ${formatDuration(k.leadMergeToProd.p90)}, n=${k.leadMergeToProd.n})` : "—", "merge da PR até o fim do deploy que a levou ao ar (mediana)"],
     ["Taxa de falha de mudança", cfr === null ? "— (nenhum release com verificação pós-release)" : `${formatPercent(cfr)} (${k.changeFailures} de ${k.checkedReleases} releases verificados)`, "releases cuja verificação pós-release reverteu ou achou produção fora do ar ÷ releases com verificação conclusiva"],
     ["Tempo de restauração", k.timeToRestore.n ? `${formatDuration(k.timeToRestore.median)} (n=${k.timeToRestore.n})` : k.changeFailures ? "— (sem release saudável depois da falha)" : "— (nenhuma falha de mudança registrada)", "da falha de mudança ao próximo release com verificação saudável"],
@@ -246,9 +248,11 @@ export function executiveSummary(report: ProductivityReport, lang: SummaryLang =
   const oldest = b.oldestOpen ? `#${b.oldestOpen.number}, ${formatDuration(report.generatedAt - b.oldestOpen.createdAt, lang)}` : "—";
   const partial = k.releaseCovered !== "full";
   const atLeast = partial ? "≥" : "";
-  const frequency = k.deploysPerBusinessDay === null
-    ? (pt ? "frequência — (nenhum dia útil com fonte)" : "frequency — (no business day with a source)")
-    : pt ? `${formatNumber(k.deploysPerBusinessDay, lang, 1)} por dia útil com dados (${daysText(k.releaseBusinessDays, lang)} dias úteis)` : `${formatNumber(k.deploysPerBusinessDay, lang, 1)} per business day with data (${daysText(k.releaseBusinessDays, lang)} business days)`;
+  const frequency = k.deployFrequencyCountOnly
+    ? (pt ? "sem taxa por dia útil (janela menor que 1 dia)" : "no per-business-day rate (window shorter than a day)")
+    : k.deploysPerBusinessDay === null
+      ? (pt ? "frequência — (nenhum dia útil com fonte)" : "frequency — (no business day with a source)")
+      : pt ? `${formatNumber(k.deploysPerBusinessDay, lang, 1)} por dia útil com dados (${businessDaysText(k.releaseBusinessDays, lang)})` : `${formatNumber(k.deploysPerBusinessDay, lang, 1)} per business day with data (${businessDaysText(k.releaseBusinessDays, lang)})`;
   const bots = botsLine(report, lang);
   // the backlog line reads the period's own end for a closed period; today apart, labelled
   const end = b.periodEnd;

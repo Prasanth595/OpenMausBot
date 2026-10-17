@@ -289,9 +289,11 @@ export interface ReportKpis {
   /** DORA — deliveries per business day WITH A RELEASE SOURCE (Mon–Fri, São
    * Paulo, national holidays off): days no source covers are unknown, not zero. */
   deploysPerBusinessDay: number | null;
-  /** Business days elapsed in the period. */
+  /** The window is shorter than a day: the frequency is its count, not a rate (no extrapolation). */
+  deployFrequencyCountOnly?: boolean;
+  /** Business days the period touches, whole (rounded up). */
   businessDays: number;
-  /** Of those, the business days a release source covers (the denominator above). */
+  /** Of those, the whole business days a release source covers, at least 1 when it covers any of the period (the denominator above). */
   releaseBusinessDays: number;
   /** How much of the period a release source covers: below "full", deliveries are a lower bound. */
   releaseCovered: "full" | "partial" | "none";
