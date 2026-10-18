@@ -706,6 +706,42 @@ describe("\"Confiar\" never with the chip on another folder, nor on an ambiguous
     await openDesktopSessionIn(plain.driver, { folder: ours.alias, folderName: folder, text: "b", expected: ours.worktree, registered: () => listed });
   });
 
+  it("17/10 9042 (app 2.42): the screen of the click shows no worktree option — the brief goes in there; the dialog again on a later link, the trust already saved, is no leftover — the cli; a brief that does not leave is a miss", async () => {
+    const folder = "9042-nomes-completos-nos-catalogos-do";
+    const { ours, listed } = world(folder);
+    // what OCR read on 17/10 (server.log 21:33:07Z and 21:34:01Z)
+    const dialog = "Leia nosso guia de segurança para mais informações. | Cancelar | Confiar no workspace | Ide Code CLI | + Descreva uma tarefa ou faça uma pergunta | • Este computa... | M 9042-nomes-completos-nos-catalogo... | Automático Opus 5.5 Rápido Médio";
+    const after = "> Importar 3 sessões do Claude Code CLI | X | + Descreva uma tarefa ou faça uma pergunta | Este computa... | 9042-nomes-completos-nos-catalogo.. | Automático | Opus 5.5 Rápido Médio";
+    const before = "Resolvi. | Responder";
+    const input = { folder: ours.alias, folderName: folder, text: "brief", expected: ours.worktree, registered: () => listed, branch: `omb/${folder}`, dialogTie: true };
+    // try 1, 18:32:27 BRT: one click on "Confiar no workspace", then the brief on the screen of the click
+    vi.setSystemTime(new Date(2026, 9, 17, 18, 32, 27).getTime());
+    const app = fakeApp([screenFrom(before), screenFrom(dialog)]);
+    const read = app.driver.ocr;
+    const answered = fakeApp([screenFrom(after), SENT]).driver.ocr;
+    app.driver.ocr = () => (app.actions.some((action) => action.startsWith("click")) ? answered() : read());
+    const step = await openDesktopSessionIn(app.driver, { ...input, trustLog: () => "", trustClicks: 0 });
+    expect(step).toMatchObject({ ok: true });
+    expect(step.ok && step.note).toContain("trusted the workspace");
+    const firstClick = app.actions.findIndex((action) => action.startsWith("click"));
+    expect(clicksOn(app.actions.slice(0, firstClick + 1), screenFrom(dialog), /^Confiar no workspace$/)).toBe(1);
+    expect(app.actions.slice(firstClick + 1).some((action) => action.startsWith("paste"))).toBe(true);
+    // try 2, 18:33:40: the dialog with the next link, the app's log having saved our trust at 18:32:59 —
+    // the whole dialog is never a leftover line: nothing typed under it, the cli (no second click in this create)
+    vi.setSystemTime(new Date(2026, 9, 17, 18, 33, 40).getTime());
+    const at = new Date(2026, 9, 17, 18, 32, 59).getTime();
+    const saved = [logLine(at, `LocalSessions.saveTrust: cwd=${ours.alias}`), logLine(at, `Saved workspace trust for ${ours.alias}`)].join("\n");
+    const again = fakeApp([screenFrom(before), screenFrom(dialog)]);
+    const second = await openDesktopSessionIn(again.driver, { ...input, trustLog: () => saved, trustClicks: 1 });
+    expect(second).toMatchObject({ ok: false, cliNow: true });
+    expect(again.actions.some((action) => action.startsWith("click") || action.startsWith("paste") || action.startsWith("type"))).toBe(false);
+    // a brief that did not leave the screen is a miss: the breaker counts it (15 tries, none counted, on 17/10)
+    const stuck = fakeApp([screenFrom(before), screenFrom(after)]);
+    const third = await openDesktopSessionIn(stuck.driver, { ...input, trustLog: () => saved, trustClicks: 1 });
+    expect(third).toMatchObject({ ok: false, miss: true, retry: true });
+    expect(!third.ok && third.reason).toContain("did not leave the new session's screen");
+  });
+
   it("ties by the newest line, never one of up to 999 ms before the link, and two folders in the newest second tie to none", () => {
     const { ours, before } = world("9378-supervisor-do-atendimento", "2026-10-05T16:00:50Z");
     const opened = new Date(2026, 9, 5, 13, 0, 6, 500).getTime();

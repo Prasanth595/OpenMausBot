@@ -21,7 +21,8 @@ const LINES: Record<string, number> = {
   "server/bot-autonomy.ts": 2722,
   "server/cc-sessions.ts": 1045,
   // +69 for the app 2.37+ link trust dialog (dialogTie: our link's dialog over stale chips, the brief on the screen of the click, the app started before its link) and the "+ " field; lower again with the next move-out.
-  "server/claude-desktop.ts": 2154,
+  // +7 for the 2.42 trust dialog of 17/10 9042 (no worktree option on the screen of the click, the whole dialog never a leftover, a brief that does not leave a miss).
+  "server/claude-desktop.ts": 2161,
   "server/desktop-work.ts": 1225,
   "server/drivers/agents-catalog.ts": 1126,
   "server/own-worktrees.ts": 1262,

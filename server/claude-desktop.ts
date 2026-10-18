@@ -807,7 +807,10 @@ export async function openDesktopSessionIn(driver: DesktopDriver, input: { folde
     // tripped the breaker. With the app's own log saying it saved the trust
     // for our folder, nothing tying the line to another folder, and git
     // listing the folder, the line is a leftover: the brief goes in.
-    const leftover = Boolean(trust && clicked && seen.field && input.expected && trustSavedFor(log(), input.expected)
+    // Never the whole dialog (its "Cancelar" or guide line): 2.37+ asks again on
+    // every link, a folder it already saved too (17/10 9042: saved 18:32:59, then
+    // 15 tries typed under the dialog until it was answered — none counted a miss)
+    const leftover = Boolean(trust && clicked && seen.field && !trustDialog(bottom) && input.expected && trustSavedFor(log(), input.expected)
       && trustPromptFor(bottom, log(), opened, input.expected).is !== "other"
       && ownWorktreeFolder(input.folder, input.expected, registered()));
     if (trust && !leftover) {
@@ -838,7 +841,9 @@ export async function openDesktopSessionIn(driver: DesktopDriver, input: { folde
           if (trustPrompt(bottom)) continue;
           const now = ours(bottom);
           if ("ok" in now) { if (now.cliNow) return now; continue; }
-          if (now.field && !now.stale && worktreeOption(chipRow(bottom)) === "off") afterClick = now.field;
+          // no worktree option at all is fine, as in judge (2.42's composer shows none: 17/10 9042 18:33:07 BRT)
+          const option = worktreeOption(chipRow(bottom));
+          if (now.field && !now.stale && (option === "off" || option === null)) afterClick = now.field;
         }
       }
       // Never pasted on the screen of the click: both times the server
@@ -860,6 +865,8 @@ export async function openDesktopSessionIn(driver: DesktopDriver, input: { folde
     await act(screen, () => driver.click(fieldClickX(field), field.y + field.h / 2));
     await driver.sleep(300);
     const sent = await typeBrief(screen, input.text, size, input.folderName);
+    // a brief the screen shows did not leave is a miss of the link (a guard's stop, no reading, is not): the breaker counts it (17/10 9042)
+    if (!sent.ok && sent.seen !== undefined && !sent.human) return { ...sent, miss: true };
     const notes = [
       ...(setUp.tried.length ? [`set on screen first: ${setUp.tried.join("; ")}`] : []),
       ...(leftover ? [`the line "Confiar no workspace" was still on screen, the app's log already saving the trust for ${input.folderName}`] : []),
