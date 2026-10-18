@@ -19,6 +19,20 @@ interface SpeakOptions {
   messageId?: string;
 }
 
+/** One spoken reply, fed block by block: blocks come from the committed
+ * splitter (`/api/tts/prepare`), the caller decides when each one is closed,
+ * and `end` settles after the last queued block has played. */
+export interface SpeechStream {
+  /** Queue one utterance block; empty blocks are dropped. */
+  push(block: string): void;
+  /** No further blocks; resolves when everything queued has played. */
+  end(): Promise<void>;
+  /** Split text through the server's committed splitter; rejects like `speak`. */
+  prepare(text: string): Promise<string[]>;
+  /** Surface a fatal error and kill the stream. */
+  fail(error: string): void;
+}
+
 type TtsPrepareBody = { ready?: boolean; utterances?: string[]; error?: string };
 type TtsErrorBody = { error?: string };
 
@@ -100,6 +114,19 @@ export class Speaker {
   }
 
   async speak(text: string, opts: SpeakOptions = {}): Promise<void> {
+    const stream = this.begin(opts);
+    let utterances: string[];
+    try {
+      utterances = await stream.prepare(text);
+    } catch (e) {
+      stream.fail(e instanceof Error ? e.message : String(e));
+      return;
+    }
+    for (const utterance of utterances) stream.push(utterance);
+    await stream.end();
+  }
+
+  begin(opts: SpeakOptions = {}): SpeechStream {
     recordSpeakEnter(opts.messageId);
     this.stop();
     const mine = this.token;
@@ -108,28 +135,48 @@ export class Speaker {
     const live = () => this.token === mine && !controller.signal.aborted;
 
     this.set({ status: "preparing", botId: opts.botId, messageId: opts.messageId });
-    if (localSystemVoiceActive()) {
-      await this.speakWithLocalSystem(text, opts, live);
-      if (this.request === controller) this.request = null;
-      return;
-    }
-    let utterances: string[];
-    try {
-      utterances = await this.prepare(text, opts.voiceId, controller.signal);
-      recordPrepared(opts.messageId, utterances.length);
-    } catch (e) {
-      if (live()) this.set({ ...IDLE, error: e instanceof Error ? e.message : String(e) });
-      if (this.request === controller) this.request = null;
-      return;
-    }
-    if (!live()) return;
-    if (!utterances.length) {
-      this.set(IDLE);
-      if (this.request === controller) this.request = null;
-      return;
-    }
+    return localSystemVoiceActive()
+      ? this.localStream(opts, live, controller)
+      : this.networkStream(opts, live, controller);
+  }
 
+  /** The system voice has no splitter round trip: one utterance per block, the
+   * whole text for a completed reply, so streaming degrades to speaking at the
+   * authoritative frame. */
+  private localStream(opts: SpeakOptions, live: () => boolean, controller: AbortController): SpeechStream {
+    let chain: Promise<void> = Promise.resolve();
+    let closed = false;
+    return {
+      push: (block) => {
+        if (closed || !block) return;
+        chain = chain.then(() => this.speakWithLocalSystem(block, opts, live));
+      },
+      end: async () => {
+        closed = true;
+        await chain;
+        if (this.request === controller) this.request = null;
+      },
+      prepare: async (text) => [text],
+      fail: () => { closed = true; },
+    };
+  }
+
+  private networkStream(opts: SpeakOptions, live: () => boolean, controller: AbortController): SpeechStream {
     type Rendered = { blob: Blob; error?: never } | { blob?: never; error: unknown };
+    const pending: string[] = [];
+    let closed = false;
+    let finished = false;
+    let running = false;
+    let wake: (() => void) | null = null;
+    let settleDrained: () => void = () => {};
+    const drained = new Promise<void>((resolve) => { settleDrained = resolve; });
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      closed = true;
+      wake?.();
+      settleDrained();
+    };
     const render = (utterance: string, block: number): Promise<Rendered> => {
       recordBlockTiming(opts.messageId, block, "renderStart");
       return this.render(utterance, opts.voiceId, controller.signal).then(
@@ -140,36 +187,81 @@ export class Speaker {
         (error: unknown) => ({ error }),
       );
     };
-    const inFlight: Promise<Rendered>[] = [];
-    for (let i = 0; i < utterances.length; i += 1) {
-      while (inFlight.length < PREFETCH_WINDOW && i + inFlight.length < utterances.length) {
-        const block = i + inFlight.length;
-        inFlight.push(render(utterances[block], block));
-      }
-      const current = inFlight.shift();
-      if (!current) break;
-      const rendered = await current;
-      if ("error" in rendered) {
-        if (live()) {
-          this.set({
-            ...IDLE,
-            error: rendered.error instanceof Error ? rendered.error.message : String(rendered.error),
-          });
+    const run = async (): Promise<void> => {
+      const inFlight: Promise<Rendered>[] = [];
+      let index = 0;
+      let playedAll = false;
+      for (;;) {
+        while (inFlight.length < PREFETCH_WINDOW && index + inFlight.length < pending.length) {
+          const block = index + inFlight.length;
+          inFlight.push(render(pending[block]!, block));
         }
-        if (this.request === controller) this.request = null;
-        return;
+        if (!inFlight.length) {
+          if (closed || !live()) {
+            playedAll = closed;
+            break;
+          }
+          await new Promise<void>((resolve) => { wake = resolve; });
+          wake = null;
+          continue;
+        }
+        const current = inFlight.shift()!;
+        const at = index;
+        index += 1;
+        const rendered = await current;
+        if ("error" in rendered) {
+          if (live()) {
+            this.set({ ...IDLE, error: rendered.error instanceof Error ? rendered.error.message : String(rendered.error) });
+          }
+          return;
+        }
+        if (!live()) return;
+        this.set({ status: "speaking", botId: opts.botId, messageId: opts.messageId, caption: pending[at]! });
+        const played = await this.play(rendered.blob, live, opts.messageId, at);
+        if (!played || !live()) {
+          if (live()) this.set({ ...IDLE, error: "The generated voice clip couldn't be played." });
+          return;
+        }
       }
-      if (!live()) return;
-      this.set({ status: "speaking", botId: opts.botId, messageId: opts.messageId, caption: utterances[i] });
-      const finished = await this.play(rendered.blob, live, opts.messageId, i);
-      if (!finished || !live()) {
-        if (live()) this.set({ ...IDLE, error: "The generated voice clip couldn't be played." });
+      if (playedAll && live() && !finished) this.set(IDLE);
+      if (this.request === controller) this.request = null;
+    };
+    const kick = () => {
+      if (finished) return;
+      wake?.();
+      if (running || (!pending.length && !closed)) return;
+      // A microtask lets one batch of pushes fill the prefetch window before
+      // the first render starts, the way the whole-text path always did.
+      running = true;
+      void Promise.resolve().then(run).finally(() => {
+        running = false;
+        finish();
+      });
+    };
+    return {
+      push: (block) => {
+        if (finished || !block) return;
+        pending.push(block);
+        kick();
+      },
+      end: () => {
+        closed = true;
+        kick();
+        return drained;
+      },
+      prepare: async (text) => {
+        const utterances = await this.prepare(text, opts.voiceId, controller.signal);
+        recordPrepared(opts.messageId, utterances.length);
+        return utterances;
+      },
+      fail: (error) => {
+        if (finished) return;
+        controller.abort();
+        if (live()) this.set({ ...IDLE, error });
         if (this.request === controller) this.request = null;
-        return;
-      }
-    }
-    if (live()) this.set(IDLE);
-    if (this.request === controller) this.request = null;
+        finish();
+      },
+    };
   }
 
   private speakWithLocalSystem(
