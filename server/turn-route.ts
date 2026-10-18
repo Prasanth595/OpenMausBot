@@ -12,10 +12,9 @@ export interface TurnSignals {
   priorTurnUsedTools: boolean;
 }
 
-// English only: a message in another language falls back on the other signals.
 const ACTION = /\b(build|fix|debug|implement|refactor|write|create|generate|deploy|install|run|test|search|find|look up|browse|open|edit|change|update|delete|remove|rename|move|migrate|analy[sz]e|review|compare|research|summari[sz]e|translate|draft|send|email|schedule|book|download|upload|scrape|clone|commit|push|merge|plan|design|calculate|convert)\b/i;
 const CODE = /```|`[^`\n]+`|\b(function|const|let|class|import|def|SELECT|FROM)\b|[{};]\s*$|\w+\.(ts|tsx|js|py|go|rs|json|md|sh|yml|yaml|sql|css|html)\b|https?:\/\/|(^|\s)[~.]?\/[\w.-]+\//m;
-const CONTINUE = /^(yes|yep|yeah|ok(ay)?|sure|go( ahead| on)?|do it|continue|proceed|please do|sounds good|retry|try again)\b/i;
+const CONTINUE = /^(yes|yep|yeah|ok(ay)?|sure|go( ahead| on)?|do it|continue|proceed|please do|sounds good|retry|try again|продолж(?:и|ай|айте|ите|ить|им)|давай(?:те)?|дальше)(?=$|[^\p{L}\p{N}_])/iu;
 const ACK = /^(thanks|thank you|thx|ty|cool|nice|great|perfect|awesome|got it|lol|haha)\b[\s!.]*$/i;
 const SIMPLE_CHARS = 280;
 const SIMPLE_LINES = 4;
@@ -39,10 +38,12 @@ const FAST = /(^|[-_/. ])(haiku|flash|mini|nano|lite|small|fast|instant|spark|tu
 /** Same upstream provider only; among several, the first listed wins since engines list their newest first. */
 export function fastModelFor(catalog: ModelCatalog | undefined, current: string): string | undefined {
   if (!catalog) return undefined;
+  const selected = catalog.options.find((option) => option.id === current);
+  if (!selected?.provider || selected.custom) return undefined;
   if (FAST.test(current)) return current;
-  const provider = catalog.options.find((option) => option.id === current)?.provider;
+  const provider = selected.provider;
   const pick = catalog.options.find((option) =>
-    !option.custom && FAST.test(option.id) && (option.provider ?? undefined) === (provider ?? undefined));
+    !option.custom && FAST.test(option.id) && option.provider === provider);
   return pick?.id;
 }
 

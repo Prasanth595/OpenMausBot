@@ -184,3 +184,43 @@ it.each([
     expect(f.turns().at(-1).resumed).toBe(false);
   }
 }, false, { FAKE_CLAUDE_CONTEXT_TOKENS: String(tokens) }), 90_000);
+
+it("keeps the Codex model and effort for a Russian continuation after compaction", () => fixture(async f => {
+  await f.send("Keep the current task and its constraints");
+  await f.send("The task remains unfinished");
+  const dumpPath = join(f.session.info.dataDir, "codex-continuation.json");
+  await f.restart(() => {
+    const path = join(f.session.info.dataDir, "config.json");
+    const config = JSON.parse(readFileSync(path, "utf8"));
+    config.instances.codex = {
+      driver: "codex",
+      config: { cli: fileURLToPath(new URL("./testing/fake-codex-app-server.ts", import.meta.url)) },
+      environment: {
+        FAKE_CODEX_DUMP: dumpPath,
+        FAKE_CODEX_DUMP_TURNS_ONLY: "1",
+        FAKE_CODEX_ROOM_PLAN: join(f.session.info.dataDir, "room-plan.json"),
+        FAKE_CODEX_MODELS: JSON.stringify([
+          { id: "gpt-6.1-sol", displayName: "GPT-6.1-Sol", isDefault: true },
+          { id: "glm-5.3-flash", displayName: "GLM-5.3-Flash" },
+        ]),
+      },
+    };
+    writeFileSync(path, JSON.stringify(config));
+  });
+  await f.api(`/api/bots/${f.bot.id}`, {
+    modelSelection: { instanceId: "codex", model: "gpt-6.1-sol", effort: "max" },
+    replyStyle: "conversational",
+    approvalMode: "ask",
+  }, "PATCH");
+  await f.compact();
+  await f.idle();
+  expect((await f.messages()).at(-1).kind).toBe("compaction");
+  await f.send("Продолжи");
+  const messages = await f.messages();
+  expect(messages.findLast(message => message.role === "user").quickModel).toBeUndefined();
+  const launch = JSON.parse(readFileSync(dumpPath, "utf8"));
+  expect(launch.calls.find((call: any) => call.method === "thread/start").params)
+    .toMatchObject({ model: "gpt-6.1-sol", modelProvider: "openai" });
+  expect(launch.calls.find((call: any) => call.method === "turn/start").params)
+    .toMatchObject({ effort: "max" });
+}), 90_000);

@@ -45,9 +45,9 @@ describe("classifyTurn", () => {
 const claude: ModelCatalog = {
   default: "claude-sonnet-5",
   options: [
-    { id: "claude-opus-5", label: "Claude Opus 5" },
-    { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
-    { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
+    { id: "claude-opus-5", label: "Claude Opus 5", provider: "anthropic" },
+    { id: "claude-sonnet-5", label: "Claude Sonnet 5", provider: "anthropic" },
+    { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", provider: "anthropic" },
   ],
 };
 const mixed: ModelCatalog = {
@@ -98,15 +98,15 @@ describe("routeTurn", () => {
   });
 
   it("lowers an explicit effort when the engine has no quick model", () => {
-    expect(routeTurn({ ...base, catalog: { default: "x", options: [{ id: "claude-opus-5", label: "Opus" }] } }))
+    expect(routeTurn({ ...base, catalog: { default: "x", options: [{ id: "claude-opus-5", label: "Opus", provider: "anthropic" }] } }))
       .toEqual({ tier: "simple", model: "claude-opus-5", effort: "low", variant: "v" });
   });
 });
 
 describe("long conversations", () => {
   const windowed: ModelCatalog = { default: "claude-opus-5", options: [
-    { id: "claude-opus-5", label: "Claude Opus 5", contextWindow: 1_000_000 },
-    { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", contextWindow: 200_000 },
+    { id: "claude-opus-5", label: "Claude Opus 5", provider: "anthropic", contextWindow: 1_000_000 },
+    { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", provider: "anthropic", contextWindow: 200_000 },
   ] };
   const input: RouteInput = {
     conversational: true, followsBotModel: true, automated: false, signals: { text: "hi there", ...plain },
@@ -135,4 +135,58 @@ describe("routeDirectTurn", () => {
     expect(routeDirectTurn(bot, { modelSelection: bot.modelSelection }, [], message, instance, false).tier).toBeNull();
     expect(routeDirectTurn(bot, {}, [], message, instance, true).tier).toBeNull();
   });
+});
+
+describe("unverified catalog providers", () => {
+  const catalog: ModelCatalog = {
+    default: "gpt-6.1-sol",
+    options: [
+      { id: "gpt-6.1-sol", label: "GPT-6.1-Sol" },
+      { id: "glm-5.3-flash", label: "GLM-5.3-Flash" },
+    ],
+  };
+
+  it("does not treat two absent provider identities as a compatible route", () => {
+    expect(fastModelFor(catalog, "gpt-6.1-sol")).toBeUndefined();
+  });
+
+  it("does not guess a provider when the selected model is absent from the catalog", () => {
+    expect(fastModelFor(catalog, "unlisted-model")).toBeUndefined();
+  });
+
+  it("does not leave a custom route for an official fast model", () => {
+    expect(fastModelFor({
+      default: "custom-model",
+      options: [
+        { id: "custom-model", label: "Custom", provider: "openai", custom: true },
+        { id: "gpt-5.4-mini", label: "Mini", provider: "openai" },
+      ],
+    }, "custom-model")).toBeUndefined();
+  });
+
+  it.each(["Продолжи", "Продолжай", "Продолжайте, пожалуйста", "Давай дальше", "Дальше"])(
+    "keeps a Russian continuation on the selected model and effort: %s",
+    (text) => {
+      const bot = { replyStyle: "conversational" as const, modelSelection: { instanceId: "codex", model: "gpt-6.1-sol", effort: "max" as const } };
+      const instance = { models: catalog, adapter: { capabilities: { effortLevels: ["low", "max"] as const } } };
+      expect(routeDirectTurn(bot, {}, [{ role: "bot", kind: "compaction" }], { text, images: [] }, instance, false))
+        .toEqual({ tier: "complex", model: "gpt-6.1-sol", effort: "max", variant: undefined });
+    },
+  );
+
+  it("keeps the selected model for a simple chat line without provider identity", () => {
+    const bot = { replyStyle: "conversational" as const, modelSelection: { instanceId: "codex", model: "gpt-6.1-sol" } };
+    const instance = { models: catalog, adapter: { capabilities: {} } };
+    expect(routeDirectTurn(bot, {}, [], { text: "hello", images: [] }, instance, false).model).toBe("gpt-6.1-sol");
+  });
+});
+
+it("does not substitute an unqualified candidate for a provider-tagged current model", () => {
+  expect(fastModelFor({
+    default: "gpt-6.1-sol",
+    options: [
+      { id: "gpt-6.1-sol", label: "GPT", provider: "openai" },
+      { id: "glm-5.3-flash", label: "GLM Flash" },
+    ],
+  }, "gpt-6.1-sol")).toBeUndefined();
 });

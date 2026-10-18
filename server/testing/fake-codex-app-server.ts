@@ -430,6 +430,12 @@ process.stdin.on("data", (chunk) => {
         break;
       }
       case "model/list":
+        if (process.env.FAKE_CODEX_MODELS) {
+          out({ jsonrpc: "2.0", id: msg.id, result: {
+            data: JSON.parse(process.env.FAKE_CODEX_MODELS), nextCursor: null,
+          } });
+          break;
+        }
         if (msg.params?.cursor === "page-2") {
           out({
             jsonrpc: "2.0",
