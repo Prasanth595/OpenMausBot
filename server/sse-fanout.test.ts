@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createServer, request, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -168,5 +168,25 @@ describe("startSseKeepalive", () => {
     expect({ writes, done }).toEqual({ writes: 0, done: 1 });
     expect(deliverSseFrame({ res: { ...res, writableLength: 0, once: () => res }, backpressured: false }, "message", "m")).toBe("disconnected");
     expect(writes).toBe(0);
+  });
+
+  it("a response 'error' (a write after end) is logged and stops the keepalive instead of crashing", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const listeners: Record<string, ((...args: unknown[]) => void)[]> = {};
+    let writes = 0;
+    let done = 0;
+    const res = { writableEnded: false, destroyed: false, write: () => { writes++; return true; }, end: () => {},
+      on: (event: string, listener: (...args: unknown[]) => void) => { (listeners[event] ??= []).push(listener); return res; } };
+    startSseKeepalive({ req: { on: () => undefined }, res, heartbeatMs: 5, live: () => true, frame: "x", onDone: () => { done++; } });
+    expect(listeners.error?.length).toBe(1);
+    await sleep(20);
+    const before = writes;
+    listeners.error![0](Object.assign(new Error("write after end"), { code: "ERR_STREAM_WRITE_AFTER_END" }));
+    listeners.close?.forEach((listener) => listener());
+    await sleep(30);
+    expect(writes).toBe(before);
+    expect(done).toBe(1);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("sse:"), "write after end");
+    warn.mockRestore();
   });
 });

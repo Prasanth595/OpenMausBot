@@ -60,7 +60,10 @@ export function startSseKeepalive(input: { req: { on(event: "close", listener: (
       stop();
     }
   }, input.heartbeatMs);
-  res.on("error", stop);
+  res.on("error", (error) => {
+    console.warn("sse: stream error, keepalive stopped:", error instanceof Error ? error.message : String(error));
+    stop();
+  });
   res.on("close", stop);
   res.on("finish", stop);
   req.on("close", stop);
