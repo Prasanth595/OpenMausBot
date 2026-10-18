@@ -62,3 +62,30 @@ describe("DigestChip", () => {
     expect(html).not.toContain("files changed");
   });
 });
+
+describe("CompactionChip provenance", () => {
+  it.each(["excerpts" as const, undefined])("identifies excerpt fallback, including legacy records: %s", (method) => {
+    const html = renderToStaticMarkup(createElement(CompactionChip, { message: {
+      id: "context", role: "bot", kind: "compaction", at: 1,
+      compaction: {
+        summary: "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.\n[110 earlier excerpts omitted]\nLatest correction: keep the task unfinished.",
+        method, firstKeptId: "", foldedThroughId: "old", tokensBefore: 1, by: "person",
+      },
+    } }));
+    expect(html).toContain("Context shortened using recent excerpts");
+    expect(html).toContain("No model-written summary was available");
+    expect(html).not.toContain("Earlier context summarized");
+  });
+
+  it("uses the explicit method instead of guessing from generated text", () => {
+    const html = renderToStaticMarkup(createElement(CompactionChip, { message: {
+      id: "context", role: "bot", kind: "compaction", at: 1,
+      compaction: {
+        summary: "Historical excerpts in chronological order; quoted by a model.",
+        method: "model", firstKeptId: "", foldedThroughId: "old", tokensBefore: 1, by: "person",
+      },
+    } }));
+    expect(html).toContain("Earlier context summarized");
+    expect(html).not.toContain("No model-written summary was available");
+  });
+});

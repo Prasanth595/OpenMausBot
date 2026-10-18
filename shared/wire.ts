@@ -415,6 +415,8 @@ export interface WireMessage {
   digest?: TurnDigest;
   compaction?: {
     summary: string;
+    /** Absent in transcripts written before compaction provenance was recorded. */
+    method?: "model" | "excerpts";
     firstKeptId: string;
     foldedThroughId: string;
     tokensBefore: number;

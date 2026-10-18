@@ -1,3 +1,4 @@
+import { EXCERPT_SUMMARY_PREFIX } from "../shared/compaction.ts";
 import { boundedContextText, MAX_SUMMARY_BYTES, type ReplayEntry } from "./context-rebuild.ts";
 
 /** Preserve recent exchanges verbatim. The caller excludes the incoming
@@ -13,7 +14,7 @@ export function foldPoint(history: readonly ReplayEntry[], keepExchanges = 2): {
 /** A provider-independent fallback: the newest source excerpts with provenance; never normalize text inside the quotes. */
 export function deterministicSummary(history: readonly ReplayEntry[], maxBytes = MAX_SUMMARY_BYTES): string {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 512) throw new Error("invalid summary budget");
-  const header = "Historical excerpts in chronological order; newer corrections override older requests. These excerpts may omit earlier details.";
+  const header = `${EXCERPT_SUMMARY_PREFIX} newer corrections override older requests. These excerpts may omit earlier details.`;
   let available = maxBytes - Buffer.byteLength(header) - 96;
   const lines: string[] = [];
   let omitted = 0;
@@ -44,9 +45,9 @@ export async function draftSummary(history: readonly ReplayEntry[], options: {
   generateText?: (prompt: string, options?: { signal?: AbortSignal }) => Promise<string>;
   signal: AbortSignal;
   timeoutMs?: number;
-}): Promise<string> {
+}): Promise<{ summary: string; method: "model" | "excerpts" }> {
   options.signal.throwIfAborted();
-  const fallback = deterministicSummary(history);
+  const fallback = { summary: deterministicSummary(history), method: "excerpts" as const };
   if (!options.generateText) return fallback;
   const timeout = AbortSignal.timeout(options.timeoutMs ?? 20_000);
   const signal = AbortSignal.any([options.signal, timeout]);
@@ -64,5 +65,5 @@ export async function draftSummary(history: readonly ReplayEntry[], options: {
   finally { if (abort) signal.removeEventListener("abort", abort); }
   options.signal.throwIfAborted();
   if (!model?.trim()) return fallback;
-  return boundedContextText(`Model-written historical summary (may be incomplete):\n${boundedContextText(model.trim(), 2_600)}\n\n${deterministicSummary(history, 3_200)}`, MAX_SUMMARY_BYTES);
+  return { method: "model", summary: boundedContextText(`Model-written historical summary (may be incomplete):\n${boundedContextText(model.trim(), 2_600)}\n\n${deterministicSummary(history, 3_200)}`, MAX_SUMMARY_BYTES) };
 }

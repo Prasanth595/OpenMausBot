@@ -270,7 +270,10 @@ Native `auto`/`off` settings supply no known numeric bound; other engines keep
 their own model-window threshold. The native CLI setting itself is unchanged.
 
 The selected account's tool-free helper can produce a historical summary, with
-a 20-second timeout and source-labelled fallback when unavailable. Summaries
+a 20-second timeout and source-labelled fallback when unavailable. The compaction
+record identifies a model-written summary or an excerpt fallback.
+The chat labels excerpt fallbacks explicitly, including older records with the
+known excerpt header; the stored conversation remains available. Summaries
 are capped at 6,000 bytes and retain recent source corrections. The helper may
 incur provider usage; its one-shot cost is not separately reported by the current
 provider interface. Summaries are not verified facts and can omit details.

@@ -90,6 +90,7 @@ it("compacts durably, keeps corrections and starts a fresh native session withou
   expect(record.compaction.summary).toContain("CORRECTION");
   expect(Buffer.byteLength(record.compaction.summary)).toBeLessThanOrEqual(6_000);
   expect(record.compaction.by).toBe("person");
+  expect(record.compaction.method).toBe("model");
   expect(f.turns()).toHaveLength(turnsBefore);
   await f.compact();
   await f.idle();
@@ -184,3 +185,29 @@ it.each([
     expect(f.turns().at(-1).resumed).toBe(false);
   }
 }, false, { FAKE_CLAUDE_CONTEXT_TOKENS: String(tokens) }), 90_000);
+
+it("persists excerpt provenance when the selected engine has no compaction writer", () => fixture(async f => {
+  await f.send("An earlier task constraint");
+  await f.send("The task is still unfinished");
+  await f.restart(() => {
+    const path = join(f.session.info.dataDir, "config.json");
+    const config = JSON.parse(readFileSync(path, "utf8"));
+    config.instances.codex = {
+      driver: "codex",
+      config: { cli: fileURLToPath(new URL("./testing/fake-codex-app-server.ts", import.meta.url)) },
+    };
+    writeFileSync(path, JSON.stringify(config));
+  });
+  await f.api(`/api/bots/${f.bot.id}`, {
+    modelSelection: { instanceId: "codex", model: "gpt-fake-default" }, approvalMode: "ask",
+  }, "PATCH");
+  const originalIds = (await f.messages()).map(message => message.id);
+  await f.compact();
+  await f.idle();
+  const messages = await f.messages();
+  const record = messages.at(-1);
+  expect(record.compaction).toMatchObject({ method: "excerpts", summary: expect.stringContaining("Historical excerpts") });
+  expect(messages.slice(0, originalIds.length).map(message => message.id)).toEqual(originalIds);
+  await f.restart();
+  expect((await f.messages()).at(-1).compaction.method).toBe("excerpts");
+}), 60_000);

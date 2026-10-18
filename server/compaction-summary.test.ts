@@ -43,14 +43,14 @@ it("preserves prior summaries as labelled source data, not instructions for the 
 });
 
 it("works without a model helper", async () => {
-  expect(await draftSummary(history, { signal: new AbortController().signal })).toBe(deterministicSummary(history));
+  expect(await draftSummary(history, { signal: new AbortController().signal })).toEqual({ summary: deterministicSummary(history), method: "excerpts" });
 });
 
 it("aborts a timed-out helper and uses the labelled deterministic fallback", async () => {
   const generateText = vi.fn((_prompt: string, options?: { signal?: AbortSignal }) => new Promise<string>((_resolve, reject) => {
     options!.signal!.addEventListener("abort", () => reject(options!.signal!.reason), { once: true });
   }));
-  expect(await draftSummary(history, { signal: new AbortController().signal, generateText, timeoutMs: 20 })).toBe(deterministicSummary(history));
+  expect(await draftSummary(history, { signal: new AbortController().signal, generateText, timeoutMs: 20 })).toEqual({ summary: deterministicSummary(history), method: "excerpts" });
   expect(generateText.mock.calls[0]![1]!.signal!.aborted).toBe(true);
 });
 
@@ -66,9 +66,9 @@ it("Stop prevents a late helper result from being committed, even if it ignores 
 
 it("bounds model output without losing the latest source correction", async () => {
   const result = await draftSummary(history, { signal: new AbortController().signal, generateText: async () => "model text ".repeat(10_000) });
-  expect(Buffer.byteLength(result)).toBeLessThanOrEqual(6_000);
-  expect(result).toContain("may be incomplete");
-  expect(result).toContain("Cancel deployment");
+  expect(Buffer.byteLength(result.summary)).toBeLessThanOrEqual(6_000);
+  expect(result.summary).toContain("may be incomplete");
+  expect(result.summary).toContain("Cancel deployment");
 });
 
 // Codex: its own background call is never used while a turn waits.
@@ -99,7 +99,8 @@ it("is written by the helper model for a bot whose engine has no text call, and 
     options?.onUsage?.({ model: "claude-haiku-4-5", input: 900, output: 80, costUsd: 0.001 });
     return "The person cancelled the deployment and asked for tests only.";
   });
-  const summary = await draftSummary(history, { signal: new AbortController().signal, generateText });
+  const { summary, method } = await draftSummary(history, { signal: new AbortController().signal, generateText });
+  expect(method).toBe("model");
   expect(summary).toContain("Model-written historical summary (may be incomplete):\nThe person cancelled the deployment");
   expect(summary).toContain("Cancel deployment");
   expect(prompts).toEqual([summaryPrompt(history)]);
@@ -110,13 +111,13 @@ it("keeps the excerpt summary for that bot while no helper is set", async () => 
   const write = vi.fn(async () => "never asked");
   const { generateText } = helperWriter(write, null);
   expect(generateText).toBeUndefined();
-  expect(await draftSummary(history, { signal: new AbortController().signal, generateText })).toBe(deterministicSummary(history));
+  expect(await draftSummary(history, { signal: new AbortController().signal, generateText })).toEqual({ summary: deterministicSummary(history), method: "excerpts" });
   expect(write).not.toHaveBeenCalled();
 });
 
 it("falls back to the excerpt summary, without failing the turn, when the helper throws or hangs", async () => {
   const failing = helperWriter(async () => { throw new Error("503 from the helper's provider"); });
-  expect(await draftSummary(history, { signal: new AbortController().signal, generateText: failing.generateText })).toBe(deterministicSummary(history));
+  expect(await draftSummary(history, { signal: new AbortController().signal, generateText: failing.generateText })).toEqual({ summary: deterministicSummary(history), method: "excerpts" });
 
   let aborted = false;
   const hanging = helperWriter((_prompt, options) => new Promise<string>((_resolve, reject) => {
@@ -125,7 +126,15 @@ it("falls back to the excerpt summary, without failing the turn, when the helper
       reject(options!.signal!.reason);
     }, { once: true });
   }));
-  expect(await draftSummary(history, { signal: new AbortController().signal, generateText: hanging.generateText, timeoutMs: 20 })).toBe(deterministicSummary(history));
+  expect(await draftSummary(history, { signal: new AbortController().signal, generateText: hanging.generateText, timeoutMs: 20 })).toEqual({ summary: deterministicSummary(history), method: "excerpts" });
   expect(aborted).toBe(true);
   expect(hanging.booked).toEqual([]);
+});
+
+it("records whether a helper produced a model summary or an excerpt fallback", async () => {
+  const signal = new AbortController().signal;
+  expect(await draftSummary(history, { signal })).toMatchObject({ method: "excerpts" });
+  expect(await draftSummary(history, { signal, generateText: async () => "" })).toMatchObject({ method: "excerpts" });
+  expect(await draftSummary(history, { signal, generateText: async () => "The tests remain unfinished." }))
+    .toMatchObject({ method: "model", summary: expect.stringContaining("The tests remain unfinished.") });
 });

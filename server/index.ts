@@ -7667,7 +7667,7 @@ async function compactConversation(input: {
     }
     store.appendMessage(threadId, {
       role: "bot", kind: "compaction",
-      compaction: { summary, firstKeptId: fold.firstKeptId, foldedThroughId,
+      compaction: { ...summary, firstKeptId: fold.firstKeptId, foldedThroughId,
         tokensBefore: measurement?.tokens ?? Math.ceil(bytes / 4), by: manual ? "person" : "harness" },
     }, { kind: "compaction.append", key: `${threadId}:${messages.at(-1)?.id}:${fold.firstKeptId}` });
   } finally {

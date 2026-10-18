@@ -5883,5 +5883,7 @@
   "history.empty": "No changes recorded yet.",
   "history.refreshError": "Couldn’t refresh history.",
   "history.undo": "Undo this change",
-  "history.restoreUnavailable": "The exact previous instructions are unavailable, so this change cannot be undone."
+  "history.restoreUnavailable": "The exact previous instructions are unavailable, so this change cannot be undone.",
+  "chat.compactionExcerptsTitle": "Context shortened using recent excerpts",
+  "chat.compactionExcerptsHint": "Your full conversation is still here. No model-written summary was available, so the agent uses recent excerpts and any kept messages. Earlier details may be missing from its context."
 }
