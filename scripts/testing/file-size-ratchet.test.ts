@@ -30,7 +30,7 @@ const LINES: Record<string, number> = {
   "shared/wire.ts": 1013,
   "src/components/NeedsYouResolver.tsx": 1423,
   // +24 for the HighLevel CRM mount, prompt part and internal handler (logic lives in server/highlevel/*); lower again with the next move-out.
-  "server/index.ts": 23074,
+  "server/index.ts": 23060,
   "src/state/store.tsx": 3691,
   "electron/main.mjs": 3480,
   "server/store.ts": 2523,

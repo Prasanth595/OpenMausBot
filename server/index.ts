@@ -751,7 +751,7 @@ import {
   type Viewer,
 } from "./bot-visibility.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
-import { deliverSseFrame } from "./sse-fanout.ts";
+import { deliverSseFrame, endSse, startSseKeepalive } from "./sse-fanout.ts";
 import {
   PHONE_SECRET_PROTOCOL_VERSION,
   PhoneSecretBridge,
@@ -5526,9 +5526,7 @@ function audienceChanged(): void {
   for (const client of sseClients) {
     if (client.viewer.kind !== "member") continue;
     sseClients.delete(client);
-    try {
-      client.res.end();
-    } catch {}
+    endSse(client.res);
   }
 }
 // Before any revocation callback: Cloud boot can revoke sessions before routes are registered.
@@ -5567,9 +5565,7 @@ function closeSessionStreams(sessionId: string): void {
   for (const client of sseClients) {
     if (client.sessionId !== sessionId) continue;
     sseClients.delete(client);
-    try {
-      client.res.end();
-    } catch {}
+    endSse(client.res);
   }
 }
 sessions.onSessionRevoked((sessionId) => {
@@ -22094,19 +22090,9 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       sseClients.add(client);
       req.socket.setTimeout(0);
       // A comment frame keeps intermediaries from idling the connection; a data frame resets EventSource's own liveness watchdog. Heartbeats carry no id.
-      const keepalive = setInterval(() => {
-        if (client.sessionId && !sessions.isLive(client.sessionId)) {
-          res.end();
-          return;
-        }
-        try {
-          res.write(`: keepalive\n\ndata: ${JSON.stringify({ kind: "ping" })}\n\n`);
-        } catch {}
-      }, SSE_HEARTBEAT_MS);
-      req.on("close", () => {
-        clearInterval(keepalive);
-        sseClients.delete(client);
-      });
+      // Cleared however the stream ends (an ended response is never written again: 17/10 ERR_STREAM_WRITE_AFTER_END).
+      startSseKeepalive({ req, res, heartbeatMs: SSE_HEARTBEAT_MS, live: () => !client.sessionId || sessions.isLive(client.sessionId),
+        frame: `: keepalive\n\ndata: ${JSON.stringify({ kind: "ping" })}\n\n`, onDone: () => sseClients.delete(client) });
       return;
     }
 
