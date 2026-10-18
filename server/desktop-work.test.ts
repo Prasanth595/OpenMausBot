@@ -494,6 +494,48 @@ describe("archiving", () => {
     expect(h.reports.at(-1)!.text).toContain("depois de falhar");
   });
 
+  it("\"arquive à mão\" reaches the person as one item in \"Precisa de você\", settled when the session is archived (#9337)", () => {
+    const h = harness();
+    const pendings: { title: string; link?: string; key: string; why?: string; steps?: unknown[] }[] = [];
+    const resolved: string[] = [];
+    h.deps.ownerPending = (_session, item) => pendings.push(item);
+    h.deps.resolveOwnerPending = (key) => resolved.push(key);
+    const session = h.opened("k");
+    session.status = "idle";
+    session.desktop!.pending = { kind: "archive", text: "", since: h.now, attempts: 0 };
+    giveUpPending(h.deps, session, "the Claude window could not be brought to the front");
+    expect(session.desktop!.archiveHandedOver).toBe(true);
+    expect(pendings).toEqual([expect.objectContaining({ key: "cc-archive:k", title: expect.stringContaining("Arquivar à mão a sessão"), link: `claude://code/continue?session=${LOCAL}` })]);
+    expect(practicalMissing(pendings[0] as { why?: string; steps?: unknown[] })).toBeNull();
+    expect(h.chips.at(-1)!.text).toBe("não foi possível arquivar no app — arquive à mão");
+    // not archived yet: nothing settles
+    followDesktopSessions(h.deps);
+    expect(resolved).toEqual([]);
+    // the person archives it in the app: the item closes by itself, once
+    h.records.get(LOCAL)!.isArchived = true;
+    followDesktopSessions(h.deps);
+    expect(session.status).toBe("archived");
+    expect(resolved).toEqual(["cc-archive:k"]);
+    followDesktopSessions(h.deps);
+    expect(resolved).toEqual(["cc-archive:k"]);
+  });
+
+  it("a rename that cannot be done asks no archive item, and an archive by someone else settles none (#9337)", () => {
+    const h = harness();
+    const pendings: { key: string }[] = [];
+    const resolved: string[] = [];
+    h.deps.ownerPending = (_session, item) => pendings.push(item);
+    h.deps.resolveOwnerPending = (key) => resolved.push(key);
+    const session = h.opened("m");
+    session.status = "idle";
+    session.desktop!.pending = { kind: "rename", text: "#9337 Nova", since: h.now, attempts: 0 };
+    giveUpPending(h.deps, session, "the session menu showed no Rename item");
+    expect(pendings.map((item) => item.key)).toEqual(["cc-rename:m"]);
+    h.records.get(LOCAL)!.isArchived = true;
+    followDesktopSessions(h.deps);
+    expect(resolved).not.toContain("cc-archive:m");
+  });
+
   it("does not check again a session the server itself archived through cc_session_archive after giving up (archiveHandedOver)", () => {
     const h = harness();
     const session = h.opened("i");

@@ -88,7 +88,7 @@ export interface BoardSession {
   blockedOn?: string;
   archivedAt?: number;
   resumeAfterTag?: { releaseSha?: string } | object;
-  desktop?: { localId?: string; issue?: string; pending?: { kind: string; since: number } };
+  desktop?: { localId?: string; issue?: string; pending?: { kind: string; since: number }; archiveHandedOver?: boolean };
   delivery?: { prs: Record<string, { number: number; state?: string; owned?: string; mergeSha?: string; inProductionAt?: number }> };
   claimedPrs?: number[];
 }
@@ -606,6 +606,9 @@ function buildCard(keys: string[], context: CardContext): BoardCard | null {
   const delivered = prViews.filter((pr) => pr.state === "MERGED" && pr.delivered !== null);
   const liveSessions = sessions.filter((session) => session.status !== "archived");
   const workingSession = liveSessions.find((session) => {
+    // a failed session is not at work: it never holds the card in Sessão over PRs or deliveries
+    // (#9337: a session that failed on 07/10 and could not be archived pinned a delivered P1 there for 11 days)
+    if (session.status === "failed") return false;
     const own = sessionPrs(session).map((number) => views.get(number)).filter((pr): pr is PrView => Boolean(pr));
     // a session with a PR on the board is represented by the PR; one whose PRs all merged works on something new only while it runs
     if (own.some((pr) => pr.state === "OPEN" || (pr.state === "MERGED" && pr.delivered === null))) return false;
@@ -621,7 +624,8 @@ function buildCard(keys: string[], context: CardContext): BoardCard | null {
   else if (waitingRelease.length) stage = "release";
   else if (recentDelivery.length) stage = "production";
   else if (!openIssues.length) return null; // delivered over 7 days ago and closed, or nothing left open
-  else stage = liveSessions.length ? "session" : "entry";
+  // only a session that can still move counts; a failed one handed to the person to archive does not
+  else stage = liveSessions.some((session) => session.status !== "failed" || !session.desktop?.archiveHandedOver) ? "session" : "entry";
 
   // ── what it is ──
   const primary = pickPrimary(issueNumbers, sessions, knownIssues);

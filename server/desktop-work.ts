@@ -368,6 +368,7 @@ export function reportFor(deps: DesktopWorkDeps, session: CcSession): string {
 }
 
 const renameKey = (session: CcSession) => `cc-rename:${session.id}`;
+const archiveKey = (session: CcSession) => `cc-archive:${session.id}`;
 
 /** "Precisa de você" shows one line: the app's title (what the person finds
  * in the app's sidebar) and the new one, short. */
@@ -403,7 +404,22 @@ export function giveUpPending(deps: DesktopWorkDeps, session: CcSession, reason:
     return;
   }
   // "arquive à mão": when the person does, it is what the server asked for
-  if (pending.kind === "archive") desktop.archiveHandedOver = true;
+  if (pending.kind === "archive") {
+    desktop.archiveHandedOver = true;
+    // "arquive à mão" must reach the person as an item in "Precisa de você", not only as a chip and a
+    // report to the bot: otherwise nobody owns it and the Esteira card stays blocked (#9337)
+    const appTitle = (desktop.localId ? deps.readRecord(desktop.localId)?.title : undefined) ?? session.title;
+    const open = desktop.localId ? { link: `claude://code/continue?session=${desktop.localId}` } : {};
+    deps.ownerPending?.(session, {
+      title: `Arquivar à mão a sessão "${appTitle.slice(0, 60)}" no app Claude`, ...open, key: archiveKey(session),
+      why: "O servidor não conseguiu arquivar esta sessão no app Claude; enquanto ela não for arquivada, o item fica bloqueado na Esteira.",
+      steps: [
+        { text: `No app Claude, abra a sessão "${appTitle.slice(0, 60)}" (se o link não abrir, procure-a na lista do app, inclusive fora dos projetos).`, ...open },
+        { text: "Arquive-a pelo menu da sessão." },
+        { text: "Pronto: o servidor vê o arquivamento no registro do app e fecha este item sozinho." },
+      ],
+    });
+  }
   if (pending.kind === "rename") {
     // The title the person sees in the app (not our ledger's), and the new one, essentials first.
     const appTitle = (desktop.localId ? deps.readRecord(desktop.localId)?.title : undefined) ?? session.title;
@@ -606,6 +622,7 @@ export function followDesktopSessions(deps: DesktopWorkDeps): void {
       const ordered = desktop.pending?.kind === "archive" || Boolean(desktop.archiveWhenResolved) || Boolean(desktop.archiveHandedOver) || failed;
       delete desktop.pending;
       deps.ledger.setStatus(session, "archived");
+      if (desktop.archiveHandedOver) deps.resolveOwnerPending?.(archiveKey(session));
       if (ordered) {
         if (failed && !desktop.archiveHandedOver) {
           session.archivedOutsideAt = now;

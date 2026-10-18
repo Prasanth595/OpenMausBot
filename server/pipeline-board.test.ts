@@ -298,6 +298,26 @@ describe("the board's rules", () => {
     expect(card(app, "issue:9058").links.session).toEqual({ kind: "app", url: "claude://code/continue?session=local_21b6dfe7-b762-492b-b71f-23b1aece055b" });
   });
 
+  it("a failed session never holds a delivered issue in Sessão (#9337: failed 07/10, not archived, P1 pinned there 11 days)", () => {
+    const base = boardSessions().find((session) => session.title.startsWith("9058"))!;
+    const failed = { ...base, id: "f9337000-0000-4000-8000-000000008204", title: "8204 Reprovado sidebar da fila não reflete no atendimento", status: "failed", failedAt: NOW - 2 * HOUR, lastError: "the session hit an error", delivery: undefined };
+    const board = buildPipelineBoard(boardInputs({ sessions: [...boardSessions(), failed] }));
+    // its PR #9350 is in production: the card says so, the failed session does not pull it back
+    expect(card(board, "issue:8204")).toMatchObject({ stage: "production", prs: [9350] });
+    // the same session still running does hold it (control)
+    const running = buildPipelineBoard(boardInputs({ sessions: [...boardSessions(), { ...failed, status: "running", failedAt: undefined, lastError: undefined }] }));
+    expect(card(running, "issue:8204").stage).toBe("session");
+  });
+
+  it("a failed session handed to the person to archive leaves an open issue without PRs in Entrada; one not handed over stays in Sessão, blocked (#9337)", () => {
+    const fail = (extra: object) => boardSessions().map((session) => session.title.startsWith("9058")
+      ? { ...session, status: "failed", failedAt: NOW - HOUR, lastError: "could not archive", ...extra } : session);
+    const handed = buildPipelineBoard(boardInputs({ sessions: fail({ surface: "app", desktop: { localId: "local_9337", archiveHandedOver: true } }) }));
+    expect(card(handed, "issue:9058").stage).toBe("entry");
+    const kept = buildPipelineBoard(boardInputs({ sessions: fail({}) }));
+    expect(card(kept, "issue:9058")).toMatchObject({ stage: "session", state: "blocked", reason: { code: "session-failed" } });
+  });
+
   it("an item answered and waiting on its bot is not the person's", () => {
     const board = buildPipelineBoard(boardInputs({ ownerPending: boardInputs().ownerPending.map((item) => ({ ...item, awaitingSince: NOW - 10 * 60_000 })) }));
     expect(card(board, "issue:9355")).toMatchObject({ state: "idle", owner: null });
