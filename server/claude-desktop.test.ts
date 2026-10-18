@@ -659,6 +659,9 @@ describe("the app's real screen (OCR fixture)", () => {
     expect(findComposer(R7_SESSION, REAL_SIZE, "nuria-platform")).toMatchObject({ text: R7_FIELD, line: { x: 547, y: 842 }, bar: { text: "+ Q v Automático" } });
     expect(findComposer(S36300F35, REAL_SIZE, "nuria-platform")).toMatchObject({ text: "qual o status do gate da #9330?" });
     expect(findComposer(swap(R7_SESSION, { [R7_FIELD]: "Digite / para comandos" }), REAL_SIZE)).toMatchObject({ text: null, line: { y: 842 } });
+    // the "+" (attach) button OCR reads on the field's line is no draft (18/10, o228–o233)
+    expect(findComposer(swap(R7_SESSION, { [R7_FIELD]: "+ Digite / para comandos" }), REAL_SIZE)).toMatchObject({ text: null, line: { y: 842 } });
+    expect(findComposer(swap(R7_SESSION, { [R7_FIELD]: "+ Digite / para comandos…" }), REAL_SIZE)).toMatchObject({ text: null });
     // a placeholder with no mode bar under it is not a field
     expect(findComposer([{ x: 547, y: 875, w: 200, h: 16, text: "Digite / para comandos" }], REAL_SIZE)).toBeNull();
     expect(findComposer([{ x: 547, y: 300, w: 200, h: 16, text: "conversation text" }], REAL_SIZE)).toBeNull();

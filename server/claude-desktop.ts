@@ -80,7 +80,10 @@ const HUMAN_SLACK_MS = 500;
 /** The empty message field's placeholder: its exact text as the whole OCR
  * line ("Responder…", never "Responder ao cliente…"), and only where the
  * field is (see findComposer) — a line of the conversation is not it. */
-const COMPOSER_PLACEHOLDER = /^(Digite \/ para comandos|Type \/ for commands|Responder|Reply)(?:\s*(?:…|\.{3}))?$/i;
+// Since 2.37 OCR reads the composer's "+" (attach) button on the field's
+// line here too ("+ Digite / para comandos", 18/10): an empty field read as
+// a draft held every message and rename of that session (o228–o233).
+const COMPOSER_PLACEHOLDER = /^(?:[+⊕]\s*)?(Digite \/ para comandos|Type \/ for commands|Responder|Reply)(?:\s*(?:…|\.{3}))?$/i;
 /** The field of a new, empty session. The app (2.26454.0, ion-dist i18n)
  * draws one of two: "Descreva uma tarefa ou faça uma pergunta" (RLloCeiLx7,
  * the only one OCR read so far, up to 06/10 14:52Z) or, behind a flag of its
@@ -101,7 +104,7 @@ const BACKSPACE = 51;
 /** The one character typed to tell an app suggestion from a draft. */
 const SUGGESTION_PROBE = ".";
 /** The probe character as OCR may read it alone in a field ("." "·" "," …): ours, never the person's. */
-const PROBE_LEFTOVER = /^[.·,'`]$/;
+const PROBE_LEFTOVER = /^(?:[+⊕]\s*)?[.·,'`]$/;
 const KEY_A = 0;
 /** With Command: to the end of the text, whatever line the click landed on. */
 const DOWN_ARROW = 125;
