@@ -69,24 +69,7 @@ import { approvalModeFor } from "../../shared/approval-mode";
 import { openPlaceAction, placeBlocked, placeFacts, placeHasIssue, placeViewFor, usePlaceSeat, worksOnSimpleLabel } from "@/lib/place-view";
 import { cloudRefusal, type PlaceActionId, type PlaceFacts, type PlaceView } from "../../shared/place-view";
 import { t } from "@/lib/i18n";
-import type { LocaleKey } from "@/locales";
-
-class LocalizedPanelError extends Error {
-  constructor(
-    readonly key: LocaleKey,
-    readonly problem?: string | null,
-    readonly fallbackKey?: LocaleKey,
-  ) {
-    super(key);
-  }
-}
-
-function panelErrorText(error: Error | string | null): string | null {
-  if (error instanceof LocalizedPanelError) {
-    return t(error.key, error.fallbackKey ? { problem: error.problem ?? t(error.fallbackKey) } : undefined);
-  }
-  return error instanceof Error ? error.message : error;
-}
+import { LocalizedPanelError, panelErrorText } from "@/lib/computer-messages";
 
 interface VpsComputerStatus {
   configured: boolean;
@@ -1602,7 +1585,7 @@ export function ComputerPanel({
         {phase === "unconfigured" && cloudView.action?.id === "add-boat-key" && (
           <div className="mt-3 rounded-xl bg-card p-4">
             <ApiKeyRow
-              section="box"
+              section="box" via="computer_panel"
               onSaved={(configured) => configured && setRetry((n) => n + 1)}
             />
           </div>

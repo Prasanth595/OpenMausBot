@@ -37,14 +37,69 @@ Contract version: `1` (`cloudContractVersion` on the wire).
 3. When it is ready, the machine appears under **Servers** as **My Cloud**, and
    the card offers **Open My Cloud**. One click opens the machine in the
    app window, signed in. There is no second confirmation.
-4. The first thing the Cloud asks is **What should your Cloud do while you're
-   away?** (`src/components/CloudIntent.tsx`, `src/lib/cloud-intent.ts`): a box
-   drawn like the composer, with `/setup` fixed in front of the text, four
+4. The first thing the Cloud shows is its welcome
+   (`src/components/cloud-welcome/`, `src/lib/cloud-welcome.ts`): **Welcome to
+   {name}** (the name this app keeps for the server, **My Cloud** where it has
+   none), three steps on the left and the step on the right. It is only for the
+   owner's own session on a Cloud home, and never for a Cloud set up before it
+   (one that answered the first-job question, or where a bot has finished a
+   turn, before the welcome ever showed there). The first time it shows, it
+   says so in the Cloud's record (`cloud-welcome-shown`), so a chat that
+   finishes before its first step (from a phone, say) does not end it.
+   1. **Bring your stuff** comes first, before anything starts a chat: a copy
+      from the Cloud's own page goes only into an empty Cloud (its starter bot
+      at most, no rooms, no chat with a message from the person), so a first
+      chat would leave only Replace. In the desktop app it offers **Everything
+      from this Mac** ("this computer" elsewhere), counting this computer's
+      bots, chats and routines and its size, chosen when this computer has work
+      to bring and the copy can run (the checks in docs/copy-workspace.md, not
+      whether its one-time card was put off), and **Start fresh**, which opens
+      the team library. **Copy to {name}** runs the copy in place, with its
+      progress, **Stop the copy**, and its errors and notes as in Settings; once
+      it lands, what came over and what arrived paused. **Skip for now** keeps
+      the copy's card from coming back (`cloud-setup-move-skipped`). In a
+      browser, on a phone, or in a desktop app that is another server's client,
+      it offers Start fresh and says that the desktop app brings bots from a
+      computer. On a Cloud that already has bots or chats of its own (a copy
+      made before, a chat from a phone), it offers neither: it says **Your bots
+      are already here**, and **Continue** moves on. A backup file is
+      imported from Settings → Backups, as on any server.
+   2. **Connect your AI**: the engine sign-in's own tiles and sign-in panel
+      (below), with **Connected** on one that can run. While the trial's Claude
+      credit lasts and nothing of the person's own can run, a line says so
+      (with the amount where the desktop app knows it), and **Use my credit for
+      now** moves on.
+   3. **Files and apps**, optional: **Share folders** opens Settings → MausBot
+      Cloud in this computer's window, one click from Files (a browser is told
+      to use the desktop app), and **Connect apps** opens Connected apps on the
+      Cloud.
+   4. **{name} is ready**: **Say hi to your Chief of Staff** (or to the first
+      bot) opens its chat, and **Give it a job** asks the first-job question.
+
+   Each finished step is kept in the Cloud's onboarding record
+   (`cloud-welcome-bring`, `cloud-welcome-engine`, `cloud-welcome-files`),
+   which never travels with a copy, so the welcome opens where it was left on
+   any device; the steps can be visited in any order from the left. It ends for
+   good at its last step or with **Skip setup** (`cloud-welcome-done`), and
+   with Hide setup. A save the Cloud refuses (a 409 while provider settings
+   are being changed, say) is tried once more; an end that still cannot be
+   saved is kept on this device (`omb.cloudWelcome.done`), so the welcome does
+   not come back on the next launch, and a small keeper beside the setup card
+   (`WelcomeKeeper.tsx`) sends it again when the Cloud answers.
+   The main pane and the setup card read the record the same way, with the
+   hints written here and not saved yet. Picking another bot or room in the
+   sidebar steps it aside for the session; **Continue setup** on the setup card
+   brings it back.
+5. The first-job question, **What should your Cloud do while you're away?**
+   (`src/components/CloudIntent.tsx`, `src/lib/cloud-intent.ts`), is asked
+   only when asked for: from the welcome's last step, or the setup card's
+   **Give it a job** on a Cloud set up before the welcome. It is a box drawn
+   like the composer, with `/setup` fixed in front of the text, four
    ideas that fill it in (a news digest, watching a page, a research roundup,
    a daily plan); hovering one previews its full text in the box. It is never a
    gate: **Skip for now** sits in plain view under the ideas, Escape skips while
-   the box is empty, and picking another bot in the sidebar goes to that bot,
-   leaving the question to the setup card's **Give it a job**. The answer is sent as `/setup <job>`
+   the box is empty, and picking another bot in the sidebar goes to that bot.
+   The answer is sent as `/setup <job>`
    (server/setup-mode.ts), so the bot asks at most four questions and sets
    itself up for the job in the chat. With an engine already able to run, it
    is sent at once; the box becomes the composer on the way (a named View
@@ -52,11 +107,10 @@ Contract version: `1` (`cloudContractVersion` on the wire).
    waits on this device (`omb.cloudIntent.pending` in browser storage) and
    the engine sign-in shows it at the top, with **Edit**. The Cloud keeps
    that the question was answered (`cloud-intent-asked`) and that a job was
-   given (`cloud-intent-given`) in its onboarding record, so no device asks
-   again; a Cloud where a bot has already finished a turn is never asked.
-   The question is asked only of the owner's own session on a Cloud home.
-5. Then, with no engine signed in, the engine sign-in
-   (`src/components/CloudEngineSignIn.tsx`): provider tiles side by side (two,
+   given (`cloud-intent-given`) in its onboarding record.
+6. With no engine signed in, the engine sign-in
+   (`src/components/CloudEngineSignIn.tsx`; the welcome's second step shows the
+   same tiles and panel while it is open): provider tiles side by side (two,
    or three where the image carries the Grok CLI), where the picked one opens
    its sign-in in a panel underneath, and an API key below them:
    - **Claude**: the existing paste-code flow (open Anthropic's
@@ -75,7 +129,7 @@ Contract version: `1` (`cloudContractVersion` on the wire).
    When a waiting job's engine can run, the screen says **Connected. Starting
    your job…** for a moment, the choices step back, and the job goes to the
    chat as above.
-6. Until one of those engines can run, every bot on the Cloud, including the
+7. Until one of those engines can run, every bot on the Cloud, including the
    default one, shows this sign-in rather than a chat that fails its first
    turn. Once one can run, the chat takes its place. Sign-ins stay on the
    machine's volume (`~/.claude`, `~/.codex`, `~/.grok`, the server's own
@@ -83,9 +137,9 @@ Contract version: `1` (`cloudContractVersion` on the wire).
    so in one line and offers an xAI key instead.
 
 The Cloud's `GET /api/auth/session` answers `"cloudHome": true` for a paired
-session; that is how the web UI knows to open the engine sign-in instead of
-the welcome flow, which describes the person's own computer (it can still be
-replayed from Settings).
+session; that is how the web UI knows to open the Cloud's welcome and engine
+sign-in instead of the welcome flow, which describes the person's own computer
+(it can still be replayed from Settings).
 
 ### Use My Cloud on your phone
 
@@ -189,10 +243,46 @@ proposal card is theirs (the card records who allowed it, and what it
 showed: a routine from before counts only while it still runs exactly that,
 the same instructions, bot, schedule and place, with no attachment), and so
 is one created at once in the owner's own Full-access conversation, or by a
-run of one of the owner's routines. Approving a change (an edit, a pause, a
-resume) keeps a routine the owner's only if it already was: it never makes
-anyone else's routine theirs. One a bot creates or changes at once from any
-other conversation is nobody's, like anyone else's edit. Resuming, moving or
+run of one of the owner's routines. A bot's own change applied with an Undo
+receipt (a skill it authored, a team it set up) is nobody's answer, so it
+never takes a conversation out of being the owner's own. Approving a change
+(an edit, a pause, a resume) keeps a routine the owner's only if it already
+was: it never makes anyone else's routine theirs.
+
+A Cloud only its owner has ever used has nobody to confine. While no trace of
+a second person exists anywhere on it (no session other than the owner's own
+devices, current or revoked; no earlier key that was never proven the owner's;
+no line, card answer, conversation or routine recorded under anyone else's
+key; and a record that can be read), every routine and conversation runs at
+its bot's own level, whatever writer it has on record. Only what came in from
+outside stays confined: a routine a bot made or changed in a conversation a
+webhook drove (its run, a payload posted into it, or work it handed on) is
+recorded as the outside's, and runs without full access until the owner opens
+it and saves it once. Routines from before this that a webhook-driven
+conversation made or changed are recorded the same way, once. The first trace
+of a second person makes the Cloud shared for good: cloud-owner.json records
+when, nothing clears it, and a restore never brings or removes it. If that
+happens after a start found only the owner, every routine a bot made in a
+conversation only the owner spoke in (lines copied from the owner's desktop
+count) is recorded as the owner's at that moment; from then on the rules below
+apply.
+
+A routine runs at the level of the conversation it was made in. One a bot
+creates at once, or changes while it is the owner's, in a conversation where
+only the owner spoke (it was opened, written in and answered only by proven
+keys, the owner's own devices, and nothing came in by webhook; what bots
+posted there, such as receipts and routine reports, does not count) is the
+owner's for its level, so its runs keep the bot's own level, Full access
+included. It is proven for lending and memory only when that conversation also
+holds no report of anyone else's routine. One a bot creates or changes at once
+from any other conversation (someone else's line or answer, an adopted key's,
+another bot's message, a webhook's post or run) is nobody's, like anyone
+else's edit. At each start, a nobody's routine a bot made is the owner's again
+when its creating card is still in that conversation, only the owner spoke
+there before it, and the routine still runs exactly what that card showed;
+proven too when no report of anyone else's routine came before the card. A
+confined routine run's approval card says why: open it and save it once to run
+it with full access. Resuming, moving or
 retiming a routine keeps it the owner's when they are its writer and no
 fingerprint of theirs is on it yet (a template, a restore); a fingerprint
 that no longer matches what it runs is renewed only by the owner rewriting
@@ -238,7 +328,23 @@ chevron minimizes the card to its segments on this device only
 the last required step finishes in the session that is open,
 the card gives way once to **Your Cloud is ready**, with the guide mascot;
 a Cloud that opens already done shows nothing. Each step's state comes from
-the Cloud or the app, never from a box the person ticks:
+the Cloud or the app, never from a box the person ticks.
+
+It is the welcome's steps in short, never a second checklist beside it: while
+the welcome fills the window the card does not show (nor does the one-time
+Copy this computer here card). When the person steps away from the welcome,
+the card lists **Create your Cloud** (done from the start), **Bring your
+stuff** (done after a copy or a team from the library, skipped after Start
+fresh or Skip for now), **Connect your AI** (done once the welcome's step was
+passed with an engine that can run, the trial's credit included; skipped when
+passed without one) and **Files and apps**, and the step that leads offers
+**Continue setup**, which opens the welcome on that step. After the welcome
+ends, the card stays only while no engine can run, or while a job given at
+the welcome's end waits for its routine (the steps below), and then gives way
+once to **Your Cloud is ready**.
+
+A Cloud set up before the welcome (it answered the first-job question, or a
+bot has finished a turn there) keeps the first-job checklist:
 
 1. **Create your Cloud**: done from the start; the Cloud exists.
 2. **Give it a first job**: done once a job is given to the first question
@@ -273,11 +379,12 @@ settings…**.
 
 **Hide setup** is the only dismiss. The Cloud keeps it (`cloud-setup-hidden`
 in its onboarding record), so it holds on every device and after browser
-storage is cleared, and it is the move's **Not now** too. The card also goes
+storage is cleared, and it is the move's **Not now** and the welcome's end
+too. The card also goes
 away by itself once an engine can run and the Cloud has done something: with
 a first job given, its routine exists (the bot's first turn only asks its
-questions, so a finished turn is not enough); without one, a bot has finished
-a turn there. With a routine, **Your Cloud is ready** names it and its next
+questions, so a finished turn is not enough); without one, the welcome has
+ended, or on a Cloud set up before it, a bot has finished a turn there. With a routine, **Your Cloud is ready** names it and its next
 run, and **Run it now** starts it at once so the first result need not wait
 for the schedule. Nothing asks for confirmation.
 After the card, the one-time Copy this computer here card behaves as on any
@@ -308,6 +415,15 @@ Cloud use this computer**, below), through the shared-computer tools.
   place that cannot exist.
 - The built-in browser is on unless the person switches it off in Settings.
   The desktop turns it on in its first-run welcome, which a Cloud home skips.
+- The built-in browser never opens Reddit (`reddit.com`, `redd.it`,
+  `redditmedia.com`, `redditstatic.com`, `reddit.app.link` and their
+  subdomains): Reddit blocks bots that browse from data-centre addresses and can
+  ban the person's account. The egress gate refuses those names, whether the
+  page was typed, linked, redirected to or framed, and a bot's call that would
+  open one is told so and pointed at the Reddit connected app or the person's
+  own computer (`server/browser/egress/reddit.ts`). A cloud computer's
+  `open_url` refuses them the same way. The desktop's and a self-hosted
+  server's browsers are not limited.
 
 `shared/cloud-home.ts` decides which places are offered, for the server and
 the app alike.
@@ -334,10 +450,11 @@ account, companion client mode and restarting the app before a check succeeds
 stays refused. In a web browser, the browser asks for the microphone for
 the Cloud's address.
 
-- **The key is the person's own.** No Cloud plan includes Live calls: the
-  person pastes an OpenAI API key from a project with GPT-Live access. It is
-  saved on the Cloud (`PUT /api/config`, as a server page has no credential
-  store), and the Live copy says so.
+- **The key is the person's own.** No Cloud plan includes the key, and no plan
+  is needed for Live calls: they use the OpenAI key in Settings → API keys, or
+  a separate Live key, from a project with GPT-Live access. It is saved on the
+  Cloud (`PUT /api/config`, as a server page has no credential store), and the
+  Live copy says so.
 - **The voice knows where it runs.** In the bot's own words
   (`CLOUD_HOME_PLACE` in `server/system-prompt.ts`), it is told it runs on
   the person's My Cloud, not on their own computer, and that the bot changes
@@ -505,6 +622,36 @@ open: quitting it (or the Mac sleeping) only pauses lending, and it resumes
 when the app runs again with the switch still on. Below the choices, **Activity
 on this computer** lists every request the Cloud made, refused ones included.
 
+The switch always says where lending stands, whichever way it got there:
+
+- **Off, and why.** When lending stops (the person turned it off, signed out
+  of MausBot Cloud, another account signed in, or My Cloud moved to another
+  machine) the reason and the time are kept with the grant, so after a restart
+  the switch still says "Off since 7 Oct, 14:02, when you signed out of MausBot
+  Cloud." The folders and apps-and-screen choice are kept too: **Lend the same
+  again** restores them in one click.
+- **One control for My Cloud.** **Settings → Servers** no longer offers
+  **Computer access** for My Cloud's entry (it wrote the same record with a
+  terminal option this switch never offers, so the switch could read off while
+  that panel showed apps and screen lent). That entry links here instead. A
+  Computer access grant saved for My Cloud before shows here as lent, terminal
+  included, and when it cannot run (that panel follows the maintainer flag) it
+  says so. Stopping or choosing here replaces it.
+- **Last used.** "My Cloud last used this computer 3 minutes ago", from the
+  activity log.
+- **Reconnects by itself.** Lending already resumed after sleep, a lost
+  network or a Cloud restart. When this app's session on the Cloud has ended
+  (unused for a month, or signed out there), main now signs the window back in
+  to the verified Cloud with a fresh one-time code, as **Open My Cloud** does,
+  at most every 15 minutes, instead of waiting for a click. A saved Cloud
+  sign-in still being read at startup pauses lending; it never counts as a
+  sign-out.
+
+On My Cloud's own page, **Settings → MausBot Cloud** lists **Computers lent to
+My Cloud**: each by name and platform, **Online now**, **Offline, last online
+…**, or **No longer lent**, what it lends and when My Cloud last used it, with
+**Change what's lent** opening this computer's switch.
+
 While lending is on, a menu-bar item shows it (**In use** while the Cloud is
 running something on this Mac) with **Stop lending**. Turning the switch off or
 choosing **Stop lending** stops at once: the Cloud is told, a running action
@@ -562,6 +709,19 @@ On the Cloud home (`server/shared-computers.ts`, `server/index.ts`):
 - Lending is on for every Cloud home, with no maintainer flag.
 - Only the owner's admin sessions (the Admin's signed pairing gives the
   desktop one) can lend.
+- **What it remembers** (`server/lent-computers.ts`, `lent-computers.json`):
+  for each computer lent to it, by name, its platform (sent by desktops once
+  the Cloud advertises `lendingDetails`), how many folders it lends and whether
+  apps and screen or a terminal, when it was last online (written at most once
+  a minute) and last used, and whether its owner turned lending off. Never a
+  folder name or path, a secret or anything a job carried; kept 90 days.
+- **What bots are told.** `list_shared_computers` lists online computers with
+  their `device` ("PC", "Mac" or "computer"). When none is online it adds
+  `offline` and a `say` sentence naming the computer, its kind and when it was
+  last online ("Their PC ASH-PC is lent to My Cloud but offline (last online
+  …)"), or that lending was turned off on it. The Cloud prompt names the
+  person's computer the same way and tells bots never to call a PC a Mac; an
+  offline `shared_computer` call says the same.
 - The server refuses operations outside the scopes the Mac registered before
   queuing them, never retries an operation with an unknown outcome, and never
   substitutes its own files for an offline Mac.
@@ -743,7 +903,7 @@ and Fly restarts the machine. The one exception: after a restore commits
 (`server/restart.ts`) and the launcher starts only the server again.
 
 The machine's secrets (`OMB_CLOUD_BOOTSTRAP_SECRET` and the relay tokens
-`OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`)
+`OMB_CLOUD_BOAT_TOKEN`, `OMB_CLOUD_VOICE_TOKEN`, `OMB_CLOUD_DECIDER_TOKEN`, `OMB_CLOUD_X_TOKEN`)
 arrive as the launcher's environment, from the Fly app secrets the Admin
 sets. The launcher never puts them in a child's environment, because
 `/proc/<pid>/environ` keeps a process's starting environment for anything
@@ -843,6 +1003,8 @@ For each service the Admin has configured, it also sets:
 | `OMB_TTS_DEFAULT_VOICE` | env | An ElevenLabs voice id, used until the person picks a voice or another speech provider in Settings. |
 | `OMB_CLOUD_DECIDER_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/decider`, the Admin's Jev relay. It is a Jev base URL, used as it is: the decider adds `/v1/systemone`, the relay's only route, so every included decision goes to exactly `<OMB_CLOUD_DECIDER_URL>/v1/systemone`. |
 | `OMB_CLOUD_DECIDER_TOKEN` | secret | This machine's decision relay token (`omb_decide_…`). It is not a Jev key and works only through the relay. |
+| `OMB_CLOUD_X_URL` | env | `https://cloud.openmausbot.com/api/cloud/services/x`, the Admin's treg relay; the client calls `<OMB_CLOUD_X_URL>/call/<endpoint>` for the X tools' eight endpoints, and `/research/search`, `/research/endpoints/<id>` and `/research/call/<id>` for the research tools. A person's own treg key (Settings → API keys) wins over it and goes straight to treg. |
+| `OMB_CLOUD_X_TOKEN` | secret | This machine's X research relay token (`omb_x_…`). Not a treg key; it works only through the relay, within the plan's monthly X research calls. A signed-in desktop gets its own (`omb_xd_…`) from `POST /api/cloud/desktop/services/x` and hands it to its server in memory. |
 
 A service is included only when both its URL and its token are set
 (`server/included-services.ts`). The real Boat, ElevenLabs and Jev keys stay
@@ -874,7 +1036,7 @@ computers belong to this machine on every request.
   only the person's own Jev key until the relay accepts it too. The relay
   speaks Jev's API only: included decisions are Jev's, and with OpenRouter
   selected in **Settings → Decision model** nothing is included (it needs an
-  OpenRouter key of the person's own).
+  OpenRouter key: one saved there, or the one under **Settings → API keys**).
 - **Included decisions are on until switched off.** While the decision model
   runs on the included token, its master switch counts as on unless the person
   switched it off in **Settings → Decision model**; an explicit off always
@@ -907,11 +1069,36 @@ computers belong to this machine on every request.
 - A refusal from the Boat or voice relay (for example, the month's cloud
   computer hours are used up) is shown as the relay's own message. A resume
   that fails with a server error is retried on the next poll, as Boat asks.
+- An included cloud computer goes to sleep through the relay's `POST
+  /boxes/{id}/stop` after 10 idle minutes, as one on a person's own key does
+  at Boat; a refused stop is retried later, a longer wait each time. A
+  computer stays on when a routine that uses it runs within the next 30
+  minutes, since every wake counts against the Boat account's shared starts.
 - A refusal from the decision relay (401 for an unknown token, 402 without an
   active subscription, 429 over the month's cap or a rate limit, 502 or 503
   upstream) never reaches a turn: as with any decision-model failure, the room
   does what it would without it (its lead answers). Only **Test** shows it,
   as a fixed sentence.
+
+### Included connected apps
+
+Connected apps (Gmail, Outlook, Slack, LinkedIn, Calendly and the rest of the
+catalog) come with the plan through OpenMausBot's managed connection service,
+the same one the packaged desktop app uses. The Admin sets nothing for it: at
+every start the server registers the Cloud's own installation if it has none,
+keeps the token owner-only in `/data/.openmausbot/connected-apps-installation.json`
+(never in a backup, a move or `config.json`), checks it with the service, and
+retries with backoff while the service is down, without holding up the start.
+An owner's own Composio project key still wins. The details are in
+[composio.md](composio.md#mausbot-cloud). `OMB_COMPOSIO_BROKER_URL` (env, not
+secret, optional) points a Cloud at another service, such as a staging one.
+
+For a paid plan the Admin also sets `OMB_CLOUD_CONNECTED_APPS_GRANT` (secret):
+a grant it signs for the machine id, which the server presents to the service
+once it holds its token. The service then gives this installation a paid
+Cloud's app-event limit (2,000 a day instead of a desktop's 500). Without it a
+Cloud gets the desktop limit. The grant's format is in
+[the broker's README](../cloudflare/composio-broker/README.md#paid-clouds).
 
 ### Trial Claude credit
 
@@ -930,7 +1117,8 @@ credit, the Admin also sets:
   adds one read-only **Trial credit · Claude** engine: the OpenAI-compatible
   driver (`openai-compat`, the same chat engine and tools as any API key) with
   the relay as its address and the token as its own key, on the models the
-  relay lists, cheapest first (OpenRouter's `provider/model` ids too). Never Claude Code and never Codex: the
+  relay lists, the default first (the Admin lists Sonnet first, Haiku after;
+  OpenRouter's `provider/model` ids too). Never Claude Code and never Codex: the
   platform's key is never used to run another product's agent for anyone, and
   no `ANTHROPIC_*` variable or Claude config folder ever holds the token. It
   is never saved to `config.json` and has no sign-in. The token is held like
@@ -940,10 +1128,29 @@ credit, the Admin also sets:
 - **Out of the box.** A new Cloud's first bot runs on it when nothing of the
   person's own can run there (the first start waits up to 15 seconds for the
   relay's model list), so My Cloud opens on the chat, not the engine sign-in.
+  A bot runs on the credit's default model unless the person picks another;
+  when the relay's default changes (Haiku to Sonnet), bots still on the old
+  default follow it.
+- **Every bot runs.** While nothing of the person's own is signed in, a bot on
+  an engine My Cloud can't run (a desktop copy's own Claude or Codex, signed
+  out here, or an engine only that desktop has) moves onto the credit when the
+  engines are read: at start, when the credit's list arrives, when the app
+  reads the engines, and before a message to that bot is sent. Where it came
+  from is kept in `providers/trial-credit/moved.json` (it never travels in a
+  backup or a move). An engine whose sign-in can't be read yet is left alone
+  (`server/cloud-credit-moves.ts`).
 - **Their own always wins.** A new bot gets the person's own engine whenever
-  one can run. From the moment one can (a sign-in, a key), each bot and
-  conversation still on the credit moves to it, with one line in each, and the
-  credit is not offered to bots any more.
+  one can run. From the moment one is signed in for sure (a sign-in, a key),
+  each bot and conversation still on the credit moves to it, with one line in
+  each, and the credit is not offered to bots any more. A bot that came from
+  another engine goes back to that engine and model when it is the one signed
+  in; otherwise it takes the new-bot default among the person's own.
+- **Checked once connected.** Right after an engine is connected in the
+  welcome's **Connect your AI** step or the engine sign-in, the app sends it
+  one tiny real message (`POST /api/instances/:id/check`) and says
+  **Claude is working** or what to fix (sign in again, the provider's own
+  refusal in plain words), with **Test again**. No step is added; an engine
+  already connected is not checked again.
 - **Used up or gone.** The relay's refusal reads as one plain sentence that
   names the next step, never the API's JSON (`server/trial-credit.ts`), told
   apart by the relay's own error `code`, which it puts first in its error
@@ -952,7 +1159,8 @@ credit, the Admin also sets:
   `invalid_api_key` (a token it no longer knows) is no longer on this Cloud.
   The engine then stops offering itself until another token arrives (kept
   across restarts), and with no AI of their own My Cloud opens on its engine
-  sign-in, saying why. A `401`, `402` or `403` without the relay's code (a
+  sign-in, saying why. In a chat, used up or gone is a quiet note with
+  **Connect your own AI**, never an error. A `401`, `402` or `403` without the relay's code (a
   proxy's page) is an ordinary failed turn. `429` (paused for now: the day's
   ceiling, a Cloud being stopped, or the Admin's own account with Anthropic)
   and `400` `trial_credit_too_low` (too little left for this chat; a new chat
@@ -1079,7 +1287,10 @@ a prompt, a URL, an email address, a token, or an engine's account
 (`ProviderSnapshot.account`). Only fixed codes, counts, times, versions, engine
 kinds, random ids, connector slugs, booleans and machine numbers. Connected
 apps are looked up in the background at most every 30 minutes, so a slow
-provider never holds the answer. Cloud computers are not listed: through the
+provider never holds the answer. `connectors.items` lists only apps the
+person set up: connected now, or connected once and since expired or failed.
+An app never connected, HighLevel without a saved connection included, is not
+listed. Cloud computers are not listed: through the
 Admin's Boat relay that would count as using an included service and hold back
 updates; a cloud computer that fails a turn arrives as its place's code
 (`cc-unavailable`, `cc-no-start`, `cc-provider`, …).
@@ -1109,6 +1320,14 @@ without them works as before; a malformed one is dropped, never the machine):
   `storage`, `starting` or `checking`): the app shows the same four steps as
   the Cloud page, and says when setup is slow.
 - `cloud.retryAt` (ms) when `failed`: the time of the next automatic try.
+- `cloud.unreachable: {cause, since}` while `ready`: the Admin's health checks
+  can't reach the Cloud. `cause` is `host` (the server it runs on is being
+  restarted by the hosting provider; it comes back by itself) or `no_answer`
+  (it missed three checks in a row); `since` (ms) is its first missed check.
+  While it is there, Settings says why in place of "My Cloud is ready" and
+  hides Open My Cloud, the Cloud link opens nothing, and a connection that fails
+  says the same sentence (read from the session again just after the failure)
+  instead of "Cloud request failed".
 - `cloud.disk: {gb, maxGb}`: the volume now and the most the plan lets it grow
   to. Only with it does a copy to the Cloud count on a larger disk (and ask the
   Admin to grow it, below). Without it the app assumes nothing: a copy is measured
@@ -1163,32 +1382,128 @@ notice queue (below), on this computer's page and on My Cloud's own page.
 
 #### One card at a time: the notice queue
 
-`components/AppNotices.tsx` is the one place for the cards at the bottom left
-(`lib/notices.ts`), asked in order, one on screen at a time, and none after
-one closes until another launch:
+`components/AppNotices.tsx` is the one place for the Cloud Pro popup and the
+cards at the bottom left (`lib/notices.ts`), asked in order, one on screen at a
+time, and none after one closes until another launch:
 
-1. **The card after the update** (`CloudTrialIntro`, id `cloud-trial-intro-v1`):
+1. **The Cloud Pro popup** (`CloudProPopup`, id `cloud-pro-update-2026-10`):
+   one centered dialog, once per installed desktop app whatever its plan (a
+   new install once its onboarding is done), on whichever page its window
+   shows: this computer's, My Cloud's or another saved server's. A server's
+   page shows it only once that server runs this version (My Cloud once the
+   Cloud is updated), so a window that only ever shows a server on an older
+   version does not get it. It does not wait for This computer's first-run
+   welcome there: a window that opens on My Cloud or a saved server may
+   never load This computer's page, and an install from before the welcome
+   kept a record has no record of finishing it, so waiting would leave those
+   desktops without the popup. Showing it never switches the window. Main keeps whether this desktop has seen it
+   (`electron/desktop-prefs.mjs`, a small file in the app's data folder,
+   written to a temporary file and renamed over the old one, so a failed
+   write keeps the last record), and every page and every port the app's own
+   page is served on agree. This computer's workspace record counts as seen
+   on every page, before its page has loaded on this build (main reads
+   `config.json` in its data folder): a close kept there earlier, or the
+   welcome's MausBot Cloud step, which also keeps the
+   card after the update away; a close kept only in this computer's page's
+   storage counts once that page has loaded, and is handed to main. The
+   welcome leaves its MausBot Cloud step out once main says this desktop has
+   seen the popup. Never in a window connected to another
+   computer as its remote client, which has no Cloud sign-in, Add a Cloud
+   dialog or Settings → MausBot Cloud to send anyone to, nor on a branded
+   build, which sells no Cloud. It waits while main, the plan or the Admin's
+   offer is loading; while another dialog (modal or not, the tour's
+   spotlight included), My Cloud's setup checklist or the card saying the
+   Cloud is set up, or a call is open; and, when the Cloud can't be reached,
+   for a later launch. Nothing in it opens a checkout or the browser:
+   - **On this computer's page**, with no plan, **Start free trial** (while
+     the Admin offers one) or **Upgrade to Cloud Pro** opens the Add a Cloud
+     dialog (source `update_popup`), and so does **Compare plans** (the dialog
+     lists every plan); on any plan (a trial, Personal, Pro, Max or one that
+     needs attention) **Manage plan** opens Settings → MausBot Cloud, and
+     there is no Compare plans. Personal → Pro is not self-serve yet, so
+     Personal gets Manage plan rather than an Upgrade that would end at
+     "write to us". Its numbers are the Admin's.
+   - **On My Cloud's page**, from the plan main tells that page
+     (`cloud-plan:state`, asked once main has restored the Cloud sign-in), a
+     plan, payment trouble or an ended sign-in gets **Manage plan**. It
+     switches the window to This computer, whose page opens at Settings →
+     MausBot Cloud (where an ended sign-in can sign in again). A plan still
+     being checked waits for a later launch; with none read, it is as on
+     another server.
+   - **On another saved server's page**, which is told nothing about the
+     plan, it shows no plan, price or Compare plans: **Continue on this
+     computer** switches the window to This computer, whose page finishes
+     the click from the plan it knows itself, without showing the popup a
+     second time. Someone who can buy (signed out, or signed in with no
+     plan) gets the Add a Cloud dialog (source `update_popup`), which loads
+     the Admin's offer itself; a plan, payment trouble, a payment being
+     linked or an ended sign-in gets Settings → MausBot Cloud. A sign-in
+     still restoring or connecting, or a plan This computer cannot check
+     right now, is waited on for ten seconds at most, then it is Settings →
+     MausBot Cloud, which says where it stands.
+
+   Main makes either switch only for a popup this desktop has not seen, and
+   only when the page asks right after
+   a click or a key press on it (the preload checks
+   `navigator.userActivation`). It loads This computer's page on the click
+   (`?desktop-settings=cloud-settings` for Manage plan, `cloud-add` for
+   Continue on this computer, with `source=update_popup` and the page clicked,
+   `via=my_cloud` or `server`) and records the popup as seen once that page
+   has loaded. The preload and main refuse anything else: `cloud-pro`
+   (Continue on this computer) from My Cloud's or another saved server's
+   page, and `manage` (Manage plan) only from My Cloud's own page, as main
+   verifies it. This computer's page opens it at once, whatever else is
+   going on there (a bot at work, an update), and shows no card in the
+   corner for the rest of that page load. So another server's page can
+   bring the window to This computer and have that page do what its own
+   popup's main button would, but it cannot choose what opens there; like any
+   page of the window, it can close the popup for this desktop. While main
+   switches, the main button is held; a switch main cannot make (This
+   computer's server is not ready, another switch is under way, or the
+   switch fails) keeps the popup up with a line saying so and the button to
+   try again, and leaves the popup for a later launch, as does a page that
+   does not load.
+
+   Any button, its X, Escape or a click outside end it for good; until then
+   it comes back on a later launch. It takes focus at its title, keeps Tab
+   inside, takes Escape only while focus is in it, and gives focus back when
+   it closes unless focus has moved on. `cloud_pro_popup`
+   ([docs/analytics.md](analytics.md)) counts it as shown at most once a day
+   on a desktop, however often it comes back, and names the page each event
+   is counted on. Only `upgrade`, `manage` and `see_plans` by someone signed
+   in to MausBot Cloud first tie their analytics to their Cloud account's
+   email, and only on this computer's page, where the app knows the email;
+   My Cloud's Manage plan and a server page's Continue on this computer are
+   counted on that page as `continue`, and what they open on this
+   computer's page is counted there with the page they came from. While the
+   app has kept no analytics choice of its own yet and serves its page on a
+   port other than its first, such a click is counted without the email,
+   because an opt-out made before may be kept in the first port's storage.
+2. **The card after the update** (`CloudTrialIntro`, id `cloud-trial-intro-v1`):
    MausBot Cloud's free trial for someone signed out or with no plan who
    has used the app before this launch, only while the Admin offers a trial
-   (it waits for one). Its numbers are the Admin's: the trial's days, the
-   lowest monthly price, the Claude credit and money-back. At most once a
-   calendar day, on at most three days (one for someone who closed the
+   (it waits for one), and never on a desktop whose first-run welcome
+   showed its MausBot Cloud step. Its numbers are the Admin's: the trial's
+   days, the lowest monthly price, the Claude credit and money-back. At most
+   once a calendar day, on at most three days (one for someone who closed the
    earlier Pro card), kept in browser storage and the workspace's hint record;
    any button, its X or Escape end it for good. **Start free trial** opens the
    Add a Cloud dialog, **Show me how** lights the server menu (below), **Sign
    in to your Cloud plan** (signed out) only hides it for now. Never on a
    branded build or a desktop signed in with an organization.
-2. **The free trial's notice** (above), on this computer's page and on My
+3. **The free trial's notice** (above), on this computer's page and on My
    Cloud's own page (its only entry there, after its engine sign-in and setup
    checklist).
-3. **This computer's My Cloud card** (`CloudNotice`): a ready My Cloud for
+4. **This computer's My Cloud card** (`CloudNotice`): a ready My Cloud for
    someone with a plan, or **Sign in again** where the sign-in ended (Not now
    kept per card).
-4. **Star us on GitHub**, asked once.
+5. **Star us on GitHub**, asked once.
 
-None of them shows over setup (the welcome flow, the tour), a dialog, Settings,
-the Add a Cloud dialog or its tip, busy work, or an update being offered; none
-takes focus, and each is announced once to a screen reader.
+None of them shows over setup (the welcome flow, the tour, and on My Cloud its
+engine sign-in and its setup checklist until that is done or hidden), a dialog,
+Settings, the Add a Cloud dialog or its tip, busy work, or an update being
+offered; no card in the corner takes focus, and each is announced once to a
+screen reader.
 
 How the app holds the answer (`electron/cloud-account.mjs`): it asks every
 minute (every 15 seconds while the Cloud is set up or a payment is linked),
@@ -1205,6 +1520,12 @@ again** (one step, the plan unaffected) instead of offering a plan. A `401` or
 other refusal, is a failed check like a dropped connection: it never ends the
 sign-in. Nobody signed in with a paid plan, in payment trouble, with a payment
 being linked, or whose state is unknown is offered a plan anywhere in the app.
+The Cloud Pro popup gives a plan, payment trouble and a payment being linked
+**Manage plan**; of the states it cannot verify, it waits while the sign-in is
+still restoring or connecting, waits for a later launch while the check is
+`unavailable`, and gives Manage plan to an ended sign-in (`reauth-required`)
+and to one the app could not read and removed (`restore-removed`): Settings →
+MausBot Cloud asks both to sign in again.
 
 In the Server menu, **My Cloud** goes through the same connection as
 **Open My Cloud** (no pairing code to type); when it cannot, the app
@@ -1237,9 +1558,10 @@ malformed session summary or grant is treated as none.
 ## Add a Cloud
 
 The one way to buy MausBot Cloud in the app, the same for every way in:
-the card after the update, **Show me how**, **Add a Cloud…** in the server
-menu (the sidebar's and the menu bar's Server menu), Settings (the Cloud card
-in General, and MausBot Cloud), and the routine screen's note.
+the Cloud Pro popup, the card after the update, **Show me how**, **Add a
+Cloud…** in the server menu (the sidebar's and the menu bar's Server menu),
+Settings (the Cloud card in General, and MausBot Cloud), and the routine
+screen's note.
 
 - **The menu item.** Main adds **Add a Cloud…** under the saved servers only
   for the installed app on this computer (never a dev build, companion mode or
@@ -1311,7 +1633,8 @@ in General, and MausBot Cloud), and the routine screen's note.
   again, `429` says to use the open checkout or wait, anything else says
   nothing was charged; `404`/`405`/`501` is an Admin before the route.
   `source` is one of `app_card`, `app_howto`, `app_menu`, `app_settings`,
-  `app_routines` (main refuses any other, and any plan the offer doesn't sell).
+  `app_routines`, `update_popup` (main refuses any other, and any plan the
+  offer doesn't sell).
 - **Interest** `POST /api/cloud/desktop/interest` `{kind: "another_cloud"}` → `{ok: true}`.
 - Every signed-in request carries this app's version in `x-openmausbot-version`.
 
@@ -1320,6 +1643,7 @@ shown, and the dialog offers today's plans at the Admin's prices, charged
 today. Analytics (the app's existing, optional PostHog) register `app_version`
 and `surface` (`local` or `server`) on every event, and count the card, its
 actions, the tip, the dialog's views and checkouts opened, with no content.
+[docs/analytics.md](analytics.md) lists every event and property.
 
 ## Copy this computer to your Cloud
 
@@ -1360,6 +1684,13 @@ section is only what the Cloud adds.
 - **The restart.** The Cloud's launcher (`server/cloud-home-start.ts`) starts
   only the server again on exit 75, and startup settles who owns what came
   (`server/cloud-owner.ts`): a copied routine is the owner's.
+- **Bring newer chats.** On a Cloud with work of its own, the same panel offers
+  **Bring newer chats to My Cloud**, which adds only the conversations and
+  messages it lacks and replaces nothing (docs/copy-workspace.md, Bring newer
+  chats).
+- **After the copy.** My Cloud becomes the server this app opens, and this
+  computer's page says in one line that the bots now live on My Cloud, with
+  **Open My Cloud**, so the two are not used side by side by accident.
 - **Older Clouds.** A Cloud from before Copy to My Cloud answers `404` and the app
   says it has not updated yet; one from before any server could receive a copy
   still receives one from this app (its routes are the same).

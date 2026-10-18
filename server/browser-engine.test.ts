@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { credentialStoreFlags } from "./browser/egress/gate.ts";
 import {
   agentBrowserIntegration,
   browserEngineEncryptionKey,
@@ -656,7 +657,37 @@ describe("finding the browser engine", () => {
     files.add(override);
     expect(resolveAgentBrowserBinary({ dataDir, env: { ...env, OMB_AGENT_BROWSER_PATH: override }, exists })).toBe(override);
     expect(resolveAgentBrowserBinary({ dataDir, env: { ...env, OMB_AGENT_BROWSER_PATH: join(dataDir, "missing", name) }, exists })).toBeNull();
-    expect(browserEngineStatus({ dataDir, env, exists })).toMatchObject({ kind: "ready", binaryPath: pinned, version: agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset()) });
+    expect(browserEngineStatus({ dataDir, env, exists })).toMatchObject({ kind: "ready", binaryPath: pinned, version: agentBrowserReleaseVersion(resolveAgentBrowserReleaseAsset()), managed: true });
+    expect(browserEngineStatus({ dataDir, env: { ...env, OMB_AGENT_BROWSER_PATH: override }, exists, versionOf: () => AGENT_BROWSER_VERSION })).toMatchObject({ kind: "ready", binaryPath: override, managed: false });
+    files.delete(pinned);
+    expect(browserEngineStatus({ dataDir, env, exists, versionOf: () => AGENT_BROWSER_VERSION })).toMatchObject({ kind: "ready", binaryPath: pathBinary, managed: false });
+  });
+
+  it("hands agent-browser the Chrome OMB prepared instead of the bundled shell, never when it attaches to the person's Chrome", () => {
+    const resources = mkdtempSync(join(tmpdir(), "omb-browser-resources-"));
+    scratch.push(resources);
+    const host = { platform: "darwin" as const, arch: "arm64" };
+    const env = { OMB_RESOURCES_PATH: resources, PATH: "" };
+    const bundle = browserBundlePaths(join(resources, "browser-engine"), "darwin-arm64");
+    mkdirSync(bundle.licenses, { recursive: true });
+    for (const file of [bundle.engine, bundle.chrome, bundle.manifest]) {
+      mkdirSync(join(file, ".."), { recursive: true });
+      writeFileSync(file, "fixture");
+    }
+    expect(browserEngineStatus({ env, ...host })).toMatchObject({ kind: "ready", binaryPath: bundle.engine, managed: true });
+    const launcher = { AGENT_BROWSER_EXECUTABLE_PATH: "/data/browser/chrome-launcher.sh", AGENT_BROWSER_HIDE_SCROLLBARS: "0" };
+    const spec = agentBrowserIntegration({ binaryPath: bundle.engine, session: "bot-1", encryptionKey: "key", env, launcher, ...host });
+    expect(spec.env).toMatchObject(launcher);
+    expect(agentBrowserIntegration({ binaryPath: bundle.engine, session: "bot-1", encryptionKey: "key", env, launcher: {}, ...host }).env.AGENT_BROWSER_EXECUTABLE_PATH).toBe(bundle.chrome);
+    const mine = agentBrowserIntegration({ binaryPath: bundle.engine, session: "mine", encryptionKey: "key", env, launcher, attach: {}, ...host });
+    expect(mine.env.AGENT_BROWSER_EXECUTABLE_PATH).toBe(bundle.chrome);
+    expect(mine.env).not.toHaveProperty("AGENT_BROWSER_HIDE_SCROLLBARS");
+  });
+
+  it("names the browser the engine starts in its status line", () => {
+    const ready = { kind: "ready" as const, binaryPath: "/e/agent-browser", version: AGENT_BROWSER_VERSION, managed: true };
+    expect(describeBrowserEngine(ready, "Google Chrome 153 (installed)")).toBe(`browser engine: agent-browser ${AGENT_BROWSER_VERSION} at /e/agent-browser; browser: Google Chrome 153 (installed)`);
+    expect(describeBrowserEngine(ready)).toBe(`browser engine: agent-browser ${AGENT_BROWSER_VERSION} at /e/agent-browser`);
   });
 
   it("reports an unmanaged agent-browser's real version and warns when it is not the pin", () => {
@@ -680,13 +711,13 @@ describe("finding the browser engine", () => {
       expect(warn).toHaveBeenCalledOnce();
       warn.mockClear();
       const matched = browserEngineStatus({ dataDir, env, exists, versionOf: () => AGENT_BROWSER_VERSION });
-      expect(matched).toEqual({ kind: "ready", binaryPath: binary, version: AGENT_BROWSER_VERSION });
+      expect(matched).toEqual({ kind: "ready", binaryPath: binary, version: AGENT_BROWSER_VERSION, managed: false });
       expect(warn).not.toHaveBeenCalled();
       const unknown = browserEngineStatus({ dataDir, env, exists, versionOf: () => null });
       expect(unknown).toMatchObject({ kind: "ready", version: "unknown", warning: expect.stringContaining("unknown") });
       warn.mockClear();
       const probing = browserEngineStatus({ dataDir, env, exists, versionOf: () => undefined });
-      expect(probing).toEqual({ kind: "ready", binaryPath: binary, version: "unknown" });
+      expect(probing).toEqual({ kind: "ready", binaryPath: binary, version: "unknown", managed: false });
       expect(warn).not.toHaveBeenCalled();
     } finally {
       warn.mockRestore();
@@ -776,6 +807,35 @@ describe("installing the browser engine", () => {
 });
 
 describe("what a bot gets", () => {
+  // Without a gate the browser connects nowhere: Chrome fails every connection through port 0.
+  const noGate = {
+    AGENT_BROWSER_PROXY: "socks5://127.0.0.1:0", AGENT_BROWSER_PROXY_BYPASS: "<-loopback>",
+    AGENT_BROWSER_ARGS: ["--webrtc-ip-handling-policy=disable_non_proxied_udp", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", ...credentialStoreFlags()].join("\n"),
+  };
+
+  it("launches Chrome only behind its egress gate, off the person's keychain, and never for the person's own Chrome", () => {
+    const gated = agentBrowserIntegration({ binaryPath: "/x/agent-browser", session: "bot-1", encryptionKey: "k", env: { PATH: "/usr/bin" }, egressPort: 45123, platform: "darwin" });
+    expect(gated.env).toMatchObject({ AGENT_BROWSER_PROXY: "socks5://127.0.0.1:45123", AGENT_BROWSER_PROXY_BYPASS: "<-loopback>" });
+    expect(gated.env.AGENT_BROWSER_ARGS!.split("\n")).toEqual(["--webrtc-ip-handling-policy=disable_non_proxied_udp", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--use-mock-keychain"]);
+    expect(agentBrowserIntegration({ binaryPath: "/x", session: "bot-1", encryptionKey: "k", env: {}, egressPort: 45123, platform: "linux" }).env.AGENT_BROWSER_ARGS).toContain("--password-store=basic");
+    expect(agentBrowserIntegration({ binaryPath: "/x", session: "bot-1", encryptionKey: "k", env: {} }).env.AGENT_BROWSER_PROXY).toBe("socks5://127.0.0.1:0");
+    const mine = agentBrowserIntegration({ binaryPath: "/x", session: "work", encryptionKey: "k", env: {}, attach: {}, egressPort: 45123 });
+    for (const key of ["AGENT_BROWSER_PROXY", "AGENT_BROWSER_PROXY_BYPASS", "AGENT_BROWSER_ARGS"]) expect(mine.env).not.toHaveProperty(key);
+  });
+
+  it("keeps the prepared Chrome launcher and the gate together, and no launcher setting routes Chrome around the gate", () => {
+    const launcher = { AGENT_BROWSER_EXECUTABLE_PATH: "/d/chrome-launcher.sh", AGENT_BROWSER_HIDE_SCROLLBARS: "0" };
+    const gate = { AGENT_BROWSER_PROXY: "socks5://127.0.0.1:45123", AGENT_BROWSER_PROXY_BYPASS: "<-loopback>" };
+    const spec = agentBrowserIntegration({ binaryPath: "/x", session: "bot-1", encryptionKey: "k", env: {}, launcher, egressPort: 45123, platform: "darwin" });
+    expect(spec.env).toMatchObject({ ...launcher, ...gate });
+    const pushy = agentBrowserIntegration({
+      binaryPath: "/x", session: "bot-1", encryptionKey: "k", env: {}, egressPort: 45123, platform: "darwin",
+      launcher: { ...launcher, AGENT_BROWSER_PROXY: "direct://", AGENT_BROWSER_PROXY_BYPASS: "*", AGENT_BROWSER_ARGS: "--lang=en-IN" },
+    });
+    expect(pushy.env).toMatchObject({ AGENT_BROWSER_EXECUTABLE_PATH: "/d/chrome-launcher.sh", ...gate });
+    expect(pushy.env.AGENT_BROWSER_ARGS!.split("\n")).toEqual(["--lang=en-IN", "--webrtc-ip-handling-policy=disable_non_proxied_udp", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp", "--use-mock-keychain"]);
+  });
+
   it("forwards the explicit Chrome path without copying arbitrary environment or overriding session isolation", () => {
     vi.stubEnv("AGENT_BROWSER_EXECUTABLE_PATH", "/process/chrome");
     const spec = agentBrowserIntegration({
@@ -793,7 +853,7 @@ describe("what a bot gets", () => {
       AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_ENCRYPTION_KEY: "session-key",
       AGENT_BROWSER_CONFIG: expect.stringContaining("omb-managed-config.json"),
       AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_HEADED: "0", PATH: "/usr/bin",
-      AGENT_BROWSER_EXECUTABLE_PATH: "/opt/trusted chrome/chrome",
+      AGENT_BROWSER_EXECUTABLE_PATH: "/opt/trusted chrome/chrome", ...noGate,
     });
   });
 
@@ -807,7 +867,7 @@ describe("what a bot gets", () => {
       AGENT_BROWSER_RESTORE_SAVE: "auto", AGENT_BROWSER_ENCRYPTION_KEY: "session-key",
       AGENT_BROWSER_CONFIG: expect.stringContaining("omb-managed-config.json"),
       AGENT_BROWSER_HEADLESS: "1", AGENT_BROWSER_HEADED: "0", PATH: "/usr/bin",
-      AGENT_BROWSER_EXECUTABLE_PATH: "/opt/process-chrome/chrome",
+      AGENT_BROWSER_EXECUTABLE_PATH: "/opt/process-chrome/chrome", ...noGate,
     });
     for (const env of [{}, { AGENT_BROWSER_EXECUTABLE_PATH: "" }]) {
       const explicit = agentBrowserIntegration({ binaryPath: "/x", session: "s", encryptionKey: "k", env });

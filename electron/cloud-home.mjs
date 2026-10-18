@@ -23,6 +23,7 @@ function homeOrigin(value) {
 }
 
 export const CLOUD_SETUP_STEPS = Object.freeze(["reserving", "storage", "starting", "checking"]);
+export const CLOUD_UNREACHABLE_CAUSES = Object.freeze(["host", "no_answer"]);
 const GB = 1024 ** 3;
 const record = value => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const moment = value => Number.isSafeInteger(value) && value > 0;
@@ -40,7 +41,20 @@ export function parseCloudSummary(input) {
   const retryAt = status === "failed" && moment(input.retryAt) ? input.retryAt : null;
   const disk = record(input.disk) && wholeGb(input.disk.gb) && wholeGb(input.disk.maxGb) && input.disk.maxGb >= input.disk.gb
     ? { gb: input.disk.gb, maxGb: input.disk.maxGb } : null;
-  return { status, ...(origin ? { origin } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}) };
+  const unreachable = status === "ready" && record(input.unreachable) && CLOUD_UNREACHABLE_CAUSES.includes(input.unreachable.cause) && moment(input.unreachable.since)
+    ? { cause: input.unreachable.cause, since: input.unreachable.since } : null;
+  return { status, ...(origin ? { origin } : {}), ...(setup ? { setup } : {}), ...(retryAt ? { retryAt } : {}), ...(disk ? { disk } : {}), ...(unreachable ? { unreachable } : {}) };
+}
+
+const UNREACHABLE_TEXT = Object.freeze({
+  host: "The server My Cloud runs on is being restarted by our hosting provider. My Cloud and its files are safe, and it comes back on its own, usually within about 20 minutes.",
+  no_answer: "My Cloud hasn't answered for a few minutes. Nothing was lost, and we've been told.",
+});
+/** Why My Cloud can't be reached when the Admin says so, for main's dialogs; with `origin`, only for that server. */
+export function cloudUnreachableText(state, origin = null) {
+  const machine = state?.status === "connected" ? state.machine : null;
+  if (!machine?.unreachable || (origin !== null && machine.origin !== origin)) return null;
+  return UNREACHABLE_TEXT[machine.unreachable.cause] ?? null;
 }
 
 const PURCHASE_STATES = Object.freeze(["confirming", "held"]);
@@ -147,6 +161,22 @@ export function rememberedCloudHome(previous, state) {
   return previous?.accountId === accountId ? previous : null;
 }
 
+/** Signs this app back in to the person's own Cloud when its session there has ended (unused for a month, or signed out
+ * there), so lending resumes by itself: a fresh one-time code from the Admin for the Cloud it verified, redeemed into the
+ * window's own cookie, as opening My Cloud does. Never for any other origin. */
+export async function signInCloudSession({ origin, mine, pair, fetch: fetchImpl }) {
+  if (!origin || origin !== mine) return false;
+  try {
+    const grant = await pair();
+    if (grant?.origin !== origin || typeof grant.code !== "string") return false;
+    const response = await fetchImpl(`${origin}/api/auth/pair`, {
+      method: "POST", credentials: "include", redirect: "error", cache: "no-store", signal: AbortSignal.timeout(15_000),
+      headers: { "content-type": "application/json", origin }, body: JSON.stringify({ code: grant.code, cookie: true, label: "OpenMausBot app (lending)" }),
+    });
+    return response.ok;
+  } catch { return false; }
+}
+
 /** The one rule for "this page is my Cloud".
  *
  * @param {{ account: { homeTarget(): { origin: string } | null, state(): { account?: { id: string } } } | null,
@@ -164,10 +194,10 @@ export function isCloudHomeEntry(entry, { homeOrigin = null, remembered = null }
   return Boolean(entry?.origin) && (entry.origin === homeOrigin || entry.origin === remembered?.origin);
 }
 
-/** A hint, never a verified Cloud. */
+/** A hint, never a verified Cloud: the entry this app listed for it (`home`), or one still under the default name. */
 export function savedCloudHomeOrigin(state) {
   const saved = Array.isArray(state?.environments) ? state.environments : [];
-  return saved.find((entry) => entry?.name === CLOUD_HOME_NAME)?.origin ?? null;
+  return (saved.find((entry) => entry?.home === true) ?? saved.find((entry) => entry?.name === CLOUD_HOME_NAME))?.origin ?? null;
 }
 
 export function parsePairingGrant(input, origin, now) {
@@ -177,10 +207,13 @@ export function parsePairingGrant(input, origin, now) {
   return { origin, code: input.code, expiresAt: input.expiresAt };
 }
 
-export function withCloudHome(state, machine, makeId) {
+/** Listed once, under the name and colour its owner chose while it was set up (`look`), else My Cloud; never renamed here after. */
+export function withCloudHome(state, machine, makeId, look = null) {
   if (!machine?.origin || machine.status === "provisioning") return state;
   if (state.environments.some((entry) => entry.origin === machine.origin)) return state;
-  return environments.withEnvironment(state, { origin: machine.origin, name: CLOUD_HOME_NAME }, makeId);
+  const added = environments.withEnvironment(state, { origin: machine.origin, name: look?.name || CLOUD_HOME_NAME }, makeId);
+  const color = environments.ENTRY_COLORS.includes(look?.color) ? look.color : null;
+  return { ...added, environments: added.environments.map((entry) => entry.origin === machine.origin ? { ...entry, ...(color ? { color } : {}), home: true } : entry) };
 }
 
 /** The one-time code goes in the hash, never a query. */
