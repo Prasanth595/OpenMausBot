@@ -360,7 +360,8 @@ describe("a sign-in that stops at a passkey", () => {
 
 describe("closing the last tab", () => {
   const tab = (tabId: string) => ({ tabId, title: tabId, url: `https://${tabId}.example.test/`, active: tabId === "t1" });
-  const closes = () => [...host.querySelectorAll("button")].map((candidate) => candidate.getAttribute("aria-label") ?? "").filter((label) => label.startsWith("Close t"));
+  // Only the Close buttons that sit beside a tab; the panel has other "Close …" buttons.
+  const closes = () => [...host.querySelectorAll('[role="tab"]')].map((tab) => tab.nextElementSibling?.getAttribute("aria-label")).filter((label): label is string => !!label);
 
   it("offers no Close on agent-browser's only tab, which it refuses to close, but still closes one of two", async () => {
     fixture.state.config.browserEngine = { kind: "engine", engine: "agent-browser" };
