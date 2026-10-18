@@ -197,7 +197,7 @@ export function createBotPackageExport(input: {
       schedule: portableSchedule(routine.schedule),
       durationMinutes: routine.durationMinutes,
       ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
-      ...(routine.overlap === "queue" ? { overlap: "queue" as const } : {}),
+      ...(routine.overlap ? { overlap: routine.overlap } : {}),
       enabledAfterInstall: false as const,
     }];
   });
@@ -639,7 +639,7 @@ export function createTeamPackageExport(input: TeamExportInput): TeamExportResul
       schedule: portableSchedule(routine.schedule),
       durationMinutes: routine.durationMinutes,
       ...(routine.timeoutMinutes === undefined ? {} : { timeoutMinutes: routine.timeoutMinutes }),
-      ...(routine.overlap === "queue" ? { overlap: "queue" as const } : {}),
+      ...(routine.overlap ? { overlap: routine.overlap } : {}),
       ...(!goal && routine.continuity ? { continuity: true } : {}),
       ...(routine.runOnStartup ? { runOnStartup: true } : {}),
       enabledAfterInstall: routine.enabled,

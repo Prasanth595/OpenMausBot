@@ -157,7 +157,7 @@ const ROUTINE_FIELDS_SCHEMA = {
   overlap: {
     type: "string",
     enum: ["skip", "queue"],
-    description: "While this routine is still working, skip scheduled occurrences (default) or queue at most one run. Queue skips further occurrences until the pending run starts; it never builds an unlimited backlog. Manual and webhook requests are separate.",
+    description: "While this routine is still working (or its bot is busy), queue at most one run (default) or skip scheduled occurrences. Queue folds further occurrences into the pending run, which starts as soon as the bot is free; it never builds an unlimited backlog. Manual and webhook requests are separate.",
   },
   run_on_startup: {
     type: "boolean",

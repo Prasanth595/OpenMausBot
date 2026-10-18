@@ -93,6 +93,7 @@ export interface Routine {
   durationMinutes: number;
   /** Optional wall-clock safety limit. Missing means the run is unlimited. */
   timeoutMinutes?: number;
+  /** Absent or "queue": an occurrence due while the previous run is active is coalesced into one pending run; "skip" drops it. */
   overlap?: "skip" | "queue";
   /** Each run starts with the previous run's report. */
   continuity?: boolean;
@@ -159,6 +160,7 @@ export interface RoutineInput {
   durationMinutes?: number;
   /** `null` explicitly removes the limit; omission preserves it on updates. */
   timeoutMinutes?: number | null;
+  /** Absent or "queue": an occurrence due while the previous run is active is coalesced into one pending run; "skip" drops it. */
   overlap?: "skip" | "queue";
   /** Each run starts with the previous run's report. */
   continuity?: boolean;

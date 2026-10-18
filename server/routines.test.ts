@@ -134,7 +134,7 @@ describe("bounded scheduled overlap and run health", () => {
     { type: "daily", time: "09:00", weekdays: [0, 1, 2, 3, 4, 5, 6] },
   ])("persists skipped occurrences once without changing the definition revision: %j", async schedule => {
     const h = harness(start);
-    const routine = h.manager.create({ ...input(), schedule });
+    const routine = h.manager.create({ ...input(), schedule, overlap: "skip" });
     h.setNow(routine.nextRunAt!); await h.manager.tick();
     const skippedAt = h.manager.listRoutines()[0].nextRunAt!;
     h.setNow(skippedAt); await h.manager.tick(); await h.manager.tick();
@@ -174,7 +174,9 @@ describe("bounded scheduled overlap and run health", () => {
     expect(h.manager.listRoutines()[0]).toMatchObject({ skippedRuns: 9, overlap: "queue" });
     expect(new RoutineManager(h.options).listRoutines()[0]).toMatchObject({ skippedRuns: 9, overlap: "queue" });
     expect(h.manager.update(routine.id, { name: "Renamed" })?.overlap).toBe("queue");
-    expect(h.manager.update(routine.id, { overlap: "skip" })?.overlap).toBeUndefined();
+    expect(h.manager.update(routine.id, { overlap: "skip" })?.overlap).toBe("skip");
+    expect(new RoutineManager(h.options).listRoutines()[0].overlap).toBe("skip");
+    expect(h.manager.update(routine.id, { overlap: undefined })?.overlap).toBeUndefined();
     expect(new RoutineManager(h.options).listRoutines()[0].overlap).toBeUndefined();
   });
 
@@ -189,7 +191,7 @@ describe("bounded scheduled overlap and run health", () => {
 
   it("rolls the skip counter and scheduler cursor back together on a failed write", async () => {
     const h = harness(start);
-    h.manager.create(input());
+    h.manager.create({ ...input(), overlap: "skip" });
     h.setNow(start + 5 * 60_000); await h.manager.tick();
     const before = h.manager.listRoutines()[0];
     const save = vi.spyOn(h.manager as unknown as { save(): void }, "save").mockImplementationOnce(() => { throw new Error("fixture disk full"); });
@@ -276,7 +278,7 @@ describe("a run left waiting for the person", () => {
 
   it.each(["skip", "queue"] as const)("starts the next day's run instead of skipping it behind an unanswered sign-in (%s overlap)", async (overlap) => {
     const h = harness(monday);
-    const routine = h.manager.create({ ...daily, ...(overlap === "queue" ? { overlap } : {}) });
+    const routine = h.manager.create({ ...daily, overlap });
     const day1 = routine.nextRunAt!;
     expect(new Date(day1).toISOString()).toBe("2026-10-12T06:30:00.000Z");
     h.setNow(day1); await h.manager.tick();
@@ -301,7 +303,7 @@ describe("a run left waiting for the person", () => {
 
   it("leaves a question asked shortly before the next occurrence alone, then replaces it at the one after", async () => {
     const h = harness(monday);
-    const routine = h.manager.create({ ...daily, schedule: { type: "interval", everyMinutes: 60, anchorAt: monday } });
+    const routine = h.manager.create({ ...daily, overlap: "skip", schedule: { type: "interval", everyMinutes: 60, anchorAt: monday } });
     const first = routine.nextRunAt!;
     h.setNow(first); await h.manager.tick();
     h.setNow(first + minutes(5)); ask(h, "thread-1");
@@ -324,7 +326,7 @@ describe("a run left waiting for the person", () => {
 
   it.each(["skip", "queue"] as const)("keeps today's %s overlap behind a run that was answered and is still working", async (overlap) => {
     const h = harness(monday);
-    const routine = h.manager.create({ ...daily, ...(overlap === "queue" ? { overlap } : {}) });
+    const routine = h.manager.create({ ...daily, overlap });
     h.setNow(routine.nextRunAt!); await h.manager.tick();
     h.setNow(routine.nextRunAt! + minutes(5)); ask(h, "thread-1");
     h.setNow(routine.nextRunAt! + minutes(10));
@@ -350,7 +352,7 @@ describe("a run left waiting for the person", () => {
   it("keeps a run whose delegated work is still open, and tells the owner once about the occurrences it skips", async () => {
     const h = harness(monday);
     h.options.handedOffWorkLive = (threadId) => threadId === "thread-1";
-    const routine = h.manager.create({ ...daily, schedule: { type: "interval", everyMinutes: 5, anchorAt: monday } });
+    const routine = h.manager.create({ ...daily, overlap: "skip", schedule: { type: "interval", everyMinutes: 5, anchorAt: monday } });
     h.setNow(routine.nextRunAt!); await h.manager.tick();
     parkOnPerson(h, "thread-1");
     for (let minute = 10; minute <= 120; minute += 5) {
@@ -387,7 +389,7 @@ describe("a run left waiting for the person", () => {
 
   it("carries a wait across a restart, and times a wait saved by an older version from the restart", async () => {
     const h = harness(monday);
-    const routine = h.manager.create(daily);
+    const routine = h.manager.create({ ...daily, overlap: "skip" });
     const day1 = routine.nextRunAt!;
     h.setNow(day1); await h.manager.tick();
     parkOnPerson(h, "thread-1");
@@ -524,9 +526,9 @@ describe("cron routines use the existing persistent scheduler", () => {
     expect(h.manager.listRoutines()[0].nextRunAt).toBe(start + 20 * 3_600_000 + 60_000);
   });
 
-  it("does not accumulate cron work while a previous run is queued or active", async () => {
+  it("does not accumulate cron work while a previous run is queued or active (skip overlap)", async () => {
     const h = harness(start); h.setBot("busy");
-    const routine = h.manager.create(input({ ...monthly, expression: "* * * * *" }));
+    const routine = h.manager.create({ ...input({ ...monthly, expression: "* * * * *" }), overlap: "skip" });
     h.setNow(routine.nextRunAt!); await h.manager.tick();
     h.setNow(start + 5 * 60_000); await h.manager.tick();
     expect(h.manager.listRuns()).toHaveLength(1);
@@ -1631,6 +1633,7 @@ describe("RoutineManager", () => {
       botId: "maus-interval",
       schedule: { type: "interval", everyMinutes: 5, anchorAt },
       durationMinutes: 30,
+      overlap: "skip",
     });
 
     h.setNow(anchorAt);
@@ -3704,5 +3707,120 @@ describe("routine paths that cannot exist where the routine runs", () => {
     await h.manager.tick();
     expect(h.started[0]!.prompt).toContain("[OpenMausBot: this run is on a Linux computer, where C:\\Users\\Ada\\Reports\\weekly.xlsx cannot exist.");
     expect(JSON.parse(readFileSync(h.options.file!, "utf8")).routines[0]).not.toHaveProperty("warning");
+  });
+});
+
+describe("an occurrence due while the routine's previous run is still active", () => {
+  // The Esteira shape: every 15 minutes, one bot, a run that outlives several ticks.
+  const start = Date.parse("2026-10-18T19:00:00Z");
+  const quarter = 15 * 60_000;
+  const esteira = (overlap?: "skip" | "queue") => ({
+    name: "Esteira", prompt: "Pull the queue", botId: "chief-1",
+    schedule: { type: "cron" as const, expression: "*/15 * * * *", timeZone: "America/Sao_Paulo" },
+    ...(overlap ? { overlap } : {}),
+  });
+  const done = (h: ReturnType<typeof harness>, threadId: string) => h.manager.handleRuntimeEvent({
+    eventId: `done-${threadId}`, provider: "fake", threadId, createdAt: new Date().toISOString(), type: "turn.completed", ok: true,
+  });
+  const logs = () => {
+    const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    return { lines: () => spy.mock.calls.map(call => String(call[0])), restore: () => spy.mockRestore() };
+  };
+
+  it.each([undefined, "queue"] as const)("coalesces missed ticks into one pending run that starts when the run frees (%s overlap)", async (overlap) => {
+    const log = logs();
+    try {
+      const h = harness(start);
+      const routine = h.manager.create(esteira(overlap));
+      const first = routine.nextRunAt!;
+      expect(first).toBe(start + quarter);
+      h.setNow(first); await h.manager.tick();
+      expect(h.started).toHaveLength(1);
+      // Three ticks pass while the first run is still working: one pending run, never three.
+      for (const tick of [2, 3, 4]) {
+        h.setNow(start + tick * quarter); await h.manager.tick(); await h.manager.tick();
+      }
+      expect(h.started).toHaveLength(1);
+      const pending = h.manager.listRuns().filter(run => run.status === "queued");
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toMatchObject({ scheduledFor: start + 2 * quarter, triggerSource: "schedule", coalescedRuns: 2 });
+      expect(h.manager.listRuns().filter(run => run.status === "missed")).toEqual([]);
+      expect(log.lines()).toEqual(expect.arrayContaining([
+        expect.stringContaining("deferred: busy (its previous run is still active)"),
+        expect.stringContaining("deferred: busy, coalesced 1"),
+        expect.stringContaining("deferred: busy, coalesced 2"),
+      ]));
+      // Survives a restart as the same single pending run.
+      expect(new RoutineManager(h.options).listRuns().filter(run => run.status === "queued")).toEqual([
+        expect.objectContaining({ id: pending[0]!.id, coalescedRuns: 2 }),
+      ]);
+
+      // The first run finishes between ticks: the pending one starts right away, not at the next tick.
+      h.setNow(start + 4 * quarter + 7 * 60_000);
+      done(h, "thread-1");
+      await expect.poll(() => h.started.length).toBe(2);
+      expect(h.manager.listRuns().find(run => run.id === pending[0]!.id)).toMatchObject({ status: "running", threadId: "thread-2" });
+      expect(log.lines()).toEqual(expect.arrayContaining([expect.stringMatching(/pending run .* starts now, \d+ min after it was due, coalesced 2/)]));
+
+      // Back to normal: the next tick while that run works queues one again, and nothing else.
+      h.setNow(start + 5 * quarter); await h.manager.tick();
+      expect(h.manager.listRuns().filter(run => run.status === "queued")).toHaveLength(1);
+      expect(h.started).toHaveLength(2);
+    } finally { log.restore(); }
+  });
+
+  it("keeps one pending run while the bot is busy with other work, then fires it as soon as the bot frees", async () => {
+    const log = logs();
+    try {
+      const h = harness(start); h.setBot("busy");
+      const routine = h.manager.create(esteira());
+      h.setNow(routine.nextRunAt!); await h.manager.tick();
+      h.setNow(start + 2 * quarter); await h.manager.tick();
+      h.setNow(start + 3 * quarter); await h.manager.tick();
+      expect(h.manager.listRuns()).toHaveLength(1);
+      expect(h.manager.listRuns()[0]).toMatchObject({ status: "queued", deferredAt: start + quarter, coalescedRuns: 2 });
+      expect(log.lines()).toEqual(expect.arrayContaining([
+        expect.stringContaining("deferred: target busy"),
+        expect.stringContaining("deferred: busy, coalesced 2"),
+      ]));
+      h.setBot("ready"); h.setNow(start + 3 * quarter + 60_000); await h.manager.tick();
+      expect(h.started).toHaveLength(1);
+      expect(h.manager.listRuns()[0]).toMatchObject({ status: "running" });
+    } finally { log.restore(); }
+  });
+
+  it("still drops the occurrence, with a log line, when the routine explicitly chose skip", async () => {
+    const log = logs();
+    try {
+      const h = harness(start);
+      const routine = h.manager.create(esteira("skip"));
+      expect(routine.overlap).toBe("skip");
+      h.setNow(routine.nextRunAt!); await h.manager.tick();
+      h.setNow(start + 2 * quarter); await h.manager.tick();
+      h.setNow(start + 3 * quarter); await h.manager.tick();
+      expect(h.manager.listRuns()).toHaveLength(1);
+      expect(h.manager.listRoutines()[0]).toMatchObject({ skippedRuns: 2, overlap: "skip" });
+      expect(new RoutineManager(h.options).listRoutines()[0].overlap).toBe("skip");
+      expect(log.lines().filter(line => line.includes("(overlap: skip)"))).toHaveLength(2);
+      done(h, "thread-1"); await h.manager.tick();
+      expect(h.started).toHaveLength(1);
+    } finally { log.restore(); }
+  });
+
+  it("lets a pending run give way to the next occurrence when the run ahead of it waits on the person", async () => {
+    const h = harness(start);
+    const routine = h.manager.create(esteira());
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.setNow(routine.nextRunAt! + 60_000);
+    h.manager.handleRuntimeEvent({
+      eventId: "ask", provider: "fake", threadId: "thread-1", createdAt: new Date().toISOString(),
+      type: "request.opened", requestType: "question", tool: "ask", summary: "Which account?",
+    });
+    for (const tick of [2, 3, 4]) { h.setNow(start + tick * quarter); await h.manager.tick(); }
+    // Waiting since 19:16Z: the 20:00Z occurrence is past the notice window, so the wait gives way and the pending run starts.
+    expect(h.manager.listRuns().find(run => run.threadId === "thread-1")).toMatchObject({ status: "cancelled" });
+    expect(h.started).toHaveLength(2);
+    expect(h.manager.listRuns().filter(run => run.status === "queued")).toHaveLength(0);
+    expect(h.manager.listRuns().filter(run => run.status === "running")).toHaveLength(1);
   });
 });

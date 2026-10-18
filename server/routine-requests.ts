@@ -581,7 +581,7 @@ function normalizeDefinition(input: RoutineToolDefinitionInput, now: number): Ro
     durationMinutes: duration(input.durationMinutes),
     ...(timeoutMinutes == null ? {} : { timeoutMinutes }),
     ...(input.continuity === true ? { continuity: true } : {}),
-    ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
+    ...(input.overlap === "skip" || input.overlap === "queue" ? { overlap: input.overlap } : {}),
     ...(input.runOnStartup === true ? { runOnStartup: true } : {}),
   };
 }
@@ -898,7 +898,7 @@ function cardCopy(
       `Runs on: ${destination}`,
       `Run limit: ${definition.timeoutMinutes === undefined ? "No limit" : `${definition.timeoutMinutes} minutes`}`,
       `Continuity: ${definition.continuity ? "Carries the previous run's report into the next run" : "Each run starts fresh"}`,
-      `While busy: ${definition.overlap === "queue" ? "Queue one scheduled run; skip further occurrences until it starts" : "Skip overlapping scheduled occurrences"}`,
+      `While busy: ${definition.overlap === "skip" ? "Skip overlapping scheduled occurrences" : "Keep one scheduled run pending and start it once free; later occurrences fold into it"}`,
       ...(definition.runOnStartup || (operation.action === "update" && operation.changes.runOnStartup !== undefined)
         ? [`On startup: ${definition.runOnStartup ? "Also runs once each time OpenMausBot starts" : "Runs only on its schedule"}`]
         : []),
@@ -925,7 +925,7 @@ function inputFromDefinition(definition: RoutineRequestDefinition, botId: string
     durationMinutes: definition.durationMinutes,
     ...(definition.timeoutMinutes === undefined ? {} : { timeoutMinutes: definition.timeoutMinutes }),
     ...(definition.continuity ? { continuity: true } : {}),
-    ...(definition.overlap === "queue" ? { overlap: "queue" as const } : {}),
+    ...(definition.overlap ? { overlap: definition.overlap } : {}),
     ...(definition.runOnStartup ? { runOnStartup: true } : {}),
   };
 }
@@ -1017,7 +1017,7 @@ function revalidateOperation(operation: RoutineRequestOperation, manager: Routin
         || routine.durationMinutes !== definition.durationMinutes
         || routine.timeoutMinutes !== definition.timeoutMinutes
         || Boolean(routine.continuity) !== Boolean(definition.continuity)
-        || (routine.overlap ?? "skip") !== (definition.overlap ?? "skip")
+        || (routine.overlap === "skip") !== (definition.overlap === "skip")
         || Boolean(routine.runOnStartup) !== Boolean(definition.runOnStartup)
         || (routine.attachments?.length ?? 0) > 0) return false;
       const candidate = schedule.type === "interval" && routine.schedule.type === "interval"

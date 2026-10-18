@@ -89,6 +89,8 @@ export interface Routine {
   timeoutMinutes?: number;
   attachments?: RoutineContextAttachment[];
   continuity?: boolean;
+  /** An occurrence due while this routine's previous run is still active: by default (absent, or "queue")
+   * it is coalesced into ONE pending run that starts as soon as the target is free; "skip" drops it. */
   overlap?: "skip" | "queue";
   runOnStartup?: boolean;
   skippedRuns?: number;
@@ -141,6 +143,8 @@ export interface RoutineRun {
   manual: boolean;
   deferredAt?: number;
   deferredNoticeAt?: number;
+  /** Later scheduled occurrences folded into this pending run while it waited; the run stands for all of them. */
+  coalescedRuns?: number;
   /** Set once a transient failure re-queued the run; it starts again no earlier than this. */
   retryAt?: number;
   /** When its current wait began; read only while the run is waiting. */
@@ -686,7 +690,8 @@ function sanitizeInput(input: RoutineInput, after: number): Omit<Routine, "id" |
     ...(timeoutMinutes === undefined ? {} : { timeoutMinutes }),
     attachments,
     ...(continuity ? { continuity: true } : {}),
-    ...(input.overlap === "queue" ? { overlap: "queue" as const } : {}),
+    // Kept as chosen (absent and "queue" behave alike) so installed-package part hashes stay as written.
+    ...(input.overlap === "skip" || input.overlap === "queue" ? { overlap: input.overlap } : {}),
     ...(input.runOnStartup === true && schedule.type !== "once" ? { runOnStartup: true } : {}),
   };
 }
@@ -739,7 +744,8 @@ export class RoutineManager {
               attachments: loadAttachments(routine.attachments),
               sourceThreadId: persistedSourceThreadId.parse(routine.sourceThreadId),
               resultsThreadId: persistedSourceThreadId.parse(routine.resultsThreadId),
-              overlap: routine.overlap === "queue" ? "queue" : undefined,
+              // Absent and "queue" both coalesce; only an explicit "skip" drops overlapping occurrences.
+              overlap: routine.overlap === "skip" || routine.overlap === "queue" ? routine.overlap : undefined,
               runOnStartup: routine.runOnStartup === true ? true : undefined,
               skippedRuns: Number.isSafeInteger(routine.skippedRuns) && routine.skippedRuns! > 0 ? routine.skippedRuns : undefined,
               lastSkippedAt: Number.isSafeInteger(routine.lastSkippedAt) && routine.lastSkippedAt! >= 0 && routine.lastSkippedAt! <= MAX_DATE_MS ? routine.lastSkippedAt : undefined,
@@ -1056,7 +1062,7 @@ export class RoutineManager {
         updatedAt: Math.max(now, routine.updatedAt + 1),
       });
       if (!clean.continuity) delete routine.continuity;
-      if (clean.overlap !== "queue") delete routine.overlap;
+      if (clean.overlap === undefined) delete routine.overlap;
       if (!clean.runOnStartup) delete routine.runOnStartup;
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;
@@ -1422,15 +1428,32 @@ export class RoutineManager {
             );
             const scheduledQueued = this.runs.some(run => run.routineId === routine.id && run.status === "queued" &&
               (run.triggerSource ?? (run.manual ? "manual" : "schedule")) === "schedule");
-            if (!overlapping || (routine.overlap === "queue" && !scheduledQueued)) {
+            // Overlap coalesces by default: one pending scheduled run per routine, started once the
+            // target is free. Only an explicit "skip" drops the occurrence.
+            const coalesces = routine.overlap !== "skip";
+            if (!overlapping || (coalesces && !scheduledQueued)) {
               const run = this.newRun(routine, scheduledFor, false, allocations);
               if (late > CATCH_UP_MS) {
                 run.status = "missed";
                 run.finishedAt = now;
                 run.error = "This computer was offline for more than 12 hours after the scheduled time";
               }
+              if (overlapping && run.status === "queued") {
+                console.log(`routines: "${routine.name}" (${routine.id.slice(0, 8)}) deferred: busy (its previous run is still active), run ${run.id.slice(0, 8)} pending for ${new Date(scheduledFor).toISOString()}`);
+              }
               scheduledRuns.push(run);
+            } else if (coalesces) {
+              // Already one pending scheduled run: fold this occurrence into it, never a second one.
+              const pending = this.runs.find(run => run.routineId === routine.id && run.status === "queued" &&
+                (run.triggerSource ?? (run.manual ? "manual" : "schedule")) === "schedule");
+              if (pending) {
+                pending.coalescedRuns = Math.min(Number.MAX_SAFE_INTEGER, (pending.coalescedRuns ?? 0) + 1);
+                console.log(`routines: "${routine.name}" (${routine.id.slice(0, 8)}) deferred: busy, coalesced ${pending.coalescedRuns} into pending run ${pending.id.slice(0, 8)} (occurrence ${new Date(scheduledFor).toISOString()})`);
+              }
+              routine.skippedRuns = Math.min(Number.MAX_SAFE_INTEGER, (routine.skippedRuns ?? 0) + 1);
+              routine.lastSkippedAt = scheduledFor;
             } else {
+              console.log(`routines: "${routine.name}" (${routine.id.slice(0, 8)}) skipped occurrence ${new Date(scheduledFor).toISOString()}: its previous run is still active (overlap: skip)`);
               const waiting = this.runs.find((run) => run.routineId === routine.id && run.status === "waiting" && run.waitingSince !== undefined);
               // Once per wait, an occurrence skipped behind it leaves a missed receipt, so the owner is told.
               if (waiting && skipNeedsNotice(scheduledFor, waiting.waitingSince!, routine.lastSkippedAt)) {
@@ -1486,6 +1509,7 @@ export class RoutineManager {
         if (state === "busy") {
           if (run.deferredAt == null) {
             run.deferredAt = now;
+            if (!sameRoutineWorking) console.log(`routines: "${run.routineName}" (${run.routineId.slice(0, 8)}) deferred: target busy, run ${run.id.slice(0, 8)} waits and starts when it is free`);
             this.save();
             this.emitRun(run);
           }
@@ -1500,6 +1524,9 @@ export class RoutineManager {
         if (state === "missing") {
           this.failRun(run, this.missingTargetMessage(run.target));
           continue;
+        }
+        if (run.deferredAt != null || run.coalescedRuns) {
+          console.log(`routines: "${run.routineName}" (${run.routineId.slice(0, 8)}) pending run ${run.id.slice(0, 8)} starts now, ${Math.max(0, Math.round((now - run.scheduledFor) / 60_000))} min after it was due${run.coalescedRuns ? `, coalesced ${run.coalescedRuns}` : ""}`);
         }
         const startedAt = this.now();
         const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;

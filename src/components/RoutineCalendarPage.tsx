@@ -378,7 +378,7 @@ export function EventEditor({
     existingRoutine?.timeoutMinutes ?? null,
   );
   const [intervalTimeoutDefaultApplied, setIntervalTimeoutDefaultApplied] = useState(Boolean(existingRoutine));
-  const [overlap, setOverlap] = useState<"skip" | "queue">(existingRoutine?.overlap ?? "skip");
+  const [overlap, setOverlap] = useState<"skip" | "queue">(existingRoutine?.overlap ?? "queue");
   const [continuity, setContinuity] = useState(Boolean(existingRoutine?.continuity));
   const [runOnStartup, setRunOnStartup] = useState(Boolean(existingRoutine?.runOnStartup));
   const [recurrence, setRecurrence] = useState<RecurrenceChoice>(recurrenceFor(schedule, initialAt));
@@ -550,7 +550,8 @@ export function EventEditor({
           schedule: nextSchedule,
           durationMinutes,
           timeoutMinutes,
-          overlap,
+          // The default (absent) already queues one run: leave it absent unless the person chose otherwise.
+          overlap: existingRoutine && existingRoutine.overlap === undefined && overlap === "queue" ? undefined : overlap,
           continuity: routineTarget === "bot" && recurrence !== "none" && continuity,
           runOnStartup: recurrence !== "none" && runOnStartup,
           attachments: routineTarget === "room-goal" ? [] : attachments as RoutineContextAttachment[],
@@ -609,7 +610,7 @@ export function EventEditor({
     || runOn === "cloud"
     || timeoutMinutes != null
     || runOnStartup
-    || overlap === "queue");
+    || overlap === "skip");
 
   useModalDialog(dialogRef, onClose);
 
