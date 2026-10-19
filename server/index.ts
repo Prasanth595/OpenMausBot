@@ -807,6 +807,7 @@ import { createUsageRoutes } from "./routes/usage.ts";
 import { createBotMessageRoutes } from "./routes/bot-messages.ts";
 import { createThreadRoutes } from "./routes/threads.ts";
 import { createOwnerPendingRoutes } from "./routes/owner-pending.ts";
+import { auditTo, createDecisor, createPolicyReader, DECISOR_BOOT_DELAY_MS, DECISOR_LOG_FILE, DECISOR_POLICY_FILE, DECISOR_TICK_MS, invokeRoute } from "./owner-decisor.ts";
 import { createNowRoutes } from "./routes/now.ts";
 import { createReportRoutes } from "./routes/reports.ts";
 import { createOwnWorktreeRoutes } from "./routes/own-worktrees.ts";
@@ -18908,7 +18909,7 @@ ROUTES.push(createLiveRoutes({
 // their paths is answered by another module, so the order changes nothing.
 // "Precisa de você": the resolved list, resolve, unsupersede, remind,
 // ask-steps, delegate and reply (owner-pending.ts).
-ROUTES.push(createOwnerPendingRoutes({
+const ownerPendingRoutes = createOwnerPendingRoutes({
   store, autonomy, cfg, answerDedupe, ownerDeclines, appFolderFlaps,
   dataDir: DATA_DIR,
   nuriaStopFile: NURIA_STOP_FILE,
@@ -18920,7 +18921,38 @@ ROUTES.push(createOwnerPendingRoutes({
   delegationTime, delegateView, ccIsGitRepo, delegationOwner, appAvailability, startCcSession, delegationReturned, delegationChip,
   appFolderBlock, ownOnByName, readPowerNow, diskItemTurn, recheckDiskItem, foldersInUse, allProcessCwds, replaceQueuedChoice,
   drainQueuedSends, startOrQueueDirectMessage,
-}));
+});
+ROUTES.push(ownerPendingRoutes);
+
+// The Decisor (server/owner-decisor.ts): the owner's proxy for "Precisa de você", off unless
+// decisor-policy.json exists in the data dir. It answers through the same route the panel's
+// buttons use, in-process — never over HTTP, where the desktop-app guard keeps bots out.
+const decisorLog = (line: string) => console.log(`[decisor] ${line}`);
+const decisor = createDecisor({
+  readPolicy: createPolicyReader(join(DATA_DIR, DECISOR_POLICY_FILE)),
+  openItems: () => autonomy.allOwnerPending(),
+  resolvedItems: () => autonomy.resolvedOwnerPendingOf(),
+  threadExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)),
+  botName: (botId) => store.bot(botId)?.name ?? botId,
+  stopped: () => existsSync(NURIA_STOP_FILE),
+  reply: (botId, itemId, body) => invokeRoute(ownerPendingRoutes, `/api/bots/${botId}/owner-pending/${itemId}/reply`, body),
+  resolve: (item, note) => {
+    const done = autonomy.resolveOwnerPending({ botId: item.botId, id: item.id, by: "owner", note });
+    for (const each of done) {
+      if (store.taskByThread(each.botId, each.threadId)) store.appendMessage(each.threadId, { role: "bot", kind: "activity", tool: { name: chipText(`Resolvido pelo Decisor: ${each.title} — ${note}`, 240), ok: true } });
+    }
+    refreshBotRow(item.botId);
+  },
+  log: decisorLog,
+  audit: auditTo(join(DATA_DIR, DECISOR_LOG_FILE), decisorLog),
+  now: () => Date.now(),
+});
+const DECISOR_EVERY_MS = autonomyTestMs("OMB_DECISOR_TICK_MS") ?? DECISOR_TICK_MS;
+setTimeout(() => {
+  const run = () => void decisor.tick().catch((error) => console.error(`[decisor] pass failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`));
+  run();
+  setInterval(run, DECISOR_EVERY_MS).unref();
+}, autonomyTestMs("OMB_DECISOR_BOOT_DELAY_MS") ?? DECISOR_BOOT_DELAY_MS).unref();
 // "Agora" (now.ts), the productivity report and its goals (reports.ts), the
 // server's own worktrees (own-worktrees.ts) and "Esteira" (pipeline-board.ts).
 ROUTES.push(createNowRoutes({ nowStatus }));

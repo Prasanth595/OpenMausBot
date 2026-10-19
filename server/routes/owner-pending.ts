@@ -50,6 +50,7 @@ import {
   type FolderBlockSeen,
   type FolderFlapState,
 } from "../owner-chips.ts";
+import { DECISOR_LINE, DECISOR_NOTE_PREFIX, isDecisorRequest } from "../owner-decisor.ts";
 import { delegationBrief, delegationChoice, type DelegatedItemRef, type OwnerDelegationBack } from "../owner-delegate.ts";
 import { supersededLine } from "../owner-pending-guard.ts";
 import { pluggedInRefusal, POWER_PENDING_KEY, POWER_PLUGGED_LABEL, type PowerState } from "../power.ts";
@@ -292,7 +293,9 @@ export function createOwnerPendingRoutes(deps: OwnerPendingRouteDeps): RouteHand
       let text: string;
       let resolve: boolean;
       // what goes in the item's history (J18)
-      let answer: { kind: "option" | "text" | "ask"; label?: string; text: string };
+      let answer: { kind: "option" | "text" | "ask"; label?: string; text: string; decisor?: true };
+      // the Decisor answers through this same route, in-process: its answer is marked as its own (server/owner-decisor.ts)
+      const byDecisor = isDecisorRequest(req);
       if (body.ask === "steps") {
         text = ownerPendingStepsRequestText(item);
         resolve = false;
@@ -409,6 +412,11 @@ export function createOwnerPendingRoutes(deps: OwnerPendingRouteDeps): RouteHand
         if (check.outcome !== "keep") return json(res, 409, { error: diskChangedText(check), code: "disk_item_changed" });
         text = `${text}\n\n${check.line}`;
       }
+      // the Decisor's answer: the bot reads that it was not the owner who clicked, and the history keeps it
+      if (byDecisor && answer.kind !== "ask") {
+        answer = { ...answer, decisor: true };
+        text = `${DECISOR_LINE}\n${text}`;
+      }
       // a superseded item's words and asks reach its bot saying so: its commands must not run (INSP-R13fol #16)
       if (item.supersededBy) text = `${text}\n\n[Servidor: ${supersededLine(item.supersededBy)}]`;
       // a bot's mixed item whose removal went to the server's item: an answer about those folders authorizes nothing (R5-1)
@@ -483,7 +491,7 @@ export function createOwnerPendingRoutes(deps: OwnerPendingRouteDeps): RouteHand
         return ownerAnswerFailed(bot.id, item.id, answer, error);
       }
       autonomy.recordOwnerPendingAnswer(bot.id, item.id, "queueId" in receipt && receipt.queued ? { ...answer, delivered: false, queued: true, queueId: receipt.queueId } : { ...answer, delivered: true });
-      const done = resolve ? autonomy.resolveOwnerPending({ botId: bot.id, id: item.id, by: "owner" }) : [];
+      const done = resolve ? autonomy.resolveOwnerPending({ botId: bot.id, id: item.id, by: "owner", ...(byDecisor ? { note: `${DECISOR_NOTE_PREFIX} decidido pelo Decisor («${answer.label ?? "resposta"}»)` } : {}) }) : [];
       refreshBotRow(bot.id);
       // the text rides along: a queued answer is shown queued in the conversation
       return json(res, 202, { ...receipt, text, resolved: done.length, ...(diskNotice ? { notice: diskNotice } : {}) });

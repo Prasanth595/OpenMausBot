@@ -339,6 +339,8 @@ export interface OwnerPendingAnswer {
   queueId?: string;
   /** Why it did not reach the bot. */
   error?: string;
+  /** Given by the Decisor (server/owner-decisor.ts) on the owner's behalf, not clicked by the owner. */
+  decisor?: true;
 }
 
 /** What of the items a session may see: those whose conversation it may
