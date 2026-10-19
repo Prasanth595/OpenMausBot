@@ -5954,5 +5954,7 @@
   "history.empty": "No changes recorded yet.",
   "history.refreshError": "Couldn’t refresh history.",
   "history.undo": "Undo this change",
-  "history.restoreUnavailable": "The exact previous instructions are unavailable, so this change cannot be undone."
+  "history.restoreUnavailable": "The exact previous instructions are unavailable, so this change cannot be undone.",
+  "approvalMode.liveChange": "Changes apply before the next tool executes. Actions already running and open approval cards keep their current decision.",
+  "approvalMode.nextTurnChange": "You can change the selection now. This provider applies it on the next user turn; the running turn keeps its current level."
 }
