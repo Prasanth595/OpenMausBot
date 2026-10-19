@@ -652,6 +652,70 @@ describe("containerComputerStatus", () => {
     expect(status.viewer_url).toContain("#autoconnect=true&resize=scale&password=secret123");
   });
 
+  function flakyRunner(responses: Record<string, string | Error>, flaky: Record<string, Array<string | Error>>) {
+    const base = runner(responses);
+    const run: CommandRunner = async (command, args, timeout) => {
+      const key = [command, ...args].join(" ");
+      const queue = flaky[key];
+      if (queue && queue.length > 0) {
+        base.calls.push(key);
+        const next = queue.shift()!;
+        if (next instanceof Error) throw next;
+        return { stdout: next };
+      }
+      return base.run(command, args, timeout);
+    };
+    return { calls: base.calls, run };
+  }
+
+  const readyResponses = () => ({
+    "/usr/bin/which docker": "docker\n",
+    "/usr/bin/which podman": new Error("missing"),
+    "docker info --format {{.ServerVersion}}": "29\n",
+    [`docker image inspect ${IMAGE}`]: preparedImageInspect(),
+    [`docker inspect ${CONTAINER}`]: readyInspect(),
+    [versionProbe]: `cua-driver ${CUA_DRIVER_VERSION}\n`,
+    [statusProbe]: "running\n",
+    [healthProbe]: JSON.stringify({ schema_version: "1", overall: "ok", checks: [] }),
+    [readinessProbe]: "{}\n",
+    [readinessRead]: validPng.toString("base64"),
+    [`docker exec ${CONTAINER} tail -n 4 /var/log/supervisor/cua-driver.error.log`]: "",
+  });
+
+  it("retries an empty or timed-out driver version answer before reporting a problem", async () => {
+    const fake = flakyRunner(readyResponses(), {
+      [versionProbe]: [new Error("timed out"), "\n"],
+    });
+    const status = await containerComputerStatus(fake.run, "linux");
+    expect(status.ready).toBe(true);
+    expect(fake.calls.filter((call) => call === versionProbe)).toHaveLength(3);
+  });
+
+  it("reports 'expected cua-driver' only when the driver answers a different version", async () => {
+    const fake = runner({ ...readyResponses(), [versionProbe]: "cua-driver 0.19.0\n" });
+    const status = await containerComputerStatus(fake.run, "linux");
+    expect(status.desktop_error).toContain(`expected cua-driver ${CUA_DRIVER_VERSION}`);
+    expect(fake.calls.filter((call) => call === versionProbe)).toHaveLength(1);
+  });
+
+  it("does not claim a version mismatch when the driver never answers", async () => {
+    const fake = runner({ ...readyResponses(), [versionProbe]: new Error("timed out") });
+    const status = await containerComputerStatus(fake.run, "linux");
+    expect(status.desktop_error).not.toContain("expected cua-driver");
+    expect(status.desktop_error).toContain("did not answer");
+  });
+
+  it("does not fall back to the setup steps when an image inspect is briefly slow", async () => {
+    const fake = flakyRunner(readyResponses(), {
+      [`docker image inspect ${IMAGE}`]: [new Error("timed out")],
+      [`docker inspect ${CONTAINER}`]: [new Error("timed out")],
+    });
+    const status = await containerComputerStatus(fake.run, "linux");
+    expect(status.image).toBe(true);
+    expect(status.imageMatches).toBe(true);
+    expect(status.ready).toBe(true);
+  });
+
   it("can inspect the viewer without waiting for CUA health or screenshots", async () => {
     const fake = runner({
       "/usr/bin/which docker": "docker\n",

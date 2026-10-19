@@ -236,10 +236,54 @@ async function installed(
   platform: NodeJS.Platform,
 ): Promise<boolean> {
   try {
-    await runner(platform === "win32" ? "where.exe" : "/usr/bin/which", [cmd], 4000);
+    await runner(platform === "win32" ? "where.exe" : "/usr/bin/which", [cmd], 10_000);
     return true;
   } catch {
     return false;
+  }
+}
+
+/** Pause between transient retries; tests swap it for an instant one. */
+let probeSleep = (ms: number) =>
+  process.env.VITEST ? Promise.resolve() : new Promise<void>((resolve) => setTimeout(resolve, ms));
+export function setProbeSleepForTests(sleep: (ms: number) => Promise<void>): void {
+  probeSleep = sleep;
+}
+
+/** A busy host answers runtime calls slowly: retry a read a few times with backoff before believing it failed. */
+async function retryRead<T>(read: () => Promise<T>, attempts = 3, baseDelayMs = 1500): Promise<T> {
+  let last: unknown;
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    try {
+      return await read();
+    } catch (error) {
+      last = error;
+      if (error instanceof NotTransient) throw error;
+      if (attempt < attempts - 1) await probeSleep(baseDelayMs * 2 ** attempt);
+    }
+  }
+  throw last;
+}
+
+/** Thrown only when the driver answered with a different version, never for a slow or failed exec. */
+class NotTransient extends Error {}
+class DriverVersionMismatch extends NotTransient {}
+
+export const CUA_VERSION_PROBE_TIMEOUT_MS = 25_000;
+
+/** Reads the driver version, retrying empty output, timeouts and exec errors; reports "expected" only on a real mismatch. */
+async function probeDriverVersion(runner: CommandRunner, runtime: Runtime, containerName: string): Promise<void> {
+  const expected = `cua-driver ${CUA_DRIVER_VERSION}`;
+  try {
+    await retryRead(async () => {
+      const version = await runner(runtime, cuaExecArgs(["--version"], { container: containerName }), CUA_VERSION_PROBE_TIMEOUT_MS);
+      const answer = version.stdout.trim();
+      if (!answer) throw new Error("empty version answer");
+      if (answer !== expected) throw new DriverVersionMismatch(`expected ${expected}, found ${answer.slice(0, 80)}`);
+    });
+  } catch (error) {
+    if (error instanceof DriverVersionMismatch) throw error;
+    throw new Error("Cua Driver did not answer the version check yet (the host may be busy)");
   }
 }
 
@@ -536,7 +580,8 @@ export async function containerComputerStatus(
   }
 
   try {
-    const { stdout } = await runner(status.runtime, ["image", "inspect", IMAGE]);
+    const runtime = status.runtime;
+    const { stdout } = await retryRead(() => runner(runtime, ["image", "inspect", IMAGE], 20_000));
     const image = inspectedImage(stdout, status.runtime);
     status.image = imageLabelsMatch(image.labels);
     status.image_id = image.id;
@@ -544,7 +589,18 @@ export async function containerComputerStatus(
   }
 
   try {
-    const { stdout } = await runner(status.runtime, ["inspect", target.containerName]);
+    const runtime = status.runtime;
+    const { stdout } = await retryRead(async () => {
+      try {
+        return await runner(runtime, ["inspect", target.containerName], 20_000);
+      } catch (error) {
+        // a missing container answers at once with "no such": that is the answer, not a slow host
+        if (/no such|not found/i.test(String((error as { stderr?: unknown })?.stderr ?? (error as Error)?.message ?? ""))) {
+          throw new NotTransient("missing");
+        }
+        throw error;
+      }
+    });
     if (status.runtime === "container") {
       const inspected = JSON.parse(stdout) as Array<{
         configuration?: {
@@ -636,9 +692,7 @@ export async function containerComputerStatus(
     status.persistence === "durable";
   if (canProbe) {
     try {
-      const expected = `cua-driver ${CUA_DRIVER_VERSION}`;
-      const version = await runner(status.runtime, cuaExecArgs(["--version"], { container: target.containerName }), 8000);
-      if (version.stdout.trim() !== expected) throw new Error(`expected ${expected}`);
+      await probeDriverVersion(runner, status.runtime, target.containerName);
       await runner(status.runtime, cuaExecArgs(["status", "--socket", CUA_SOCKET], { container: target.containerName }), 8000);
       const health = await runner(
         status.runtime,
