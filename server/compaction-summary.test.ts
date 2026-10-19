@@ -152,3 +152,21 @@ it("allows carried checkpoint outcomes to cite receipts from the earlier folded 
   expect(again.requirements).toEqual(changed.requirements);
   expect(again.summary).toContain(correction.text);
 });
+
+
+it("sends protected wording once when reusing a rendered checkpoint", async () => {
+  const checkpoint = await draftSummary(history, options(async () => result()));
+  const prompt = summaryPrompt([], checkpoint);
+  expect(prompt.split(history[0]!.text)).toHaveLength(2);
+  expect(prompt).toContain("Assistant claimed deployment");
+  expect(prompt).toContain(checkpoint.requirements[0]!.id);
+});
+
+
+it("reports protected instruction capacity before calling the model, without truncating requirements", async () => {
+  const generate = vi.fn(async () => result());
+  const protectedCheckpoint = { summary: "Prior state", requirements: [{ id: "large", text: "x".repeat(30_000), sourceIds: ["u0"] }] };
+  await expect(draftSummary(history, { ...options(generate), window: 16_000, previous: protectedCheckpoint })).rejects.toThrow(/Protected user requirements.*larger context window/);
+  expect(generate).not.toHaveBeenCalled();
+  expect(protectedCheckpoint.requirements[0]!.text).toHaveLength(30_000);
+});
