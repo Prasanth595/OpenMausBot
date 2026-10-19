@@ -1,5 +1,5 @@
 import type { Notification } from "../../shared/notification";
-import { finishedNotificationsEnabled, notificationSoundsEnabled } from "./notification-preferences";
+import { finishedNotificationsEnabled, inputNotificationsEnabled, notificationSoundsEnabled } from "./notification-preferences";
 
 export type NotifyFrame = Notification;
 
@@ -32,6 +32,7 @@ export function showNotification(
 ) {
   if (typeof Notification === "undefined") return;
   if (frame.kind === "done" && !finishedNotificationsEnabled()) return;
+  if ((frame.kind === "approval" || frame.kind === "question" || frame.kind === "sign-in") && !inputNotificationsEnabled()) return;
   const spend = frame.kind === "spend";
   if (!spend && document.hasFocus() && visibleThreadId === frame.threadId) return;
 

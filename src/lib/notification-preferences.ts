@@ -3,10 +3,12 @@ import { useSyncExternalStore } from "react";
 export const NOTIFICATION_SOUNDS_KEY = "omb-notification-sounds";
 export const NOTIFICATION_FEED_KEY = "omb-notification-feed";
 export const FINISHED_NOTIFICATIONS_KEY = "omb-finished-notifications";
+export const INPUT_NOTIFICATIONS_KEY = "omb-input-notifications";
 
 let sessionChoice: boolean | undefined;
 let feedSessionChoice: boolean | undefined;
 let finishedSessionChoice: boolean | undefined;
+let inputSessionChoice: boolean | undefined;
 const listeners = new Set<() => void>();
 
 function storage(): Storage | undefined {
@@ -31,11 +33,12 @@ function notify() {
 }
 
 function onStorage(event: StorageEvent) {
-  if (event.key !== NOTIFICATION_SOUNDS_KEY && event.key !== NOTIFICATION_FEED_KEY && event.key !== FINISHED_NOTIFICATIONS_KEY && event.key !== null) return;
+  if (event.key !== NOTIFICATION_SOUNDS_KEY && event.key !== NOTIFICATION_FEED_KEY && event.key !== FINISHED_NOTIFICATIONS_KEY && event.key !== INPUT_NOTIFICATIONS_KEY && event.key !== null) return;
   if (event.storageArea && event.storageArea !== storage()) return;
   sessionChoice = undefined;
   feedSessionChoice = undefined;
   finishedSessionChoice = undefined;
+  inputSessionChoice = undefined;
   notify();
 }
 
@@ -93,7 +96,6 @@ export function useNotificationFeed(): boolean {
   return useSyncExternalStore(subscribe, notificationFeedEnabled, () => false);
 }
 
-/** Per device: "done" notices only; approvals, questions and warnings always show. */
 export function finishedNotificationsEnabled(): boolean {
   if (finishedSessionChoice !== undefined) return finishedSessionChoice;
   try {
@@ -117,4 +119,29 @@ export function setFinishedNotifications(enabled: boolean): void {
 
 export function useFinishedNotifications(): boolean {
   return useSyncExternalStore(subscribe, finishedNotificationsEnabled, () => true);
+}
+
+export function inputNotificationsEnabled(): boolean {
+  if (inputSessionChoice !== undefined) return inputSessionChoice;
+  try {
+    return storage()?.getItem(INPUT_NOTIFICATIONS_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setInputNotifications(enabled: boolean): void {
+  inputSessionChoice = enabled;
+  try {
+    const local = storage();
+    const value = enabled ? "1" : "0";
+    local?.setItem(INPUT_NOTIFICATIONS_KEY, value);
+    if (local?.getItem(INPUT_NOTIFICATIONS_KEY) === value) inputSessionChoice = undefined;
+  } catch {
+  }
+  notify();
+}
+
+export function useInputNotifications(): boolean {
+  return useSyncExternalStore(subscribe, inputNotificationsEnabled, () => true);
 }

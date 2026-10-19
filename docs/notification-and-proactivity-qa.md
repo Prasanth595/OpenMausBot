@@ -20,7 +20,16 @@ Every notification carries both the bot ID and the exact task thread ID. A
 click must select that bot **and switch to that task**, including a routine's
 detached task; opening whichever task happens to be active is a failure.
 
-Desktop notifications are suppressed while the window already has focus. The
+Desktop and browser clients have two independent switches in **Settings →
+Appearance**: **Notify when a bot needs my input** (approval, question and
+sign-in requests) and **Notify when a bot finishes a turn** (`done` events).
+Both are on by default; an existing finished-notifications choice is preserved.
+These choices are saved on this device, require browser/OS notification
+permission, and do not hide pending cards or change the notification feed.
+Failures, spend warnings, mentions and delegation updates keep their own
+existing delivery behavior. Native mobile clients keep their own settings.
+
+Desktop notifications are suppressed when their exact task is already focused. The
 iOS app can present live or replayed notifications while it is running and uses
 the same bot/task target when the notification is tapped. Waking a terminated
 iOS app still requires a future APNs relay; local network or VPN connectivity
@@ -56,6 +65,12 @@ other:
 6. Exercise Auto mode, a Routine, and a Webhook independently. Verify each has
    a visible initiating user/configured trigger and that no unconfigured
    heartbeat starts work.
+7. In Settings → Appearance, try all four combinations of input and finished
+   alerts. Background the window, trigger a question, answer it, and let the
+   turn finish. Only the enabled categories should show a system alert; the
+   pending question and completed result remain visible in chat either way.
+   Reload and repeat with another conversation focused. Denied browser
+   permission disables both switches and explains how to allow notifications.
 
 Live provider, OS-permission, backgrounding, and APNs behavior cannot be proven
 by unit tests alone and remains part of the signed desktop/iPhone release pass.

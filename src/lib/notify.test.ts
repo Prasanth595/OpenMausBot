@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const sounds = vi.hoisted(() => ({ enabled: true, finished: true }));
+const sounds = vi.hoisted(() => ({ enabled: true, finished: true, input: true }));
 vi.mock("./notification-preferences", () => ({
   notificationSoundsEnabled: () => sounds.enabled,
   finishedNotificationsEnabled: () => sounds.finished,
+  inputNotificationsEnabled: () => sounds.input,
 }));
 
 import {
@@ -43,6 +44,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   sounds.enabled = true;
   sounds.finished = true;
+  sounds.input = true;
 });
 
 describe("desktop notifications", () => {
@@ -83,6 +85,38 @@ describe("desktop notifications", () => {
     showNotification({ ...frame, kind: "sign-in" }, vi.fn());
     showNotification({ ...frame, kind: "spend" }, vi.fn());
     expect(notices).toHaveLength(3);
+  });
+
+  it.each([
+    [true, true], [true, false], [false, true], [false, false],
+  ])("independently filters input=%s and finished=%s", (input, finished) => {
+    const { notices } = installNotification("granted");
+    sounds.input = input;
+    sounds.finished = finished;
+    const kinds = ["approval", "question", "sign-in", "done"] as const;
+    for (const kind of kinds) showNotification({ ...frame, kind, title: kind }, vi.fn());
+    expect(notices.map((notice) => notice.title)).toEqual([
+      ...(input ? ["approval", "question", "sign-in"] : []),
+      ...(finished ? ["done"] : []),
+    ]);
+  });
+
+  it("keeps failures, warnings, mentions and delegation notices outside both category switches", () => {
+    const { notices } = installNotification("granted");
+    sounds.input = false;
+    sounds.finished = false;
+    const kinds = ["routine-failed", "routine-deferred", "turn-failed", "incident", "spend", "mention", "delegation-settled"] as const;
+    for (const kind of kinds) showNotification({ ...frame, kind, title: kind }, vi.fn());
+    expect(notices.map((notice) => notice.title)).toEqual(kinds);
+  });
+
+  it("opens a mid-turn question's exact pending task", () => {
+    const { notices } = installNotification("granted");
+    const onOpen = vi.fn();
+    showNotification({ ...frame, kind: "question", threadId: "waiting-task", title: "Maus has a question" }, onOpen);
+    expect(notices).toHaveLength(1);
+    notices[0]!.onclick?.();
+    expect(onOpen).toHaveBeenCalledWith({ botId: frame.botId, threadId: "waiting-task" });
   });
 
   it("shows a notification after permission is granted", () => {

@@ -190,3 +190,61 @@ describe("finished-work notifications preference", () => {
     expect(preference.finishedNotificationsEnabled()).toBe(true);
   });
 });
+
+describe("needs-input notifications preference", () => {
+  it("preserves existing finished choices and persists independent choices through reload", async () => {
+    let preference = await import("./notification-preferences");
+    preference.setFinishedNotifications(false);
+    expect(preference.useInputNotifications()).toBe(true);
+    expect(hook.serverSnapshot!()).toBe(true);
+    preference.setInputNotifications(false);
+    expect(local.getItem(preference.INPUT_NOTIFICATIONS_KEY)).toBe("0");
+    vi.resetModules();
+    preference = await import("./notification-preferences");
+    expect(preference.inputNotificationsEnabled()).toBe(false);
+    expect(preference.finishedNotificationsEnabled()).toBe(false);
+    preference.setInputNotifications(true);
+    expect(preference.finishedNotificationsEnabled()).toBe(false);
+    preference.setFinishedNotifications(true);
+    preference.setInputNotifications(false);
+    expect(preference.finishedNotificationsEnabled()).toBe(true);
+    expect(preference.notificationSoundsEnabled()).toBe(true);
+    expect(preference.notificationFeedEnabled()).toBe(false);
+  });
+
+  it("updates mounted consumers and follows cross-window changes and clear", async () => {
+    const preference = await import("./notification-preferences");
+    preference.useInputNotifications();
+    const listener = vi.fn();
+    const unsubscribe = hook.subscribe!(listener);
+    preference.setInputNotifications(false);
+    expect(listener).toHaveBeenCalledOnce();
+    expect(hook.snapshot!()).toBe(false);
+    local.setItem(preference.INPUT_NOTIFICATIONS_KEY, "1");
+    storageEvent(preference.INPUT_NOTIFICATIONS_KEY);
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(hook.snapshot!()).toBe(true);
+    local.clear();
+    storageEvent(null);
+    expect(listener).toHaveBeenCalledTimes(3);
+    expect(hook.snapshot!()).toBe(true);
+    unsubscribe();
+  });
+
+  it.each(["getter", "read", "write", "missing"])("keeps the choice usable when storage fails at %s", async (failure) => {
+    if (failure === "getter") {
+      Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new Error("blocked"); } });
+    } else if (failure === "missing") {
+      vi.stubGlobal("localStorage", undefined);
+    } else {
+      if (failure === "write") local.setItem.mockImplementation(() => { throw new Error("blocked"); });
+      if (failure === "read") local.getItem.mockImplementation(() => { throw new Error("blocked"); });
+    }
+    const preference = await import("./notification-preferences");
+    expect(preference.useInputNotifications()).toBe(true);
+    preference.setInputNotifications(false);
+    expect(preference.useInputNotifications()).toBe(false);
+    preference.setInputNotifications(true);
+    expect(preference.inputNotificationsEnabled()).toBe(true);
+  });
+});

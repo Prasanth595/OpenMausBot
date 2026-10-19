@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
 import { DeviceNotificationsRow } from "./NotificationSettingsRows";
 
-const fixture = vi.hoisted(() => ({ optedIn: true, setFinishedNotifications: vi.fn() }));
+const fixture = vi.hoisted(() => ({ optedIn: true, inputOptedIn: true, setFinishedNotifications: vi.fn(), setInputNotifications: vi.fn() }));
 vi.mock("@/lib/notification-preferences", () => ({
   useNotificationSounds: () => true,
   setNotificationSounds: vi.fn(),
@@ -13,6 +13,8 @@ vi.mock("@/lib/notification-preferences", () => ({
   setNotificationFeed: vi.fn(),
   useFinishedNotifications: () => fixture.optedIn,
   setFinishedNotifications: fixture.setFinishedNotifications,
+  useInputNotifications: () => fixture.inputOptedIn,
+  setInputNotifications: fixture.setInputNotifications,
 }));
 
 let root: Root | undefined;
@@ -24,6 +26,7 @@ const requestPermission = vi.fn(async (): Promise<NotificationPermission> => "gr
 beforeEach(() => {
   vi.clearAllMocks();
   fixture.optedIn = true;
+  fixture.inputOptedIn = true;
   permission = "granted";
   setLocale("en");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -41,7 +44,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-const toggle = () => container.querySelector<HTMLButtonElement>('[role="switch"]')!;
+const toggle = (kind: "input" | "finished" = "finished") => container.querySelector<HTMLButtonElement>(`[aria-label="Notify when a bot ${kind === "input" ? "needs my input" : "finishes a turn"}"]`)!;
 const mount = async () => { await act(async () => root!.render(createElement(StrictMode, null, createElement(DeviceNotificationsRow)))); };
 const resume = async (event: "visibilitychange" | "focus") => {
   await act(async () => (event === "focus" ? window : document).dispatchEvent(new Event(event)));
@@ -54,32 +57,54 @@ it.each(["visibilitychange", "focus"] as const)("follows a permission changed in
   await resume(event);
   expect(toggle().disabled).toBe(true);
   expect(toggle().getAttribute("aria-checked")).toBe("false");
+  expect(toggle("input").disabled).toBe(true);
   expect(container.textContent).toContain("Notifications are blocked for this site");
   permission = "granted";
   await resume(event);
   expect(toggle().disabled).toBe(false);
   expect(toggle().getAttribute("aria-checked")).toBe("true");
+  expect(toggle("input").disabled).toBe(false);
   expect(requestPermission).not.toHaveBeenCalled();
   expect(fixture.setFinishedNotifications).not.toHaveBeenCalled();
+  expect(fixture.setInputNotifications).not.toHaveBeenCalled();
 });
 
-it("asks the browser only from the switch, and turns finished notices on once allowed", async () => {
+it.each(["input", "finished"] as const)("asks the browser only from the %s switch, and enables only that category once allowed", async (kind) => {
   permission = "default";
   fixture.optedIn = false;
+  fixture.inputOptedIn = false;
+  const setter = kind === "input" ? fixture.setInputNotifications : fixture.setFinishedNotifications;
+  const otherSetter = kind === "input" ? fixture.setFinishedNotifications : fixture.setInputNotifications;
   await mount();
-  expect(toggle().getAttribute("aria-checked")).toBe("false");
+  expect(toggle(kind).getAttribute("aria-checked")).toBe("false");
   expect(requestPermission).not.toHaveBeenCalled();
-  await act(async () => toggle().click());
+  await act(async () => toggle(kind).click());
   expect(requestPermission).toHaveBeenCalledOnce();
-  expect(fixture.setFinishedNotifications).toHaveBeenCalledWith(true);
+  expect(setter).toHaveBeenCalledWith(true);
+  expect(otherSetter).not.toHaveBeenCalled();
 
   requestPermission.mockResolvedValueOnce("denied");
-  fixture.setFinishedNotifications.mockClear();
+  setter.mockClear();
   permission = "default";
   await resume("focus");
-  await act(async () => toggle().click());
+  await act(async () => toggle(kind).click());
+  expect(setter).not.toHaveBeenCalled();
+  expect(toggle(kind).disabled).toBe(true);
+  expect(otherSetter).not.toHaveBeenCalled();
+});
+
+it("lets input alerts be muted independently of finished alerts", async () => {
+  await mount();
+  await act(async () => toggle("input").click());
+  expect(fixture.setInputNotifications).toHaveBeenCalledWith(false);
   expect(fixture.setFinishedNotifications).not.toHaveBeenCalled();
-  expect(toggle().disabled).toBe(true);
+  expect(requestPermission).not.toHaveBeenCalled();
+});
+
+it("hides both categories when the browser has no notification API", async () => {
+  vi.stubGlobal("Notification", undefined);
+  await mount();
+  expect(container.querySelector('[role="switch"]')).toBeNull();
 });
 
 it("keeps a muted device muted when permission is granted elsewhere, and toggles without asking once allowed", async () => {

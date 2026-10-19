@@ -2,9 +2,11 @@ import { useEffect, useState } from "react";
 import { t } from "@/lib/i18n";
 import {
   setFinishedNotifications,
+  setInputNotifications,
   setNotificationFeed,
   setNotificationSounds,
   useFinishedNotifications,
+  useInputNotifications,
   useNotificationFeed,
   useNotificationSounds,
 } from "@/lib/notification-preferences";
@@ -26,7 +28,8 @@ const currentPermission = (): NotificationPermission => (typeof Notification !==
 /** A browser shows nothing until it is asked from a click; the person may also change the site permission elsewhere. */
 export function DeviceNotificationsRow() {
   const [permission, setPermission] = useState(currentPermission);
-  const enabled = useFinishedNotifications();
+  const finishedEnabled = useFinishedNotifications();
+  const inputEnabled = useInputNotifications();
   useEffect(() => {
     const refresh = () => {
       if (document.visibilityState === "visible") setPermission(currentPermission());
@@ -41,26 +44,39 @@ export function DeviceNotificationsRow() {
   if (typeof Notification === "undefined") return null;
 
   const blocked = permission === "denied";
-  const toggle = async () => {
-    if (permission === "granted") return setFinishedNotifications(!enabled);
+  const toggle = async (enabled: boolean, setEnabled: (enabled: boolean) => void) => {
+    if (permission === "granted") return setEnabled(!enabled);
     const next = await requestNotificationPermission();
     if (!next) return;
     setPermission(next);
-    if (next === "granted") setFinishedNotifications(true);
+    if (next === "granted") setEnabled(true);
   };
 
   return (
-    <SettingRow
-      title={t("settings.deviceNotifications.title")}
-      subtitle={t(blocked ? "settings.deviceNotifications.blocked" : "settings.deviceNotifications.subtitle")}
-    >
-      <Switch
-        checked={permission === "granted" && enabled}
-        disabled={blocked}
-        aria-label={t("settings.deviceNotifications.show")}
-        onClick={() => void toggle()}
-      />
-    </SettingRow>
+    <>
+      <SettingRow
+        title={t("settings.inputNotifications.title")}
+        subtitle={t(blocked ? "settings.deviceNotifications.blocked" : "settings.inputNotifications.subtitle")}
+      >
+        <Switch
+          checked={permission === "granted" && inputEnabled}
+          disabled={blocked}
+          aria-label={t("settings.inputNotifications.title")}
+          onClick={() => void toggle(inputEnabled, setInputNotifications)}
+        />
+      </SettingRow>
+      <SettingRow
+        title={t("settings.finishedNotifications.title")}
+        subtitle={t(blocked ? "settings.deviceNotifications.blocked" : "settings.finishedNotifications.subtitle")}
+      >
+        <Switch
+          checked={permission === "granted" && finishedEnabled}
+          disabled={blocked}
+          aria-label={t("settings.finishedNotifications.title")}
+          onClick={() => void toggle(finishedEnabled, setFinishedNotifications)}
+        />
+      </SettingRow>
+    </>
   );
 }
 
