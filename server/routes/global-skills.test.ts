@@ -25,7 +25,9 @@ it("creates, reads, disables and unshares a skill while protecting library copie
   const send = (method: string, body: unknown) => ({ method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
   const content = "---\nname: route-test\ndescription: Test skill\n---\nTest instructions.\n";
   try {
-    expect((await fetch(`${base}/api/global-skills`, send("POST", { text: content, enabled: true }))).status).toBe(201);
+    const created = await fetch(`${base}/api/global-skills`, send("POST", { text: content, enabled: true }));
+    expect(created.status).toBe(201);
+    expect(await created.json()).toMatchObject({ skills: [{ name: "route-test", global: true, enabled: true }] });
     expect(await (await fetch(`${base}/api/global-skills/route-test`)).json()).toEqual({ text: content });
     expect((await fetch(`${base}/api/global-skills/route-test`, send("PATCH", { enabled: false }))).status).toBe(200);
     const entry = library.listLibrarySkills().find((skill) => skill.name === "route-test")!;

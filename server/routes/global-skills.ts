@@ -34,7 +34,7 @@ export function createGlobalSkillsRoutes({ store }: { store: Store }): RouteHand
         if ("error" in result) return json(res, 422, { error: result.error });
         const shared = setLibrarySkillGlobal(parsed.name, true);
         if ("error" in shared) return json(res, 422, { error: shared.error });
-        installed.push(result);
+        installed.push(shared);
       }
       return json(res, 201, { skills: installed });
     }
