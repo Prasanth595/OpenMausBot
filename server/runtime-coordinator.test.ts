@@ -1272,3 +1272,18 @@ describe("host approval origin propagation", () => {
     } finally { w.coordinator.close(); }
   });
 });
+
+
+it("recomputes queued consultation authority with its consultation mode", () => {
+  const w = world(() => "hold");
+  const modes: unknown[] = [];
+  w.host.levelOf = (_target, _source, _origin, mode) => { modes.push(mode); return { level: "ask" }; };
+  try {
+    begun(w, chief, "mode-source");
+    w.coordinator.enqueue(chief, "mode-source", undefined, tester, "Inspect only", { mode: "consult" });
+    modes.length = 0;
+    w.coordinator.tick();
+    expect(modes).toContain("consult");
+    expect(modes).not.toContain(undefined);
+  } finally { w.coordinator.close(); }
+});

@@ -203,18 +203,28 @@ export function createChatCompletion<Config>(options: RuntimeOptions<Config>) {
         ? AbortSignal.any([signal, timeoutController.signal])
         : timeoutController.signal;
 
-      const response = await fetch(`${options.apiUrl}/chat/completions`, {
+      const requestBody = {
+        ...options.requestBody(model, messages, stream),
+        ...(tools.length ? { tools } : {}),
+        ...(checkpoint ? { ...(options.completionTokenLimit?.(model, checkpoint.maxTokens) ?? { max_tokens: checkpoint.maxTokens }), stream_options: { include_usage: true },
+          ...(checkpoint.effort ? { reasoning_effort: checkpoint.effort } : {}) } : {}),
+      };
+      const request = {
         method: "POST",
         ...(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === "image_url")) ? { redirect: "error" as const } : {}),
         headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          ...options.requestBody(model, messages, stream),
-          ...(tools.length ? { tools } : {}),
-          ...(checkpoint ? { ...(options.completionTokenLimit?.(model, checkpoint.maxTokens) ?? { max_tokens: checkpoint.maxTokens }), stream_options: { include_usage: true },
-            ...(checkpoint.effort ? { reasoning_effort: checkpoint.effort } : {}) } : {}),
-        }),
+        body: JSON.stringify(requestBody),
         signal: activeSignal,
-      });
+      };
+      let response = await fetch(`${options.apiUrl}/chat/completions`, request);
+      if (options.driverKind === "openai-compat" && checkpoint?.effort && [400, 422].includes(response.status)) {
+        const detail = await response.clone().text();
+        if (/reasoning_effort/i.test(detail) && /unsupported|not supported|unknown parameter|unrecognized/i.test(detail)) {
+          await response.body?.cancel();
+          delete requestBody.reasoning_effort;
+          response = await fetch(`${options.apiUrl}/chat/completions`, { ...request, body: JSON.stringify(requestBody) });
+        }
+      }
       if (!response.ok) {
         const body = await response.text().catch(() => "");
         if (rejectsKey(response.status, body)) noteKeyRejected(options.apiUrl, options.apiKey);

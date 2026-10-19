@@ -446,7 +446,7 @@ export class RuntimeCoordinator implements Coordinator {
       approvalLevel: a => {
         if (!a.parentId) return { level: a.level, source: a.levelSource };
         const parent = a.parentId ? this.store.get(a.parentId) : undefined;
-        const selected = host.levelOf(address(a), parent && address(parent), a.origin.kind).level;
+        const selected = host.levelOf(address(a), parent && address(parent), a.origin.kind, a.mode).level;
         return { level: runningApprovalMode(a.level, selected, false), source: a.levelSource };
       },
       run: (a, input, signal) => this.run(a, input, signal),
