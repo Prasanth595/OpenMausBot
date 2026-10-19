@@ -25,7 +25,7 @@ import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { LEARN_SOURCE_PREFIX } from "./skill-learn.ts";
-import { libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills, type LibrarySkillListing } from "./skill-library.ts";
+import { globalLibrarySkillNames, libraryDescriptionsAt, librarySkillFilePath, listLibrarySkills, type LibrarySkillListing } from "./skill-library.ts";
 import { readManagedLinks, writeManagedLinks } from "./skill-link-registry.ts";
 import {
   directoryEntryState, entryExistsWithoutFollowing, formatKb, isSkillReferencePath, learnedSkillDirectoryMatches, publishReviewedRevision,
@@ -1320,9 +1320,9 @@ export function expandSkillCommandTurnText(botId: string, text: string, assigned
 
 export function resolveBotSkills(botId: string, assignedLibrary: readonly string[] | undefined): SkillListing[] {
   const own = listSkills(botId);
-  if (!assignedLibrary?.length) return own;
   const ownNames = new Set(own.map((skill) => skill.name));
-  const assigned = new Set(assignedLibrary);
+  const assigned = new Set([...(assignedLibrary ?? []), ...globalLibrarySkillNames()]);
+  if (!assigned.size) return own;
   const fromLibrary = listLibrarySkills().filter((skill) => assigned.has(skill.name) && !ownNames.has(skill.name));
   return [...own, ...fromLibrary];
 }
@@ -1342,7 +1342,7 @@ export function listBotSkillsWithOrigin(
     ...skill,
     origin: ownNames.has(skill.name) ? ("private" as const) : ("library" as const),
   }));
-  const library = listLibrarySkills().filter((entry) => !ownNames.has(entry.name) && !assigned.has(entry.name));
+  const library = listLibrarySkills().filter((entry) => !entry.global && !ownNames.has(entry.name) && !assigned.has(entry.name));
   return { skills, library };
 }
 

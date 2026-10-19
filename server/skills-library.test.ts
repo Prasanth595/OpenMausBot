@@ -24,6 +24,17 @@ beforeEach(() => {
 });
 
 describe("skills library store", () => {
+  it("makes a global skill available to bots without an assignment and expands its command", () => {
+    const name = `global-${Math.random().toString(36).slice(2, 10)}`;
+    library.installLibrarySkill({ name, instructions: SKILL(name), source: "test", reviewState: "approved" });
+    library.setLibrarySkillGlobal(name, true);
+    expect(skills.resolveBotSkills(bot, undefined).map((skill) => skill.name)).toContain(name);
+    expect(skills.skillsSystemPrompt(bot)).toContain(name);
+    expect(skills.expandSkillCommandTurnText(bot, `/${name} hello`)).toContain("Request: hello");
+    library.setLibrarySkillGlobal(name, false);
+    expect(skills.resolveBotSkills(bot, undefined).map((skill) => skill.name)).not.toContain(name);
+    expect(skills.resolveBotSkills(bot, [name]).map((skill) => skill.name)).toContain(name);
+  });
   it("installs a skill: bytes on disk, entry in the index, listing, invalidation event", () => {
     const events: Array<{ kind: string; name: string }> = [];
     library.skillLibraryEvents.on("invalidate", (event) => events.push(event));

@@ -3,10 +3,21 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { loadBundledSkills, loadUserSkills, mergeSkills, parseSkillManifest, renderSkillInstructions, selectBundledSkills, type BundledSkill } from "./skill-library.ts";
+import { globalLibrarySkillNames, installLibrarySkill, listLibrarySkills, loadBundledSkills, loadUserSkills, mergeSkills, parseSkillManifest, renderSkillInstructions, selectBundledSkills, setLibrarySkillGlobal, type BundledSkill } from "./skill-library.ts";
 
 const instructionsFor = (text: string, capabilities: string[], skills: BundledSkill[], options?: { includeRoot?: boolean }) =>
   renderSkillInstructions(selectBundledSkills(text, capabilities, skills), options);
+
+it("shares and unshares a library skill without deleting it", () => {
+  const root = mkdtempSync(join(tmpdir(), "openmausbot-global-skill-"));
+  installLibrarySkill({ name: "shared-test", instructions: "---\nname: shared-test\ndescription: Test skill\n---\nTest instructions.\n", source: "test", root });
+  expect(globalLibrarySkillNames(root)).toEqual([]);
+  expect(setLibrarySkillGlobal("shared-test", true, root)).toMatchObject({ global: true, enabled: false });
+  expect(globalLibrarySkillNames(root)).toEqual(["shared-test"]);
+  expect(setLibrarySkillGlobal("shared-test", false, root)).toMatchObject({ global: false });
+  expect(globalLibrarySkillNames(root)).toEqual([]);
+  expect(listLibrarySkills(root)).toHaveLength(1);
+});
 
 const phone: BundledSkill = {
   directory: "/skills/phone-harness",

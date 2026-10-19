@@ -72,8 +72,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
   const mode = () => shareLearnedSkillsMode(cfg);
 
   /** The bot's own skills, and its library skills while the library is on; an imported skill of the same name yields. */
-  const ownSkills = (bot: BotRecord) =>
-    skillsLibraryEnabled(cfg) ? resolveBotSkills(bot.id, bot.assignedSkills) : listSkills(bot.id);
+  const ownSkills = (bot: BotRecord) => resolveBotSkills(bot.id, skillsLibraryEnabled(cfg) ? bot.assignedSkills : undefined);
   const listBotSkills = (bot: BotRecord): SkillListing[] => {
     const own = ownSkills(bot);
     return [...own, ...importedSkillListings(bot.id, new Set(own.map((skill) => skill.name)))];
@@ -84,7 +83,7 @@ export function createSkillsLibraryHost(deps: SkillsLibraryHostDeps) {
     // Private wins collisions: a private skill that no longer verifies must not fall through to a same-named shared one.
     if (listSkills(bot.id).some((skill) => skill.name === name)) return null;
     // The library fallback is by assignment only, never by name alone.
-    if (skillsLibraryEnabled(cfg) && bot.assignedSkills?.includes(name)) return readLibrarySkillFile(name);
+    if (resolveBotSkills(bot.id, skillsLibraryEnabled(cfg) ? bot.assignedSkills : undefined).some((skill) => skill.name === name)) return readLibrarySkillFile(name);
     return readImportedSkillFile(name);
   };
 

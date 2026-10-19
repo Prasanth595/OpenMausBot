@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
+import { GlobalSkillsSettings } from "./GlobalSkillsSettings";
 
 const MAX_BYTES = 24_000;
 const byteLength = (value: string) => new TextEncoder().encode(value).byteLength;
@@ -91,6 +92,7 @@ export function GlobalContextSettings() {
           {saving && <span className="text-ink-secondary">{t("settings.profile.saving")}</span>}
           {!saving && !changed && !loading && <span className="text-success">{t("settings.profile.saved")}</span>}
         </p>
+        <GlobalSkillsSettings />
       </div>
     </Card>
   );

@@ -143,6 +143,7 @@ export interface SkillLibraryEntry {
   sha256: string;
   importedAt: string;
   reviewState: LibraryReviewState;
+  global?: boolean;
   license?: string;
   compatibility?: string;
   tags?: string[];
@@ -166,6 +167,7 @@ export interface LibrarySkillListing {
   name: string;
   description: string;
   enabled: boolean;
+  global: boolean;
   editable: false;
   source: string;
   sha256: string;
@@ -184,6 +186,7 @@ const skillLibraryEntrySchema = z.object({
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   importedAt: z.string(),
   reviewState: z.enum(["approved", "disabled"]),
+  global: z.boolean().optional(),
   license: z.string().optional(),
   compatibility: z.string().optional(),
   tags: z.array(z.string().regex(/^[a-z0-9][a-z0-9-]{0,23}$/)).max(8).optional(),
@@ -271,6 +274,7 @@ function librarySkillListing(root: string, entry: SkillLibraryEntry): LibrarySki
     name: entry.name,
     description: entry.description,
     enabled: entry.reviewState === "approved" && intact,
+    global: entry.global === true,
     editable: false,
     source: entry.source,
     sha256: entry.sha256,
@@ -373,6 +377,31 @@ export function setLibrarySkillReviewState(
   writeSkillLibraryIndex(root, index);
   skillLibraryEvents.emit("invalidate", { kind: "review-state", name });
   return librarySkillListing(root, entry);
+}
+
+/** Changes whether a library skill is available to every bot. */
+export function setLibrarySkillGlobal(
+  name: string,
+  global: boolean,
+  root: string = skillsLibraryRoot(),
+): LibrarySkillListing | { error: string } {
+  if (!isSkillName(name)) return { error: "invalid skill name" };
+  const indexRead = readSkillLibraryIndexState(root);
+  if ("error" in indexRead) return indexRead;
+  const index = indexRead.index;
+  const entry = index[name];
+  if (!entry) return { error: `no library skill named "${name}"` };
+  if (global) entry.global = true;
+  else delete entry.global;
+  writeSkillLibraryIndex(root, index);
+  skillLibraryEvents.emit("invalidate", { kind: "global", name });
+  return librarySkillListing(root, entry);
+}
+
+export function globalLibrarySkillNames(root: string = skillsLibraryRoot()): string[] {
+  return Object.values(readSkillLibraryIndex(root))
+    .filter((entry) => entry.global)
+    .map((entry) => entry.name);
 }
 
 /** Applied only while the stored bytes still match `expectSha256`; otherwise `stale` and nothing changes. */
