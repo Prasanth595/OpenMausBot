@@ -562,6 +562,7 @@
   "settings.globalContext.securityNote": "Do not store passwords, API keys, or other secrets here. This content is included in every bot's model context.",
   "settings.globalContext.loadError": "Could not load global context. Try again.",
   "settings.globalContext.saveError": "Could not save global context. Try again.",
+  "settings.globalContext.tooLarge": "Each field is limited to 24,000 bytes. Shorten the text to save it.",
   "settings.globalContext.save": "Save changes",
   "settings.globalContext.saving": "Saving…",
   "settings.section.desktopWorkspaces": "Servers",

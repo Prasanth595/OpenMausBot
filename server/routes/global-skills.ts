@@ -1,5 +1,7 @@
 import { z } from "zod";
+import { createHash } from "node:crypto";
 
+import { SKILL_FILE_MAX_BYTES } from "../../shared/skill-md.ts";
 import { fetchSkillFromSource } from "../skill-fetch.ts";
 import { installLibrarySkill, listLibrarySkills, readLibrarySkillFile, setLibrarySkillGlobal, setLibrarySkillReviewState } from "../skill-library.ts";
 import { listSkills, parseSkillMd, scanSkillText } from "../skills.ts";
@@ -21,7 +23,8 @@ export function createGlobalSkillsRoutes({ store }: { store: Store }): RouteHand
         : await fetchSkillFromSource(body.data.source!);
       if ("error" in fetched) return json(res, 422, { error: fetched.error });
       const candidates = fetched.skills;
-      const installed = [];
+      const prepared = [];
+      const names = new Map(listLibrarySkills().map((skill) => [skill.name, skill.sha256]));
       for (const candidate of candidates) {
         const file = candidate.files.find((entry) => entry.path === "SKILL.md" || entry.path.endsWith("/SKILL.md"));
         if (!file) return json(res, 422, { error: "no SKILL.md found at that location" });
@@ -30,11 +33,24 @@ export function createGlobalSkillsRoutes({ store }: { store: Store }): RouteHand
         if ("error" in parsed) return json(res, 422, { error: parsed.error });
         const existing = conflict(parsed.name);
         if (existing) return json(res, 409, { error: `/${parsed.name} is already private to ${existing.name}; choose another name first` });
-        const result = installLibrarySkill({ name: parsed.name, instructions: file.content, source: candidate.source, warnings: scanSkillText(file.content), reviewState: body.data.text && body.data.enabled ? "approved" : "disabled" });
-        if ("error" in result) return json(res, 422, { error: result.error });
-        const shared = setLibrarySkillGlobal(parsed.name, true);
-        if ("error" in shared) return json(res, 422, { error: shared.error });
-        installed.push(shared);
+        if (Buffer.byteLength(file.content, "utf8") > SKILL_FILE_MAX_BYTES) return json(res, 422, { error: `SKILL.md is larger than ${SKILL_FILE_MAX_BYTES / 1024}KB` });
+        const hash = createHash("sha256").update(file.content).digest("hex");
+        if (names.has(parsed.name) && names.get(parsed.name) !== hash) return json(res, 422, { error: `a skill named "${parsed.name}" is already in the library — choose a different name` });
+        names.set(parsed.name, hash);
+        prepared.push({ candidate, file, parsed });
+      }
+      const installed = [];
+      const importError = (message: string) => installed.length ? `${message} Some skills were already imported; check the list.` : message;
+      for (const { candidate, file, parsed } of prepared) {
+        try {
+          const result = installLibrarySkill({ name: parsed.name, instructions: file.content, source: candidate.source, warnings: scanSkillText(file.content), reviewState: body.data.text && body.data.enabled ? "approved" : "disabled" });
+          if ("error" in result) return json(res, 422, { error: importError(result.error) });
+          const shared = setLibrarySkillGlobal(parsed.name, true);
+          if ("error" in shared) return json(res, 422, { error: importError(shared.error) });
+          installed.push(shared);
+        } catch {
+          return json(res, 500, { error: "Could not finish importing skills. Some skills may have been imported; check the list." });
+        }
       }
       return json(res, 201, { skills: installed });
     }

@@ -3,13 +3,19 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+
+vi.mock("../skill-fetch.ts", async (original) => {
+  const actual = await original<typeof import("../skill-fetch.ts")>();
+  return { ...actual, fetchSkillFromSource: vi.fn(actual.fetchSkillFromSource) };
+});
 
 process.env.OMB_DATA_DIR = mkdtempSync(join(tmpdir(), "omb-global-skills-routes-"));
 const { createGlobalSkillsRoutes } = await import("./global-skills.ts");
 const { dispatchRoutes } = await import("./table.ts");
 const { json, readBody } = await import("../harness/http.ts");
 const library = await import("../skill-library.ts");
+const { fetchSkillFromSource } = await import("../skill-fetch.ts");
 import type { Store } from "../store.ts";
 import type { RequestAuth } from "../request-auth.ts";
 
@@ -37,6 +43,19 @@ it("creates, reads, disables and unshares a skill while protecting library copie
     expect(library.readLibrarySkillFile("route-test")).toBe(content);
     expect((await fetch(`${base}/api/global-skills/route-test`, send("PATCH", { enabled: true }))).status).toBe(404);
     expect((await fetch(`${base}/api/global-skills`, send("POST", { source: "invalid" }))).status).toBe(422);
+    vi.mocked(fetchSkillFromSource).mockResolvedValueOnce({ skills: [
+      { source: "fixture", files: [{ path: "SKILL.md", content: "---\nname: valid-first\ndescription: Test\n---\nInstructions" }] },
+      { source: "fixture", files: [{ path: "SKILL.md", content: "invalid" }] },
+    ] });
+    expect((await fetch(`${base}/api/global-skills`, send("POST", { source: "fixture/repo" }))).status).toBe(422);
+    expect(library.listLibrarySkills().some((skill) => skill.name === "valid-first")).toBe(false);
+
+    vi.mocked(fetchSkillFromSource).mockResolvedValueOnce({ skills: [
+      { source: "fixture", files: [{ path: "SKILL.md", content: "---\nname: valid-first\ndescription: Test\n---\nInstructions" }] },
+      { source: "fixture", files: [{ path: "SKILL.md", content: content.replace("Test instructions.", "Different instructions.") }] },
+    ] });
+    expect((await fetch(`${base}/api/global-skills`, send("POST", { source: "fixture/repo" }))).status).toBe(422);
+    expect(library.listLibrarySkills().some((skill) => skill.name === "valid-first")).toBe(false);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

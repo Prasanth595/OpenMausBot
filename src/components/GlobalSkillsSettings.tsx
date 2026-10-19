@@ -29,7 +29,7 @@ export function GlobalSkillsSettings() {
     if (!source.trim()) return;
     setWorking("import"); setError("");
     try { await api("/api/global-skills", { method: "POST", body: JSON.stringify({ source: source.trim() }) }); setSource(""); await refresh(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not import the skill."); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not import the skill."); await refresh().catch(() => {}); }
     finally { setWorking(""); }
   };
   const addCommand = async () => {

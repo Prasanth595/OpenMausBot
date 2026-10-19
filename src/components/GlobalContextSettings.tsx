@@ -88,6 +88,7 @@ export function GlobalContextSettings() {
         </div>
         <p className="text-[12px] leading-relaxed text-ink-secondary">{t("settings.globalContext.securityNote")}</p>
         {error ? <p role="alert" className="text-[12px] text-danger">{error}</p> : null}
+        {tooLarge ? <p role="alert" className="text-[12px] text-danger">{t("settings.globalContext.tooLarge")}</p> : null}
         <p className="min-h-4 text-[12px]" role="status">
           {saving && <span className="text-ink-secondary">{t("settings.profile.saving")}</span>}
           {!saving && !changed && !loading && <span className="text-success">{t("settings.profile.saved")}</span>}
