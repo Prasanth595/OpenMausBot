@@ -593,6 +593,10 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           (freshBrowserBot.busy || browserRuntime.heldBy(currentBrowserSession(freshBrowserBot.id, freshBrowserBot.browserProfile)))) {
         return json(res, 409, { error: "Stop the bot and release browser control before changing its profile." });
       }
+      if (requestedApprovalMode === "auto" && currentApprovalMode !== "auto" &&
+          auth.kind === "loopback" && !DESKTOP_MANAGED && !req.headers.origin && store.bots.some(bot => bot.busy)) {
+        return json(res, 409, { error: "Change approval mode from the app or a paired device while bots are working." });
+      }
       if (profile.patch.soul !== undefined) {
         if (freshBrowserBot) assertTeamComputerChangeIdle(freshBrowserBot, { ...freshBrowserBot, ...patch } as BotRecord);
         const runtimePatch = { ...patch };
