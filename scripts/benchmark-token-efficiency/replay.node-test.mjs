@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
 import { randomUUID, createHash } from 'node:crypto';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,7 +25,7 @@ for (const changed of ['capture', 'helper']) test(`resume refuses a changed ${ch
     const model = randomUUID();
     const capture = JSON.stringify({ label: 'fixture', workload: 'short', requests: [] });
     await writeFile(input, capture);
-    await writeFile(output, JSON.stringify({ model, benchmarkUrl: origin, captureSha256: changed === 'capture' ? randomUUID() : createHash('sha256').update(capture).digest('hex'), helperSha256: randomUUID(), namespace: randomUUID(), rows: [] }));
+    await writeFile(output, JSON.stringify({ model, benchmarkUrl: origin, captureSha256: changed === 'capture' ? randomUUID() : createHash('sha256').update(capture).digest('hex'), helperSha256: changed === 'helper' ? randomUUID() : createHash('sha256').update(await readFile(new URL('./replay-splash.mjs', import.meta.url))).digest('hex'), namespace: randomUUID(), rows: [] }));
     let failed = false;
     try {
       await promisify(execFile)(process.execPath, [fileURLToPath(new URL('./replay-splash.mjs', import.meta.url)), input, output], {

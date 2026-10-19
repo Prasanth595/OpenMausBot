@@ -56,8 +56,11 @@ async function main() {
       res.end();
       if (req.url === "/v1/chat/completions") captured.push({ request: JSON.parse(body), response });
     } catch {
-      res.writeHead(502, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "Local model forwarding failed" }));
+      if (res.headersSent) res.destroy();
+      else {
+        res.writeHead(502, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Local model forwarding failed" }));
+      }
     }
   });
   await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));

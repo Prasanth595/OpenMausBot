@@ -279,12 +279,12 @@ describe("OpenAI-compatible wire history", () => {
     const completed: RuntimeEvent[] = [];
     instance.adapter.onEvent((event) => { if (event.type === "turn.completed") completed.push(event); });
     try {
-      await instance.adapter.sendTurn({ threadId: "image", text: "first", systemStable: "Stable.", systemVolatile: "", approvalMode: "full",
-        sourceMessage: { id: "u1", role: "user", text: "first" }, transcript: [], images: [{ path, mime: "image/png", bytes: readFileSync(path).byteLength }] });
+      await instance.adapter.sendTurn({ threadId: "image", text: "", systemStable: "Stable.", systemVolatile: "", approvalMode: "full",
+        sourceMessage: { id: "u1", role: "user", text: "" }, transcript: [], images: [{ path, mime: "image/png", bytes: readFileSync(path).byteLength }] });
       await vi.waitFor(() => expect(completed).toHaveLength(1));
       await instance.adapter.sendTurn({ threadId: "image", text: "second", systemStable: "Stable.", systemVolatile: "", approvalMode: "ask",
         sourceMessage: { id: "u2", role: "user", text: "second" }, transcript: [
-          { id: "u1", role: "user", text: "first" }, { id: "a1", role: "assistant", text: "answer 1" },
+          { id: "u1", role: "user", text: "" }, { id: "a1", role: "assistant", text: "answer 1" },
         ] });
       await vi.waitFor(() => expect(completed).toHaveLength(2));
       expect(bodies[0].messages[1].content.some((part: any) => part.type === "image_url")).toBe(true);

@@ -488,6 +488,8 @@ describe("describe_tool's last resort, whatever the names", () => {
 });
 
 it.each([
+  { type: "object", required: ["company_id"] },
+  { type: "object", required: ["company_id"], properties: {} },
   { type: "object", properties: { filter: { type: "object", properties: { id: { type: "string" } }, required: ["id"] } } },
   { type: "object", properties: { limit: { type: "integer", minimum: 1 } } },
   { type: "object", properties: { name: { type: "string", description: "Use the exact case." } } },

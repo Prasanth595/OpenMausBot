@@ -78,8 +78,11 @@ async function main() {
       res.end();
       if (req.url === "/v1/chat/completions") captured.push({ request, elapsedMs: Math.round(performance.now() - started), response });
     } catch (error) {
-      res.writeHead(502, { "content-type": "application/json" });
-      res.end(JSON.stringify({ error: "Local model forwarding failed" }));
+      if (res.headersSent) res.destroy();
+      else {
+        res.writeHead(502, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Local model forwarding failed" }));
+      }
       if (req.url === "/v1/chat/completions") captured.push({ request: null, elapsedMs: Math.round(performance.now() - started), response: String(error) });
     }
   });

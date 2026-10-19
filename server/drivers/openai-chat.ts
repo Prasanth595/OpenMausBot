@@ -694,7 +694,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
         if (abort.signal.aborted) { ok = false; stopReason = "interrupted"; }
         if (!finalMessage || cleanupFailed || abort.signal.aborted || steered) delivered.delete(historyKey);
         const selected = selectedTranscript(turn.transcript);
-        if (finalMessage && !cleanupFailed && !abort.signal.aborted && turn.sourceMessage?.id && turn.sourceMessage.text &&
+        if (finalMessage && !cleanupFailed && !abort.signal.aborted && turn.sourceMessage?.id &&
             (reused || selected.entries.every((entry) => Boolean(entry.id))) && !steered) {
           const transcript = [...(reused && previous ? [...previous.transcript, ...appended!] : selected.entries), turn.sourceMessage,
             ...assistantTexts.map((text) => ({ role: "assistant" as const, text }))];

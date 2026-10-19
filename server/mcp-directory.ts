@@ -318,6 +318,7 @@ function signatureOmitsDetails(schema: unknown): boolean {
   if (!isRecord(schema)) return true;
   if (Object.keys(schema).some(key => !["type", "properties", "required", "additionalProperties"].includes(key))) return true;
   if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) return true;
+  if (Array.isArray(schema.required) && schema.required.some(key => typeof key !== "string" || !isRecord(schema.properties) || !Object.hasOwn(schema.properties, key))) return true;
   return isRecord(schema.properties) && Object.values(schema.properties).some(field => !isRecord(field) ||
     Object.keys(field).some(key => key !== "type") || !["string", "number", "integer", "boolean", "null"].includes(String(field.type)));
 }
