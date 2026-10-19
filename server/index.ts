@@ -392,6 +392,7 @@ import {
   reportFor as desktopReportFor,
   takeFreshQueued,
   runDesktopWork as runDesktopWorkFlow,
+  retireRenameAsks,
   watchStalledSessions,
   type DesktopWorkDeps,
 } from "./desktop-work.ts";
@@ -11771,7 +11772,14 @@ async function climbStopLadderTick(): Promise<void> {
   }
 }
 
+let renameAsksRetired = false;
+
 async function runDesktopWork(): Promise<void> {
+  // once, at startup: the "Renomear no app" items of before are settled — no session is renamed by hand any more
+  if (!renameAsksRetired) {
+    renameAsksRetired = true;
+    retireRenameAsks(desktopWork, autonomy.allOwnerPending().map((item) => item.key ?? ""));
+  }
   await refreshReleaseHold();
   refreshSessionSignals();
   void climbStopLadderTick().catch((error) => console.error(`[cc-sessions] stop ladder failed: ${error instanceof Error ? error.message : String(error)}`));

@@ -222,9 +222,9 @@ export interface CcDesktopState {
   removeWorktree?: boolean;
   /** The issue number the session is about ("9311"), from its title or brief. */
   issue?: string;
-  /** A rename to "NNNN …" was already tried (it is tried once). */
+  /** The app's title was found without the issue number and the log said so (once); the session names itself from its brief, nobody renames it. */
   renameTried?: boolean;
-  /** The person was asked (owner_pending) to rename it by hand: resolved once the app's title opens with "NNNN", or on archive. */
+  /** Before sessions named themselves, the person was asked (owner_pending) to rename it by hand; settled at startup (retireRenameAsks). */
   renameAsked?: boolean;
   /** tool_use id of the open question already reported to the owner. */
   questionReported?: string;

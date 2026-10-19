@@ -10,7 +10,6 @@ import {
   DESKTOP_DRAFT_RECHECK_MS,
   DESKTOP_ARCHIVE_MAX_TRIES,
   DESKTOP_MAX_MISSES,
-  DESKTOP_RENAME_MAX_MISSES,
   DESKTOP_SEND_CONFIRM_MS,
   DESKTOP_SUMMARY_WAIT_MS,
   DESKTOP_SEND_MAX_DELIVERIES,
@@ -29,8 +28,10 @@ import {
   screenWaitOf,
   uniqueSessionTitle,
   pickDesktopPending,
-  renameAskTitle,
+  retireRenameAsks,
   runDesktopWork,
+  SESSION_TITLE_TOOL,
+  sessionTitleStep,
   watchStalledSessions,
   type DesktopWorkDeps,
 } from "./desktop-work.ts";
@@ -94,8 +95,10 @@ function harness() {
 
 describe("the brief", () => {
   it("opens with the issue number without \"#\" and the title, the marker on its own line (the owner's rule, R9-4)", () => {
-    expect(desktopBriefText("automação inatividade não dispara", "OMBX", "Issue: https://github.com/o/r/issues/9298\nFaça X")).toBe("9298 automação inatividade não dispara\n[OMBX]\n\nIssue: https://github.com/o/r/issues/9298\nFaça X");
-    expect(desktopBriefText("#9300 gate", "OMBY", "ver #9299", "\n\nfooter")).toBe("9300 gate\n[OMBY]\n\nver #9299\n\nfooter");
+    expect(desktopBriefText("automação inatividade não dispara", "OMBX", "Issue: https://github.com/o/r/issues/9298\nFaça X")).toBe(`9298 automação inatividade não dispara\n[OMBX]\n\n${sessionTitleStep("9298 automação inatividade não dispara", false)}\n\nIssue: https://github.com/o/r/issues/9298\nFaça X`);
+    expect(desktopBriefText("#9300 gate", "OMBY", "ver #9299", "\n\nfooter")).toBe(`9300 gate\n[OMBY]\n\n${sessionTitleStep("9300 gate", false)}\n\nver #9299\n\nfooter`);
+    // no issue, no title step: the app's own title is as good as any
+    expect(desktopBriefText("limpeza", "OMBZ", "sem número")).toBe("limpeza\n[OMBZ]\n\nsem número");
     expect(desktopBriefText("9052 tempo de reabertura", "OMBW", "x").split("\n")[0]).toBe("9052 tempo de reabertura");
     expect(desktopBriefText("limpeza", "OMBZ", "sem número").split("\n")[0]).toBe("limpeza");
     // the number the title opens with is the issue, not a "#" further in
@@ -520,7 +523,7 @@ describe("archiving", () => {
     expect(resolved).toEqual(["cc-archive:k"]);
   });
 
-  it("a rename that cannot be done asks no archive item, and an archive by someone else settles none (#9337)", () => {
+  it("a rename that cannot be done asks no item at all, and an archive by someone else settles none (#9337)", () => {
     const h = harness();
     const pendings: { key: string }[] = [];
     const resolved: string[] = [];
@@ -530,7 +533,7 @@ describe("archiving", () => {
     session.status = "idle";
     session.desktop!.pending = { kind: "rename", text: "#9337 Nova", since: h.now, attempts: 0 };
     giveUpPending(h.deps, session, "the session menu showed no Rename item");
-    expect(pendings.map((item) => item.key)).toEqual(["cc-rename:m"]);
+    expect(pendings).toEqual([]);
     h.records.get(LOCAL)!.isArchived = true;
     followDesktopSessions(h.deps);
     expect(resolved).not.toContain("cc-archive:m");
@@ -704,50 +707,55 @@ describe("round 3: screen failures, questions, old queues, names", () => {
     expect(h.reports.filter((report) => report.text.includes("no longer exists"))).toHaveLength(1);
   });
 
-  it("renames a session to \"NNNN …\" (no \"#\", the owner's rule) once, then delivers what was queued meanwhile", async () => {
+  it("never queues a rename for an app title without the number: the session names itself, and the log says it once", async () => {
     const h = harness();
+    const log: string[] = [];
+    h.deps.log = (line) => log.push(line);
+    const pendings: unknown[] = [];
+    h.deps.ownerPending = (_session, item) => pendings.push(item);
     const session = h.opened("a", { title: "Chat ticket agent/client labels bug" });
     session.status = "idle";
     session.desktop!.issue = "9311";
+    // its first turn is still on: the session may still name itself, nothing is said
     followDesktopSessions(h.deps);
-    expect(session.desktop!.pending).toMatchObject({ kind: "rename", text: "9311 Chat ticket agent/client labels bug" });
-    session.queued.push({ text: "siga com o PR", at: h.now });
-    h.transcripts.get("cli-a")!.ended = true;
-    await h.tick();
-    expect(h.steps.rename).toHaveBeenCalled();
-    // clicked, not yet confirmed: it counts once the app's record shows the title
-    expect(h.chips.some((chip) => chip.text.startsWith("renomeada"))).toBe(false);
-    h.records.get(LOCAL)!.title = "9311 Chat ticket agent/client labels bug";
+    expect(log.filter((line) => line.startsWith("title:"))).toEqual([]);
+    h.records.get(LOCAL)!.completedTurns = 1;
     followDesktopSessions(h.deps);
-    expect(h.chips.some((chip) => chip.text.startsWith("renomeada no app: 9311"))).toBe(true);
-    followDesktopSessions(h.deps);
-    expect(session.desktop!.pending).toMatchObject({ kind: "send", text: "siga com o PR" });
-    followDesktopSessions(h.deps);
-    expect(h.steps.rename).toHaveBeenCalledTimes(1);
-  });
-
-  it("never renames mid-turn, and reports a rename the app's record never showed", async () => {
-    const h = harness();
-    const session = h.opened("a", { title: "Chat ticket agent/client labels bug" });
-    session.desktop!.issue = "9311";
-    session.status = "idle";
-    followDesktopSessions(h.deps);
-    session.status = "running";
-    await h.tick();
-    expect(h.steps.rename).not.toHaveBeenCalled();
-    // idle by the ledger, but the transcript's turn is still going
-    session.status = "idle";
-    await h.tick();
-    expect(h.steps.rename).not.toHaveBeenCalled();
-    h.transcripts.get("cli-a")!.ended = true;
-    h.advance(61_000);
-    await h.tick();
-    expect(h.steps.rename).toHaveBeenCalledTimes(1);
-    h.advance(DESKTOP_ARCHIVE_CONFIRM_MS + 1);
     followDesktopSessions(h.deps);
     expect(session.desktop!.pending).toBeUndefined();
-    expect(h.reports.at(-1)!.text).toContain('still says "Chat ticket agent/client labels bug"');
-    expect(h.chips.some((chip) => chip.text.startsWith("renomeada"))).toBe(false);
+    expect(log.filter((line) => line.startsWith("title:"))).toEqual([`title: session a is "Chat ticket agent/client labels bug" in the app, without its issue 9311; not renamed — claude://code/continue?session=${LOCAL} finds it`]);
+    // what was queued is delivered, no rename before it, the screen never renames
+    session.queued.push({ text: "siga com o PR", at: h.now });
+    h.transcripts.get("cli-a")!.ended = true;
+    followDesktopSessions(h.deps);
+    expect(session.desktop!.pending).toMatchObject({ kind: "send", text: "siga com o PR" });
+    await h.tick();
+    expect(h.steps.rename).not.toHaveBeenCalled();
+    expect(pendings).toEqual([]);
+    // named by itself: nothing to say
+    const named = harness();
+    const quiet: string[] = [];
+    named.deps.log = (line) => quiet.push(line);
+    const own = named.opened("b", { title: "9311 Chat ticket agent/client labels bug", completedTurns: 2 });
+    own.desktop!.issue = "9311";
+    followDesktopSessions(named.deps);
+    expect(quiet.filter((line) => line.startsWith("title:"))).toEqual([]);
+  });
+
+  it("drops a rename queued before sessions named themselves, never on the screen", async () => {
+    const h = harness();
+    const log: string[] = [];
+    h.deps.log = (line) => log.push(line);
+    const session = h.opened("a", { title: "Chat ticket agent/client labels bug" });
+    session.status = "idle";
+    session.desktop!.issue = "9311";
+    session.desktop!.renameTried = true;
+    session.desktop!.pending = { kind: "rename", text: "9311 Chat ticket agent/client labels bug", since: h.now, attempts: 0 };
+    h.transcripts.get("cli-a")!.ended = true;
+    await h.tick();
+    expect(session.desktop!.pending).toBeUndefined();
+    expect(h.steps.rename).not.toHaveBeenCalled();
+    expect(log.some((line) => line.startsWith("rename dropped: session a"))).toBe(true);
   });
 
   it("never numbers the brief twice", () => {
@@ -842,75 +850,74 @@ describe("an issue left without a live session", () => {
   });
 });
 
-describe("a rename that cannot be done", () => {
-  it("asks the person after three misses instead of trying 29 times", async () => {
-    const h = harness();
-    const pendings: { title: string; link?: string; key: string }[] = [];
-    h.deps.ownerPending = (_session, item) => pendings.push(item);
-    const session = h.opened("r");
-    h.transcripts.set("cli-r", { text: "brief", writtenAt: h.now, ended: true });
-    session.status = "idle";
-    session.desktop!.pending = { kind: "rename", text: "#8891 Inbox 503 diagnóstico", since: h.now, attempts: 0 };
-    for (let i = 0; i < DESKTOP_RENAME_MAX_MISSES; i += 1) {
-      h.results.push({ ok: false, reason: "the session menu showed no Rename item", retry: true, miss: true, touched: true });
-      await h.tick();
-      h.advance(11 * 60_000);
-    }
-    expect(session.desktop!.pending).toBeUndefined();
-    expect(h.steps.rename).toHaveBeenCalledTimes(DESKTOP_RENAME_MAX_MISSES);
-    expect(pendings).toEqual([expect.objectContaining({ key: "cc-rename:r", title: expect.stringContaining('→ "#8891 Inbox 503 diagnóstico"'), link: expect.stringContaining("claude://code/continue?session=") })]);
-    // J17: born with why and steps
-    expect(practicalMissing(pendings[0] as { why?: string; steps?: unknown[] })).toBeNull();
-    expect(JSON.stringify(pendings[0])).toContain("Renomeie-a para: #8891 Inbox 503 diagnóstico");
+describe("the session names itself in the app (no one renames it by hand)", () => {
+  it("the brief has it call the app's set_session_title on itself, right after its folder check, with the \"NNNN …\" title", () => {
+    const at = Date.parse("2026-10-18T12:00:00Z");
+    const text = desktopBriefText("#9636 Reconciliar desdobramentos de resolução no BI", "OMBX", "Faça X", "", at);
+    const lines = text.split("\n");
+    expect(lines[0]).toBe("9636 Reconciliar desdobramentos de resolução no BI");
+    const step = lines.find((line) => line.startsWith("Passo 1"))!;
+    expect(step).toContain(`${SESSION_TITLE_TOOL} com session_id "self" e title "9636 Reconciliar desdobramentos de resolução no BI"`);
+    expect(SESSION_TITLE_TOOL).toBe("mcp__ccd_session_mgmt__set_session_title");
+    expect(step).toContain("logo depois do passo 0");
+    expect(text.indexOf("Passo 0")).toBeLessThan(text.indexOf("Passo 1"));
+    expect(text.indexOf("Passo 1")).toBeLessThan(text.indexOf("Faça X"));
+    // it never asks anyone to rename, and touches no other session
+    expect(text).toContain("sem pedir a ninguém que renomeie a sessão");
+    expect(text).toContain("não renomeie nem mexa em outras sessões");
   });
 
-  it("names the session by the app's title, short, and settles the item when the person renames it by hand or it is archived (INSP-D A6)", async () => {
+  it("quotes a title safely and keeps it within the app's 200 characters", () => {
+    const step = sessionTitleStep(`9999 "aspas" ${"x".repeat(300)}`, false);
+    const title = JSON.parse(/title (".*?[^\\]") \(se/.exec(step)![1]!) as string;
+    expect(title.startsWith('9999 "aspas" ')).toBe(true);
+    expect(title.length).toBeLessThanOrEqual(200);
+    expect(step.startsWith("Passo 1, antes da tarefa")).toBe(true);
+  });
+
+  it("a rename the screen could not do asks the person nothing: a log line, no chip, no report", async () => {
     const h = harness();
-    const pendings: { title: string; link?: string; key: string }[] = [];
-    const resolved: string[] = [];
+    const pendings: unknown[] = [];
+    const log: string[] = [];
     h.deps.ownerPending = (_session, item) => pendings.push(item);
-    h.deps.resolveOwnerPending = (key) => resolved.push(key);
-    // e25edbb6 on 01/10: our title and the app's differ
-    const session = h.opened("e", { title: "Inbox 503 diagnóstico e recuperação" });
-    session.title = "8891 inbox 503 diagnóstico encerrar e recuperação";
-    session.desktop!.issue = "8891";
-    session.desktop!.renameTried = true;
-    h.transcripts.set("cli-e", { text: "brief", writtenAt: h.now, ended: true });
+    h.deps.log = (line) => log.push(line);
+    const session = h.opened("r");
     session.status = "idle";
-    session.desktop!.pending = { kind: "rename", text: "8891 Inbox 503 diagnóstico e recuperação", since: h.now, attempts: 0 };
-    for (let i = 0; i < DESKTOP_RENAME_MAX_MISSES; i += 1) {
-      h.results.push({ ok: false, reason: "the session menu showed no Rename item", retry: true, miss: true, touched: true });
-      await h.tick();
-      h.advance(11 * 60_000);
-    }
-    expect(pendings).toHaveLength(1);
-    expect(pendings[0]!.title).toBe('Renomear no app: "Inbox 503 diagnóstico e recuperação" → "8891 Inbox 503 diagnóstico e recuperação"');
-    expect(pendings[0]!.title).not.toContain("encerrar");
-    // long titles are cut, each with "…": the line stays short and the new title's number stays in it
-    const long = renameAskTitle("Uma sessão com um título bem mais comprido do que cabe na linha", "#9999 Uma sessão com um título bem mais comprido do que cabe na linha");
-    expect(long).toBe('Renomear no app: "Uma sessão com um título bem mais c…" → "#9999 Uma sessão com um título bem mais com…"');
-    // not yet renamed: nothing settles
-    followDesktopSessions(h.deps);
-    expect(resolved).toEqual([]);
-    // a title that only mentions the number further in is not the rename
-    h.records.set(LOCAL, { ...h.records.get(LOCAL)!, title: "Inbox 503 (ver 8891)" });
-    followDesktopSessions(h.deps);
-    expect(resolved).toEqual([]);
-    // the person renamed it by hand in the app, the owner's way: number first, no "#"
-    h.records.set(LOCAL, { ...h.records.get(LOCAL)!, title: "8891 Inbox 503 diagnóstico e recuperação" });
-    followDesktopSessions(h.deps);
-    expect(resolved).toEqual(["cc-rename:e"]);
-    followDesktopSessions(h.deps);
-    expect(resolved).toEqual(["cc-rename:e"]);
-    // archived without being renamed: settled too
-    const other = harness();
-    const settled: string[] = [];
-    other.deps.resolveOwnerPending = (key) => settled.push(key);
-    const archived = other.opened("f", { title: "Outra" });
-    archived.desktop!.renameAsked = true;
-    other.records.set(LOCAL, { ...other.records.get(LOCAL)!, isArchived: true });
-    followDesktopSessions(other.deps);
-    expect(settled).toEqual(["cc-rename:f"]);
+    session.desktop!.pending = { kind: "rename", text: "8891 Inbox 503 diagnóstico", since: h.now, attempts: 0 };
+    giveUpPending(h.deps, session, "the session menu showed no Rename item");
+    expect(session.desktop!.pending).toBeUndefined();
+    expect(session.desktop!.renameAsked).toBeUndefined();
+    expect(pendings).toEqual([]);
+    expect(h.chips).toEqual([]);
+    expect(h.reports).toEqual([]);
+    expect(log.at(-1)).toMatch(/^rename dropped: session r keeps the app's title .*nobody is asked to rename it/);
+  });
+
+  it("at startup settles every open \"Renomear no app\" item through the normal resolution, those of sessions gone included", () => {
+    const h = harness();
+    const resolved: string[] = [];
+    const log: string[] = [];
+    h.deps.resolveOwnerPending = (key) => resolved.push(key);
+    h.deps.log = (line) => log.push(line);
+    const asked = h.opened("e", { title: "Inbox 503 diagnóstico e recuperação" });
+    asked.desktop!.renameAsked = true;
+    const queued = h.appSession("q", { localId: "local_q" });
+    queued.desktop!.pending = { kind: "rename", text: "9198 Email timeout", since: h.now, attempts: 0 };
+    const sending = h.appSession("s", { localId: "local_s" });
+    sending.desktop!.pending = { kind: "send", text: "siga", since: h.now, attempts: 0 };
+    const keys = retireRenameAsks(h.deps, ["cc-rename:e", "cc-rename:gone", "cc-archive:x", "", "power:mac"]);
+    expect(keys.sort()).toEqual(["cc-rename:e", "cc-rename:gone"]);
+    expect(resolved.sort()).toEqual(["cc-rename:e", "cc-rename:gone"]);
+    expect(asked.desktop!.renameAsked).toBeUndefined();
+    expect(queued.desktop!.pending).toBeUndefined();
+    expect(sending.desktop!.pending).toMatchObject({ kind: "send" });
+    expect(log).toEqual(["rename items settled at startup (no session is renamed by hand any more): cc-rename:e, cc-rename:gone"]);
+    // nothing open: nothing settled, nothing said
+    const quiet = harness();
+    const none: string[] = [];
+    quiet.deps.resolveOwnerPending = (key) => none.push(key);
+    expect(retireRenameAsks(quiet.deps, ["cc-archive:x"])).toEqual([]);
+    expect(none).toEqual([]);
   });
 });
 
@@ -972,24 +979,6 @@ describe("a field that already held text", () => {
     h.results.push({ ok: false, reason: "há texto não enviado", retry: true, touched: true, draft });
     await h.tick();
     expect(pendings.at(-1)!.title).toContain("Texto não enviado");
-  });
-
-  it("asks the person to rename by hand after three \"text that was not there\" waits (INSP-D B5)", async () => {
-    const h = harness();
-    const pendings: { title: string; link?: string; key: string }[] = [];
-    h.deps.ownerPending = (_session, item) => pendings.push(item);
-    const session = h.opened("w", { title: "Fila errada ao criar ticket" });
-    session.desktop!.renameTried = true;
-    h.transcripts.set("cli-w", { text: "brief", writtenAt: h.now, ended: true });
-    session.status = "idle";
-    session.desktop!.pending = { kind: "rename", text: "#9305 Fila errada ao criar ticket", since: h.now, attempts: 0 };
-    for (let i = 0; i < DESKTOP_RENAME_MAX_MISSES; i += 1) {
-      h.results.push({ ok: false, reason: "the message field holds text that was not there before the menu opened; nothing was typed, the rename waits", retry: true, miss: true, touched: true });
-      await h.tick();
-      h.advance(11 * 60_000);
-    }
-    expect(session.desktop!.pending).toBeUndefined();
-    expect(pendings).toEqual([expect.objectContaining({ key: "cc-rename:w" })]);
   });
 
   it("keeps the message, asks the person once in \"Precisa de você\", and settles it when the field is free", async () => {

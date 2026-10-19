@@ -188,7 +188,31 @@ function briefWith(title: string, marker: string, brief: string, footer: string,
   // One "NNNN" at the start, never twice ("9311 9311 Chat…"); a title that
   // already names its issue further in ("Chat #9311 …") is left as it is.
   const first = !number || titleOpensWithIssue(named, number) || new RegExp(`#${number}(?!\\d)`).test(named) ? named : `${number} ${named}`;
-  return `${first}\n[${marker}]\n\n${guard ? `${guard}\n\n` : ""}${brief}${footer}`;
+  // the app's own title would drop the number: the session names itself, right after its folder check
+  const naming = number ? sessionTitleStep(first, guard !== null) : null;
+  return `${first}\n[${marker}]\n\n${guard ? `${guard}\n\n` : ""}${naming ? `${naming}\n\n` : ""}${brief}${footer}`;
+}
+
+/** The Claude app's tool, in every session it runs, that sets that
+ * session's title (Claude 2.42304.0, ccd_session_mgmt): with session_id
+ * "self" it renames the session itself, no approval asked while the title is
+ * the app's own (only a title the person typed asks them first). */
+export const SESSION_TITLE_TOOL = "mcp__ccd_session_mgmt__set_session_title";
+/** The app caps a title it is given at 200 characters. */
+const SESSION_TITLE_MAX = 200;
+
+/** The step that has a session name itself "NNNN …" in the app. The app
+ * titles a session with a summary of its own that drops the number
+ * ("9636 Reconciliar…" became "Reconciliar desdobramentos…"), its menus have
+ * no rename, and a title set through its tool is never replaced by its
+ * summary afterwards: so the session does it, and nobody is ever asked to
+ * rename a session by hand. */
+export function sessionTitleStep(title: string, afterGuard: boolean): string {
+  const named = title.length > SESSION_TITLE_MAX ? title.slice(0, SESSION_TITLE_MAX).trimEnd() : title;
+  return [
+    `${afterGuard ? "Passo 1, logo depois do passo 0 e antes da tarefa" : "Passo 1, antes da tarefa"}: dê a esta sessão o título certo no app Claude. Chame a ferramenta ${SESSION_TITLE_TOOL} com session_id "self" e title ${JSON.stringify(named)} (se ela estiver entre as ferramentas adiadas, carregue-a antes com ToolSearch "select:${SESSION_TITLE_TOOL}").`,
+    "Só isso com essa ferramenta: não renomeie nem mexa em outras sessões. Se ela não existir ou recusar, siga com a tarefa sem insistir e sem pedir a ninguém que renomeie a sessão.",
+  ].join("\n");
 }
 
 /** The first step of a session in the server's own worktree: its folder is
@@ -367,15 +391,9 @@ export function reportFor(deps: DesktopWorkDeps, session: CcSession): string {
   return ccReportForOwner(session, { hookDecision: id && deps.hookDecision ? deps.hookDecision(id) : null });
 }
 
-const renameKey = (session: CcSession) => `cc-rename:${session.id}`;
+const RENAME_KEY_PREFIX = "cc-rename:";
+const renameKey = (session: CcSession) => `${RENAME_KEY_PREFIX}${session.id}`;
 const archiveKey = (session: CcSession) => `cc-archive:${session.id}`;
-
-/** "Precisa de você" shows one line: the app's title (what the person finds
- * in the app's sidebar) and the new one, short. */
-export function renameAskTitle(appTitle: string, newTitle: string): string {
-  const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text);
-  return `Renomear no app: "${cut(appTitle, 36)}" → "${cut(newTitle, 44)}"`;
-}
 
 /** A screen action that cannot be done. Only a create that never opened
  * fails the session; a message that could not be typed, or an archive or
@@ -420,24 +438,42 @@ export function giveUpPending(deps: DesktopWorkDeps, session: CcSession, reason:
       ],
     });
   }
+  // a rename is never the person's: the session names itself from its brief, and its
+  // link finds it by id whatever its title; at most a line in the log
   if (pending.kind === "rename") {
-    // The title the person sees in the app (not our ledger's), and the new one, essentials first.
-    const appTitle = (desktop.localId ? deps.readRecord(desktop.localId)?.title : undefined) ?? session.title;
-    desktop.renameAsked = true;
-    deps.ownerPending?.(session, {
-      title: renameAskTitle(appTitle, pending.text), ...(desktop.localId ? { link: `claude://code/continue?session=${desktop.localId}` } : {}), key: renameKey(session),
-      why: "O servidor não consegue renomear esta sessão no app sozinho, e com o título certo você a acha na lista do app Claude.",
-      steps: [
-        { text: `No app Claude, abra a sessão "${appTitle.slice(0, 60)}".`, ...(desktop.localId ? { link: `claude://code/continue?session=${desktop.localId}` } : {}) },
-        { text: `Renomeie-a para: ${pending.text.slice(0, 120)}` },
-        { text: "Pronto: o servidor vê o título novo e fecha este item sozinho." },
-      ],
-    });
+    deps.ledger.save();
+    deps.log?.(`rename dropped: session ${session.id} keeps the app's title (${reason.slice(0, 200)}); nobody is asked to rename it${link}`);
+    return;
   }
   deps.ledger.save();
-  const what = pending.kind === "archive" ? "archive" : "rename";
-  deps.chip(session, pending.kind === "archive" ? "não foi possível arquivar no app — arquive à mão" : "não foi possível renomear no app", false);
-  deps.report(session, `Claude Code session "${session.title}" (${session.id}): could not ${what} it in the Claude app — ${reason}. Nothing else changed; ${pending.kind === "archive" ? "ask the person to archive it by hand" : "the person may rename it by hand"}${link}.`);
+  deps.chip(session, "não foi possível arquivar no app — arquive à mão", false);
+  deps.report(session, `Claude Code session "${session.title}" (${session.id}): could not archive it in the Claude app — ${reason}. Nothing else changed; ask the person to archive it by hand${link}.`);
+}
+
+/** No session is renamed by hand any more: the "Renomear no app" items the
+ * server once opened (keys cc-rename:…), and what its sessions kept of a
+ * rename, are settled once at startup through the normal resolution. The
+ * keys settled. */
+export function retireRenameAsks(deps: Pick<DesktopWorkDeps, "ledger" | "resolveOwnerPending" | "log">, openKeys: readonly string[]): string[] {
+  const keys = new Set(openKeys.filter((key) => key.startsWith(RENAME_KEY_PREFIX)));
+  let changed = false;
+  for (const session of deps.ledger.all()) {
+    const desktop = session.desktop;
+    if (!desktop) continue;
+    if (desktop.renameAsked) {
+      delete desktop.renameAsked;
+      keys.add(renameKey(session));
+      changed = true;
+    }
+    if (desktop.pending?.kind === "rename") {
+      delete desktop.pending;
+      changed = true;
+    }
+  }
+  if (changed) deps.ledger.save();
+  for (const key of keys) deps.resolveOwnerPending?.(key);
+  if (keys.size) deps.log?.(`rename items settled at startup (no session is renamed by hand any more): ${[...keys].join(", ")}`);
+  return [...keys];
 }
 
 /** The next queued message still fresh enough to deliver; older ones are
@@ -651,26 +687,19 @@ export function followDesktopSessions(deps: DesktopWorkDeps): void {
       deps.ledger.save();
       deps.chip(session, "o app não confirmou o arquivamento; tentando de novo", false);
     }
-    // A rename counts only once the app's record shows the new title.
-    const renaming = desktop.pending?.kind === "rename" && desktop.pending.verifyUntil ? desktop.pending : null;
-    if (renaming) {
-      if (record.title?.trim() === renaming.text.trim()) {
-        delete desktop.pending;
-        deps.ledger.save();
-        deps.chip(session, `renomeada no app: ${renaming.text.slice(0, 80)}`);
-      } else if (now > renaming.verifyUntil!) {
-        delete desktop.pending;
-        deps.ledger.save();
-        deps.chip(session, "o app não mostra o novo título — renomear não foi confirmado", false);
-        deps.report(session, `Claude Code session "${session.title}" (${session.id}): the rename to "${renaming.text}" was tried in the Claude app, but the app's record still says "${record.title ?? "(no title)"}". It is not tried again; the person may rename it by hand (claude://code/continue?session=${desktop.localId}).`);
-      }
-    }
-    // The owner wants every session named "NNNN …" in the app (no "#"), and
-    // the app titles them itself: rename it once, the way a person would.
-    if (desktop.issue && !desktop.renameTried && !desktop.pending && record.title && !record.title.includes(desktop.issue)) {
-      desktop.renameTried = true;
-      desktop.pending = { kind: "rename", text: `${desktop.issue} ${record.title}`, since: now, attempts: 0 };
+    // A rename the server queued before sessions named themselves: never on the screen any more.
+    if (desktop.pending?.kind === "rename") {
+      delete desktop.pending;
       deps.ledger.save();
+      deps.log?.(`rename dropped: session ${session.id} — the session names itself from its brief, never the screen nor the person`);
+    }
+    // The owner wants every session named "NNNN …" in the app (no "#"): the
+    // session does it itself (sessionTitleStep). One that did not keeps the
+    // app's title — its link finds it by id — and the log says so, once.
+    if (desktop.issue && !desktop.renameTried && record.title && (record.completedTurns ?? 0) > 0 && !record.title.includes(desktop.issue)) {
+      desktop.renameTried = true;
+      deps.ledger.save();
+      deps.log?.(`title: session ${session.id} is "${record.title.slice(0, 80)}" in the app, without its issue ${desktop.issue}; not renamed — claude://code/continue?session=${desktop.localId} finds it`);
     }
     const transcript = deps.transcriptOf(record.cliSessionId);
     // Its worktree is gone (removed by hand, or reused and cleaned up): the
