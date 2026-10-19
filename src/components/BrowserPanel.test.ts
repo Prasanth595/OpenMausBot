@@ -385,4 +385,17 @@ describe("closing the last tab", () => {
     await flush();
     expect(socket.sent.at(-1)).toEqual({ type: "tabClose", tabId: "t1" });
   });
+
+  it("offers no Close on the only tab of a My Chrome profile, which stays on agent-browser under the Chrome engine", async () => {
+    fixture.state.config.browserEngine = { kind: "engine", engine: "chrome", myChrome: true };
+    fixture.state.config.browserProfiles = [{ id: "mine", name: "Mine", browser: "chrome" }];
+    await render({ bot: { ...bot, browserProfile: "mine" } });
+    await act(async () => FakeSocket.instances.at(-1)!.refuse());
+    await flush();
+    const live = FixtureEventSource.instances.at(-1)!;
+    await act(async () => { live.emit("ready", { viewerId: "viewer" }); live.emit("tabs", { tabs: [tab("t1")] }); });
+    await flush();
+    expect(host.textContent).toContain("t1");
+    expect(closes()).toEqual([]);
+  });
 });
