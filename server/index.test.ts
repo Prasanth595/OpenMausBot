@@ -11962,6 +11962,31 @@ describe("section context API", () => {
   });
 });
 
+describe("global context API", () => {
+  afterEach(async () => {
+    await api("PUT", "/api/global-context", { instructions: "", memory: "" });
+  });
+
+  it("stores separate global instructions and memory", async () => {
+    const saved = await api("PUT", "/api/global-context", { instructions: "Ask before sending.", memory: "Office: Karachi." });
+    expect(saved.status).toBe(200);
+    expect(saved.body).toMatchObject({
+      instructions: { text: "Ask before sending." },
+      memory: { text: "Office: Karachi." },
+      maxBytes: 24_000,
+    });
+    const read = await api("GET", "/api/global-context");
+    expect(read.body).toMatchObject({ instructions: { text: "Ask before sending." }, memory: { text: "Office: Karachi." } });
+  });
+
+  it("rejects incomplete and oversized global context writes", async () => {
+    expect((await api("PUT", "/api/global-context", { instructions: "only one" })).status).toBe(400);
+    const oversized = await api("PUT", "/api/global-context", { instructions: "x".repeat(24_001), memory: "" });
+    expect(oversized.status).toBe(400);
+    expect(oversized.body.error).toContain("24KB");
+  });
+});
+
 describe("bot memory API", () => {
   const workspaceOf = (botId: string) => join(home, ".openmausbot", "workspaces", botId);
 

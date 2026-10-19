@@ -366,6 +366,7 @@ import {
   sectionContextSystemPrompt,
   writeSectionContext,
 } from "./section-context.ts";
+import { globalInstructionsSystemPrompt, globalMemorySystemPrompt } from "./global-context.ts";
 import {
   applyStagedSkillWrite,
   applySkillWriteWithReceipt,
@@ -3251,8 +3252,10 @@ function previewSystemPrompt(bot: BotRecord) {
     { id: "credential", label: "Credentials", text: agentsMounted ? CREDENTIAL_PROMPT : "" },
     { id: "routine", label: "Triggers", text: agentsMounted ? TRIGGER_PROMPT : "" },
     { id: "profile", label: "Profile changes", text: agentsMounted ? PROFILE_PROMPT : "" },
+    { id: "global-instructions", label: "Global instructions", text: globalInstructionsSystemPrompt() },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
     { id: "team-memory", label: "Team memory", text: teamMemory.systemPrompt(bot.section) + (agentsMounted ? TEAM_MEMORY_PROMPT : "") },
+    { id: "global-memory", label: "Global memory", text: globalMemorySystemPrompt() },
     teamAvailabilityPart(agentsMounted && coordination ? peers : []),
     { id: "memory", label: "Memory", text: memorySystemPrompt(bot.id, { managedWrites: agentsMounted, fileTools: Boolean(privateWorkspace), enabled: bot.memoryEnabled !== false }) },
     { id: "skills", label: "Skills index", text: privateWorkspace ? skillsHost.skillsIndex(bot, undefined, instance) : "" },
@@ -8493,7 +8496,7 @@ async function startTurn(
       const unseen = handed && handedStateUsable(handed, cursor, contextOrder) ? unseenMessages(replayable, contextOrder, handed) : undefined;
       const externalUpdate = Boolean(opts?.coordination?.resumed || unseen?.some((m) => m.keep));
       // What a resumed session keeps from its launch; Codex reasserts model and provider on resume, but an in-flight turn and an omitted effort keep the prior selection.
-      const persistentConfig = [bot.name, bot.title, bot.description, sectionContextSystemPrompt(bot.section),
+      const persistentConfig = [bot.name, bot.title, bot.description, globalInstructionsSystemPrompt(), globalMemorySystemPrompt(), sectionContextSystemPrompt(bot.section),
         ...(instance.driverKind === "codex" ? [model, effort ?? null] : [])];
       const sessionConfig = (soul: string | undefined) =>
         createHash("sha256").update(JSON.stringify([...persistentConfig, soul])).digest("hex").slice(0, 16);
@@ -9032,8 +9035,10 @@ async function startTurn(
         { id: "routine-execution", label: "Routine execution", text: opts?.automationSource === "schedule" || opts?.automationSource === "manual" || opts?.automationSource === "startup" ? ROUTINE_EXECUTION_PROMPT : "" },
         { id: "profile", label: "Profile changes", text: profilePrompt },
         { id: "learn", label: "Skill authoring", text: learnPrompt },
+        { id: "global-instructions", label: "Global instructions", text: globalInstructionsSystemPrompt() },
         { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
         { id: "team-memory", label: "Team memory", text: teamMemory.systemPrompt(bot.section) + (integrations.agents ? TEAM_MEMORY_PROMPT : "") },
+        { id: "global-memory", label: "Global memory", text: globalMemorySystemPrompt() },
         // Volatile, so a teammate starting or finishing never changes the stable half.
         teamAvailabilityPart(coordinationPrompt ? sectionPeers : []),
         { id: "recent", label: "Recent work", text: recentWorkPrompt(recentWork(recentWorkSources(bot), bot, { userName: cfg.profile?.name?.trim() || "User", currentThreadId: threadId, ...recentWorkFilter() })) },
@@ -10881,8 +10886,10 @@ async function runClaimedGroupMemberTurn(
     { id: "recall", label: "Recall", text: integrations.agents && bot.memoryEnabled !== false ? SESSION_SEARCH_SYSTEM_PROMPT : "" },
     teamAvailabilityPart(outsideRoom),
     { id: "recent", label: "Recent work", text: recentWorkPrompt(recentLines) },
+    { id: "global-instructions", label: "Global instructions", text: globalInstructionsSystemPrompt() },
     { id: "section-context", label: "Section context", text: sectionContextSystemPrompt(bot.section) },
     { id: "team-memory", label: "Team memory", text: teamMemory.systemPrompt(bot.section) + (integrations.agents ? TEAM_MEMORY_PROMPT : "") },
+    { id: "global-memory", label: "Global memory", text: globalMemorySystemPrompt() },
     { id: "memory", label: "Memory", text: roomMemory ? `\n${roomMemory.trim()}` : "" },
     { id: "skills", label: "Skills index", text: workspace ? skillsHost.skillsIndex(bot, threadId, instance) : "" },
     { id: "skill-instructions", label: "Skill instructions", text: renderSkillInstructions(selectedSkills, { includeRoot: Boolean(workspace) }) },

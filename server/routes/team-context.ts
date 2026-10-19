@@ -2,6 +2,7 @@
 import { z } from "zod";
 
 import { SECTION_CONTEXT_MAX_BYTES, readSectionContext, sectionContextKey, sectionContextLabel, writeSectionContext } from "../section-context.ts";
+import { GLOBAL_CONTEXT_MAX_BYTES, readGlobalContext, writeGlobalContext } from "../global-context.ts";
 import { sectionKey, type Store } from "../store.ts";
 import { TEAM_MEMORY_KINDS, TeamMemory, TeamMemoryConflict, type TeamMemoryKind } from "../team-memory.ts";
 import { PASS, type RouteHandler } from "./table.ts";
@@ -15,6 +16,22 @@ export function createTeamContextRoutes(deps: TeamContextRouteDeps): RouteHandle
   const { store, teamMemory } = deps;
   return async ({ req, res, url, path, method, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
+    if (path === "/api/global-context" && (method === "GET" || method === "PUT")) {
+      if (method === "GET") {
+        const context = readGlobalContext();
+        return json(res, 200, { ...context, maxBytes: GLOBAL_CONTEXT_MAX_BYTES });
+      }
+      const parsed = z.object({ instructions: z.string(), memory: z.string() }).safeParse(await readBody(req));
+      if (!parsed.success) return json(res, 400, { error: "instructions and memory must be strings" });
+      if ([parsed.data.instructions, parsed.data.memory].some((text) => Buffer.byteLength(text, "utf8") > GLOBAL_CONTEXT_MAX_BYTES)) {
+        return json(res, 400, { error: `global context is capped at ${GLOBAL_CONTEXT_MAX_BYTES / 1000}KB per field` });
+      }
+      try {
+        return json(res, 200, { ...writeGlobalContext(parsed.data), maxBytes: GLOBAL_CONTEXT_MAX_BYTES });
+      } catch (error) {
+        return json(res, 500, { error: error instanceof Error ? error.message : String(error) });
+      }
+    }
     // Bots receive the brief in their system context, but no agent tool can write it: one bot cannot change every teammate's turns.
     if (path === "/api/team-memory" && (method === "GET" || method === "POST")) {
       if (!url.searchParams.has("section")) return json(res, 400, { error: "section is required" });

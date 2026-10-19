@@ -108,7 +108,7 @@ describe("Settings in Simple mode", () => {
   it("files every Advanced page under one Simple page, or hides it", () => {
     const placed = SIMPLE_PAGES.flatMap((page) => page.sections);
     expect(new Set(placed).size).toBe(placed.length);
-    const hidden = SECTIONS.map((entry) => entry.id).filter((id) => !placed.includes(id));
+    const hidden = SECTIONS.map((entry) => entry.id).filter((id) => !placed.includes(id) && id !== "globalContext");
     expect(hidden).toEqual(["skills", "usage", "backups", "workspaces", "experimental"]);
     for (const id of hidden) expect(SIMPLE_HIDDEN_SECTIONS).toContain(id);
   });
@@ -119,6 +119,7 @@ describe("Settings in Simple mode", () => {
     expect(html.indexOf('aria-label="Advanced mode"')).toBeGreaterThan(0);
     expect(html.indexOf('aria-label="Advanced mode"')).toBeLessThan(html.indexOf("Language"));
     expect(blocks(html)).toEqual(["general"]);
+    expect(html.indexOf("Profile")).toBeLessThan(html.indexOf("Global context"));
   });
 
   it("stacks Model providers, API keys and Decision model on AI, each under its heading", () => {
@@ -185,6 +186,7 @@ describe("Settings in Simple mode", () => {
     ["engines", "ai"],
     ["connections", "ai"],
     ["decisionModel", "ai"],
+    ["globalContext", "general"],
     ["companion", "computers"],
     ["remote", "computers"],
     ["desktopWorkspaces", "computers"],
@@ -196,7 +198,7 @@ describe("Settings in Simple mode", () => {
     fixture.section = section;
     const html = render();
     expect(currentPage(html)).toBe(page);
-    expect(blocks(html)).toContain(section === "remote" ? "companion" : section);
+    expect(blocks(html)).toContain(section === "globalContext" ? "general" : section === "remote" ? "companion" : section);
   });
 
   it.each<[AppSettingsSection, string]>([

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, CircleUser, Cloud, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen } from "lucide-react";
+import { Archive, CircleUser, Cloud, Coins, Download, FlaskConical, KeyRound, LockKeyhole, Monitor, Palette, ScrollText, Search, Sparkles, TabletSmartphone, Terminal, User, Users, X, Building2, Zap, BookOpen, Brain } from "lucide-react";
 import { api, useStore, type AppSettingsSection, type ConfigStatus } from "@/state/store";
 import { builtInBrowserEnabled, routinesInConversationEnabled, showToolCallsEnabled, skillAuthoringEnabled, skillsLibraryEnabled } from "@/lib/feature-flags";
 import { localeChoices, type LocaleKey } from "@/locales";
@@ -62,6 +62,7 @@ import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 import { Select } from "./Select";
+import { GlobalContextSettings } from "./GlobalContextSettings";
 
 // labelKey, not a label: t() reads the active pack when called, so a label resolved at module scope would freeze the
 // boot language.
@@ -87,6 +88,7 @@ export const SECTIONS: Array<{
   { id: "engines", group: "ai", labelKey: "settings.section.engines", icon: Terminal, keywords: ["models", "model providers", "engines", "claude", "codex", "grok", "providers", "cli", "sign in", "subscription"] },
   { id: "connections", group: "ai", labelKey: "settings.section.connections", icon: KeyRound, keywords: ["keys", "api", "api key", "api keys", "connections", "composio", "box", "xai", "mistral", "cerebras", "meta", "muse", "vps", "router", "openrouter", "base url", "openai", "anthropic", "groq", "opencode", "provider"] },
   { id: "decisionModel", group: "ai", labelKey: "settings.section.decisionModel", icon: Zap, keywords: ["decision", "jev", "typesafe", "routing", "auto", "rooms", "who answers"] },
+  { id: "globalContext", group: "ai", labelKey: "settings.section.globalContext", icon: Brain, keywords: ["global", "shared", "memory", "instructions", "all bots", "new bots", "context", "preferences", "rules"] },
   { id: "skills", group: "ai", labelKey: "settings.section.skills", icon: BookOpen, keywords: ["skills", "library", "assign", "agent skills", "skill md"] },
   { id: "desktopWorkspaces", group: "computers", labelKey: "settings.section.desktopWorkspaces", icon: Building2, keywords: ["workspace", "cloud", "hosted", "vps", "server", "servers", "connect", "pair", "switch", "local"] },
   { id: "computer", group: "computers", labelKey: "settings.section.computer", icon: Monitor, keywords: ["vm", "virtual", "desktop", "browser", "built-in browser", "profiles", "browser profiles"] },
@@ -661,7 +663,8 @@ export function SettingsModal() {
 
   const simplePages = advanced ? [] : simpleSettingsPages(availableSections, section);
   const visiblePages = simplePages.filter((page) => simplePageMatches(page, q));
-  const currentPage = simplePages.find((page) => page.sections.includes(section));
+  const currentPage = simplePages.find((page) => page.sections.includes(section))
+    ?? (section === "globalContext" ? simplePages.find((page) => page.id === "general") : undefined);
 
   const sectionLabelKey = advanced
     ? SECTIONS.find((entry) => entry.id === section)?.labelKey
@@ -751,6 +754,7 @@ export function SettingsModal() {
             <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
               <ProfileFields />
             </Card>
+            {!advanced && <GlobalContextSettings />}
 
             <LanguageRow />
             <NewBotEffortRow />
@@ -844,6 +848,7 @@ export function SettingsModal() {
           </Card>
         );
       case "decisionModel": return <DecisionModelSettings />;
+      case "globalContext": return <GlobalContextSettings />;
       case "engines": return <EnginesSettings />;
       case "backups": return <><WorkspaceBackupSettings /><CompanyBackupSettings /></>;
       case "import": return <ImportSettings />;
