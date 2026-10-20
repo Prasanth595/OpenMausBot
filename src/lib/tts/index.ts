@@ -32,6 +32,9 @@ export interface SpeechStream {
   /** Adopt the completed reply's message id: the snapshot and the probe
    * records carry it from here on. */
   identify(messageId: string | undefined): void;
+  /** Tear down this stream's audio, but only while it is still the speaker's
+   * current stream: a superseded stream must not silence its successor. */
+  cancel(): void;
   /** Surface a fatal error and kill the stream. */
   fail(error: string): void;
 }
@@ -168,6 +171,7 @@ export class Speaker {
       },
       prepare: async (text) => [text],
       identify: (messageId) => this.adoptMessageId(opts, live, messageId),
+      cancel: () => { if (live()) this.stop(); },
       fail: () => { closed = true; },
     };
   }
@@ -266,6 +270,7 @@ export class Speaker {
         return utterances;
       },
       identify: (messageId) => this.adoptMessageId(opts, live, messageId),
+      cancel: () => { if (live()) this.stop(); },
       fail: (error) => {
         if (finished) return;
         controller.abort();

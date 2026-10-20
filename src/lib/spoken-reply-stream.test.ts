@@ -9,6 +9,7 @@ interface FakeHandle {
   pushes: string[];
   inputs: string[];
   identified: (string | undefined)[];
+  cancels: number;
   ends: number;
   failure: string | null;
 }
@@ -18,10 +19,9 @@ interface FakeHandle {
  * open until a later block exists. */
 function fakeSpeech(prepareOverride?: (text: string) => string[]) {
   const handles: FakeHandle[] = [];
-  let stops = 0;
   const sink: ReplySpeechSink = {
     begin(opts) {
-      const handle: FakeHandle = { opts, pushes: [], inputs: [], identified: [], ends: 0, failure: null };
+      const handle: FakeHandle = { opts, pushes: [], inputs: [], identified: [], cancels: 0, ends: 0, failure: null };
       handles.push(handle);
       const split = prepareOverride ?? ((text: string) => redactSecretsInText(text).split(/(?<=[.!?])\s+/).filter(Boolean));
       return {
@@ -38,16 +38,16 @@ function fakeSpeech(prepareOverride?: (text: string) => string[]) {
         identify: (messageId) => {
           handle.identified.push(messageId);
         },
+        cancel: () => {
+          handle.cancels += 1;
+        },
         fail: (error) => {
           handle.failure = error;
         },
       };
     },
-    stop: () => {
-      stops += 1;
-    },
   };
-  return { sink, handles, stops: () => stops };
+  return { sink, handles };
 }
 
 const owner: SpokenReplyOwner = { botId: "bot", voiceId: "vo" };
@@ -56,6 +56,8 @@ const delta = (text: string, turnId = "turn-1"): RuntimeEvent =>
   ({ ...base, eventId: `${turnId}-d`, type: "content.delta", streamKind: "assistant_text", delta: text });
 const turnDone = (ok: boolean, turnId = "turn-1"): RuntimeEvent => ({ ...base, eventId: `${turnId}-c`, type: "turn.completed", ok });
 const turnStart = (turnId: string): RuntimeEvent => ({ ...base, eventId: `${turnId}-s`, type: "turn.started" });
+const deltaIn = (threadId: string, text: string): RuntimeEvent =>
+  ({ ...base, eventId: `${threadId}-d`, type: "content.delta", streamKind: "assistant_text", delta: text, threadId });
 const toolStart = (turnId = "turn-1"): RuntimeEvent => ({ ...base, eventId: `${turnId}-i`, type: "item.started", itemType: "tool" });
 const settle = async (): Promise<void> => {
   for (let i = 0; i < 6; i += 1) await Promise.resolve();
@@ -125,7 +127,7 @@ describe("SpokenReplyStream", () => {
   });
 
   it("goes silent when the speak gates close at the completed frame", async () => {
-    const { sink, handles, stops } = fakeSpeech();
+    const { sink, handles } = fakeSpeech();
     const stream = new SpokenReplyStream(sink);
     stream.onRuntimeEvent(delta("One. Two. Three "), owner);
     await settle();
@@ -133,7 +135,7 @@ describe("SpokenReplyStream", () => {
     stream.completeBotText("t", "turn-1", "One. Two. Three four.", null);
     stream.onRuntimeEvent(turnDone(true), null);
     await settle();
-    expect(stops()).toBe(1);
+    expect(handles[0].cancels).toBe(1);
     expect(handles[0].pushes).toEqual(["One.", "Two."]);
     expect(handles[0].ends).toBe(0);
     expect(handles).toHaveLength(1);
@@ -152,15 +154,31 @@ describe("SpokenReplyStream", () => {
   });
 
   it("stops speech when the turn fails", async () => {
-    const { sink, handles, stops } = fakeSpeech();
+    const { sink, handles } = fakeSpeech();
     const stream = new SpokenReplyStream(sink);
     stream.onRuntimeEvent(delta("One. Two. Three "), owner);
     await settle();
     stream.onRuntimeEvent(turnDone(false), owner);
     await settle();
-    expect(stops()).toBe(1);
+    expect(handles[0].cancels).toBe(1);
     expect(handles[0].pushes).toEqual(["One.", "Two."]);
     expect(handles[0].ends).toBe(0);
+  });
+
+  it("cancels only the failing thread's stream", async () => {
+    const { sink, handles } = fakeSpeech();
+    const stream = new SpokenReplyStream(sink);
+    stream.onRuntimeEvent(delta("One. Two. "), owner);
+    await settle();
+    stream.onRuntimeEvent(deltaIn("u", "Other thread. "), owner);
+    await settle();
+    expect(handles).toHaveLength(2);
+    stream.onRuntimeEvent(turnDone(false), owner);
+    await settle();
+    expect(handles[0].cancels).toBe(1);
+    expect(handles[1].cancels).toBe(0);
+    expect(handles[1].pushes).toEqual([]);
+    expect(handles[1].ends).toBe(0);
   });
 
   it("holds back an unclosed private-key block until it closes", async () => {

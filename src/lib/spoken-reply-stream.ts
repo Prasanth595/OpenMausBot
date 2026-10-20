@@ -27,7 +27,6 @@ export interface SpokenReplyOwner {
 /** The Speaker surface this stream drives. */
 export interface ReplySpeechSink {
   begin(opts: { botId?: string; voiceId?: string; messageId?: string }): SpeechStream;
-  stop(): void;
 }
 
 function speakableStreamText(buffer: string): string {
@@ -84,7 +83,8 @@ export class SpokenReplyStream {
     if (current && sameTurn(current, turnId)) {
       if (!owner) {
         this.turns.delete(threadId);
-        this.speech.stop();
+        current.ended = true;
+        current.stream.cancel();
         return;
       }
       current.stream.identify(messageId);
@@ -146,7 +146,8 @@ export class SpokenReplyStream {
     if (!current || !sameTurn(current, turnId)) return;
     if (!ok) {
       this.turns.delete(threadId);
-      this.speech.stop();
+      current.ended = true;
+      current.stream.cancel();
       return;
     }
     current.ended = true;

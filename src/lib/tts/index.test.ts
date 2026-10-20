@@ -421,4 +421,25 @@ describe("stream identification", () => {
     expect(sample?.blocks).toHaveLength(2);
     expect(sample?.blocks[0]?.renderStartAt).toBeDefined();
   });
+
+  it("cancel tears down only the stream that is still current", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) =>
+        String(input).endsWith("/prepare")
+          ? json({ ready: true, utterances: ["Old."] })
+          : new Response(new Blob(["mp3"]), { status: 200 }),
+      ),
+    );
+    const speaker = new Speaker();
+    const first = speaker.begin({});
+    first.push("Old.");
+    const second = speaker.begin({});
+
+    first.cancel();
+    expect(speaker.state).toEqual({ status: "preparing" });
+
+    second.cancel();
+    expect(speaker.state).toEqual({ status: "idle" });
+  });
 });
