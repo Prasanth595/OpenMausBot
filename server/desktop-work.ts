@@ -862,7 +862,13 @@ export function followDesktopSessions(deps: DesktopWorkDeps): void {
 export function sessionMarks(record: Pick<DesktopRecord, "worktreePath" | "worktreeName" | "cwd"> | null | undefined, branchOf: (path: string | undefined) => string | null = worktreeBranch): string[] {
   if (!record) return [];
   const branch = branchOf(record.worktreePath ?? record.cwd);
-  return [...new Set([branch, record.worktreeName].filter((mark): mark is string => typeof mark === "string" && mark.length >= 6 && mark !== "main" && mark !== "master"))];
+  // A session OMB started in its own worktree folder (often through a link, with no worktreeName in the app's
+  // record) shows that folder in its chip, and the branch may have moved since ("lote/e-bi", 20/10 9bdc955d):
+  // the folder's name is a mark too — only for a worktree folder, never a shared repo folder.
+  const folder = [record.worktreePath, record.cwd]
+    .filter((path): path is string => typeof path === "string" && /\/(?:\.claude\/worktrees|\.worktrees|worktrees|\.omb-worktree-links\/[^/]+)\/[^/]+\/?$/.test(path))
+    .map((path) => basename(path.replace(/\/+$/, "")));
+  return [...new Set([branch, record.worktreeName, ...folder].filter((mark): mark is string => typeof mark === "string" && mark.length >= 6 && mark !== "main" && mark !== "master"))];
 }
 
 /** One screen action, if one is due. `state.busy` keeps them one at a time. */

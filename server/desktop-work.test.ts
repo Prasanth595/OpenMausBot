@@ -1207,4 +1207,12 @@ describe("sessionMarks", () => {
     expect(sessionMarks({ cwd: "/repo" }, () => "main")).toEqual([]);
     expect(sessionMarks(null)).toEqual([]);
   });
+
+  it("adds the worktree folder's name when the app's record has none and the branch moved (9bdc955d, Lote E BI)", () => {
+    const cwd = "/Users/o/Projetos/.omb-worktree-links/nuria-platform/9647-9646-9645-lote-e-bi";
+    expect(sessionMarks({ cwd }, () => "lote/e-bi")).toEqual(["lote/e-bi", "9647-9646-9645-lote-e-bi"]);
+    expect(sessionMarks({ cwd: "/r/nuria-platform/.claude/worktrees/9634-fechar-status/" }, () => null)).toEqual(["9634-fechar-status"]);
+    // a shared repo folder is never a mark: other sessions show it too
+    expect(sessionMarks({ cwd: "/Users/o/Projetos/nuria-platform" }, () => null)).toEqual([]);
+  });
 });
