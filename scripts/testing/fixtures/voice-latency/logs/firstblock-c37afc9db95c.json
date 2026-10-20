@@ -335,7 +335,6 @@
   "measuredBuildCommit": "71d57b4d0",
   "date": "2026-10-18T18:06:40.430Z",
   "machine": {
-    "hostname": "BradsMacStudio.localdomain",
     "platform": "darwin",
     "arch": "arm64"
   },
