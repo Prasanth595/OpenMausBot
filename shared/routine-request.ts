@@ -56,6 +56,8 @@ export interface RoutineRequestDefinition {
   continuity?: boolean;
   /** Keep at most one scheduled run pending by default (later occurrences fold into it), or "skip" them. */
   overlap?: "skip" | "queue";
+  /** "own": the routine does not wait behind the bot's other routines; `null` removes it. */
+  lane?: "own" | null;
   /** Also run once each time OpenMausBot starts. Repeating routines only. */
   runOnStartup?: boolean;
 }
