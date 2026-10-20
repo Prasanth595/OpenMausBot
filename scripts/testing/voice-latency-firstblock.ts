@@ -3,7 +3,7 @@
 // committed splitter with the first-block cap over the committed
 // corpus and writes every reply's first-block char count. Offline and
 // deterministic: no engine, no key, no audio, no timing.
-import { hostname } from "node:os";
+import { cpus } from "node:os";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -61,7 +61,7 @@ function main(): void {
     },
     measuredBuildCommit: process.env.OMB_MEASURED_COMMIT ?? "(unset: worktree HEAD)",
     date: new Date().toISOString(),
-    machine: { hostname: hostname(), platform: process.platform, arch: process.arch },
+    machine: { platform: process.platform, arch: process.arch, cpuModel: cpus()[0]?.model ?? null },
     offline: true,
   };
   mkdirSync(LOGS_DIR, { recursive: true });
