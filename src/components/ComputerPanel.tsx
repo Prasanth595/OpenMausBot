@@ -30,6 +30,7 @@ import { ApiKeyRow } from "./ApiKeys";
 import { cn } from "@/lib/cn";
 import { useCaptionChrome } from "@/components/DesktopCapabilities";
 import { usePageVisible } from "@/lib/page-visible";
+import { previewCaptureMs, useWindowFocusedRef } from "@/lib/capture-pace";
 import { listenLiveFrames } from "@/lib/live-events";
 import { CloudScreenPreview } from "./CloudScreenPreview";
 import { isActiveTurnRefusal, isRemoteScreenshotContention } from "@/lib/remote-desktop";
@@ -721,6 +722,7 @@ export function ComputerPanel({
   }, [phase, threadPath, profileBot.busy, livePlace]);
 
   const pageVisible = usePageVisible();
+  const windowFocused = useWindowFocusedRef();
   const lastLiveAt = useRef(0);
   const previewBusy = useRef(bot.busy);
   useEffect(() => { previewBusy.current = bot.busy; }, [bot.busy]);
@@ -749,7 +751,7 @@ export function ComputerPanel({
     setPreviewRefreshing(true);
     const shoot = async () => {
       if (inFlight || controller.signal.aborted) return;
-      if (Date.now() - lastAttemptAt < (retryDelay ?? (previewBusy.current ? 4000 : 30_000))) return;
+      if (Date.now() - lastAttemptAt < previewCaptureMs({ busy: previewBusy.current === true, focused: windowFocused.current, retryDelay })) return;
       if (previewBusy.current && Date.now() - lastLiveAt.current < 10_000) return;
       inFlight = true;
       retryDelay = null;
