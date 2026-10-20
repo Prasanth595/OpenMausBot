@@ -9065,7 +9065,7 @@ async function startTurn(
       const shareNote = skillsHost.shareNote(bot, threadId, Boolean(privateWorkspace));
       const accountPool = cfg.accountPools?.antigravity;
       const pooledRecovery = accountPoolEnabled(accountPool, instance.driverKind);
-      const startupRecovery = (cfg.automaticRecovery?.enabled === true || pooledRecovery) && (opts?.automaticRecoveryIndex ?? 0) < ((liveBot ?? bot).fallback?.length || (cfg.automaticRecovery.backup ? 1 : pooledRecovery ? registry.instances().filter((candidate) => candidate.instanceId !== instanceId && candidate.driverKind === "antigravityAgent" && candidate.enabled).length : 0));
+      const startupRecovery = (cfg.automaticRecovery?.enabled === true || pooledRecovery) && (opts?.automaticRecoveryIndex ?? 0) < ((liveBot ?? bot).fallback?.length || (cfg.automaticRecovery?.backup ? 1 : pooledRecovery ? registry.instances().filter((candidate) => candidate.instanceId !== instanceId && candidate.driverKind === "antigravityAgent" && candidate.enabled).length : 0));
       const limitedUntil = startupRecovery ? limitClock.blockedUntil(instanceId) : null;
       if (limitedUntil) throw new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, limitedUntil);
       const dispatch = await guardTurnDispatch(shareNote.after(instance.adapter.sendTurn({
