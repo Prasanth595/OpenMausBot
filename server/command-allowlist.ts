@@ -143,11 +143,12 @@ export class CommandAllowlistStore {
     return commandCoveredByPatterns(candidate.command, scoped.map((rule) => rule.command).filter(isCommandPattern), opts);
   }
 
-  /** "Always allow this type of command": save its program patterns, or the exact string when none is safe. */
+  /** "Always allow this type of command": save one pattern per part (shared commandPatterns); refuses when any part may write. */
   remember(botId: string, value: CommandAllowlistCandidate): CommandAllowlistRule[] {
     const candidate = validateCommandAllowlistCandidate(value);
     const patterns = commandPatterns(candidate.command);
-    if (!patterns) return [this.add(botId, candidate)];
+    // the card never offers this for a command with a part that may write or delete; a stale request is refused too
+    if (!patterns) throw invalid("This command has a part that can change or delete something, so it cannot be always allowed. Allow it once instead.");
     return patterns.map((command) => this.add(botId, { ...candidate, command }));
   }
 

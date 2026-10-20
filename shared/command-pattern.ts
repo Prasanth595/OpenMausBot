@@ -148,38 +148,64 @@ export function patternWordsFor(part: CommandPart): string[] | null {
 
 export const isCommandPattern = (rule: string) => /^\S+(?: \S+)* \*$/.test(rule) && !rule.slice(0, -2).includes("*");
 
+/** Programs (or program + subcommand) that only read: the only kinds "Always allow this type of command" may save.
+ * Anything else — a write, a delete, a push, an install — keeps asking every time and the button is not offered. */
+const SAVEABLE_PROGRAMS = new Set([
+  ...READ_ONLY, "ps", "df", "du", "cd", "lsof", "uname", "whoami", "id", "jq", "sort", "uniq", "cut", "tr", "sw_vers",
+  "file", "basename", "dirname", "realpath", "test", "true", "printf", "less", "tree", "shasum", "md5", "diff", "uptime",
+]);
+const SAVEABLE_SUBCOMMANDS: Record<string, readonly string[]> = {
+  git: ["status", "log", "diff", "show", "rev-parse", "branch", "remote", "ls-files", "blame", "describe", "shortlog", "rev-list", "cat-file", "grep"],
+  "gh pr": ["view", "list", "diff", "checks", "status"],
+  "gh issue": ["view", "list", "status"],
+  "gh run": ["view", "list"],
+  "gh repo": ["view"],
+  "gh release": ["view", "list"],
+  npm: ["ls", "view", "outdated", "explain"],
+  pnpm: ["ls", "why", "outdated"],
+  docker: ["ps", "images", "logs", "inspect"],
+  kubectl: ["get", "describe", "logs"],
+  brew: ["list", "info"],
+  defaults: ["read"],
+  launchctl: ["list", "print"],
+};
+
+/** The pattern a part saves as, or null when the part may write/delete or cannot be a pattern. */
+function saveablePattern(part: CommandPart): string | null {
+  if (isDangerousPart(part)) return null;
+  const words = patternWordsFor(part);
+  if (!words) return null;
+  const program = programName(words[0]!);
+  if (words.length === 1) return SAVEABLE_PROGRAMS.has(program) && !SAVEABLE_SUBCOMMANDS[program] && program !== "gh" ? `${words[0]} *` : null;
+  const scope = words.length === 3 ? `${program} ${words[1]}` : program;
+  const sub = words[words.length - 1]!;
+  return SAVEABLE_SUBCOMMANDS[scope]?.includes(sub) ? `${words.join(" ")} *` : null;
+}
+
 /**
- * The patterns "Always allow this type of command" saves for a command: one
- * per part that is not already read-only. Null means no safe pattern exists
- * (dangerous program, unparsable syntax); the caller saves the exact string.
+ * The ONE decision of what "Always allow this type of command" saves — the card's button and label and the save
+ * path all call this. One pattern per part, read-only parts included (on Ask they need a rule too). Null when any
+ * part may write or delete, or the command cannot be parsed: then the button is not offered and nothing is saved.
  */
 export function commandPatterns(command: string): string[] | null {
   const parts = splitCommand(command);
   if (!parts) return null;
   const patterns: string[] = [];
   for (const part of parts) {
-    if (isReadOnlyPart(part)) continue;
-    const words = patternWordsFor(part);
-    if (!words) return null;
-    const pattern = `${words.join(" ")} *`;
+    const pattern = saveablePattern(part);
+    if (!pattern) return null;
     if (!patterns.includes(pattern)) patterns.push(pattern);
   }
   return patterns.length ? patterns : null;
 }
 
-/** A label for the card: `cat *`, or `git status * · cd *`. */
+/** A label for the card: `cat *`, or `git status * · cd *` — exactly what is saved; null means no button. */
 export function commandPatternLabel(command: string): string | null {
-  const parts = splitCommand(command);
-  if (!parts) return null;
-  const labels: string[] = [];
-  for (const part of parts) {
-    const words = isReadOnlyPart(part) ? [part[0]!] : patternWordsFor(part);
-    if (!words) return null;
-    const label = `${words.join(" ")} *`;
-    if (!labels.includes(label)) labels.push(label);
-  }
-  return labels.join(" · ");
+  return commandPatterns(command)?.join(" · ") ?? null;
 }
+
+/** Whether the card may offer "Always allow this type of command" for this command. */
+export const commandSaveable = (command: string) => commandPatterns(command) !== null;
 
 const partMatches = (part: CommandPart, pattern: string) => {
   const words = pattern.slice(0, -2).split(" ");

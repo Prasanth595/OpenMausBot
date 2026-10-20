@@ -167,11 +167,18 @@ describe("command allowlist patterns", () => {
     expect(new CommandAllowlistStore(filename).matches("bot-a", { ...candidate(), command: "df" })).toBe(true);
   });
 
-  it("remembers a dangerous command only as its exact string", () => {
+  it("never remembers a command with a part that writes or deletes: it keeps asking", () => {
     const store = new CommandAllowlistStore(filename);
-    expect(store.remember("bot-a", { ...candidate(), command: "rm -rf build" }).map((rule) => rule.command)).toEqual(["rm -rf build"]);
-    expect(store.matches("bot-a", { ...candidate(), command: "rm -rf build" })).toBe(true);
-    expect(store.matches("bot-a", { ...candidate(), command: "rm -rf ~" })).toBe(false);
+    expect(() => store.remember("bot-a", { ...candidate(), command: "rm -rf build" })).toThrow(/cannot be always allowed/);
+    expect(() => store.remember("bot-a", { ...candidate(), command: "gh pr view 1 && gh pr merge 1" })).toThrow(/cannot be always allowed/);
+    expect(store.matches("bot-a", { ...candidate(), command: "rm -rf build" })).toBe(false);
+  });
+
+  it("remembers each part of a read-only pipe, so it no longer asks on Ask", () => {
+    const store = new CommandAllowlistStore(filename);
+    const command = "gh pr view 9700 --json state | ps aux | grep carrier";
+    expect(store.remember("bot-a", { ...candidate(), command }).map((rule) => rule.command)).toEqual(["gh pr view *", "ps *", "grep *"]);
+    expect(store.matches("bot-a", { ...candidate(), command: "gh pr view 1 | grep x" }, { implicitReadOnly: false })).toBe(true);
   });
 
   it("allows the read-only commands from the report without any rule", () => {

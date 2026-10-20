@@ -57,6 +57,7 @@ import { RoomMemberLock } from "./room-member-lock.ts";
 import { HELD_NOTE, approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegatedApprovalMode, undeliveredApprovalTool, implicitReadOnlyFor } from "./auto-approve.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
+import { commandSaveable } from "../shared/command-pattern.ts";
 import { providerMcpTool, providerToolAllowKey } from "./provider-tool-allow.ts";
 import type { CommandAllowlistCandidate, CommandAllowlistResponse } from "../shared/command-allowlist.ts";
 import { claudeAccountInfo } from "./claude-accounts.ts";
@@ -5669,6 +5670,10 @@ function commandRememberRefusal(auth: RequestAuth, threadId: string, requestId: 
   if (!canManageCommandAllowlist(auth)) return "Only the owner or an admin can save bot-wide command permissions.";
   if (behavior !== "allow" || !pendingCommandRules.has(`${threadId}:${requestId}`)) {
     return "This live request does not contain a command that can be saved. Allow it once instead.";
+  }
+  // the same shared decision the card's button uses: a part that writes or deletes is never saved
+  if (!commandSaveable(pendingCommandRules.get(`${threadId}:${requestId}`)!.candidate.command)) {
+    return "This command has a part that can change or delete something, so it cannot be always allowed. Allow it once instead.";
   }
   return null;
 }

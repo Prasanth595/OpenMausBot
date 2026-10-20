@@ -58,6 +58,13 @@ describe("remembering exact command approvals", () => {
     expect(view({ commandAllowlist: undefined }).html).not.toContain("Always allow this type of command (git status *)");
   });
 
+  it("offers the button with the exact patterns for a read-only pipe, and none when a part writes (09:41)", () => {
+    const pipe = { ...commandAllowlist, command: "gh pr view 9700 --json state | ps aux | grep carrier" };
+    expect(view({ commandAllowlist: pipe }).html).toContain("Always allow this type of command (gh pr view * · ps * · grep *)");
+    const writes = { ...commandAllowlist, command: "gh pr view 1 && gh pr merge 1 --squash" };
+    expect(view({ commandAllowlist: writes }).html).not.toContain("Always allow this type of command");
+  });
+
   it("answers and remembers in one action without a separate preference update", () => {
     const result = view();
     expect(result.html).toContain("Always allow this type of command (git status *)");

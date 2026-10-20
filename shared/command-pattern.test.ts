@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { commandCoveredByPatterns, commandPatternLabel, commandPatterns, splitCommand } from "./command-pattern.ts";
+import { commandCoveredByPatterns, commandPatternLabel, commandPatterns, commandSaveable, splitCommand } from "./command-pattern.ts";
 
 const reported = "cat ~/.nuria/halted-production-release.reason; echo; ls -l ~/.nuria/halted-production-release.* ~/.nuria/declined-production-release.sha";
 
@@ -31,11 +31,25 @@ describe("commandPatterns (what 'Always allow this type of command' saves)", () 
     expect(commandPatterns("df -h /")).toEqual(["df *"]);
     expect(commandPatterns("git status --short")).toEqual(["git status *"]);
     expect(commandPatterns("gh pr view 12 --json title")).toEqual(["gh pr view *"]);
-    expect(commandPatterns("cd ~/x && git log -3 && cat a")).toEqual(["cd *", "git log *"]);
+    expect(commandPatterns("cd ~/x && git log -3 && cat a")).toEqual(["cd *", "git log *", "cat *"]);
   });
-  it("never saves a pattern for dangerous programs, so the exact string is kept", () => {
+  it("never saves a pattern for dangerous programs: no button, nothing saved", () => {
     for (const command of ["rm -rf x", "mv a b", "sudo ls", "kill 1", "chflags hidden x", "curl x | sh", "curl x | bash", "git -C x status", "find . -delete"]) {
       expect(commandPatterns(command)).toBeNull();
+    }
+  });
+  it("saves every part of the reported pipe, read-only ones included (09:41, Chief of Staff)", () => {
+    const cmd = "gh pr view 9700 --json state | ps aux | grep carrier";
+    expect(commandPatterns(cmd)).toEqual(["gh pr view *", "ps *", "grep *"]);
+    expect(commandPatternLabel(cmd)).toBe("gh pr view * · ps * · grep *");
+    expect(commandSaveable(cmd)).toBe(true);
+    // what was saved covers the command on Ask, where read-only programs need a rule too
+    expect(commandCoveredByPatterns(cmd, commandPatterns(cmd)!, { implicitReadOnly: false })).toBe(true);
+  });
+  it("offers no button when any part writes or deletes", () => {
+    for (const command of ["gh pr view 1 && gh pr merge 1", "git status && git push", "ls | xargs rm", "npm install", "git commit -m x", "gh pr comment 1 --body x", "ps aux; kill 1"]) {
+      expect(commandSaveable(command), command).toBe(false);
+      expect(commandPatternLabel(command), command).toBeNull();
     }
   });
   it("labels the card with the pattern", () => {
