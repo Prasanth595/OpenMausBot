@@ -14335,7 +14335,10 @@ routines = new RoutineManager({
   emit: broadcast,
   launchId: DESKTOP_MANAGED && /^[\w-]{1,100}$/.test(process.env.OMB_DESKTOP_LAUNCH_ID ?? "")
     ? process.env.OMB_DESKTOP_LAUNCH_ID : undefined,
-  hasPendingDelegations: runtimeWorkPending, handedOffWorkLive: (threadId) => coordinator.outstandingFor(threadId).length > 0,
+  hasPendingDelegations: runtimeWorkPending,
+  // A hand-off parked on a question to a person (needs_input: its view carries the question) is not work in progress: it must not hold the routine's next occurrences.
+  handedOffWorkLive: (threadId) => coordinator.outstandingFor(threadId).some((node) => node.question === undefined),
+  runTurnLive: (run) => Boolean(run.threadId && threadBusy(run.botId, run.threadId)),
   // a routine run waits while the bot's intake turn (a watch) runs elsewhere
   botState: (botId, routineId) => {
     if (!intakeBusyElsewhere(botId)) return unattendedDispatchState(botId);

@@ -15,7 +15,7 @@ import { isRoutineProblemRun } from "../shared/routines.ts";
 import { ROUTINE_PARTS, type PartPair, type RoutinePart } from "./package-parts.ts";
 import {
   composeExecutionPrompt, continuityCarry, retriesTransiently, ROUTINE_DEFERRAL_NOTICE_MS, ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED,
-  ROUTINE_TRANSIENT_RETRY_MS, routineFailure, routineHostWarning, skipNeedsNotice, supersededBy,
+  ROUTINE_TRANSIENT_RETRY_MS, routineFailure, routineHostWarning, skipNeedsNotice, staleActiveRun, supersededBy,
 } from "./routine-execution.ts";
 
 export interface RoutineIntervalWindow {
@@ -292,6 +292,8 @@ export interface RoutineManagerOptions {
   resultContract?: boolean;
   /** Work this thread handed to another bot is still open, so its wait is not only on the person. */
   handedOffWorkLive?: (threadId: string) => boolean;
+  /** A turn is live for this run's thread right now (false: none is). Absent: never judged. */
+  runTurnLive?: (run: RoutineRun) => boolean;
   /** The desktop app launch this server belongs to. The desktop restarts its
    * server within one launch (crash recovery, switching back to a workspace),
    * and that is not the app starting, so startup runs happen once per launch.
@@ -1280,6 +1282,32 @@ export class RoutineManager {
     if (changed) this.save();
   }
 
+  private readonly noTurnSince = new Map<string, number>();
+
+  /** At startup (the first tick) and on every tick: a run still marked active with no live turn, or past its maximum
+   * duration, is released so the pending run of its routine fires. A waiting run's hand-off keeps going on its own. */
+  private releaseStaleRuns(now: number): RoutineRun[] {
+    const interrupt: RoutineRun[] = [];
+    for (const run of this.runs) {
+      if (run.status !== "running" && run.status !== "waiting") { this.noTurnSince.delete(run.id); continue; }
+      if (run.status === "running" && run.threadId && this.options.runTurnLive?.(run) === false &&
+          !this.options.handedOffWorkLive?.(run.threadId)) {
+        if (!this.noTurnSince.has(run.id)) this.noTurnSince.set(run.id, now);
+      } else {
+        this.noTurnSince.delete(run.id);
+      }
+      const heldByHandOff = run.status === "waiting" && Boolean(run.threadId && this.options.handedOffWorkLive?.(run.threadId));
+      const reason = staleActiveRun(run, now, { heldByHandOff, noTurnSince: this.noTurnSince.get(run.id) });
+      if (!reason) continue;
+      this.noTurnSince.delete(run.id);
+      const wasRunning = run.status === "running";
+      console.log(`routines: "${run.routineName}" (${run.routineId.slice(0, 8)}) run ${run.id.slice(0, 8)} released after ${Math.round((now - run.startedAt!) / 60_000)} min ${run.status}: ${reason}`);
+      this.failRun(run, reason);
+      if (wasRunning && run.threadId) interrupt.push(run);
+    }
+    return interrupt;
+  }
+
   async cancelRun(id: string, reason?: string): Promise<RoutineRun | null> {
     const run = this.runs.find((r) => r.id === id);
     if (!run || !["queued", "running", "waiting"].includes(run.status)) return null;
@@ -1383,6 +1411,8 @@ export class RoutineManager {
     this.ticking = true;
     try {
       const now = this.now();
+      // Synchronous unless a run is released: an await here would yield to a concurrent tick() before dispatch.
+      for (const run of this.releaseStaleRuns(now)) await this.options.interruptTurn?.(run.botId, run.threadId!).catch(() => {});
       for (const run of this.runs) {
         if (
           !["running", "waiting"].includes(run.status) ||

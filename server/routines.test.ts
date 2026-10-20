@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import { isRoutineProblemRun } from "../shared/routines.ts";
-import { ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED } from "./routine-execution.ts";
+import { ROUTINE_ACTIVE_MAX_MS, ROUTINE_RELEASED_MAX, ROUTINE_RELEASED_NO_TURN, ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED, staleActiveRun } from "./routine-execution.ts";
 import {
   nextOccurrence,
   RoutineManager,
@@ -366,6 +366,85 @@ describe("a run left waiting for the person", () => {
     expect(h.interruptedTurns).toEqual([]);
     expect(h.started).toHaveLength(1);
     expect(h.manager.listRoutines()[0].skippedRuns).toBe(23);
+  });
+
+  const every5 = { name: "Atendimento", prompt: "Check the chat", botId: "maus-1",
+    schedule: { type: "cron" as const, expression: "*/5 * * * *", timeZone: "UTC" } };
+
+  it("releases a run waiting on a hand-off past its maximum duration; the merged pending run then fires once", async () => {
+    const h = harness(monday);
+    h.options.handedOffWorkLive = (threadId) => threadId === "thread-1";
+    const routine = h.manager.create(every5);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    parkOnPerson(h, "thread-1");
+    const first = h.manager.listRuns().find((run) => run.threadId === "thread-1")!;
+    for (let minute = 5; minute < ROUTINE_ACTIVE_MAX_MS / 60_000; minute += 5) {
+      h.setNow(first.startedAt! + minutes(minute)); await h.manager.tick();
+    }
+    expect(h.manager.listRuns().find((run) => run.id === first.id)?.status).toBe("waiting");
+    const pending = h.manager.listRuns().find((run) => run.status === "queued")!;
+    expect(pending.coalescedRuns).toBeGreaterThan(60);
+    expect(h.started).toHaveLength(1);
+
+    h.setNow(first.startedAt! + ROUTINE_ACTIVE_MAX_MS + minutes(1)); await h.manager.tick();
+    expect(h.manager.listRuns().find((run) => run.id === first.id)).toMatchObject({ status: "failed", error: ROUTINE_RELEASED_MAX });
+    // the waiting run's hand-off is left to finish on its own: no turn is interrupted
+    expect(h.interruptedTurns).toEqual([]);
+    expect(h.manager.listRuns().find((run) => run.id === pending.id)).toMatchObject({ status: "running", threadId: "thread-2" });
+    expect(h.started).toHaveLength(2);
+    expect(h.manager.listRuns().filter((run) => run.status === "queued")).toEqual([]);
+  });
+
+  it("releases at startup a run left waiting for days on a hand-off nobody finishes", async () => {
+    const h = harness(monday);
+    h.options.handedOffWorkLive = (threadId) => threadId === "thread-1";
+    const routine = h.manager.create(every5);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    parkOnPerson(h, "thread-1");
+    // OpenMausBot was restarted days later: the restart keeps it waiting (its hand-off is still pending),
+    // then the first tick releases it
+    h.setNow(monday + 3 * 24 * 60 * 60_000);
+    const restarted = new RoutineManager(h.options);
+    expect(restarted.listRuns().find((run) => run.threadId === "thread-1")?.status).toBe("waiting");
+    await restarted.tick();
+    expect(restarted.listRuns().find((run) => run.threadId === "thread-1")).toMatchObject({ status: "failed", error: ROUTINE_RELEASED_MAX });
+    // nothing holds the routine any more: its next occurrence runs
+    h.setNow(restarted.listRoutines()[0].nextRunAt!); await restarted.tick();
+    expect(restarted.listRuns().some((run) => run.status === "running" && run.threadId !== "thread-1")).toBe(true);
+  });
+
+  it("releases a run marked running with no live turn after a grace period, never one whose turn is live", async () => {
+    const h = harness(monday);
+    let live = true;
+    h.options.runTurnLive = () => live;
+    const routine = h.manager.create(every5);
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    const first = h.manager.listRuns().find((run) => run.threadId === "thread-1")!;
+    for (let minute = 5; minute <= 60; minute += 5) { h.setNow(first.startedAt! + minutes(minute)); await h.manager.tick(); }
+    expect(h.manager.listRuns().find((run) => run.id === first.id)?.status).toBe("running");
+
+    live = false; // the turn is gone, nothing will ever settle this run
+    h.setNow(first.startedAt! + minutes(65)); await h.manager.tick();
+    expect(h.manager.listRuns().find((run) => run.id === first.id)?.status).toBe("running");
+    h.setNow(first.startedAt! + minutes(76)); await h.manager.tick();
+    expect(h.manager.listRuns().find((run) => run.id === first.id)).toMatchObject({ status: "failed", error: ROUTINE_RELEASED_NO_TURN });
+    expect(h.interruptedTurns).toEqual([{ botId: "maus-1", threadId: "thread-1" }]);
+    expect(h.started).toHaveLength(2);
+  });
+
+  it("leaves runs with their own run limit, room goals and fresh runs alone", () => {
+    const now = monday + ROUTINE_ACTIVE_MAX_MS * 2;
+    const held = { heldByHandOff: true };
+    expect(staleActiveRun({ status: "waiting", target: "bot", startedAt: monday }, now, held)).toBe(ROUTINE_RELEASED_MAX);
+    expect(staleActiveRun({ status: "running", target: "bot", startedAt: monday, timeoutMinutes: 30 }, now, { noTurnSince: monday })).toBeNull();
+    expect(staleActiveRun({ status: "waiting", target: "room-goal", startedAt: monday }, now, held)).toBeNull();
+    expect(staleActiveRun({ status: "waiting", target: "bot", startedAt: now - minutes(30) }, now, held)).toBeNull();
+    expect(staleActiveRun({ status: "waiting", target: "bot", startedAt: monday, durationMinutes: 600 }, now, held)).toBeNull();
+    // a wait on the person alone is superseded by the next occurrence, never released early
+    expect(staleActiveRun({ status: "waiting", target: "bot", startedAt: monday }, now, {})).toBeNull();
+    // a running run with a live (or unknown) turn is never released by age
+    expect(staleActiveRun({ status: "running", target: "bot", startedAt: monday }, now, {})).toBeNull();
+    expect(staleActiveRun({ status: "queued", target: "bot", startedAt: monday }, now, held)).toBeNull();
   });
 
   it("replaces a waiting run-now and a room goal that needs input through the same stop as the Stop button", async () => {
