@@ -6092,5 +6092,14 @@
   "history.empty": "No changes recorded yet.",
   "history.refreshError": "Couldn’t refresh history.",
   "history.undo": "Undo this change",
-  "history.restoreUnavailable": "The exact previous instructions are unavailable, so this change cannot be undone."
+  "history.restoreUnavailable": "The exact previous instructions are unavailable, so this change cannot be undone.",
+  "accountPool.title": "Automatic account pool",
+  "accountPool.description": "Use connected Antigravity accounts in priority order when heavy work exhausts an account.",
+  "accountPool.enabled": "Use automatic account pool",
+  "accountPool.failover": "Switch after quota is exhausted",
+  "accountPool.restore": "Return to the preferred account after reset",
+  "accountPool.priority": "Account priority",
+  "accountPool.priorityLabel": "{name} priority",
+  "accountPool.resetsAt": "resets {time}",
+  "accountPool.quotaUnavailable": "Quota details are unavailable right now."
 }

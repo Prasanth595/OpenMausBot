@@ -67,6 +67,18 @@ describe("configuration boundaries", () => {
       expect(() => parseConfigPatch({ automaticRecovery: invalid })).toThrow("automaticRecovery");
     }
   });
+  it("stores Antigravity account-pool preferences without reloading providers", () => {
+    const accountPools = { antigravity: { enabled: true, failover: true, restore: false, priorities: { main: 100, backup: 80 } } };
+    expect(parseStoredConfig({ accountPools })).toEqual({ accountPools });
+    expect(parseConfigPatch({ accountPools })).toEqual({ accountPools });
+    expect(reloaded({ accountPools })).toEqual([]);
+    for (const invalid of [{ antigravity: { enabled: true, failover: true, restore: true, priorities: { main: 101 } } },
+      { antigravity: { enabled: true, failover: true, restore: true, priorities: { "": 50 } } },
+      { antigravity: { enabled: true, failover: "yes", restore: true, priorities: {} } }]) {
+      expect(() => parseConfigPatch({ accountPools: invalid })).toThrow("accountPools");
+    }
+  });
+
   it("accepts shared user context, including clearing, without reloading providers", () => {
     const profile = { aboutMe: "I prefer short answers.\nMy time zone is Europe/Berlin." };
     expect(parseConfigPatch({ profile })).toEqual({ profile });

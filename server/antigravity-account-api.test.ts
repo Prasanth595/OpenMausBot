@@ -77,6 +77,13 @@ it("validates account requests and does not allow client-only sessions to add pr
   expect(readFileSync(join(home, "config.json"), "utf8")).toBe(saved);
 });
 
+it("returns a safe empty quota response for an authenticated account without credentials", async () => {
+  const response = await api("GET", "/api/antigravity-quota?instance=google-original");
+  expect(response.status, JSON.stringify(response.body)).toBe(200);
+  expect(response.body).toEqual({ groups: [] });
+  expect((await api("GET", "/api/antigravity-quota?instance=missing")).status).toBe(404);
+});
+
 it("adds independent accounts, switches a bot between their models, and preserves them across server restart", async () => {
   const ids: string[] = [];
   for (const displayName of ["  Personal  ", "Work"]) {
