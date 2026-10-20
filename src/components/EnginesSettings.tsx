@@ -10,7 +10,7 @@ import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotic
 import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
 import { DEVICE_SIGN_IN_COPY, deviceSignInProvider } from "./DeviceSignIn";
 import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
-import { AntigravityPoolSettings } from "./AntigravityPoolSettings";
+import { AntigravityAccountPoolSettings, AntigravityPoolSettings } from "./AntigravityPoolSettings";
 import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
 import { Select } from "./Select";
 
@@ -325,6 +325,7 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
           )
       )}
       {instance.freeUpSpace && <AntigravityFreeSpace instance={instance} />}
+      {instance.driverKind === "antigravityAgent" && <AntigravityAccountPoolSettings account={instance} />}
       {instance.driverKind === "antigravityAgent" && (
         <div className="mt-3 space-y-3">
           {instance.snapshot.authenticated && <p className="break-words text-[12px] text-ink-secondary">{instance.snapshot.account?.email ?? t("engineSetup.antigravity.emailUnavailable")}</p>}
@@ -361,7 +362,7 @@ export function EnginesSettings() {
         </div>
         <RefreshEngines />
       </div>
-      {antigravityAccounts.length > 0 && <AntigravityPoolSettings accounts={antigravityAccounts} />}
+      {antigravityAccounts.length > 0 && <AntigravityPoolSettings />}
       <EngineSections
         instances={rows}
         isReady={(instance) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); }}

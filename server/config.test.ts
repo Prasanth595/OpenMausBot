@@ -72,9 +72,10 @@ describe("configuration boundaries", () => {
     expect(parseStoredConfig({ accountPools })).toEqual({ accountPools });
     expect(parseConfigPatch({ accountPools })).toEqual({ accountPools });
     expect(reloaded({ accountPools })).toEqual([]);
-    for (const invalid of [{ antigravity: { enabled: true, failover: true, restore: true, priorities: { main: 101 } } },
+    const invalidPools: JsonValue[] = [{ antigravity: { enabled: true, failover: true, restore: true, priorities: { main: 101 } } },
       { antigravity: { enabled: true, failover: true, restore: true, priorities: { "": 50 } } },
-      { antigravity: { enabled: true, failover: "yes", restore: true, priorities: {} } }]) {
+      { antigravity: { enabled: true, failover: "yes", restore: true, priorities: {} } }];
+    for (const invalid of invalidPools) {
       expect(() => parseConfigPatch({ accountPools: invalid })).toThrow("accountPools");
     }
   });

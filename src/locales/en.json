@@ -6101,5 +6101,14 @@
   "accountPool.priority": "Account priority",
   "accountPool.priorityLabel": "{name} priority",
   "accountPool.resetsAt": "resets {time}",
-  "accountPool.quotaUnavailable": "Quota details are unavailable right now."
+  "accountPool.quotaUnavailable": "Quota details are unavailable right now.",
+  "accountPool.priorityHint": "Higher percentages are chosen first.",
+  "accountPool.quotaLabel": "Remaining account quota",
+  "accountPool.quotaLoading": "Checking quota…",
+  "accountPool.switchTitle": "Move every bot to this account",
+  "accountPool.switchDescription": "Each bot keeps its current model when this account supports it. Otherwise it uses this account’s default model.",
+  "accountPool.switchAll": "Use {name} for all bots",
+  "accountPool.switching": "Switching bots…",
+  "accountPool.switchDone": "Moved {count} bot(s) to this account.",
+  "accountPool.switchPartial": "Moved {moved} of {count} bots. The others could not be switched."
 }

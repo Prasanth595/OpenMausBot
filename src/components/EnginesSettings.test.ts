@@ -30,6 +30,25 @@ function render(authenticated: boolean, options: { email?: string; signOut?: boo
   return renderToStaticMarkup(createElement(EnginesSettings));
 }
 
+describe("Settings → Engines → Antigravity account pool", () => {
+  it("keeps priority and the manual all-bot switch inside each account card", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [{ id: "bot", modelSelection: { instanceId: "codex", model: "gpt" } } as Bot];
+    fixture.instances = [{
+      instanceId: "antigravity-work", driverKind: "antigravityAgent", displayName: "Work account", cliDefault: "antigravity",
+      snapshot: { state: "available", authenticated: true, account: { email: "ahmaroffice3@gmail.com" } },
+      models: { default: "claude", options: [{ id: "claude", label: "Claude" }] },
+    }];
+    const html = renderToStaticMarkup(createElement(EnginesSettings));
+    expect(html).toContain('data-engine-card="antigravity-work"');
+    expect(html).toContain('data-antigravity-account-pool="antigravity-work"');
+    expect(html).toContain('type="text"');
+    expect(html).not.toContain('type="number"');
+    expect(html).toContain("Use Work account for all bots");
+  });
+});
+
 describe("Settings → Engines → ChatGPT accounts", () => {
   it("lists a signed-out account with one Sign in button", () => {
     const html = render(false);
