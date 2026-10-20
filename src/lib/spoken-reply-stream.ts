@@ -17,6 +17,7 @@
 import { redactSecretsInText } from "../../shared/redact";
 import type { RuntimeEvent } from "../../shared/runtime-events";
 import { speaker, type SpeechStream } from "@/lib/tts";
+import type { LiveCallState } from "../../shared/wire";
 
 /** The bot whose reply may speak, when the store's speak gates pass. */
 export interface SpokenReplyOwner {
@@ -40,6 +41,8 @@ function speakableStreamText(buffer: string): string {
 
 interface TurnSpeech {
   threadId: string;
+  /** The bot whose reply this turn speaks; a live call on it silences the turn. */
+  botId: string;
   turnId?: string;
   stream: SpeechStream;
   /** Concatenated assistant-text deltas of the burst since the last reset. */
@@ -78,6 +81,19 @@ export class SpokenReplyStream {
     }
   }
 
+  /** A live call takes the bot's speaker: its queued and playing reply speech stops. */
+  onLiveCall(call: LiveCallState | null): void {
+    if (!call || call.status === "ended") return;
+    for (const turn of this.turns.values()) {
+      if (turn.botId !== call.botId) continue;
+      this.turns.delete(turn.threadId);
+      turn.ended = true;
+      turn.authoritative = null;
+      turn.dirty = false;
+      turn.stream.cancel();
+    }
+  }
+
   /** The authoritative bot-text frame for a reply. `owner` null means the
    * store's speak gates fail now, and a live stream must go silent. */
   completeBotText(threadId: string, turnId: string | undefined, text: string, owner: SpokenReplyOwner | null, messageId?: string): void {
@@ -98,6 +114,7 @@ export class SpokenReplyStream {
     if (!owner || !text.trim()) return;
     const turn: TurnSpeech = {
       threadId,
+      botId: owner.botId,
       turnId,
       stream: this.speech.begin({ botId: owner.botId, voiceId: owner.voiceId, messageId }),
       buffer: "",
@@ -124,6 +141,7 @@ export class SpokenReplyStream {
     if (current) this.drop(current);
     const turn: TurnSpeech = {
       threadId,
+      botId: owner.botId,
       turnId,
       // begin stops whatever was speaking: a new turn's audio supersedes it.
       stream: this.speech.begin({ botId: owner.botId, voiceId: owner.voiceId }),

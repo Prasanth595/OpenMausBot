@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { redactSecretsInText } from "../../shared/redact";
 import type { RuntimeEvent } from "../../shared/runtime-events";
+import type { LiveCallState, LiveCallStatus } from "../../shared/wire";
 import type { ReplySpeechSink, SpokenReplyOwner } from "./spoken-reply-stream";
 import { SpokenReplyStream } from "./spoken-reply-stream";
 
@@ -274,6 +275,23 @@ describe("SpokenReplyStream", () => {
     expect(handles).toHaveLength(1);
     expect(handles[0].failure).toBe("splitter down");
     expect(handles[0].ends).toBe(0);
+  });
+
+  it("cancels only the called bot's speech when a live call takes the speaker", async () => {
+    const { sink, handles } = fakeSpeech();
+    const stream = new SpokenReplyStream(sink);
+    const liveCall = (botId: string, status: LiveCallStatus): LiveCallState =>
+      ({ callId: "c1", botId, threadId: "t", client: "desktop", voice: "vo", startedAt: 1, status });
+    stream.onRuntimeEvent(deltaIn("t1", "One. Two. Three "), owner);
+    stream.onRuntimeEvent(deltaIn("t2", "Four. Five. Six "), { botId: "other", voiceId: "vo" });
+    await settle();
+    stream.onLiveCall(liveCall("bot", "live"));
+    expect(handles[0].cancels).toBe(1);
+    expect(handles[0].ends).toBe(0);
+    stream.onLiveCall(liveCall("other", "ended"));
+    stream.onLiveCall(null);
+    expect(handles[1].cancels).toBe(0);
+    expect(handles[1].pushes).toEqual(["Four.", "Five."]);
   });
 
   it("ends the open stream when a new turn starts", async () => {

@@ -2069,10 +2069,7 @@ export function liveCallFromFrame(frame: unknown): { call: LiveCallState | null 
 }
 
 let liveCallLookups = 0;
-export function nextLiveCallLookup(): number {
-  liveCallLookups += 1;
-  return liveCallLookups;
-}
+export const nextLiveCallLookup = (): number => ++liveCallLookups;
 
 export { api, ApiError };
 
@@ -3427,7 +3424,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "live.call": {
           const framed = liveCallFromFrame(frame);
           // Rendered at once: the next bot frame decides auto-speak from stateRef.
-          if (framed) flushSync(() => rawDispatch({ type: "liveCall", call: framed.call }));
+          if (framed) {
+            spokenReplyStream.onLiveCall(framed.call);
+            flushSync(() => rawDispatch({ type: "liveCall", call: framed.call }));
+          }
           break;
         }
         case "config":
