@@ -1236,6 +1236,39 @@ export function sessionHeaderShown(lines: OcrLine[], title: string): boolean {
   return headerNames(top, title) || top.some((line) => isHeaderOf(line, title));
 }
 
+/** The session on screen is the one its id names: the chips under its field
+ * show its own branch or worktree (read from the app's record by id), a word
+ * no other session shares. Titles are the app's to change ("7903 Retirar
+ * métricas…" shows as "Remover métricas…"), and OMB's own notification
+ * banners cover the header — the chips at the bottom are what is left
+ * (20/10: 221 of 408 sends "not the one on screen", 6 ok). */
+export function sessionChipsShown(lines: OcrLine[], size: { h: number }, marks: readonly string[]): boolean {
+  const wanted = marks.map((mark) => mark.trim()).filter((mark) => mark.length >= 6);
+  if (!wanted.length) return false;
+  const bottom = lines.filter((line) => line.y > size.h / 2 && line.x >= SIDEBAR_MAX_X);
+  // the chip cuts a long branch ("fix/7903-retirar-metricas-pausa-sem-fo…"): a start of 16+ characters counts
+  return bottom.some((line) => line.text.split(/\s+/).some((raw) => {
+    const word = raw.replace(/(?:…|\.\.\.|[,;])+$/, "");
+    return wanted.some((mark) => word === mark || (word.length >= 16 && mark.startsWith(word)));
+  }));
+}
+
+/** The branch checked out in a worktree (its .git file → HEAD), or null. */
+export function worktreeBranch(path: string | undefined): string | null {
+  if (!path) return null;
+  try {
+    const dotGit = readFileSync(join(path, ".git"), "utf8").trim();
+    const gitdir = dotGit.startsWith("gitdir:") ? dotGit.slice(7).trim() : join(path, ".git");
+    const head = readFileSync(join(gitdir, "HEAD"), "utf8").trim();
+    return head.startsWith("ref: refs/heads/") ? head.slice(16) : null;
+  } catch {
+    try {
+      const head = readFileSync(join(path, ".git", "HEAD"), "utf8").trim();
+      return head.startsWith("ref: refs/heads/") ? head.slice(16) : null;
+    } catch { return null; }
+  }
+}
+
 /** Open a session by its one unambiguous entry in the app's sidebar (the
  * search a person would do when the link leaves another session open). */
 async function openBySidebar(screen: Screen, title: string): Promise<{ clicked: boolean; stop?: DesktopStep }> {
@@ -1258,7 +1291,7 @@ async function openBySidebar(screen: Screen, title: string): Promise<{ clicked: 
  * session's title must be on screen, the text must show up in its field,
  * and the field must empty after Return; otherwise the step is retried.
  */
-export async function sendToDesktopSession(driver: DesktopDriver, input: { localId: string; text: string; title?: string; repoName?: string }): Promise<DesktopStep> {
+export async function sendToDesktopSession(driver: DesktopDriver, input: { localId: string; text: string; title?: string; repoName?: string; marks?: readonly string[] }): Promise<DesktopStep> {
   if (!/^local_[0-9a-f-]{36}$/.test(input.localId)) return { ok: false, reason: "invalid desktop session id", retry: false };
   return withScreen(driver, async (screen) => {
     await act(screen, () => driver.openUrl(`claude://code/continue?session=${input.localId}`));
@@ -1267,19 +1300,20 @@ export async function sendToDesktopSession(driver: DesktopDriver, input: { local
     if (stop) return stop;
     const size = await driver.screenSize();
     let lines = mainArea(await driver.ocr());
-    if (input.title) {
+    const onScreen = (shown: OcrLine[]) => sessionChipsShown(shown, size, input.marks ?? []) || (input.title ? sessionHeaderShown(shown, input.title) : false);
+    if (input.title || input.marks?.length) {
       // Only the session's own header proves it is the one on screen: a line
       // of the conversation, a notification banner or the sidebar naming the
       // title does not (19/10 22:30: "QA Produção"/"Chief of Staff" was open
       // and the send kept retrying into it). The link did not bring it up:
       // open it by its entry in the sidebar (one unambiguous entry), then
       // look again — nothing is typed until its header is there.
-      if (!sessionHeaderShown(lines, input.title)) {
-        const opened = await openBySidebar(screen, input.title);
+      if (!onScreen(lines)) {
+        const opened = input.title ? await openBySidebar(screen, input.title) : { clicked: false };
         if (opened.stop) return opened.stop;
         lines = mainArea(await driver.ocr());
-        if (!sessionHeaderShown(lines, input.title)) {
-          return { ok: false, reason: `the session "${input.title}" is not the one on screen (opened by its id${opened.clicked ? " and by its sidebar entry" : ""}; its header is not there); nothing was typed`, retry: true, miss: true, touched: true, seen: seenText(lines.filter((line) => line.y < 140)) };
+        if (!onScreen(lines)) {
+          return { ok: false, reason: `the session "${input.title ?? input.localId}" is not the one on screen (opened by its id${opened.clicked ? " and by its sidebar entry" : ""}; its header is not there); nothing was typed`, retry: true, miss: true, touched: true, seen: seenText(lines.filter((line) => line.y < 140)) };
         }
       }
     }

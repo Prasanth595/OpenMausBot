@@ -28,6 +28,7 @@ import {
   recordInWorktree,
   summaryIsCurrent,
   sendToDesktopSession,
+  worktreeBranch,
   type DesktopDriver,
   type DesktopRecord,
   type DesktopStep,
@@ -855,6 +856,15 @@ export function followDesktopSessions(deps: DesktopWorkDeps): void {
   }
 }
 
+/** What the app shows of a session that no other one shares, read by its id
+ * from the app's record: its worktree's branch and name (the chips under its
+ * field). Never its title, which the app renames as it likes. */
+export function sessionMarks(record: Pick<DesktopRecord, "worktreePath" | "worktreeName" | "cwd"> | null | undefined, branchOf: (path: string | undefined) => string | null = worktreeBranch): string[] {
+  if (!record) return [];
+  const branch = branchOf(record.worktreePath ?? record.cwd);
+  return [...new Set([branch, record.worktreeName].filter((mark): mark is string => typeof mark === "string" && mark.length >= 6 && mark !== "main" && mark !== "master"))];
+}
+
 /** One screen action, if one is due. `state.busy` keeps them one at a time. */
 export async function runDesktopWork(deps: DesktopWorkDeps, state: { busy: boolean }): Promise<void> {
   followDesktopSessions(deps);
@@ -940,7 +950,7 @@ export async function runDesktopWork(deps: DesktopWorkDeps, state: { busy: boole
         ? await (steps.archive ?? archiveDesktopSession)(driver, target)
         : pending.kind === "rename"
           ? await (steps.rename ?? renameDesktopSession)(driver, { ...target, newTitle: pending.text, repoName })
-          : await (steps.send ?? sendToDesktopSession)(driver, { ...target, text: pending.text, repoName });
+          : await (steps.send ?? sendToDesktopSession)(driver, { ...target, text: pending.text, repoName, marks: sessionMarks(record) });
     }
     const at = deps.now();
     // a create is "sent" here (the brief left the field); "adopted" comes when the app's record shows up

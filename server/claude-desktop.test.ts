@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   archiveDesktopSession,
   withScreenLock,
+  sessionChipsShown,
   CLAUDE_BUNDLE_ID,
   lastAppRepo,
   liveWorktreeNames,
@@ -1181,5 +1182,38 @@ describe("one screen step at a time (20/10 00:55: interleaved sends)", () => {
   it("a step that throws does not block the next one", async () => {
     await expect(withScreenLock(async () => { throw new Error("boom"); })).rejects.toThrow("boom");
     expect(await withScreenLock(async () => 7)).toBe(7);
+  });
+});
+
+describe("the session is checked by what its id names, not its title (20/10: 6 of 408 sends ok)", () => {
+  const localId = "local_6415ced5-d3d5-4055-9d33-58c585c87de3";
+  const field = { text: "Responder...", y: 820 };
+  const bar = { text: "+ O v Automático", y: 866 };
+  // the app renamed the session, and OMB's own banner covers the top of the screen
+  const banner = { text: "Lead PRODEV precisa de aprovação", y: 40, x: 1100 };
+  const chips = { text: "nuria-platform fix/7903-retirar-metricas-de-pausa", y: 782 };
+
+  it("types into the session whose chips show its own branch, whatever its header says", async () => {
+    const app = fakeApp({ screens: [[banner, chips, field, bar], [banner, chips, { text: "follow-up now", y: 820 }, bar], [banner, chips, { text: "follow-up now", y: 400 }, field, bar]] });
+    expect(await sendToDesktopSession(app.driver, { localId, text: "follow-up now", title: "7903 Retirar métricas de pausa sem fonte", marks: ["fix/7903-retirar-metricas-de-pausa"] })).toEqual({ ok: true });
+    expect(app.actions.filter((action) => action.startsWith("paste"))).toEqual(["paste(all) follow-up now"]);
+  });
+
+  it("types nothing when the chips show another session's branch", async () => {
+    const other = { text: "nuria-platform fix/9638-esclarecer-idade-media", y: 782 };
+    const app = fakeApp({ screen: [banner, other, field, bar] });
+    expect(await sendToDesktopSession(app.driver, { localId, text: "y", title: "7903 Retirar métricas de pausa sem fonte", marks: ["fix/7903-retirar-metricas-de-pausa"] })).toMatchObject({ ok: false, miss: true });
+    expect(app.actions.some((action) => action.startsWith("paste") || action.startsWith("key"))).toBe(false);
+  });
+
+  it("matches a mark only as a whole word under the field", () => {
+    const size = { h: 923 };
+    expect(sessionChipsShown([{ x: 600, y: 782, w: 300, h: 16, text: "repo fix/7903-a" }], size, ["fix/7903-ab"])).toBe(false);
+    expect(sessionChipsShown([{ x: 600, y: 82, w: 300, h: 16, text: "repo fix/7903-ab" }], size, ["fix/7903-ab"])).toBe(false);
+    expect(sessionChipsShown([{ x: 600, y: 782, w: 300, h: 16, text: "repo fix/7903-ab" }], size, ["fix/7903-ab"])).toBe(true);
+    expect(sessionChipsShown([{ x: 600, y: 782, w: 300, h: 16, text: "main" }], size, [])).toBe(false);
+    // a long branch the chip cuts short
+    expect(sessionChipsShown([{ x: 600, y: 782, w: 300, h: 16, text: "nuria-platform fix/7903-retirar-metricas-pausa-sem-fo…" }], size, ["fix/7903-retirar-metricas-pausa-sem-fonte"])).toBe(true);
+    expect(sessionChipsShown([{ x: 600, y: 782, w: 300, h: 16, text: "nuria-platform fix/7903…" }], size, ["fix/7903-retirar-metricas-pausa-sem-fonte"])).toBe(false);
   });
 });

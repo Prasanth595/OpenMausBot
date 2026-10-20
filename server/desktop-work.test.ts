@@ -16,6 +16,7 @@ import {
   DESKTOP_SEND_PARK_MISSES,
   desktopParkMs,
   parkedPending,
+  sessionMarks,
   DESKTOP_SEND_CONFIRM_MS,
   DESKTOP_SUMMARY_WAIT_MS,
   DESKTOP_SEND_MAX_DELIVERIES,
@@ -1197,5 +1198,13 @@ describe("a send that keeps missing its session is parked (19/10 send loop)", ()
     await h.tick();
     expect(session.desktop!.pending).toBeUndefined();
     expect(session.status).toBe("running");
+  });
+});
+
+describe("sessionMarks", () => {
+  it("names a session by its worktree branch and name from the app's record, never its title", () => {
+    expect(sessionMarks({ worktreePath: "/w/7903", worktreeName: "7903-retirar-metricas" }, () => "fix/7903-retirar-metricas-de-pausa")).toEqual(["fix/7903-retirar-metricas-de-pausa", "7903-retirar-metricas"]);
+    expect(sessionMarks({ cwd: "/repo" }, () => "main")).toEqual([]);
+    expect(sessionMarks(null)).toEqual([]);
   });
 });
