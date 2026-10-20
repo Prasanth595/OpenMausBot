@@ -452,6 +452,7 @@ import {
   SendSequencer,
 } from "./send-idempotency.ts";
 import { EventBus } from "./harness/bus.ts";
+import { runLabeled, startLoopStallWatch } from "./loop-stall.ts";
 import { ProviderRegistry } from "./harness/registry.ts";
 import { ManagedDesktopProviders } from "./managed-desktop.ts";
 import { mainThread, wasOldestThread } from "./main-thread.ts";
@@ -18984,7 +18985,16 @@ ROUTES.push(createOwnWorktreeRoutes({ ownStore, ccLedger, ownBreaker, registered
 ROUTES.push(createPipelineBoardRoutes({ pipelineBoard }));
 
 const toolResults = new ToolResults();
-const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
+const handleRequest = (req: IncomingMessage, res: ServerResponse): Promise<unknown> =>
+  runLabeled(`${req.method ?? "GET"} ${requestRouteLabel(req.url)}`, () => handleRequestInner(req, res));
+
+/** The path only, ids folded: a stall log names the route without query strings or tokens. */
+function requestRouteLabel(raw: string | undefined): string {
+  const path = (raw ?? "/").split("?")[0]!;
+  return path.replace(/\/[0-9a-f]{8}-[0-9a-f-]{27,}/gi, "/:id").replace(/\/[A-Za-z0-9_-]{20,}/g, "/:id").slice(0, 120);
+}
+
+const handleRequestInner = async (req: IncomingMessage, res: ServerResponse) => {
   let url: URL;
   try {
     url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
@@ -22883,6 +22893,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   }
 };
 
+startLoopStallWatch({ profile: process.env.OMB_LOOP_STALL_PROFILE !== "0" });
 const server = createServer(handleRequest);
 desktopViewer.attach(server, handleRequest);
 
