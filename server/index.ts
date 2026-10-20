@@ -54,7 +54,7 @@ import { isPendingSignInRequest, normalizeSignInSite, signInFallbackText, signIn
 
 import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
-import { HELD_NOTE, approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegatedApprovalMode, undeliveredApprovalTool } from "./auto-approve.ts";
+import { HELD_NOTE, approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, delegatedApprovalMode, undeliveredApprovalTool, implicitReadOnlyFor } from "./auto-approve.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
 import { providerMcpTool, providerToolAllowKey } from "./provider-tool-allow.ts";
@@ -7410,8 +7410,8 @@ bus.subscribe((event: RuntimeEvent) => {
       const verdict = permission && asker && event.requestId
         ? heldAtSafetyFloor(event, autoVerdict(effectiveApprovalMode, event.tool, {
           requiresExplicitApproval: event.requiresExplicitApproval,
-          // on Ask even read-only programs ask, unless a rule was saved for them (the owner, 20/10)
-          commandAllowed: Boolean(command && commandAllowlist.matches(asker.id, command, { implicitReadOnly: effectiveApprovalMode !== "ask" })),
+          // read-only programs ask like any other unless a rule was saved, except on attended "edits" (implicitReadOnlyFor)
+          commandAllowed: Boolean(command && commandAllowlist.matches(asker.id, command, { implicitReadOnly: implicitReadOnlyFor(effectiveApprovalMode, unattended) })),
           toolAllowed: Boolean(toolAllowKey && asker.alwaysAllow?.includes(toolAllowKey)),
         }))
         : null;
