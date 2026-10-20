@@ -126,6 +126,20 @@ describe("SpokenReplyStream", () => {
     ]);
   });
 
+  it("redacts credentials and private keys in the authoritative completed frame", async () => {
+    // A splitter that does no redaction of its own: the stream must.
+    const { sink, handles } = fakeSpeech((text) => text.split(/(?<=[.!?])\s+/).filter(Boolean));
+    const stream = new SpokenReplyStream(sink);
+    const secret = "sk-ant-api03-" + "B".repeat(30);
+    const pem = `-----BEGIN PRIVATE KEY-----\n${"K".repeat(64)}\n-----END PRIVATE KEY-----`;
+    stream.completeBotText("t", "turn-1", `Done. The key ${secret} is hidden.\n${pem}`, owner);
+    await settle();
+    const spoken = handles[0].pushes.join(" ");
+    expect(spoken).not.toContain(secret);
+    expect(spoken).not.toContain("K".repeat(8));
+    expect(spoken).toContain("«redacted");
+  });
+
   it("goes silent when the speak gates close at the completed frame", async () => {
     const { sink, handles } = fakeSpeech();
     const stream = new SpokenReplyStream(sink);

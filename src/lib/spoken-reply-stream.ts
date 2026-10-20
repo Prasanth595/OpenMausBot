@@ -173,7 +173,7 @@ export class SpokenReplyStream {
             const spoken = turn.spoken;
             turn.spoken = [];
             turn.buffer = "";
-            const blocks = await turn.stream.prepare(text);
+            const blocks = await turn.stream.prepare(speakableStreamText(text));
             let resume = 0;
             while (resume < spoken.length && resume < blocks.length && spoken[resume] === blocks[resume]) resume += 1;
             // Re-speak from the first divergence: content the authoritative
