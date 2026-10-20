@@ -238,13 +238,18 @@ export class Speaker {
           if (live()) {
             this.set({ ...IDLE, error: rendered.error instanceof Error ? rendered.error.message : String(rendered.error) });
           }
+          controller.abort();
           return;
         }
-        if (!live()) return;
+        if (!live()) {
+          controller.abort();
+          return;
+        }
         this.set({ status: "speaking", botId: opts.botId, messageId: opts.messageId, caption: pending[at]! });
         const played = await this.play(rendered.blob, live, opts.messageId, at);
         if (!played || !live()) {
           if (live()) this.set({ ...IDLE, error: "The generated voice clip couldn't be played." });
+          controller.abort();
           return;
         }
       }
