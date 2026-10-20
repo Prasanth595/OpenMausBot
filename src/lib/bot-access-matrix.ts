@@ -130,8 +130,9 @@ export function planApprovalForAll(bots: readonly Bot[], instances: readonly Ins
 const sameJson = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 
 /**
- * Gives every other bot the source's connected apps, sending rule and approval level. A level the target cannot take
- * (busy, unsupported by its engine, or Custom, which is granted per bot) leaves the target's own level in place.
+ * Gives every other bot the source's connected apps, sending rule and approval level. Custom is granted per bot, so it
+ * is neither copied from the source nor replaced on a target; a level a target cannot take (busy, unsupported by its
+ * engine) also leaves the target's own level in place.
  */
 export function planCopyAccess(source: Bot, bots: readonly Bot[], instances: readonly InstanceInfo[]): TeamPlanRow[] {
   const sourceMode = approvalModeFor(source);
@@ -143,7 +144,7 @@ export function planCopyAccess(source: Bot, bots: readonly Bot[], instances: rea
     if (!sameJson(source.connectorScopes, bot.connectorScopes)) patch.connectorScopes = structuredClone(source.connectorScopes ?? null);
     if (!sameJson(outboundOf(source), outboundOf(bot))) patch.outbound = { ...outboundOf(source) };
     let approvalSkip: string | undefined;
-    if (!copyable) approvalSkip = t("botAccessMatrix.skip.customApproval");
+    if (!copyable || approvalModeFor(bot) === "custom") approvalSkip = t("botAccessMatrix.skip.customApproval");
     else {
       const [approval] = planTeamChange([bot], instances, { kind: "approval", mode: sourceMode as TeamApprovalMode });
       if (approval?.status === "apply") Object.assign(patch, approval.patch);

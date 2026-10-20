@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 import { Copy, X } from "lucide-react";
 
@@ -16,6 +16,7 @@ import {
   type AppAccess,
   type AppAccessChoice,
 } from "@/lib/bot-access-matrix";
+import { connectorServiceAccess } from "@/lib/connector-grants";
 import { t } from "@/lib/i18n";
 import {
   applyTeamPlan,
@@ -62,7 +63,7 @@ export function BotAccessDialog({ onClose }: { onClose: () => void }) {
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [results, setResults] = useState<TeamResultRow[] | null>(null);
-  const [consent, setConsent] = useState<null | { kind: "bulk" } | { kind: "one"; botId: string }>(null);
+  const [consent, setConsent] = useState<null | { kind: "bulk" } | { kind: "one"; botId: string; patch: BotUpdatePatch }>(null);
   const dialog = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -77,7 +78,7 @@ export function BotAccessDialog({ onClose }: { onClose: () => void }) {
   const setApproval = (bot: Bot, mode: TeamApprovalMode) => {
     const [row] = planApprovalForAll([bot], state.instances, mode);
     if (row?.status !== "apply") return;
-    if (planNeedsLocalAutoConsent([row])) setConsent({ kind: "one", botId: bot.id });
+    if (planNeedsLocalAutoConsent([row])) setConsent({ kind: "one", botId: bot.id, patch: row.patch });
     else save(bot, row.patch);
   };
   const startBulk = (title: string, plan: TeamPlanRow[]) => {
@@ -117,7 +118,12 @@ export function BotAccessDialog({ onClose }: { onClose: () => void }) {
       <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="bot-access-title" data-testid="bot-access-dialog"
         className="flex max-h-[90vh] w-full max-w-[1100px] flex-col overflow-hidden rounded-2xl border border-hairline/50 bg-panel text-ink shadow-2xl"
         onKeyDown={(event) => {
-          if (event.key !== "Escape" || consent) return;
+          if (consent) return;
+          if (event.key === "Tab") {
+            trapTab(event, dialog.current);
+            return;
+          }
+          if (event.key !== "Escape") return;
           event.stopPropagation();
           if (bulk) leaveBulk();
           else close();
@@ -293,7 +299,7 @@ export function BotAccessDialog({ onClose }: { onClose: () => void }) {
           setConsent(null);
           if (pending?.kind === "bulk") void runBulk(true);
           else if (pending?.kind === "one") {
-            dispatch({ type: "updateBot", botId: pending.botId, patch: { approvalMode: "auto", acknowledgeLocalAuto: true } });
+            dispatch({ type: "updateBot", botId: pending.botId, patch: { ...pending.patch, acknowledgeLocalAuto: true } });
           }
         }}
       />
@@ -301,9 +307,32 @@ export function BotAccessDialog({ onClose }: { onClose: () => void }) {
   );
 }
 
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+function trapTab(event: KeyboardEvent<HTMLElement>, container: HTMLElement | null) {
+  if (!container) return;
+  const items = Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE)).filter((element) => element.getClientRects().length > 0);
+  const first = items[0];
+  const last = items.at(-1);
+  if (!first || !last) {
+    event.preventDefault();
+    return;
+  }
+  const active = document.activeElement;
+  if (!items.some((element) => element === active)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  } else if (event.shiftKey && active === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function countFor(bot: Bot, slug: string): number {
-  const grant = bot.connectorTools?.[slug];
-  return grant && grant.tools !== "*" ? grant.tools.length : 0;
+  return connectorServiceAccess(bot.connectorTools, slug).count;
 }
 
 function AppHeading({ app }: { app: BotApp }) {

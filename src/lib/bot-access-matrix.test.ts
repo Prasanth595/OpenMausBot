@@ -130,6 +130,15 @@ describe("bot access matrix", () => {
     expect(plan[2]).not.toMatchObject({ patch: { approvalMode: "ask" } });
   });
 
+  it("leaves a target's Custom approval alone and still copies its apps", () => {
+    const source = bot("src", { connectorTools: { github: { tools: "*" } }, approvalMode: "ask" });
+    const [entry] = planCopyAccess(source, [source, bot("custom", { approvalMode: "custom" })], instances);
+    expect(entry).toMatchObject({ status: "apply", patch: { connectorTools: { github: { tools: "*" } } } });
+    expect(entry).not.toMatchObject({ patch: { approvalMode: expect.anything() } });
+    const [same] = planCopyAccess(bot("s", { approvalMode: "ask" }), [bot("s"), bot("c", { approvalMode: "custom" })], instances);
+    expect(same).toMatchObject({ status: "skip", reason: "Custom approval is set on each bot separately" });
+  });
+
   it("clears a target's own limits when the source has none", () => {
     const [entry] = planCopyAccess(bot("src"), [bot("src"), bot("t", { connectorTools: {}, connectorScopes: { apps: {} } })], instances);
     expect(entry).toMatchObject({ status: "apply", patch: { connectorTools: null, connectorScopes: null } });

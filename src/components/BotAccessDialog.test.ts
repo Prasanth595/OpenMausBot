@@ -67,6 +67,15 @@ describe("Bot access page", () => {
     expect(html).not.toContain("Only the owner or an admin");
   });
 
+  it("still renders when a bot's grants were saved in a shape this build cannot read", () => {
+    fixture.bots = [bot("Odd", { connectorTools: { github: { tools: null }, supabase: "everything" } }), bot("Fine")];
+    fixture.ownerOrAdmin = true;
+    const html = render();
+    expect(html).toContain('data-bot-id="Odd"');
+    expect(html).toContain("Custom");
+    expect(html).toContain('data-bot-id="Fine"');
+  });
+
   it("is read-only for someone who is not the owner or an admin", () => {
     fixture.bots = [bot("Rigel")];
     fixture.ownerOrAdmin = false;
