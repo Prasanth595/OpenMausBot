@@ -1,3 +1,4 @@
+import { routineLaneState } from "./intake-lock.ts";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -3936,5 +3937,59 @@ describe("an occurrence due while the routine's previous run is still active", (
     expect(h.started).toHaveLength(2);
     expect(h.manager.listRuns().filter(run => run.status === "queued")).toHaveLength(0);
     expect(h.manager.listRuns().filter(run => run.status === "running")).toHaveLength(1);
+  });
+});
+
+describe("a routine in a lane of its own (19/10: the Esteira waited behind the Chief of Staff's other routines)", () => {
+  const quarter = 15 * 60_000;
+  it("starts within 5 min of its slot while another long routine of the same bot is running", async () => {
+    const start = new Date(2026, 9, 19, 22, 0, 0).getTime();
+    let routineIds: Map<string, boolean> = new Map();
+    const h = harness(start, {
+      // the server's rule: the bot's intake turn is held by any active run that is not in its own lane
+      botState: (_botId, routineId) => routineLaneState({
+        ownLane: routineIds.get(routineId ?? "") === true,
+        intakeBusyElsewhere: () => h.manager.listRuns().some((run) => run.status === "running" && run.routineId !== routineId && routineIds.get(run.routineId) !== true),
+        dispatchState: () => "ready",
+      }).state,
+    });
+    const long = h.manager.create({ name: "Disco", prompt: "long work", botId: "maus-1", schedule: { type: "cron", expression: "0 22 * * *", timeZone: "America/Sao_Paulo" } });
+    const esteira = h.manager.create({ name: "Esteira 24/7", prompt: "pull work", botId: "maus-1", lane: "own", schedule: { type: "cron", expression: "*/15 * * * *", timeZone: "America/Sao_Paulo" } });
+    routineIds = new Map(h.manager.listRoutines().map((routine) => [routine.id, routine.lane === "own"]));
+    expect(esteira.lane).toBe("own");
+    expect(long.lane).toBeUndefined();
+    h.manager.runNow(long.id); await h.manager.tick();
+    const longRun = h.manager.listRuns().find((run) => run.routineId === long.id)!;
+    expect(longRun.status).toBe("running");
+    // the long run goes on for 45 min; every Esteira slot starts on time, not behind it
+    for (const slot of [1, 2]) {
+      h.setNow(start + slot * quarter + 60_000); await h.manager.tick();
+      const run = h.manager.listRuns().find((candidate) => candidate.routineId === esteira.id && candidate.scheduledFor === start + slot * quarter);
+      expect(run?.startedAt).toBeDefined();
+      expect(run!.startedAt! - run!.scheduledFor).toBeLessThanOrEqual(5 * 60_000);
+      h.manager.handleRuntimeEvent({ eventId: `done-${slot}`, provider: "fake", threadId: run!.threadId!, createdAt: new Date().toISOString(), type: "turn.completed", ok: true });
+    }
+  });
+
+  it("without a lane of its own it waits behind the other routine (the old behaviour)", async () => {
+    expect(routineLaneState({ ownLane: false, intakeBusyElsewhere: () => true, dispatchState: () => "ready" })).toEqual({ state: "busy", waitedOnIntake: true });
+    expect(routineLaneState({ ownLane: true, intakeBusyElsewhere: () => true, dispatchState: () => "ready" })).toEqual({ state: "ready", waitedOnIntake: false });
+    expect(routineLaneState({ ownLane: true, intakeBusyElsewhere: () => true, dispatchState: () => "busy" }).state).toBe("busy");
+  });
+
+  it("keeps lane through a reload and drops it on a patch to null", () => {
+    const h = harness();
+    const routine = h.manager.create({ name: "Esteira", prompt: "x", botId: "maus-1", lane: "own", schedule: { type: "cron", expression: "*/15 * * * *", timeZone: "UTC" } });
+    expect(h.manager.update(routine.id, { lane: null })!.lane).toBeUndefined();
+    expect(() => h.manager.create({ name: "Bad", prompt: "x", botId: "maus-1", lane: "x" as never, schedule: { type: "cron", expression: "*/15 * * * *", timeZone: "UTC" } })).toThrow(/lane/);
+  });
+
+  it("a 2-minute routine whose runs take 20 min keeps at most one pending run, never a queue of slots", async () => {
+    const start = new Date(2026, 9, 19, 22, 0, 0).getTime();
+    const h = harness(start);
+    h.manager.create({ name: "Atendimento: resposta rápida no Chat", prompt: "x", botId: "maus-1", schedule: { type: "cron", expression: "*/2 * * * *", timeZone: "UTC" } });
+    for (let minute = 0; minute <= 22; minute += 2) { h.setNow(start + minute * 60_000); await h.manager.tick(); }
+    expect(h.manager.listRuns().filter((run) => run.status === "queued")).toHaveLength(1);
+    expect(h.started).toHaveLength(1);
   });
 });

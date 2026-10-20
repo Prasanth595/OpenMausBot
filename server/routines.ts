@@ -92,6 +92,11 @@ export interface Routine {
   /** An occurrence due while this routine's previous run is still active: by default (absent, or "queue")
    * it is coalesced into ONE pending run that starts as soon as the target is free; "skip" drops it. */
   overlap?: "skip" | "queue";
+  /** "own": the routine runs in a lane of its own — it does not wait behind
+   * (nor hold) the bot's one-intake-turn lock, so a long routine of the same
+   * bot never delays it (19/10: the Esteira waited 45 min behind the Chief of
+   * Staff's other routines). The bot's thread capacity still applies. */
+  lane?: "own";
   runOnStartup?: boolean;
   skippedRuns?: number;
   lastSkippedAt?: number;
@@ -213,6 +218,7 @@ export interface RoutineInput {
   attachments?: RoutineContextAttachment[];
   continuity?: boolean;
   overlap?: "skip" | "queue";
+  lane?: "own" | null;
   runOnStartup?: boolean;
   resultsThreadId?: string | null;
 }
@@ -690,6 +696,8 @@ function sanitizeInput(input: RoutineInput, after: number): Omit<Routine, "id" |
   if (input.overlap !== undefined && input.overlap !== "skip" && input.overlap !== "queue") {
     throw new Error("Choose skip or queue for overlapping runs");
   }
+  if (input.lane != null && input.lane !== "own") throw new Error('lane must be "own" or absent');
+  if (input.lane === "own" && target === "room-goal") throw new Error("Room goals do not run in a lane of their own");
   if (continuity && target === "room-goal") {
     throw new Error("Room goals do not carry continuity yet");
   }
@@ -709,6 +717,7 @@ function sanitizeInput(input: RoutineInput, after: number): Omit<Routine, "id" |
     ...(continuity ? { continuity: true } : {}),
     // Kept as chosen (absent and "queue" behave alike) so installed-package part hashes stay as written.
     ...(input.overlap === "skip" || input.overlap === "queue" ? { overlap: input.overlap } : {}),
+    ...(input.lane === "own" ? { lane: "own" as const } : {}),
     ...(input.runOnStartup === true && schedule.type !== "once" ? { runOnStartup: true } : {}),
   };
 }
@@ -763,6 +772,7 @@ export class RoutineManager {
               resultsThreadId: persistedSourceThreadId.parse(routine.resultsThreadId),
               // Absent and "queue" both coalesce; only an explicit "skip" drops overlapping occurrences.
               overlap: routine.overlap === "skip" || routine.overlap === "queue" ? routine.overlap : undefined,
+              lane: routine.lane === "own" ? "own" : undefined,
               runOnStartup: routine.runOnStartup === true ? true : undefined,
               skippedRuns: Number.isSafeInteger(routine.skippedRuns) && routine.skippedRuns! > 0 ? routine.skippedRuns : undefined,
               lastSkippedAt: Number.isSafeInteger(routine.lastSkippedAt) && routine.lastSkippedAt! >= 0 && routine.lastSkippedAt! <= MAX_DATE_MS ? routine.lastSkippedAt : undefined,
@@ -1056,6 +1066,7 @@ export class RoutineManager {
       attachments: patch.attachments ?? routine.attachments,
       continuity: patch.continuity ?? routine.continuity,
       overlap: Object.hasOwn(patch, "overlap") ? patch.overlap : routine.overlap,
+      lane: Object.hasOwn(patch, "lane") ? patch.lane : routine.lane,
       runOnStartup: patch.runOnStartup ?? routine.runOnStartup,
     }, now);
     if (this.targetState(clean) === "missing") throw new Error(this.missingTargetMessage(clean.target));
@@ -1080,6 +1091,7 @@ export class RoutineManager {
       });
       if (!clean.continuity) delete routine.continuity;
       if (clean.overlap === undefined) delete routine.overlap;
+      if (clean.lane === undefined) delete routine.lane;
       if (!clean.runOnStartup) delete routine.runOnStartup;
       if (Object.hasOwn(patch, "timeoutMinutes") && patch.timeoutMinutes == null) {
         delete routine.timeoutMinutes;

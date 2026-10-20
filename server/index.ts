@@ -407,7 +407,7 @@ import { climbStopLadder, ownerItemCiting } from "./stop-ladder.ts";
 import { checkArchivedOutside, githubLookups } from "./archived-outside.ts";
 import { computerErrorPt } from "./error-pt.ts";
 import { sessionErrorPt } from "../shared/session-error-pt.ts";
-import { IntakeLock } from "./intake-lock.ts";
+import { IntakeLock, routineLaneState } from "./intake-lock.ts";
 import { SESSION_TOKEN_SERVICE, SessionToken } from "./session-token.ts";
 import { appFlappingPending, appUnblockPending, flappingRefusal, type FolderBlockSeen, type FolderFlapState, noteFolderBlock, ownerChannelChip, serverRestartedChip, sessionChips, staleUnblockItem } from "./owner-chips.ts";
 import { CHANNEL_ORDER_WORDS, channelOrderTarget, decisionOf, firstSentence, isOwnerChannelOrder, isOwnerOrder, lastChannelOrder, SharedState, threadByRef } from "./shared-state.ts";
@@ -8173,6 +8173,12 @@ function logIntakeWait(line: string): void {
   console.log(`[intake] ${line}`);
 }
 /** `waiter` of this bot is held back by the intake lock: logged (who, behind whom) and timed. */
+/** The routine runs in a lane of its own (routine.lane === "own"). */
+function routineInOwnLane(routineId: string | undefined): boolean {
+  if (!routineId || !routines) return false;
+  return routines.listRoutines().some((routine) => routine.id === routineId && routine.lane === "own");
+}
+
 function holdIntake(botId: string, waiter: string, what: string): void {
   intakeLock.noteWait(botId, waiter);
   logIntakeWait(`${what} of ${botId} waits behind ${intakeLock.holder(botId) ?? "?"} (the bot's other intake turn)`);
@@ -14342,7 +14348,9 @@ routines = new RoutineManager({
   runTurnLive: (run) => Boolean(run.threadId && threadBusy(run.botId, run.threadId)),
   // a routine run waits while the bot's intake turn (a watch) runs elsewhere
   botState: (botId, routineId) => {
-    if (!intakeBusyElsewhere(botId)) return unattendedDispatchState(botId);
+    // a routine in its own lane neither waits behind nor holds the bot's intake turn
+    const lane = routineLaneState({ ownLane: routineInOwnLane(routineId), intakeBusyElsewhere: () => intakeBusyElsewhere(botId), dispatchState: () => unattendedDispatchState(botId) });
+    if (!lane.waitedOnIntake) return lane.state;
     holdIntake(botId, `routine:${routineId ?? "?"}`, `routine ${routineId ?? "?"}`);
     return "busy";
   },
@@ -14410,6 +14418,10 @@ routines = new RoutineManager({
     }
   },
   startTurn: async (botId, threadId, prompt, runOn, triggerSource, onDispatchError, routineId) => {
+    if (routineInOwnLane(routineId)) {
+      await startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError });
+      return;
+    }
     noteIntakeTurn(botId, threadId);
     try {
       await startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError: (message) => {
