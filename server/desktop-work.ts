@@ -64,7 +64,8 @@ export function desktopParkMs(parks: number): number {
 
 /** A parked send: it waits out its backoff without holding anything. */
 export const parkedPending = (session: Pick<CcSession, "desktop">): boolean => session.desktop?.pending?.parkedAt !== undefined;
-export const DESKTOP_BACKOFF_BASE_MS = 30_000;
+/** 60 s, doubling: a retry never lands in the middle of another step's screen (was 30 s). */
+export const DESKTOP_BACKOFF_BASE_MS = 60_000;
 export const DESKTOP_BACKOFF_MAX_MS = 10 * 60_000;
 /** After the Archive click, the app's record must say archived within this... */
 export const DESKTOP_ARCHIVE_CONFIRM_MS = 2 * 60_000;

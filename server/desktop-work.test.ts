@@ -114,10 +114,10 @@ describe("the brief", () => {
 });
 
 describe("backoff and the queue", () => {
-  it("backs off 30s, doubling, up to 10 minutes", () => {
-    expect(desktopBackoffMs(1)).toBe(30_000);
-    expect(desktopBackoffMs(2)).toBe(60_000);
-    expect(desktopBackoffMs(5)).toBe(480_000);
+  it("backs off 60s, doubling, up to 10 minutes", () => {
+    expect(desktopBackoffMs(1)).toBe(60_000);
+    expect(desktopBackoffMs(2)).toBe(120_000);
+    expect(desktopBackoffMs(4)).toBe(480_000);
     expect(desktopBackoffMs(9)).toBe(600_000);
   });
 
@@ -156,7 +156,7 @@ describe("backoff and the queue", () => {
     expect(session.desktop!.pending!.nextAttemptAt).toBeUndefined();
     h.results.push({ ok: false, reason: "the Claude app lost focus", retry: true, touched: true });
     await h.tick();
-    expect(session.desktop!.pending).toMatchObject({ attempts: 1, nextAttemptAt: h.now + 30_000 });
+    expect(session.desktop!.pending).toMatchObject({ attempts: 1, nextAttemptAt: h.now + 60_000 });
     await h.tick();
     expect(h.steps.create).toHaveBeenCalledTimes(2);
   });
@@ -391,10 +391,10 @@ describe("sessions left running with no turn coming (#9298)", () => {
     session.desktop!.pending = { kind: "create", text: "brief", since: h.now, attempts: 0 };
     await h.tick();
     expect(session.status).toBe("running");
-    expect(session.desktop!.pending).toMatchObject({ helperFailures: 1, nextAttemptAt: h.now + 30_000 });
-    h.advance(30_000);
-    await h.tick();
+    expect(session.desktop!.pending).toMatchObject({ helperFailures: 1, nextAttemptAt: h.now + 60_000 });
     h.advance(60_000);
+    await h.tick();
+    h.advance(120_000);
     await h.tick();
     expect(session.status).toBe("failed");
     expect(session.lastError).toContain("3 tries");

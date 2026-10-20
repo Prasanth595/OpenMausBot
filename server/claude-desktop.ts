@@ -175,7 +175,22 @@ async function guard(screen: Screen, step: string): Promise<DesktopStop | null> 
 /** Run `body` as one screen step: wait for an idle, unlocked Mac first, and
  * afterwards give the front back to the app that had it — unless the person
  * came back, in which case the screen is theirs and nothing more is touched. */
-async function withScreen(driver: DesktopDriver, body: (screen: Screen) => Promise<DesktopStep>): Promise<DesktopStep> {
+/** One screen step at a time, server-wide: the app has one window, so a
+ * second step (another session's send, a rename, a create) would switch it
+ * between this step's open, check, type and Return (20/10 00:55: 7903, 9638
+ * and 9637 each "not the one on screen" 4 times). */
+let screenQueue: Promise<unknown> = Promise.resolve();
+export function withScreenLock<T>(task: () => Promise<T>): Promise<T> {
+  const run = screenQueue.then(task, task);
+  screenQueue = run.catch(() => undefined);
+  return run;
+}
+
+function withScreen(driver: DesktopDriver, body: (screen: Screen) => Promise<DesktopStep>): Promise<DesktopStep> {
+  return withScreenLock(() => withScreenUnlocked(driver, body));
+}
+
+async function withScreenUnlocked(driver: DesktopDriver, body: (screen: Screen) => Promise<DesktopStep>): Promise<DesktopStep> {
   const ready = await readyForScreen(driver);
   if (!ready.ok) return ready;
   const before = Date.now();

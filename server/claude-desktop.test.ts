@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   archiveDesktopSession,
+  withScreenLock,
   CLAUDE_BUNDLE_ID,
   lastAppRepo,
   liveWorktreeNames,
@@ -1154,5 +1155,31 @@ describe("questions, folders and reused worktrees in the app's records", () => {
   it("asks the same gesture wherever it is said: 409, create refusal and the owner's item", () => {
     expect(ROOT_SESSION_HOWTO("nuria-platform", "main")).toContain("worktree OFF");
     expect(ROOT_SESSION_HOWTO("nuria-platform", "main")).not.toMatch(/worktree on\b/);
+  });
+});
+
+describe("one screen step at a time (20/10 00:55: interleaved sends)", () => {
+  it("runs two sends one after the other, each from open to Return, never interleaved", async () => {
+    const localId = "local_6415ced5-d3d5-4055-9d33-58c585c87de3";
+    const open = { text: "Automação inatividade não dispara", y: 60 };
+    const field = { text: "Responder...", y: 820 };
+    const bar = { text: "+ O v Automático", y: 866 };
+    const screens = () => [[open, field, bar], [open, { text: "follow-up now", y: 820 }, bar], [open, { text: "follow-up now", y: 400 }, field, bar]];
+    const a = fakeApp({ screens: screens() });
+    const b = fakeApp({ screens: screens() });
+    const log: string[] = [];
+    const tag = (name: string, driver: typeof a.driver) => ({ ...driver, openUrl: async (url: string) => { log.push(`${name} open`); await driver.openUrl(url); }, key: async (code: number, cmd?: boolean) => { log.push(`${name} return`); await driver.key(code, cmd); } });
+    const [ra, rb] = await Promise.all([
+      sendToDesktopSession(tag("a", a.driver), { localId, text: "follow-up now", title: open.text }),
+      sendToDesktopSession(tag("b", b.driver), { localId, text: "follow-up now", title: open.text }),
+    ]);
+    expect(ra).toEqual({ ok: true });
+    expect(rb).toEqual({ ok: true });
+    expect(log).toEqual(["a open", "a return", "b open", "b return"]);
+  });
+
+  it("a step that throws does not block the next one", async () => {
+    await expect(withScreenLock(async () => { throw new Error("boom"); })).rejects.toThrow("boom");
+    expect(await withScreenLock(async () => 7)).toBe(7);
   });
 });
