@@ -71,4 +71,10 @@ describe("commandCoveredByPatterns", () => {
       expect(commandCoveredByPatterns(command, [])).toBe(true);
     }
   });
+
+  it("does not imply the read-only set when asked not to (Ask mode)", () => {
+    expect(commandCoveredByPatterns("cat a | wc -l", [])).toBe(true);
+    expect(commandCoveredByPatterns("cat a | wc -l", [], { implicitReadOnly: false })).toBe(false);
+    expect(commandCoveredByPatterns("cat a | wc -l", ["cat *", "wc *"], { implicitReadOnly: false })).toBe(true);
+  });
 });

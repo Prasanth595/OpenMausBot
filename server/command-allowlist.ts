@@ -132,7 +132,7 @@ export class CommandAllowlistStore {
     if (next.length !== this.rules.length) this.save(next);
   }
 
-  matches(botId: string, value: CommandAllowlistCandidate): boolean {
+  matches(botId: string, value: CommandAllowlistCandidate, opts: { implicitReadOnly?: boolean } = {}): boolean {
     if (this.unreadable || typeof botId !== "string" || !BOT_ID.test(botId)) return false;
     const candidate = commandAllowlistCandidate(value);
     if (candidate === null) return false;
@@ -140,7 +140,7 @@ export class CommandAllowlistStore {
     // Exact strings (every rule saved before patterns existed) keep working as they did.
     if (scoped.some((rule) => rule.command === candidate.command)) return true;
     // Program patterns (`cat *`, `git status *`) and the implicit read-only set, part by part.
-    return commandCoveredByPatterns(candidate.command, scoped.map((rule) => rule.command).filter(isCommandPattern));
+    return commandCoveredByPatterns(candidate.command, scoped.map((rule) => rule.command).filter(isCommandPattern), opts);
   }
 
   /** "Always allow this type of command": save its program patterns, or the exact string when none is safe. */

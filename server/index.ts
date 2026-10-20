@@ -7410,7 +7410,8 @@ bus.subscribe((event: RuntimeEvent) => {
       const verdict = permission && asker && event.requestId
         ? heldAtSafetyFloor(event, autoVerdict(effectiveApprovalMode, event.tool, {
           requiresExplicitApproval: event.requiresExplicitApproval,
-          commandAllowed: Boolean(command && commandAllowlist.matches(asker.id, command)),
+          // on Ask even read-only programs ask, unless a rule was saved for them (the owner, 20/10)
+          commandAllowed: Boolean(command && commandAllowlist.matches(asker.id, command, { implicitReadOnly: effectiveApprovalMode !== "ask" })),
           toolAllowed: Boolean(toolAllowKey && asker.alwaysAllow?.includes(toolAllowKey)),
         }))
         : null;

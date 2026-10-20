@@ -190,9 +190,11 @@ const partMatches = (part: CommandPart, pattern: string) => {
  * Whether every part of a command is covered by a pattern or is read-only.
  * Exact-string rules are checked by the caller; this only widens.
  */
-export function commandCoveredByPatterns(command: string, patterns: readonly string[]): boolean {
+/** `implicitReadOnly: false` (a bot on Ask): read-only programs need a saved rule like any other — the owner asked to see them (20/10). */
+export function commandCoveredByPatterns(command: string, patterns: readonly string[], opts: { implicitReadOnly?: boolean } = {}): boolean {
   const parts = splitCommand(command);
   if (!parts) return false;
   const usable = patterns.filter(isCommandPattern);
-  return parts.every((part) => !isDangerousPart(part) && (isReadOnlyPart(part) || usable.some((p) => partMatches(part, p))));
+  const implicit = opts.implicitReadOnly !== false;
+  return parts.every((part) => !isDangerousPart(part) && ((implicit && isReadOnlyPart(part)) || usable.some((p) => partMatches(part, p))));
 }

@@ -178,4 +178,14 @@ describe("command allowlist patterns", () => {
     const store = new CommandAllowlistStore(filename);
     expect(store.matches("bot-a", { ...candidate(), command: "cat ~/.nuria/halted-production-release.reason; echo; ls -l ~/.nuria/halted-production-release.* ~/.nuria/declined-production-release.sha" })).toBe(true);
   });
+
+  it("on Ask, read-only commands still ask unless a rule was saved for them (the owner, 20/10)", () => {
+    const store = new CommandAllowlistStore(filename);
+    const ask = { implicitReadOnly: false };
+    expect(store.matches("bot-a", { ...candidate(), command: "echo hi" }, ask)).toBe(false);
+    expect(store.matches("bot-a", { ...candidate(), command: "cat a; ls -l" }, ask)).toBe(false);
+    store.remember("bot-a", { ...candidate(), command: "echo hi" });
+    expect(store.matches("bot-a", { ...candidate(), command: "echo hi" }, ask)).toBe(true);
+    expect(store.matches("bot-a", { ...candidate(), command: "echo hi; ls" }, ask)).toBe(false);
+  });
 });
