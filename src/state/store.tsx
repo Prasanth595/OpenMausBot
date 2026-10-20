@@ -3327,7 +3327,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           }
           if (frame.message?.role === "bot" && frame.message?.kind === "text") {
-            recordBotTextMessage(frame.message as { id: string; text?: string | null });
+            recordBotTextMessage(frame.message as { id: string; text?: string | null }, frame.threadId);
             spokenReplyStream.completeBotText(frame.threadId, frame.message.turnId, frame.message.text ?? "", speechOwnerFor(frame.threadId), frame.message.id);
           }
           break;
