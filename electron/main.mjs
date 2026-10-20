@@ -384,10 +384,12 @@ function desktopDataDir() {
   return process.env.OMB_DATA_DIR || path.join(app.getPath("home"), ".openmausbot");
 }
 
-async function stopUtilityServer(proc, timeoutMs = UTILITY_SERVER_STOP_TIMEOUT_MS) {
+async function stopUtilityServer(proc, timeoutMs = UTILITY_SERVER_STOP_TIMEOUT_MS, reason = "unspecified") {
   if (!proc) return true;
   const exited = utilityServerExits.get(proc);
   if (!exited) return false;
+  // every stop says why, so a clean "exited code=0" in server.log is never a mystery
+  slog(`stopping server pid=${proc.pid ?? "?"}: ${reason}`);
   try {
     proc.kill();
   } catch {
@@ -1254,7 +1256,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
   });
   if (identity.outcome === "ready" && serverSupervisor.isCurrent(proc)) return { proc };
   slog(bootFailureMessage(port, identity));
-  const stopped = await stopUtilityServer(proc);
+  const stopped = await stopUtilityServer(proc, undefined, `boot failed on port ${port} (${identity.outcome})`);
   if (!stopped) {
     slog(`child on port ${port} did not exit after termination; refusing to start a sibling server`);
   }
@@ -1274,8 +1276,8 @@ async function startServerPackaged() {
       }
       if (started.abort) return false;
       if (started.reason !== "foreign-owner") everyPortForeignOwned = false;
-      // a slow boot is retried on the same port (once), never moved to a fallback port
-      if (portAfterFailure(started.reason) === "same" && sameTries < 1) { sameTries++; continue; }
+      // a slow boot is retried on the same port (up to 3 more times), never moved to a fallback port
+      if (portAfterFailure(started.reason) === "same" && sameTries < 3) { sameTries++; continue; }
       index++; sameTries = 0;
     }
     await new Promise((r) => setTimeout(r, 2500));
@@ -1743,7 +1745,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
         stopChild: async () => {
           // A child that will not die still writes to its folder: abort with the lease still held.
           const proc = serverProc;
-          if (proc && !(await stopUtilityServer(proc))) throw new Error("the server child did not stop");
+          if (proc && !(await stopUtilityServer(proc, undefined, "switching local environment"))) throw new Error("the server child did not stop");
         },
         releaseLease: async () => {
           desktopDataDirLease?.release();
@@ -1765,7 +1767,7 @@ async function switchLocalEnvironmentTo(targetDir, targetId) {
         },
         probeReady: async () => "ready",
         rollback: async () => {
-          if (startedProc) await stopUtilityServer(startedProc);
+          if (startedProc) await stopUtilityServer(startedProc, undefined, "environment switch rolled back");
           try {
             desktopDataDirLease?.release();
           } catch (error) {
@@ -3418,15 +3420,18 @@ let signalQuitRequested = false;
 
 // Linux package managers and watchdogs stop apps with SIGTERM/SIGINT: the first becomes a normal quit,
 // a second keeps Node's default force-quit (`once` listeners).
+let quitReason = "";
 const requestSignalQuit = () => {
   if (signalQuitRequested) return;
   signalQuitRequested = true;
+  quitReason = "signal";
   app.quit();
 };
 process.once("SIGINT", requestSignalQuit);
 process.once("SIGTERM", requestSignalQuit);
 
 app.on("before-quit", (e) => {
+  if (!desktopShutdownStarted) slog(`app quitting (before-quit: ${quitReason || "quit from the menu, Dock or AppleScript"}); the server child stops with it`);
   desktopShutdownStarted = true;
   startupScreen?.dispose();
   companyBackupSchedule?.close();
