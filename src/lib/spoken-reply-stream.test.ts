@@ -17,7 +17,7 @@ interface FakeHandle {
 /** Mirrors the committed splitter's contract: the whole text is redacted
  * first, blocks close at sentence separators, and the trailing piece stays
  * open until a later block exists. */
-function fakeSpeech(prepareOverride?: (text: string) => string[]) {
+function fakeSpeech(prepareOverride?: (text: string) => string[] | Promise<string[]>) {
   const handles: FakeHandle[] = [];
   const sink: ReplySpeechSink = {
     begin(opts) {
@@ -138,6 +138,35 @@ describe("SpokenReplyStream", () => {
     expect(spoken).not.toContain(secret);
     expect(spoken).not.toContain("K".repeat(8));
     expect(spoken).toContain("«redacted");
+  });
+
+  it("speaks later deltas that arrive while the authoritative frame is preparing", async () => {
+    const pending: { text: string; resolve: (blocks: string[]) => void }[] = [];
+    const { sink, handles } = fakeSpeech((text) => {
+      const { promise, resolve } = Promise.withResolvers<string[]>();
+      pending.push({ text, resolve });
+      return promise;
+    });
+    const release = async (index: number) => {
+      pending[index].resolve(pending[index].text.split(/(?<=[.!?])\s+/).filter(Boolean));
+      await settle();
+    };
+    const stream = new SpokenReplyStream(sink);
+    stream.onRuntimeEvent(delta("Item one done. Tail "), owner);
+    await settle();
+    expect(handles[0].pushes).toEqual([]); // still preparing: nothing closed yet
+    stream.completeBotText("t", "turn-1", "Item one done. Full text.", owner, "m1");
+    stream.onRuntimeEvent(delta("Item two opens. Second sentence. "), owner);
+    await release(0); // buffered prepare lands; the authoritative branch keeps the item-two tail
+    await release(1);
+    expect(handles[0].pushes).toEqual(["Item one done.", "Full text."]);
+    await release(2); // the surviving tail becomes a dirty pump
+    expect(handles[0].inputs).toContain("Item two opens. Second sentence. ");
+    expect(handles[0].pushes).toEqual(["Item one done.", "Full text.", "Item two opens."]);
+    stream.onRuntimeEvent(turnDone(true), owner);
+    await settle();
+    expect(handles[0].pushes).toEqual(["Item one done.", "Full text.", "Item two opens."]);
+    expect(handles[0].ends).toBe(1);
   });
 
   it("goes silent when the speak gates close at the completed frame", async () => {

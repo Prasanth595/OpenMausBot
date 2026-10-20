@@ -44,6 +44,8 @@ interface TurnSpeech {
   stream: SpeechStream;
   /** Concatenated assistant-text deltas of the burst since the last reset. */
   buffer: string;
+  /** Buffer length when the authoritative frame landed: text after it belongs to a later burst and survives the supersession. */
+  authoritativeCut: number;
   /** Blocks already pushed for this burst. */
   spoken: string[];
   /** Completed-frame text waiting to reconcile. */
@@ -88,6 +90,7 @@ export class SpokenReplyStream {
         return;
       }
       current.stream.identify(messageId);
+      current.authoritativeCut = current.buffer.length;
       current.authoritative = text;
       this.pump(current);
       return;
@@ -98,6 +101,7 @@ export class SpokenReplyStream {
       turnId,
       stream: this.speech.begin({ botId: owner.botId, voiceId: owner.voiceId, messageId }),
       buffer: "",
+      authoritativeCut: 0,
       spoken: [],
       authoritative: text,
       pumping: false,
@@ -124,6 +128,7 @@ export class SpokenReplyStream {
       // begin stops whatever was speaking: a new turn's audio supersedes it.
       stream: this.speech.begin({ botId: owner.botId, voiceId: owner.voiceId }),
       buffer: delta,
+      authoritativeCut: 0,
       spoken: [],
       authoritative: null,
       pumping: false,
@@ -167,12 +172,14 @@ export class SpokenReplyStream {
           if (turn.authoritative !== null) {
             const text = turn.authoritative;
             turn.authoritative = null;
-            // Reset before the await: a delta that lands while prepare is in
-            // flight appends to the cleared buffer and survives as a dirty
-            // pump, instead of being wiped by this supersession.
+            // Reset before the await: deltas that land while prepare is in
+            // flight sit past authoritativeCut and survive as a dirty pump,
+            // instead of being wiped by this supersession.
             const spoken = turn.spoken;
             turn.spoken = [];
-            turn.buffer = "";
+            turn.buffer = turn.buffer.slice(turn.authoritativeCut);
+            turn.authoritativeCut = 0;
+            if (turn.buffer) turn.dirty = true;
             const blocks = await turn.stream.prepare(speakableStreamText(text));
             let resume = 0;
             while (resume < spoken.length && resume < blocks.length && spoken[resume] === blocks[resume]) resume += 1;
