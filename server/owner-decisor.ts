@@ -13,8 +13,9 @@
 //   superseded mark all still apply; the bot reads it marked as the Decisor's;
 // - the option marked RECOMENDADA, else the most conservative one that is
 //   not a hard stop — never one that says the owner did something ("Já
-//   resolvi", "Liberei"), and never on merge authorization, a SHA/commit
-//   approval or the app's swap (OWNER_ONLY_STOPS, not editable by the policy); an item without options gets the policy's go-ahead text;
+//   resolvi", "Liberei"); merge, SHA approval and the app swap go through the
+//   policy like anything else; an item without options (or whose only options
+//   claim an owner action) gets the policy's go-ahead text;
 // - "Só você" (owner-delegate.ts's categories) is NOT a stop here: only the
 //   hard stops are — irreversible deletion/alteration of production data,
 //   real money, messages to people outside, credentials, disabling a
@@ -274,33 +275,6 @@ export function physicalItem(item: Pick<OwnerPending, "title" | "steps" | "key">
   return has(PHYSICAL_WORDS, [item.title, ...(item.steps ?? []).map((step) => step.text)].join("\n")) ? "bot" : null;
 }
 
-/** Never the Decisor's to answer, whatever the policy file says (it can replace
- * the hard stops, not these): the owner has not delegated merge authorization,
- * approving a commit/SHA, or swapping the app / relaxing its swap rules. Same
- * form as a hard stop (regex sources on the text lowercased, no accents). */
-export const OWNER_ONLY_STOPS: HardStop[] = [
-  {
-    id: "merge",
-    label: "autorizar merge (GO de merge, mesclar uma PR)",
-    allOf: ["\\b(?:merge|merges|mesclar|mescle|mesclagem|mesclad\\w*)\\b", "\\b(?:autoriz|aprov|liber|permit|confirm)\\w*|\\bgo\\b|\\bok\\b"],
-  },
-  {
-    id: "sha",
-    label: "aprovar um SHA ou commit",
-    allOf: ["\\bsha\\b|\\bcommits?\\b|\\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\\d)[0-9a-f]{7,40}\\b", "\\baprov\\w*|\\bapprov\\w*"],
-  },
-  {
-    id: "swap",
-    label: "trocar o app (swap) ou relaxar as regras do swap",
-    anyOf: [
-      "\\b(?:relax|afrouxa|flexibiliz|suspend|ignor|pul)\\w*[^.\\n]{0,40}\\bswap\\b",
-      "\\bswap\\b[^.\\n]{0,40}\\b(?:do app|de app|o app|app|aplicativo|openmausbot|relax\\w*|regras?)\\b",
-      "\\b(?:app|aplicativo|openmausbot)\\b[^.\\n]{0,20}\\bswap\\b",
-      "\\btroc\\w* (?:d?o )?(?:app|aplicativo)\\b",
-    ],
-  },
-];
-
 /** An option that says the OWNER did something ("Já resolvi", "Liberei",
  * "Já fiz", "Feito", "Concluí", "Ajustei o hook"): only the owner can say that;
  * the Decisor answering it tells the bot a fact that is false. */
@@ -319,12 +293,11 @@ export function claimsOwnerAction(option: Pick<OwnerPendingOption, "label" | "re
 }
 
 /** The Decisor's pick among an item's options, or why none. Never an option
- * that claims the owner did something; never on an owner-only subject. */
+ * that claims the owner did something. Merge, SHA approval and the app swap
+ * go through the policy like any other subject (owner's call, 20/10). */
 export function chooseOption(item: Pick<OwnerPending, "title" | "options"> & { why?: string }, policy: Pick<DecisorPolicy, "noRecommended" | "hardStops">): { index: number; option: OwnerPendingOption; why: string } | { keep: string } {
   const options = item.options ?? [];
-  const ownerOnly = hardStopHit([item.title, item.why ?? ""].join("\n"), OWNER_ONLY_STOPS);
-  if (ownerOnly) return { keep: `só o dono decide: ${ownerOnly.label}` };
-  const stops = [...OWNER_ONLY_STOPS, ...policy.hardStops];
+  const stops = policy.hardStops;
   const stopOf = (option: OwnerPendingOption) => hardStopHit([item.title, option.label, option.reply].join("\n"), stops);
   const recommended = options.findIndex((option) => option.recommended);
   const recommendedClaims = recommended >= 0 && claimsOwnerAction(options[recommended]!);
@@ -400,12 +373,13 @@ export function planDecision(item: OwnerPending, ctx: PlanContext): DecisorPlan 
     if (policy.physical === "keep") return { action: "keep", why: "precisa de você em pessoa (a política deixa com você)" };
     return { action: "resolve", note: `${DECISOR_NOTE_PREFIX} precisa de um gesto do dono no Mac ou num app; nenhum agente pode fazê-lo — fechado com esta nota`, why: "gesto físico do dono" };
   }
-  if (item.options?.length) {
+  // options that only claim the owner did something ("Já resolvi") are no options for the Decisor: the item is answered like one without any
+  if (item.options?.length && item.options.some((option) => !claimsOwnerAction(option))) {
     const choice = chooseOption(item, policy);
     if ("keep" in choice) return { action: "keep", why: choice.keep };
     return { action: "option", index: choice.index, label: choice.option.label, why: choice.why };
   }
-  const stop = hardStopHit([item.title, item.why ?? "", ...(item.steps ?? []).flatMap((step) => [step.text, step.command ?? ""]), item.command ?? ""].join("\n"), [...OWNER_ONLY_STOPS, ...policy.hardStops]);
+  const stop = hardStopHit([item.title, item.why ?? "", ...(item.steps ?? []).flatMap((step) => [step.text, step.command ?? ""]), item.command ?? ""].join("\n"), policy.hardStops);
   if (stop) return { action: "keep", why: `cai num limite: ${stop.label}` };
   if (physical === "bot" && policy.physical !== "delegate-then-resolve") {
     return policy.physical === "keep"

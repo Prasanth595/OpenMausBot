@@ -368,25 +368,25 @@ describe("the Decisor never claims an owner action", () => {
     options: done,
   });
 
-  it("o282: merge authorization, SHA approval and swap relaxation stay with the owner, never 'Já resolvi'", () => {
+  it("o282: merge, SHA approval and swap go through the policy; a lone 'Já resolvi' gets the go-ahead text, never the claim", () => {
     const o282 = routineAsk("o282", "Ver: #9613/#9614 (aprovação do SHA e autorização de merge), #9676 (relaxamento do swap)…", "#9613/#9614 dependem da aprovação do SHA e da autorização de merge; #9676 do relaxamento do swap.");
-    expect(planDecision(o282, ctx())).toMatchObject({ action: "keep" });
-    // even with a real option beside the claim, these subjects are the owner's
+    const plan = planDecision(o282, ctx());
+    expect(plan).toMatchObject({ action: "text" });
+    expect(JSON.stringify(plan)).not.toContain("Já resolvi");
+    // with a real option beside the claim, the real one is picked
     const withChoice = { ...o282, options: [...done, { label: "Seguir sem merge", reply: "Siga sem merge por enquanto." }] };
-    expect(planDecision(withChoice, ctx())).toMatchObject({ action: "keep", why: expect.stringContaining("só o dono decide") });
-    // and a policy that replaces the hard stops cannot drop them
-    expect(planDecision(withChoice, ctx({ policy: policy({ hardStops: [] }) }))).toMatchObject({ action: "keep" });
+    expect(planDecision(withChoice, ctx())).toMatchObject({ action: "option", label: "Seguir sem merge" });
   });
 
-  it("o2 / o1 / o281: a routine 'Ver: …' item with only 'Já resolvi' stays with the owner", () => {
+  it("o2 / o1 / o281: a routine 'Ver: …' item with only 'Já resolvi' gets a real decision (the go-ahead text), never the claim", () => {
     for (const item of [
       routineAsk("o2", "Ver: #9310", "A #9310 continua com você."),
       routineAsk("o1", "Ver: a #9310 permanece fora dessa autorização e", "a #9310 permanece fora dessa autorização e continua com você."),
       routineAsk("o281", "Por último, ele vai listar o próximo passo e o responsável de cada outra PR parada…", "Por último, ele vai listar o próximo passo e o responsável de cada outra PR parada."),
     ]) {
       const plan = planDecision(item, ctx());
-      expect(plan.action, item.id).toBe("keep");
-      expect(plan.why).toContain("afirmam algo que o dono fez");
+      expect(plan.action, item.id).toBe("text");
+      expect(JSON.stringify(plan), item.id).not.toContain("Já resolvi");
     }
     // a claim plus a postpone: the postpone, never the claim
     const postpone = { ...routineAsk("o2", "Ver: #9310", "A #9310 continua com você."), options: [...done, { label: "Deixar para depois", reply: "Deixe para depois." }] };
@@ -405,8 +405,10 @@ describe("the Decisor never claims an owner action", () => {
     });
     expect(planDecision(o279, ctx())).toMatchObject({ action: "option", index: 1, label: "Manter assim", why: expect.stringContaining("afirma algo que o dono fez") });
     expect(planDecision(o279, ctx({ policy: policy({ noRecommended: "keep" }) }))).toMatchObject({ action: "keep" });
-    // only claims: kept
-    expect(planDecision({ ...o279, options: [o279.options![0]!] }, ctx())).toMatchObject({ action: "keep" });
+    // only claims: answered like an item without options, never with the claim
+    const lone = planDecision({ ...o279, options: [o279.options![0]!] }, ctx());
+    expect(lone).toMatchObject({ action: "text" });
+    expect(JSON.stringify(lone)).not.toContain("Liberei os comandos");
   });
 
   it("recognizes claims in any case or accent, and not real decisions", () => {
