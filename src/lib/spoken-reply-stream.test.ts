@@ -8,6 +8,7 @@ interface FakeHandle {
   opts: { botId?: string; voiceId?: string; messageId?: string };
   pushes: string[];
   inputs: string[];
+  identified: (string | undefined)[];
   ends: number;
   failure: string | null;
 }
@@ -20,7 +21,7 @@ function fakeSpeech(prepareOverride?: (text: string) => string[]) {
   let stops = 0;
   const sink: ReplySpeechSink = {
     begin(opts) {
-      const handle: FakeHandle = { opts, pushes: [], inputs: [], ends: 0, failure: null };
+      const handle: FakeHandle = { opts, pushes: [], inputs: [], identified: [], ends: 0, failure: null };
       handles.push(handle);
       const split = prepareOverride ?? ((text: string) => redactSecretsInText(text).split(/(?<=[.!?])\s+/).filter(Boolean));
       return {
@@ -33,6 +34,9 @@ function fakeSpeech(prepareOverride?: (text: string) => string[]) {
         prepare: async (text) => {
           handle.inputs.push(text);
           return split(text);
+        },
+        identify: (messageId) => {
+          handle.identified.push(messageId);
         },
         fail: (error) => {
           handle.failure = error;
@@ -78,6 +82,20 @@ describe("SpokenReplyStream", () => {
     stream.onRuntimeEvent(turnDone(true), owner);
     await settle();
     expect(handles[0].pushes).toEqual(["One two.", "Three four.", "Five six."]);
+    expect(handles[0].ends).toBe(1);
+  });
+
+  it("identifies the streamed speech with its completed message id", async () => {
+    const { sink, handles } = fakeSpeech();
+    const stream = new SpokenReplyStream(sink);
+    stream.onRuntimeEvent(delta("One two. Three "), owner);
+    await settle();
+    expect(handles[0].opts).toEqual({ botId: "bot", voiceId: "vo" });
+    stream.completeBotText("t", "turn-1", "One two. Three four.", owner, "m9");
+    expect(handles[0].identified).toEqual(["m9"]);
+    stream.onRuntimeEvent(turnDone(true), owner);
+    await settle();
+    expect(handles[0].pushes).toEqual(["One two.", "Three four."]);
     expect(handles[0].ends).toBe(1);
   });
 

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { VoiceProbeSample } from "../../../shared/voice-latency-probe";
 
 import { Speaker } from "./index";
 
@@ -373,5 +374,51 @@ describe("prefetch window", () => {
     await expect(speaking).resolves.toBeUndefined();
     expect(speaker.state).toEqual({ status: "idle", error: "voice exploded" });
     expect(playedUrls).toEqual(["blob:block-1"]);
+  });
+});
+
+describe("stream identification", () => {
+  beforeEach(() => {
+    FakeAudio.latest = null;
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    vi.stubGlobal("Audio", FakeAudio);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:voice-test");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  });
+
+  it("adopts the completed message id into the snapshot and probe records", async () => {
+    const probe: VoiceProbeSample[] = [];
+    vi.stubGlobal("window", { __ombVoiceProbe: probe });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request) =>
+        String(input).endsWith("/prepare")
+          ? json({ ready: true, utterances: ["Hello.", "Bye."] })
+          : new Response(new Blob(["mp3"]), { status: 200 }),
+      ),
+    );
+    const captions: string[] = [];
+    const speaker = new Speaker();
+    const stream = speaker.begin({ botId: "bot" });
+    expect(speaker.state).toEqual({ status: "preparing", botId: "bot" });
+    expect(speaker.isSpeaking("m9")).toBe(false);
+    speaker.subscribe((snapshot) => {
+      if (snapshot.caption) captions.push(snapshot.caption);
+    });
+    stream.identify("m9");
+    expect(speaker.state).toEqual({ status: "preparing", botId: "bot", messageId: "m9" });
+    expect(speaker.isSpeaking("m9")).toBe(true);
+    for (const block of await stream.prepare("Hello. Bye.")) stream.push(block);
+    for (const caption of ["Hello.", "Bye."]) {
+      await vi.waitFor(() => expect(captions).toContain(caption));
+      FakeAudio.latest!.onended?.();
+    }
+    await stream.end();
+    expect(speaker.state).toEqual({ status: "idle" });
+    const sample = probe.find((entry) => entry.messageId === "m9");
+    expect(sample?.blockCount).toBe(2);
+    expect(sample?.blocks).toHaveLength(2);
+    expect(sample?.blocks[0]?.renderStartAt).toBeDefined();
   });
 });

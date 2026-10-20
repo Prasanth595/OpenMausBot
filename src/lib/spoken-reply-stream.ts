@@ -87,6 +87,7 @@ export class SpokenReplyStream {
         this.speech.stop();
         return;
       }
+      current.stream.identify(messageId);
       current.authoritative = text;
       this.pump(current);
       return;

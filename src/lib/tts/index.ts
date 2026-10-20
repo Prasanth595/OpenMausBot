@@ -29,6 +29,9 @@ export interface SpeechStream {
   end(): Promise<void>;
   /** Split text through the server's committed splitter; rejects like `speak`. */
   prepare(text: string): Promise<string[]>;
+  /** Adopt the completed reply's message id: the snapshot and the probe
+   * records carry it from here on. */
+  identify(messageId: string | undefined): void;
   /** Surface a fatal error and kill the stream. */
   fail(error: string): void;
 }
@@ -140,6 +143,13 @@ export class Speaker {
       : this.networkStream(opts, live, controller);
   }
 
+  /** The completed frame's message id must reach the snapshot and the probe
+   * records, which read `opts.messageId` when they fire. */
+  private adoptMessageId(opts: SpeakOptions, live: () => boolean, messageId: string | undefined): void {
+    opts.messageId = messageId;
+    if (live() && this.snapshot.status !== "idle") this.set({ ...this.snapshot, messageId });
+  }
+
   /** The system voice has no splitter round trip: one utterance per block, the
    * whole text for a completed reply, so streaming degrades to speaking at the
    * authoritative frame. */
@@ -157,6 +167,7 @@ export class Speaker {
         if (this.request === controller) this.request = null;
       },
       prepare: async (text) => [text],
+      identify: (messageId) => this.adoptMessageId(opts, live, messageId),
       fail: () => { closed = true; },
     };
   }
@@ -254,6 +265,7 @@ export class Speaker {
         recordPrepared(opts.messageId, utterances.length);
         return utterances;
       },
+      identify: (messageId) => this.adoptMessageId(opts, live, messageId),
       fail: (error) => {
         if (finished) return;
         controller.abort();
