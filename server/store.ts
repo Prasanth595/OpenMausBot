@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, readFileSync, mkdirSync, rmSync, statSync, unlinkSync } from "node:fs";
+import { runLabeled } from "./loop-stall.ts";
 import { join } from "node:path";
 
 import { writeFileAtomic, writeFileAtomicIfChanged } from "./atomic.ts";
@@ -453,7 +454,12 @@ function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string }
 interface ThreadState {
   messages: Message[];
   activeLeafId: string | null;
+  /** Bumped on every in-store change to the tree; the active path is rebuilt only when it moves. */
+  rev?: number;
+  pathMemo?: { rev: number; length: number; leaf: string | null; path: Message[] };
 }
+
+const touch = (t: ThreadState) => { t.rev = (t.rev ?? 0) + 1; };
 
 export class Store {
   bots: BotRecord[] = [];
@@ -976,7 +982,7 @@ export class Store {
   private emit(change: StoreChange) {
     for (const listener of Array.from(this.listeners)) {
       try {
-        listener(change);
+        runLabeled(`store ${change.type}`, () => listener(change));
       } catch (error) {
         console.error("store: change listener threw", error);
       }
@@ -1332,8 +1338,11 @@ export class Store {
     return this.thread(threadId).activeLeafId;
   }
 
+  /** Every turn-completed listener walks it: on a 20k-message thread the rebuild is memoised until the tree changes. */
   activePath(threadId: string): Message[] {
     const t = this.thread(threadId);
+    const memo = t.pathMemo;
+    if (memo && memo.rev === (t.rev ?? 0) && memo.length === t.messages.length && memo.leaf === t.activeLeafId) return memo.path.slice();
     const byId = new Map(t.messages.map((m) => [m.id, m]));
     const path: Message[] = [];
     let cur = t.activeLeafId ? byId.get(t.activeLeafId) : undefined;
@@ -1341,7 +1350,9 @@ export class Store {
       path.push(cur);
       cur = cur.parentId ? byId.get(cur.parentId) : undefined;
     }
-    return path.reverse();
+    path.reverse();
+    t.pathMemo = { rev: t.rev ?? 0, length: t.messages.length, leaf: t.activeLeafId, path };
+    return path.slice();
   }
 
   markTerminalAssistantMessage(threadId: string, turnId: string): Message | null {
@@ -1364,6 +1375,7 @@ export class Store {
     if (committed.id !== full.id) return committed;
     t.messages.push(full);
     t.activeLeafId = full.id;
+    touch(t);
     if (full.kind === "screen") {
       for (const pruned of this.pruneScreenFrames(t)) {
         mdb.updateMessage(threadId, pruned);
@@ -1383,6 +1395,7 @@ export class Store {
     const full: Message = { id: newId(), at: Date.now(), ...redactBotAuthored(message), parentId: anchorId };
     const children = t.messages.filter((m) => m.parentId === anchorId);
     t.messages.push(full);
+    touch(t);
     mdb.insertMessage(threadId, full);
     if (full.kind === "screen") {
       for (const pruned of this.pruneScreenFrames(t)) {
@@ -1439,6 +1452,7 @@ export class Store {
     };
     t.messages.push(full);
     t.activeLeafId = full.id;
+    touch(t);
     mdb.appendMessage(threadId, full);
     this.noteThreadActivity(threadId, full.at, true);
     this.emit({ type: "message", threadId, message: full });
@@ -1450,13 +1464,17 @@ export class Store {
   setActiveLeaf(threadId: string, messageId: string): string | null {
     const t = this.thread(threadId);
     if (!t.messages.some((m) => m.id === messageId)) return null;
-    let cur = messageId;
-    for (;;) {
-      const children = t.messages.filter((m) => m.parentId === cur);
-      if (!children.length) break;
-      cur = children.reduce((a, b) => (b.at >= a.at ? b : a)).id;
+    // One pass builds the children index: a filter per level was O(depth × messages) on a long thread.
+    const newestChild = new Map<string, Message>();
+    for (const m of t.messages) {
+      if (!m.parentId) continue;
+      const seen = newestChild.get(m.parentId);
+      if (!seen || m.at >= seen.at) newestChild.set(m.parentId, m);
     }
+    let cur = messageId;
+    for (let next = newestChild.get(cur); next; next = newestChild.get(cur)) cur = next.id;
     t.activeLeafId = cur;
+    touch(t);
     mdb.setActiveLeaf(threadId, cur);
     this.emit({ type: "thread", threadId, activeLeafId: cur });
     return cur;
@@ -1474,6 +1492,7 @@ export class Store {
     if (!applied) return committed;
     if (!movesThreadToTop(t.messages[idx]) && movesThreadToTop(next)) this.noteThreadActivity(threadId, next.at, true, next.turnCompletedAt ?? next.at);
     t.messages[idx] = next;
+    touch(t);
     this.emit({ type: "message.patch", threadId, message: next });
     return next;
   }

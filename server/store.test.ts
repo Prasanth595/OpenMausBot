@@ -1604,6 +1604,34 @@ describe("Store", () => {
     expect(store.setActiveLeaf(bot.threadId, "nope")).toBeNull();
   });
 
+  it("activePath is memoised until the tree changes and never hands out its cached array", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const first = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "one" });
+    const a = store.activePath(bot.threadId);
+    a.length = 0;
+    expect(store.activePath(bot.threadId).at(-1)?.id).toBe(first.id);
+    const second = store.appendMessage(bot.threadId, { role: "bot", kind: "text", text: "two" });
+    expect(store.activePath(bot.threadId).map((m) => m.id).slice(-2)).toEqual([first.id, second.id]);
+    store.patchMessage(bot.threadId, second.id, { text: "two, edited" });
+    expect(store.activePath(bot.threadId).at(-1)?.text).toBe("two, edited");
+    const v2 = store.branchMessage(bot.threadId, first.id, "v2")!;
+    expect(store.activePath(bot.threadId).at(-1)?.id).toBe(v2.id);
+    store.setActiveLeaf(bot.threadId, first.id);
+    expect(store.activePath(bot.threadId).map((m) => m.id)).not.toContain(second.id === v2.id ? "" : v2.id);
+  });
+
+  it("setActiveLeaf descends a long thread in one pass", () => {
+    const store = new Store(selection);
+    const bot = store.createBot();
+    const root = store.appendMessage(bot.threadId, { role: "user", kind: "text", text: "root" });
+    let last = root;
+    for (let i = 0; i < 6000; i++) last = store.appendMessage(bot.threadId, { role: i % 2 ? "user" : "bot", kind: "text", text: `m${i}` });
+    const started = performance.now();
+    expect(store.setActiveLeaf(bot.threadId, root.id)).toBe(last.id);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it("persists the branch tree and active leaf across a restart", () => {
     const store = new Store(selection);
     const bot = store.createBot();
