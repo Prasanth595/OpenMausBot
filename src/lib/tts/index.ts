@@ -159,20 +159,30 @@ export class Speaker {
   private localStream(opts: SpeakOptions, live: () => boolean, controller: AbortController): SpeechStream {
     let chain: Promise<void> = Promise.resolve();
     let closed = false;
+    let pushed = false;
     return {
       push: (block) => {
-        if (closed || !block) return;
-        chain = chain.then(() => this.speakWithLocalSystem(block, opts, live));
+        if (closed || !block || !live()) return;
+        pushed = true;
+        chain = chain.then(() => (live() ? this.speakWithLocalSystem(block, opts, live) : undefined));
       },
       end: async () => {
         closed = true;
         await chain;
+        if (!pushed && live()) this.set(IDLE);
         if (this.request === controller) this.request = null;
       },
       prepare: async (text) => [text],
       identify: (messageId) => this.adoptMessageId(opts, live, messageId),
       cancel: () => { if (live()) this.stop(); },
-      fail: () => { closed = true; },
+      fail: (error) => {
+        closed = true;
+        if (live()) {
+          controller.abort();
+          this.set({ ...IDLE, error });
+        }
+        if (this.request === controller) this.request = null;
+      },
     };
   }
 
@@ -286,6 +296,7 @@ export class Speaker {
     opts: SpeakOptions,
     live: () => boolean,
   ): Promise<void> {
+    if (!live()) return Promise.resolve();
     const value = text.trim();
     if (!value) {
       this.set(IDLE);

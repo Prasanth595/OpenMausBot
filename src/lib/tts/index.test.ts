@@ -443,3 +443,93 @@ describe("stream identification", () => {
     expect(speaker.state).toEqual({ status: "idle" });
   });
 });
+
+describe("local system voice stream", () => {
+  const makeSynth = () => ({
+    speak: vi.fn(),
+    cancel: vi.fn(),
+    getVoices: (): SpeechSynthesisVoice[] => [],
+  });
+  let synth = makeSynth();
+  let spoken: FakeUtterance[] = [];
+
+  class FakeUtterance {
+    text: string;
+    voice: SpeechSynthesisVoice | null = null;
+    onstart: (() => void) | null = null;
+    onend: (() => void) | null = null;
+    onerror: ((event: { error: string }) => void) | null = null;
+
+    constructor(text: string) {
+      this.text = text;
+      spoken.push(this);
+    }
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    synth = makeSynth();
+    spoken = [];
+    vi.stubGlobal("window", {
+      ogb: { remoteClient: { active: true }, platform: "darwin" },
+      speechSynthesis: synth,
+      SpeechSynthesisUtterance: FakeUtterance,
+    });
+  });
+
+  it("resets the preparing state when nothing was ever pushed", async () => {
+    const speaker = new Speaker();
+    const stream = speaker.begin({ botId: "bot" });
+    expect(speaker.state).toEqual({ status: "preparing", botId: "bot" });
+    expect(speaker.isSpeaking()).toBe(true);
+
+    await stream.end();
+
+    expect(speaker.state).toEqual({ status: "idle" });
+    expect(speaker.isSpeaking()).toBe(false);
+  });
+
+  it("does not speak a block queued before a newer stream took over", async () => {
+    const speaker = new Speaker();
+    const first = speaker.begin({ botId: "bot" });
+    first.push("Stale words.");
+    const second = speaker.begin({ botId: "bot" });
+    second.identify("m2");
+
+    await first.end();
+    expect(synth.speak).not.toHaveBeenCalled();
+
+    second.push("Fresh words.");
+    await vi.waitFor(() => expect(spoken.map((utterance) => utterance.text)).toEqual(["Fresh words."]));
+    spoken[0]!.onstart?.();
+    expect(speaker.state).toEqual({ status: "speaking", botId: "bot", messageId: "m2", caption: "Fresh words." });
+    spoken[0]!.onend?.();
+    await second.end();
+    expect(speaker.state).toEqual({ status: "idle" });
+  });
+
+  it("surfaces a failure and resets a live stream", () => {
+    const speaker = new Speaker();
+    const stream = speaker.begin({ botId: "bot" });
+
+    stream.fail("splitter down");
+
+    expect(speaker.state).toEqual({ status: "idle", error: "splitter down" });
+  });
+
+  it("cancel silences only a stream that is still current", () => {
+    const speaker = new Speaker();
+    const first = speaker.begin({ botId: "bot" });
+    const second = speaker.begin({ botId: "bot" });
+    const cancelsBefore = synth.cancel.mock.calls.length;
+
+    first.cancel();
+    expect(speaker.state).toEqual({ status: "preparing", botId: "bot" });
+    expect(synth.cancel.mock.calls.length).toBe(cancelsBefore);
+
+    second.cancel();
+    expect(speaker.state).toEqual({ status: "idle" });
+    expect(synth.cancel.mock.calls.length).toBe(cancelsBefore + 1);
+  });
+});
