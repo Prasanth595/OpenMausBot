@@ -456,7 +456,7 @@ import { createBrowserHost } from "./host/browser.ts";
 import { createScreenFrameSource, rememberTurnFrame, type ScreenCapture } from "./screen-frame-source.ts";
 import { screenFrameHash, screenSurfaceForTool, screenTouchingTool, settledFrameIsNews } from "./screen-frame-gate.ts";
 import { asSchedule, RoutineRequestService } from "./routine-requests.ts"; import { ownerSpokeOnly } from "./cloud-routine-level.ts"; import { routineRunCard, routineRunFallbackText } from "./routine-run-card.ts";
-import { engineLabel, LimitResetClock, nearLimitNote } from "./limit-resets.ts"; import { planAccountsFromInstances } from "./plan-usage.ts"; import { failoverLine, LimitFailovers, limitBackupAllowed } from "./limit-failover.ts"; import { createLimitResetRoutes } from "./routes/limit-resets.ts";
+import { engineLabel, LimitResetClock, nearLimitNote } from "./limit-resets.ts"; import { planAccountsFromInstances } from "./plan-usage.ts"; import { failoverLine, LimitFailovers, limitBackupAllowed } from "./limit-failover.ts"; import { accountPoolBackups, accountPoolEnabled } from "./account-pool.ts"; import { createLimitResetRoutes } from "./routes/limit-resets.ts";
 import { parseTriggerRequest, triggerTarget } from "./trigger-tools.ts"; import { WebhookRequestError, WebhookRequestService } from "./webhook-requests.ts"; import { createAppTriggerHost } from "./app-trigger-host.ts";
 import { appliesNow, directApply, UNDO_STALE, type DirectApply } from "./direct-apply.ts";
 import { createTeamMemoryRequests } from "./team-memory-requests.ts";
@@ -8238,7 +8238,10 @@ async function startTurn(
     };
   }
   healThreadModel(botId, threadId);
-  limitFailovers.restore(botId, threadId);
+  const poolRestore = cfg.accountPools?.antigravity;
+  if (!(poolRestore?.enabled && poolRestore.restore === false && registry.get(profile.modelSelection.instanceId)?.driverKind === "antigravityAgent")) {
+    limitFailovers.restore(botId, threadId);
+  }
   const bot = store.projectBotForTask(botId, threadId);
   if (!bot) throw Object.assign(new Error("no such task"), { status: 404 });
   if (bot.approvalGrant) {
@@ -9060,7 +9063,9 @@ async function startTurn(
       handoffs.dispatching(threadId, dispatchClaimId, dispatchContext.handoff);
       const clock = takesTurnClock(userTurnText) ? turnClockLine(Date.now(), hostTimeZone()) + nearLimitNote(limitClock.limit(instanceId), engineName(instanceId), hostTimeZone()) : "";
       const shareNote = skillsHost.shareNote(bot, threadId, Boolean(privateWorkspace));
-      const startupRecovery = cfg.automaticRecovery?.enabled === true && (opts?.automaticRecoveryIndex ?? 0) < ((liveBot ?? bot).fallback?.length || (cfg.automaticRecovery.backup ? 1 : 0));
+      const accountPool = cfg.accountPools?.antigravity;
+      const pooledRecovery = accountPoolEnabled(accountPool, instance.driverKind);
+      const startupRecovery = (cfg.automaticRecovery?.enabled === true || pooledRecovery) && (opts?.automaticRecoveryIndex ?? 0) < ((liveBot ?? bot).fallback?.length || (cfg.automaticRecovery.backup ? 1 : pooledRecovery ? registry.instances().filter((candidate) => candidate.instanceId !== instanceId && candidate.driverKind === "antigravityAgent" && candidate.enabled).length : 0));
       const limitedUntil = startupRecovery ? limitClock.blockedUntil(instanceId) : null;
       if (limitedUntil) throw new TurnUsageLimitRefusedError(`limit-${randomUUID()}`, `${engineName(instanceId)} is at its usage limit.`, limitedUntil);
       const dispatch = await guardTurnDispatch(shareNote.after(instance.adapter.sendTurn({
@@ -9187,7 +9192,11 @@ async function startTurn(
       if (e instanceof PlaceUnavailableError) clearFailedAutoPin(bot.id, threadId, e.place);
       let message = e instanceof Error ? e.message : String(e);
       const current = store.projectBotForTask(bot.id, threadId);
-      const backups = cfg.automaticRecovery?.enabled
+      const pool = cfg.accountPools?.antigravity;
+      const pooledBackups = accountPoolBackups(pool, instanceId, registry.instances().map((candidate) => ({
+        instanceId: candidate.instanceId, driverKind: candidate.driverKind, enabled: candidate.enabled, defaultModel: candidate.models.default,
+      })));
+      const backups = pooledBackups.length ? pooledBackups : cfg.automaticRecovery?.enabled
         ? current?.fallback?.length ? current.fallback : cfg.automaticRecovery.backup ? [cfg.automaticRecovery.backup] : []
         : [];
       const nextIndex = backups.findIndex((candidate, index) => index >= (opts?.automaticRecoveryIndex ?? 0) &&
@@ -12948,6 +12957,7 @@ function configStatus() {
     rooms: { turnTimeoutMinutes: roomTurnTimeoutMinutes(cfg) },
     mcp: { callTimeoutMinutes: mcpCallTimeoutMinutes(cfg) },
     automaticRecovery: cfg.automaticRecovery ?? { enabled: false },
+    accountPools: cfg.accountPools ?? {},
     cacheKeepWarm: cacheKeepWarmSettings(cfg),
     newBots: cfg.newBots?.effort ? { effort: cfg.newBots.effort } : {},
     threads: {

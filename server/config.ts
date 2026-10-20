@@ -295,6 +295,12 @@ const automaticRecoverySchema = z.object({
   backup: defaultModelSelectionSchema.optional(),
 }).strict().refine((recovery) => !recovery.enabled || recovery.backup !== undefined,
   { message: "Choose a backup model before enabling automatic recovery", path: ["backup"] });
+const accountPoolSchema = z.object({
+  enabled: z.boolean(),
+  failover: z.boolean(),
+  restore: z.boolean(),
+  priorities: z.record(z.string().min(1).max(200), z.number().int().min(0).max(100)).default({}),
+}).strict();
 /** Prompt-cache keep-warm. Off unless enabled; a bot's own `cacheKeepWarm` overrides it. */
 const cacheKeepWarmSchema = z.object({
   enabled: z.boolean(),
@@ -326,6 +332,7 @@ const appConfigSchema = z.object({
   signIn: z.object({ admins: z.array(z.string().max(320)).max(500).optional(), members: z.array(z.string().max(320)).max(5000).optional() }).optional(),
   defaultModelSelection: defaultModelSelectionSchema.optional(),
   automaticRecovery: automaticRecoverySchema.optional(),
+  accountPools: z.object({ antigravity: accountPoolSchema.optional() }).strict().optional(),
   cacheKeepWarm: cacheKeepWarmSchema.optional(),
   newBotDefaults: newBotDefaultsSchema.optional(),
   newBots: newBotsConfigSchema.optional(),
@@ -471,6 +478,7 @@ export interface AppConfig extends HelperConfig {
   defaultModelSelection?: ModelSelection;
   /** Off by default; one backup attempt only before any work starts. */
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
+  accountPools?: { antigravity?: { enabled: boolean; failover: boolean; restore: boolean; priorities: Record<string, number> } };
   cacheKeepWarm?: { enabled: boolean; windowMinutes?: number };
   /** UI creation template. Saving it never mutates a bot or grants access. */
   newBotDefaults?: NewBotDefaults;
@@ -1070,6 +1078,7 @@ export function saveConfig(
   if (checkedPatch.signIn !== undefined) disk.signIn = checkedPatch.signIn;
   // Replace the section so clearing a backup cannot revive the old selection.
   if (checkedPatch.automaticRecovery !== undefined) disk.automaticRecovery = checkedPatch.automaticRecovery;
+  if (checkedPatch.accountPools !== undefined) disk.accountPools = checkedPatch.accountPools;
   if (checkedPatch.cacheKeepWarm !== undefined) disk.cacheKeepWarm = checkedPatch.cacheKeepWarm;
   if (checkedPatch.defaultModelSelection !== undefined) {
     disk.defaultModelSelection = checkedPatch.defaultModelSelection;

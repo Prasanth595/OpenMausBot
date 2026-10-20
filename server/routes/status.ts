@@ -10,6 +10,8 @@ import { fleetAvailable, fleetRequest, fleetSocketPath } from "../fleet-client.t
 import { noteKeyAccepted, noteKeyRejected } from "../key-rejections.ts";
 import type { OutboundCounts } from "../outbound-counts.ts";
 import { loadPlanUsage, planAccountsFromInstances } from "../plan-usage.ts";
+import { antigravityQuota } from "../drivers/antigravity-account.ts";
+import { antigravityProfileDirectory } from "../drivers/antigravity-acp.ts";
 import { tregProviderApi } from "../included-services.ts";
 import { checkProviderKey, PROVIDER_KEY_KINDS, providerBaseUrl, type ProviderKeyKind } from "../provider-key-check.ts";
 import { checkTregKey } from "../research.ts";
@@ -126,6 +128,12 @@ export function createStatusRoutes(deps: StatusRouteDeps): RouteHandler {
         refresh: url.searchParams.get("refresh") === "1",
       });
       return json(res, 200, report);
+    }
+    if (method === "GET" && path === "/api/antigravity-quota") {
+      const instanceId = url.searchParams.get("instance") ?? "";
+      if (!/^[\w-]{1,200}$/.test(instanceId) || instanceConfigs(cfg)[instanceId]?.driver !== "antigravityAgent") return json(res, 404, { error: "no such Antigravity account" });
+      const quota = await antigravityQuota(`${antigravityProfileDirectory(instanceId, DATA_DIR)}/antigravity-acp/acp_token.json`);
+      return json(res, 200, quota ?? { groups: [] });
     }
 
     // One read-only request from this server; the verdict never carries the key.

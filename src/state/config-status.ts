@@ -44,6 +44,7 @@ export interface ConfigStatus {
   newBots?: { effort?: EffortLevel };
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   automaticRecovery?: { enabled: boolean; backup?: ModelSelection };
+  accountPools?: { antigravity?: { enabled: boolean; failover: boolean; restore: boolean; priorities: Record<string, number> } };
   /** Prompt-cache keep-warm for idle Claude threads. Absent from older servers. */
   cacheKeepWarm?: { enabled: boolean; windowMinutes: number };
   localVm: { mode: "shared" | "per-bot" | "pool"; maxInstances: number; idleTimeoutMinutes?: number };

@@ -10,6 +10,7 @@ import { ApiKeyEngineManage, EngineSetup, EngineUpdateNotice, EngineWarningNotic
 import { AccountsCard, AddAccount, accountGroupOf, accountsReady, type AccountGroup } from "./EngineAccounts";
 import { DEVICE_SIGN_IN_COPY, deviceSignInProvider } from "./DeviceSignIn";
 import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
+import { AntigravityPoolSettings } from "./AntigravityPoolSettings";
 import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
 import { Select } from "./Select";
 
@@ -349,6 +350,7 @@ export function EnginesSettings() {
     return group && groups.get(group)?.[0] === instance ? group : null;
   };
   const rows = listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance));
+  const antigravityAccounts = listed.filter((instance) => instance.driverKind === "antigravityAgent");
 
   return (
     <div className="flex min-w-0 flex-col gap-6 pb-2">
@@ -359,6 +361,7 @@ export function EnginesSettings() {
         </div>
         <RefreshEngines />
       </div>
+      {antigravityAccounts.length > 0 && <AntigravityPoolSettings accounts={antigravityAccounts} />}
       <EngineSections
         instances={rows}
         isReady={(instance) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); }}
