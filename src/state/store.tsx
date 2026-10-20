@@ -24,7 +24,6 @@ export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificatio
 import type { TurnDigest } from "../../shared/digest";
 import type { ToolScope } from "../../shared/tool-scope";
 import type { ModelVariantOption, RuntimeEvent } from "../../shared/runtime-events";
-import { recordBotTextMessage, recordRuntimeEvent } from "../lib/voice-latency-probe";
 import type { MausColor, MausMotion } from "@/lib/mascot";
 import type { BotAvatarCrop } from "../../shared/bot-avatar";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
@@ -3327,7 +3326,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             });
           }
           if (frame.message?.role === "bot" && frame.message?.kind === "text") {
-            recordBotTextMessage(frame.message as { id: string; text?: string | null }, frame.threadId);
             spokenReplyStream.completeBotText(frame.threadId, frame.message.turnId, frame.message.text ?? "", speechOwnerFor(frame.threadId), frame.message.id);
           }
           break;
@@ -3396,7 +3394,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           rawDispatch({ type: "webhookDeleted", webhookId: frame.webhookId });
           break;
         case "runtime": {
-          recordRuntimeEvent(frame.event);
           spokenReplyStream.onRuntimeEvent(frame.event, speechOwnerFor(frame.event.threadId));
           const action = runtimeFrameAction(frame.event);
           if (action) rawDispatch(action);
