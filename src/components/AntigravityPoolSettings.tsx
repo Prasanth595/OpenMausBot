@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
@@ -13,12 +13,16 @@ function usePool() {
   const { state, dispatch } = useStore();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const pool = state.config?.accountPools?.antigravity ?? defaults;
+  const storedPool = state.config?.accountPools?.antigravity;
+  const pool = storedPool ?? defaults;
   const save = async (next: Pool) => {
     setSaving(true);
     setError("");
     try {
-      const config = await api("/api/config", { method: "PUT", body: JSON.stringify({ accountPools: { antigravity: next } }) });
+      const config = await api("/api/config", {
+        method: "PUT",
+        body: JSON.stringify({ accountPools: { antigravity: next }, expectedAccountPool: storedPool ?? null }),
+      });
       dispatch({ type: "configStatus", config });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -49,12 +53,19 @@ export function AntigravityAccountPoolSettings({ account }: { account: InstanceI
   const { state, dispatch, flushBotPatches } = useStore();
   const { pool, save, saving, error } = usePool();
   const [draftPriority, setDraftPriority] = useState(String(pool.priorities[account.instanceId] ?? 100));
+  const priorityDirty = useRef(false);
+  const displayedAccountId = useRef(account.instanceId);
   const [quota, setQuota] = useState<Quota | null>(null);
   const [quotaState, setQuotaState] = useState<"loading" | "ready" | "unavailable">("loading");
   const [switching, setSwitching] = useState(false);
   const [switchResult, setSwitchResult] = useState("");
 
-  useEffect(() => { setDraftPriority(String(pool.priorities[account.instanceId] ?? 100)); }, [account.instanceId, pool.priorities]);
+  useEffect(() => {
+    const accountChanged = displayedAccountId.current !== account.instanceId;
+    displayedAccountId.current = account.instanceId;
+    if (priorityDirty.current && !accountChanged) return;
+    setDraftPriority(String(pool.priorities[account.instanceId] ?? 100));
+  }, [account.instanceId, pool.priorities]);
   useEffect(() => {
     let cancelled = false;
     setQuotaState("loading");
@@ -65,6 +76,7 @@ export function AntigravityAccountPoolSettings({ account }: { account: InstanceI
   }, [account.instanceId]);
 
   const commitPriority = () => {
+    priorityDirty.current = false;
     const value = Math.max(0, Math.min(100, Number.parseInt(draftPriority, 10) || 0));
     setDraftPriority(String(value));
     if (value !== (pool.priorities[account.instanceId] ?? 100)) {
@@ -94,9 +106,9 @@ export function AntigravityAccountPoolSettings({ account }: { account: InstanceI
       <label className="flex items-center gap-2 text-[13px] font-medium text-ink">
         <span>{t("accountPool.priority")}</span>
         <span className="flex items-center gap-1">
-          <input type="text" inputMode="numeric" pattern="[0-9]*" value={draftPriority} disabled={saving}
+          <input type="text" inputMode="numeric" pattern="[0-9]*" value={draftPriority} readOnly={saving}
             aria-label={t("accountPool.priorityLabel", { name: account.displayName })}
-            onChange={(event) => setDraftPriority(event.target.value.replace(/[^0-9]/g, "").slice(0, 3))}
+            onChange={(event) => { priorityDirty.current = true; setDraftPriority(event.target.value.replace(/[^0-9]/g, "").slice(0, 3)); }}
             onBlur={commitPriority} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
             className="w-14 rounded border border-hairline/50 bg-card px-2 py-1 text-right tabular-nums" />%
         </span>

@@ -158,6 +158,12 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
           return json(res, 409, { error: "Browser profiles changed in another window. Review the refreshed list and try again." });
         }
       }
+      if (patch.accountPools !== undefined && body.expectedAccountPool !== undefined) {
+        const current = cfg.accountPools?.antigravity ?? null;
+        if (JSON.stringify(body.expectedAccountPool) !== JSON.stringify(current)) {
+          return json(res, 409, { error: "Account-pool settings changed in another window. Review the refreshed values and try again." });
+        }
+      }
       const disablingBuiltInBrowser = patch.features?.browser === false && builtInBrowserEnabled(cfg);
       const switchingBrowserEngine = patch.browserEngine?.engine !== undefined && patch.browserEngine.engine !== browserEngineKind(cfg);
       const removedBrowserProfileIds = patch.browserProfiles === undefined

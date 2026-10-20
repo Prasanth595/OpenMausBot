@@ -118,3 +118,19 @@ describe("profile list compare-and-swap", () => {
     expect(afterRemoval.browserProfile).toBeUndefined();
   });
 });
+
+describe("account-pool compare-and-swap", () => {
+  it("rejects a stale pool save without losing the latest account priorities", async () => {
+    const original = { enabled: true, failover: true, restore: true, priorities: { primary: 100 } };
+    const created = await call("PATCH", "/api/config", { accountPools: { antigravity: original }, expectedAccountPool: null });
+    expect(created.status).toBe(200);
+
+    const updated = { ...original, priorities: { primary: 100, backup: 80 } };
+    expect((await call("PATCH", "/api/config", { accountPools: { antigravity: updated }, expectedAccountPool: original })).status).toBe(200);
+
+    const stale = await call("PATCH", "/api/config", { accountPools: { antigravity: { ...original, failover: false } }, expectedAccountPool: original });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error).toContain("Account-pool settings changed");
+    expect((await call("GET", "/api/config")).body.accountPools.antigravity).toEqual(updated);
+  });
+});
