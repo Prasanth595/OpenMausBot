@@ -483,12 +483,16 @@ export function createDecisor(deps: DecisorDeps): Decisor {
     if (!policy.enabled) return [];
     if (deps.stopped()) return [];
     const now = deps.now();
-    const resolved = deps.resolvedItems();
+    // One pass over the resolved history per tick, not one per open item.
+    const recentlyClosedKeys = new Set<string>();
+    for (const each of deps.resolvedItems()) {
+      if (each.key && each.resolvedNote?.startsWith(DECISOR_NOTE_PREFIX) && now - each.resolvedAt < DECISOR_REOPEN_HOLD_MS) recentlyClosedKeys.add(each.key);
+    }
     const done: DecisorLogEntry[] = [];
     let acted = 0;
     for (const item of [...deps.openItems()].sort((a, b) => a.createdAt - b.createdAt)) {
       if (acted >= policy.maxPerTick) break;
-      const closedKeyRecently = Boolean(item.key && resolved.some((each) => each.key === item.key && each.resolvedNote?.startsWith(DECISOR_NOTE_PREFIX) && now - each.resolvedAt < DECISOR_REOPEN_HOLD_MS));
+      const closedKeyRecently = Boolean(item.key && recentlyClosedKeys.has(item.key));
       const plan = planDecision(item, { policy, now, threadExists: deps.threadExists(item.botId, item.threadId), closedKeyRecently });
       const sayKey = `${item.botId}:${item.id}`;
       const fingerprint = `${itemVersion(item)}|${plan.action}|${plan.why}|${policy.mode}`;

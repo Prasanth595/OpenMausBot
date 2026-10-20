@@ -93,6 +93,21 @@ describe("message-db", () => {
     expect(JSON.parse(calls[0]!.input).message).toBe("passo 1");
   });
 
+  it("cross-conversation reads by kind or time use an index, not a scan of every message", () => {
+    insertMessage("t-idx", msg("m1", "hello #12", { role: "bot" }));
+    closeMessageDb();
+    botTextsWithRefsSince(0);
+    const raw = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    try {
+      const plan = (sql: string) => (raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all() as Array<{ detail: string }>).map((row) => row.detail).join(" | ");
+      expect(plan("SELECT MIN(at) FROM messages WHERE kind = 'digest'")).toMatch(/USING (COVERING )?INDEX messages_kind_at/);
+      expect(plan("SELECT thread_id FROM messages WHERE kind = 'goal.run' AND json_extract(json, '$.goalRun.status') = 'working'")).toMatch(/INDEX messages_kind_at/);
+      expect(plan("SELECT text FROM messages WHERE role = 'bot' AND (kind = 'text' OR kind = 'activity') AND at >= 1 ORDER BY at DESC LIMIT 5")).toMatch(/INDEX messages_(kind_)?at/);
+    } finally {
+      raw.close();
+    }
+  });
+
   it("persists inserts, updates, and the active leaf across a reopen", () => {
     insertMessage("t1", msg("m1", "hello"));
     insertMessage("t1", msg("m2", "world"));
@@ -458,7 +473,7 @@ describe("messages_thread_at", () => {
           "SELECT m.thread_id, m.id, m.at, substr(m.text, 1, 400) AS head, " +
           "ROW_NUMBER() OVER (PARTITION BY m.thread_id ORDER BY m.at DESC) AS rn " +
           "FROM messages m " +
-          "WHERE m.kind = 'text' AND m.role = 'bot' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (?, ?) " +
+          "WHERE +m.kind = 'text' AND m.role = 'bot' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (?, ?) " +
           "AND (json_extract(m.json, '$.from.botId') IS NULL OR json_extract(m.json, '$.from.botId') = ?)" +
           ") WHERE rn = 1 ORDER BY at DESC LIMIT ?",
       );

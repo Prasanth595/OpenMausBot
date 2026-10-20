@@ -252,6 +252,18 @@ describe("the pass", () => {
     expect((deps.audit as ReturnType<typeof vi.fn>).mock.calls.filter(([entry]) => entry.item === "o273")).toHaveLength(0);
   });
 
+  it("reads the resolved history once per pass and still holds a key the proxy closed recently", async () => {
+    const resolvedItems = vi.fn(() => [
+      { ...ITEMS.o272, resolvedAt: NOW - 60_000, resolvedNote: `${DECISOR_NOTE_PREFIX} closed` },
+      ...Array.from({ length: 500 }, (_, i) => ({ ...ITEMS.o64, id: `old-${i}`, key: `old-${i}`, resolvedAt: NOW - 60_000, resolvedNote: "by hand" })),
+    ]) as unknown as DecisorDeps["resolvedItems"];
+    const { deps, decisor } = harness({ resolvedItems });
+    const done = await decisor.tick();
+    expect(resolvedItems).toHaveBeenCalledTimes(1);
+    expect(done.find((entry) => entry.item === "o272")).toMatchObject({ action: "keep" });
+    expect(deps.resolve).not.toHaveBeenCalledWith(ITEMS.o272, expect.anything());
+  });
+
   it("dry-run sends nothing and logs each plan once", async () => {
     const { deps, decisor } = harness({}, { mode: "dry-run" });
     await decisor.tick();

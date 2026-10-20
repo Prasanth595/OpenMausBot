@@ -48,6 +48,10 @@ function open(): DatabaseSync {
     -- walk these rows in time order on messages_thread. Created on every
     -- open, including a database that already has messages.
     CREATE INDEX IF NOT EXISTS messages_thread_at ON messages(thread_id, at);
+    -- Reads across every conversation filter on kind and/or a time window (turn digests, working goal runs, what the
+    -- bots said since yesterday): without these they scanned all of messages.db and its JSON on the server's thread.
+    CREATE INDEX IF NOT EXISTS messages_kind_at ON messages(kind, at);
+    CREATE INDEX IF NOT EXISTS messages_at ON messages(at);
     CREATE TABLE IF NOT EXISTS thread_state (
       thread_id TEXT PRIMARY KEY,
       active_leaf_id TEXT
@@ -820,7 +824,8 @@ export function latestSaidByBot(threadIds: readonly string[], botId: string, sin
         "SELECT m.thread_id, m.id, m.at, substr(m.text, 1, 400) AS head, " +
         "ROW_NUMBER() OVER (PARTITION BY m.thread_id ORDER BY m.at DESC) AS rn " +
         "FROM messages m " +
-        `WHERE m.kind = 'text' AND m.role = 'bot' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (${placeholders}) ` +
+        // +m.kind: per-thread newest is walked on messages_thread_at; messages_kind_at would read every bot text since `since`.
+        `WHERE +m.kind = 'text' AND m.role = 'bot' AND m.text IS NOT NULL AND m.at >= ? AND m.thread_id IN (${placeholders}) ` +
         "AND (json_extract(m.json, '$.from.botId') IS NULL OR json_extract(m.json, '$.from.botId') = ?)" +
         ") WHERE rn = 1 ORDER BY at DESC LIMIT ?",
     )
