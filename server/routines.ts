@@ -15,7 +15,7 @@ import { isRoutineProblemRun } from "../shared/routines.ts";
 import { ROUTINE_PARTS, type PartPair, type RoutinePart } from "./package-parts.ts";
 import {
   composeExecutionPrompt, continuityCarry, retriesTransiently, ROUTINE_DEFERRAL_NOTICE_MS, ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED,
-  ROUTINE_TRANSIENT_RETRY_MS, routineFailure, routineHostWarning, skipNeedsNotice, staleActiveRun, supersededBy,
+  ROUTINE_HANDOFF_DETACH_CADENCE_MS, ROUTINE_HANDED_OFF_NOTE, ROUTINE_TRANSIENT_RETRY_MS, routineFailure, routineHostWarning, skipNeedsNotice, staleActiveRun, supersededBy,
 } from "./routine-execution.ts";
 
 export interface RoutineIntervalWindow {
@@ -581,6 +581,21 @@ function nextAlignedInterval(schedule: RoutineIntervalSchedule, after: number): 
   const intervalsElapsed = Math.floor((after - schedule.anchorAt) / intervalMs);
   const candidate = schedule.anchorAt + (intervalsElapsed + 1) * intervalMs;
   return Number.isSafeInteger(candidate) && candidate <= MAX_DATE_MS ? candidate : null;
+}
+
+/** The shortest gap between the next few occurrences after `from` (null: fewer than two). */
+export function scheduleCadenceMs(schedule: RoutineSchedule, from: number): number | null {
+  if (schedule.type === "interval") return schedule.everyMinutes * 60_000;
+  if (schedule.type === "once") return null;
+  let shortest: number | null = null;
+  let at = nextOccurrence(schedule, from);
+  for (let i = 0; i < 3 && at !== null; i++) {
+    const next = nextOccurrence(schedule, at);
+    if (next === null) break;
+    shortest = shortest === null ? next - at : Math.min(shortest, next - at);
+    at = next;
+  }
+  return shortest;
 }
 
 export function nextOccurrence(schedule: RoutineSchedule, after: number): number | null {
@@ -1282,6 +1297,17 @@ export class RoutineManager {
     if (changed) this.save();
   }
 
+  /** A scheduled bot run of a routine with continuity, due every ROUTINE_HANDOFF_DETACH_CADENCE_MS or more often. */
+  private handsOffLongWork(run: RoutineRun): boolean {
+    if (run.target !== "bot" || (run.triggerSource ?? (run.manual ? "manual" : "schedule")) !== "schedule") return false;
+    const routine = this.routines.find((candidate) => candidate.id === run.routineId);
+    // Continuity carries this run's report into the next pass, which picks the handed-off work up from there;
+    // without it the run still waits for its hand-offs as before.
+    if (!routine || routine.continuity !== true) return false;
+    const cadence = scheduleCadenceMs(routine.schedule, run.scheduledFor);
+    return cadence !== null && cadence <= ROUTINE_HANDOFF_DETACH_CADENCE_MS;
+  }
+
   private readonly noTurnSince = new Map<string, number>();
 
   /** At startup (the first tick) and on every tick: a run still marked active with no live turn, or past its maximum
@@ -1665,7 +1691,12 @@ export class RoutineManager {
         queueMicrotask(() => void this.tick());
         return cloneRun(run);
       }
-      const pending = !failure && this.options.hasPendingDelegations?.(event.threadId) === true;
+      const delegated = !failure && this.options.hasPendingDelegations?.(event.threadId) === true;
+      // A frequent routine (the Esteira, every 15 min) does not wait on its hand-offs (Claude Code sessions, a QA
+      // conversation): its run ends with the turn, so the next pass is not merged behind an hour of round trips.
+      const detached = delegated && this.handsOffLongWork(run);
+      const pending = delegated && !detached;
+      if (detached) console.log(`routines: "${run.routineName}" (${run.routineId.slice(0, 8)}) run ${run.id.slice(0, 8)} handed its long work off and ends with its turn`);
       // a turn that ended without error is not the work done: the declared RESULTADO decides
       const problem = !failure && !pending && run.resultContract ? resultProblem(run.declared ?? { kind: "missing" }) : null;
       if (problem) {
@@ -1678,6 +1709,7 @@ export class RoutineManager {
       else {
         run.status = failure ? "queued" : "completed";
         run.attention = failure ? `Starting again shortly after a temporary error: ${failure}`.slice(0, 500) : undefined;
+        if (detached && !run.output) run.output = ROUTINE_HANDED_OFF_NOTE;
       }
       if (failure) run.retryAt = this.now() + ROUTINE_TRANSIENT_RETRY_MS;
       else if (!pending) run.finishedAt = this.now();

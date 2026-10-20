@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GroupGoalRunStatus } from "../shared/group-goal-run.ts";
 import { isRoutineProblemRun } from "../shared/routines.ts";
-import { ROUTINE_ACTIVE_MAX_MS, ROUTINE_RELEASED_MAX, ROUTINE_RELEASED_NO_TURN, ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED, staleActiveRun } from "./routine-execution.ts";
+import { ROUTINE_HANDED_OFF_NOTE, ROUTINE_ACTIVE_MAX_MS, ROUTINE_RELEASED_MAX, ROUTINE_RELEASED_NO_TURN, ROUTINE_SKIPPED_WHILE_WAITING, ROUTINE_SUPERSEDED, staleActiveRun } from "./routine-execution.ts";
 import {
   nextOccurrence,
   RoutineManager,
@@ -13,6 +13,7 @@ import {
   type RoutineManagerOptions,
   type RoutineRun,
   type RoutineSchedule,
+  scheduleCadenceMs,
 } from "./routines.ts";
 
 const dirs: string[] = [];
@@ -430,6 +431,40 @@ describe("a run left waiting for the person", () => {
     expect(h.manager.listRuns().find((run) => run.id === first.id)).toMatchObject({ status: "failed", error: ROUTINE_RELEASED_NO_TURN });
     expect(h.interruptedTurns).toEqual([{ botId: "maus-1", threadId: "thread-1" }]);
     expect(h.started).toHaveLength(2);
+  });
+
+  it("a frequent routine with continuity hands its long work off: the run ends with its turn and the next pass is not merged behind it", async () => {
+    const h = harness(monday);
+    let pending = true;
+    h.options.hasPendingDelegations = () => pending;
+    h.options.handedOffWorkLive = () => pending;
+    const routine = h.manager.create({ ...every5, name: "Esteira", schedule: { type: "cron", expression: "*/15 * * * *", timeZone: "UTC" }, continuity: true, timeoutMinutes: 45 });
+    h.setNow(routine.nextRunAt!); await h.manager.tick();
+    h.manager.handleRuntimeEvent({ ...event("thread-1"), type: "turn.completed", ok: true });
+    expect(h.manager.listRuns().find((run) => run.threadId === "thread-1")).toMatchObject({ status: "completed", output: ROUTINE_HANDED_OFF_NOTE });
+    // the teammate's reply later wakes the conversation: it is not this run any more
+    h.manager.handleRuntimeEvent({ ...event("thread-1"), eventId: "reply", type: "turn.started" } as never);
+    expect(h.manager.listRuns().find((run) => run.threadId === "thread-1")?.status).toBe("completed");
+    h.setNow(routine.nextRunAt! + minutes(15)); await h.manager.tick();
+    expect(h.started).toHaveLength(2);
+    expect(h.manager.listRuns().some((run) => run.coalescedRuns)).toBe(false);
+  });
+
+  it("keeps the old wait for a frequent routine without continuity, and for a slow one", async () => {
+    for (const patch of [{ continuity: false }, { continuity: true, schedule: { type: "cron" as const, expression: "0 * * * *", timeZone: "UTC" } }]) {
+      const h = harness(monday);
+      h.options.hasPendingDelegations = () => true;
+      const routine = h.manager.create({ ...every5, ...patch });
+      h.setNow(routine.nextRunAt!); await h.manager.tick();
+      h.manager.handleRuntimeEvent({ ...event("thread-1"), type: "turn.completed", ok: true });
+      expect(h.manager.listRuns().find((run) => run.threadId === "thread-1")?.status).toBe("waiting");
+    }
+  });
+
+  it("measures a schedule's cadence from its next occurrences", () => {
+    expect(scheduleCadenceMs({ type: "cron", expression: "*/15 * * * *", timeZone: "UTC" }, monday)).toBe(minutes(15));
+    expect(scheduleCadenceMs({ type: "interval", everyMinutes: 5, anchorAt: monday }, monday)).toBe(minutes(5));
+    expect(scheduleCadenceMs({ type: "cron", expression: "30 7 * * 1-5", timeZone: "UTC" }, monday)).toBe(24 * minutes(60));
   });
 
   it("leaves runs with their own run limit, room goals and fresh runs alone", () => {

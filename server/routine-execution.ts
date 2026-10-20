@@ -179,6 +179,12 @@ export function staleActiveRun(
   return null;
 }
 
+/** A routine with continuity due at least this often hands its long work off and ends its run at the end of its turn: waiting on
+ * that work would hold every later occurrence (they only merge into one pending run) and keep the bot's own queue
+ * busy with the hand-off's round trips. The next pass picks the results up from the hand-off and its continuity. */
+export const ROUTINE_HANDOFF_DETACH_CADENCE_MS = 30 * 60_000;
+export const ROUTINE_HANDED_OFF_NOTE = "Long work handed off; this run ended its turn so the next one is not held behind it";
+
 /** Once per wait: the first occurrence skipped after the waiting run blocking it passed the notice window. */
 export function skipNeedsNotice(dueAt: number, waitingSince: number, previousSkipAt: number | undefined): boolean {
   const staleAt = waitingSince + ROUTINE_DEFERRAL_NOTICE_MS;
