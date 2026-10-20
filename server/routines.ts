@@ -309,6 +309,7 @@ export interface RoutineManagerOptions {
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 const CATCH_UP_MS = 12 * 60 * 60_000;
+export const ROUTINE_STALE_PENDING = "Skipped: this run waited more than 12 hours to start; the next scheduled run does the work";
 const WAKE_HORIZON_MS = 60 * 60_000;
 
 export const ROUTINE_RESTARTED = "OpenMausBot restarted while this routine was running";
@@ -1570,6 +1571,13 @@ export class RoutineManager {
             }
             continue;
           }
+        }
+        // A scheduled run that has waited past the catch-up window is not run at all (e.g. one that sat a day behind
+        // a busy bot): its next occurrence does the work, and a boot does not start a day-old backlog.
+        if (triggerSource === "schedule" && now - run.scheduledFor > CATCH_UP_MS) {
+          console.log(`routines: "${run.routineName}" (${run.routineId.slice(0, 8)}) pending run ${run.id.slice(0, 8)} dropped, ${Math.round((now - run.scheduledFor) / 60_000)} min late${run.coalescedRuns ? `, coalesced ${run.coalescedRuns}` : ""}`);
+          this.missQueuedRun(run, ROUTINE_STALE_PENDING);
+          continue;
         }
         const sameRoutineWorking = triggerSource === "schedule" && this.runs.some(other =>
           other.id !== run.id && other.routineId === run.routineId && ["running", "waiting"].includes(other.status));

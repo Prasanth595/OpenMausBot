@@ -22,7 +22,7 @@ import {
 import { migrateWorkspaceCredentials, workspaceCredentialEnv } from "./workspace-credentials.mjs";
 import { evictStartupCacheOnce } from "./startup-cache-eviction.mjs";
 import { activateExistingWindow, releaseSingleInstanceLock } from "./single-instance.mjs";
-import { bootFailureMessage, listeningSignal, pollServerIdentity, SERVER_BOOT_TIMEOUT_MS, SERVER_LISTENING_GRACE_MS } from "./server-boot-probe.mjs";
+import { bootFailureMessage, listeningSignal, pollServerIdentity, portAfterFailure, SERVER_BOOT_TIMEOUT_MS, SERVER_LISTENING_GRACE_MS } from "./server-boot-probe.mjs";
 import { createServerSupervisor } from "./server-supervisor.mjs";
 import { serverChildLaunch } from "./server-child-launch.mjs";
 import { packageUrlFromCommandLine, packageUrlFromDeepLink } from "./package-link.mjs";
@@ -1264,7 +1264,8 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
 async function startServerPackaged() {
   let everyPortForeignOwned = true;
   for (let attempt = 0; attempt < 2; attempt++) {
-    for (const port of DESKTOP_PORTS) {
+    for (let index = 0, sameTries = 0; index < DESKTOP_PORTS.length;) {
+      const port = DESKTOP_PORTS[index];
       if (desktopShutdownStarted) return false;
       const started = await startServerOn(port);
       if (started.proc) {
@@ -1273,6 +1274,9 @@ async function startServerPackaged() {
       }
       if (started.abort) return false;
       if (started.reason !== "foreign-owner") everyPortForeignOwned = false;
+      // a slow boot is retried on the same port (once), never moved to a fallback port
+      if (portAfterFailure(started.reason) === "same" && sameTries < 1) { sameTries++; continue; }
+      index++; sameTries = 0;
     }
     await new Promise((r) => setTimeout(r, 2500));
   }

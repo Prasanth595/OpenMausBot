@@ -15,6 +15,7 @@ import {
   type RoutineRun,
   type RoutineSchedule,
   scheduleCadenceMs,
+  ROUTINE_STALE_PENDING,
 } from "./routines.ts";
 
 const dirs: string[] = [];
@@ -3881,6 +3882,25 @@ describe("an occurrence due while the routine's previous run is still active", (
       h.setNow(start + 5 * quarter); await h.manager.tick();
       expect(h.manager.listRuns().filter(run => run.status === "queued")).toHaveLength(1);
       expect(h.started).toHaveLength(2);
+    } finally { log.restore(); }
+  });
+
+  it("drops a pending run that waited past the 12 h catch-up window instead of starting a day-old backlog", async () => {
+    const log = logs();
+    try {
+      const h = harness(start); h.setBot("busy");
+      const routine = h.manager.create({ ...esteira(), schedule: { type: "cron" as const, expression: "0 16 * * *", timeZone: "America/Sao_Paulo" } });
+      h.setNow(routine.nextRunAt!); await h.manager.tick();
+      expect(h.manager.listRuns()).toEqual([expect.objectContaining({ status: "queued" })]);
+      const due = routine.nextRunAt!;
+      // 11 h later it is still a pending run that will start
+      h.setNow(due + 11 * 3_600_000); await h.manager.tick();
+      expect(h.manager.listRuns().filter(run => run.status === "queued")).toHaveLength(1);
+      // past 12 h (e.g. at boot after a long stall) it is dropped, once, and nothing starts
+      h.setNow(due + 13 * 3_600_000); h.setBot("ready"); await h.manager.tick();
+      expect(h.started).toHaveLength(0);
+      expect(h.manager.listRuns()).toEqual([expect.objectContaining({ status: "missed", error: ROUTINE_STALE_PENDING })]);
+      expect(log.lines()).toEqual(expect.arrayContaining([expect.stringMatching(/pending run .* dropped, \d+ min late/)]));
     } finally { log.restore(); }
   });
 
