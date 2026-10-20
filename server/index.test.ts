@@ -12949,14 +12949,18 @@ describe("message pages", () => {
       const posted = await api("POST", `/api/groups/${groupId}/messages`, { text: `page probe ${i}` });
       expect(posted.status).toBe(202);
     }
-    const after = await api("GET", "/api/bots");
+    const after = await api("GET", "/api/bots?messages=all");
     return after.body.groups.find((g: { id: string }) => g.id === groupId);
   };
 
-  it("returns the whole transcript when nothing is asked for", async () => {
+  it("returns the whole transcript only with messages=all, the newest page when nothing is asked for", async () => {
     const room = await seedRoom(6);
     expect(room.messages).toHaveLength(6);
     expect(room).not.toHaveProperty("hasMore");
+    const { body } = await api("GET", "/api/bots");
+    const paged = body.groups.find((g: { id: string }) => g.id === room.id);
+    expect(paged.messages.map((msg: { id: string }) => msg.id)).toEqual(room.messages.map((msg: { id: string }) => msg.id));
+    expect(paged.hasMore).toBe(false);
   });
 
   it("returns only the newest n when asked", async () => {
