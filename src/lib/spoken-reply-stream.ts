@@ -167,15 +167,19 @@ export class SpokenReplyStream {
           if (turn.authoritative !== null) {
             const text = turn.authoritative;
             turn.authoritative = null;
+            // Reset before the await: a delta that lands while prepare is in
+            // flight appends to the cleared buffer and survives as a dirty
+            // pump, instead of being wiped by this supersession.
+            const spoken = turn.spoken;
+            turn.spoken = [];
+            turn.buffer = "";
             const blocks = await turn.stream.prepare(text);
             let resume = 0;
-            while (resume < turn.spoken.length && resume < blocks.length && turn.spoken[resume] === blocks[resume]) resume += 1;
+            while (resume < spoken.length && resume < blocks.length && spoken[resume] === blocks[resume]) resume += 1;
             // Re-speak from the first divergence: content the authoritative
             // frame holds is never dropped, and this matches what speaking the
             // completed frame alone would have said.
             for (const block of blocks.slice(resume)) turn.stream.push(block);
-            turn.spoken = [];
-            turn.buffer = "";
             continue;
           }
           if (turn.dirty && !turn.ended) {
