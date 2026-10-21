@@ -37,7 +37,6 @@ import type {
   ProviderInstance,
   ProviderSnapshot,
   ModelCatalog,
-  ModelVariantOption,
   RuntimeEvent,
   RuntimeEventListener,
   SendTurnInput,
@@ -49,6 +48,7 @@ import type {
 } from "../../contracts.ts";
 import { newEventId, newId, PERMISSION_REVIEW_IDLE_TIMEOUT_MS, PERMISSION_REVIEW_SYSTEM_PROMPT, TurnNotStartedError } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
+import { acpVariantOption, offeredModels, selectExactReviewModel } from "./model-config.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 import { MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
 
@@ -342,46 +342,8 @@ function nextUnkeyedToolId(current: AcpTurn): string {
 }
 const CLIENT_FILE_MAX_BYTES = 8 * 1024 * 1024;
 
-function acpVariantOption(result: any): { configId: string; options: ModelVariantOption[]; currentValue?: string } | undefined {
-  const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
-    (entry: any) => entry?.type === "select" && typeof entry.id === "string"
-      && (entry.id === "effort" || entry.category === "thought_level"),
-  );
-  if (!option) return;
-  const options: ModelVariantOption[] = [];
-  const seen = new Set<string>();
-  const collect = (entries: unknown) => {
-    if (!Array.isArray(entries)) return;
-    for (const entry of entries) {
-      if (typeof entry?.value === "string" && !seen.has(entry.value)) {
-        seen.add(entry.value);
-        options.push({ id: entry.value, label: typeof entry.name === "string" ? entry.name : entry.value });
-      } else if (Array.isArray(entry?.options)) collect(entry.options);
-    }
-  };
-  collect(option.options);
-  return {
-    configId: option.id,
-    options,
-    ...(typeof option.currentValue === "string" ? { currentValue: option.currentValue } : {}),
-  };
-}
 
-export function offeredModels(result: any, configId: string): string[] {
-  const option = (Array.isArray(result?.configOptions) ? result.configOptions : []).find(
-    (entry: any) => entry?.id === configId,
-  );
-  const ids: string[] = [];
-  const visit = (entries: unknown) => {
-    if (!Array.isArray(entries)) return;
-    for (const entry of entries) {
-      if (typeof entry?.value === "string") ids.push(entry.value);
-      else if (Array.isArray(entry?.options)) visit(entry.options);
-    }
-  };
-  visit(option?.options);
-  return ids;
-}
+
 
 async function readAcpImageBlocks(images: readonly TurnImageInput[]) {
   return Promise.all(images.map(async (image) => ({
@@ -1808,24 +1770,8 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             loginNote: support.loginNote,
             configure: async ({ request, sessionId, session }) => {
               if (review) {
-                const configId = support.selectModel?.configId;
-                if (!configId) throw new Error(`${support.displayName} cannot select an exact review model`);
-                let current = session;
-                const selected = (result: any) => (Array.isArray(result?.configOptions) ? result.configOptions : [])
-                  .find((entry: any) => entry?.id === configId)?.currentValue;
-                if (!offeredModels(current, configId).includes(review.model)) throw new Error(`${support.displayName} does not offer the review model`);
-                if (selected(current) !== review.model) {
-                  current = await request("session/set_config_option", { sessionId, configId, value: review.model });
-                }
-                if (selected(current) !== review.model) throw new Error(`${support.displayName} did not select the review model`);
-                if (review.variant !== undefined) {
-                  const option = acpVariantOption(current);
-                  if (!option?.options.some((entry) => entry.id === review.variant)) throw new Error(`${support.displayName} does not offer the review variant`);
-                  if (option.currentValue !== review.variant) {
-                    current = await request("session/set_config_option", { sessionId, configId: option.configId, value: review.variant });
-                  }
-                  if (acpVariantOption(current)?.currentValue !== review.variant) throw new Error(`${support.displayName} did not select the review variant`);
-                }
+                await selectExactReviewModel({ request, sessionId, session, displayName: support.displayName,
+                  modelConfigId: support.selectModel?.configId, model: review.model, variant: review.variant });
               }
               if (support.configureSession) await support.configureSession({
                 request,
