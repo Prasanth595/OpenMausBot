@@ -4,7 +4,7 @@ Use an isolated fixture following the [verification launch guide](README.md).
 Check the feature in the application renderer: the creator, file input, animated
 face, and saved-shape list need UI verification.
 
-1. From a bot's Avatar card, open **Create mascot** and import a simple closed
+1. From a bot's Avatar card, open **Create a custom mascot** and import a simple closed
    outline. Confirm the filename supplies the initial name, the preview keeps
    the standard gradient and animated face, and the face position/size controls
    update the preview.
