@@ -1669,6 +1669,7 @@
   "sidebar.newOrShare": "New or share",
   "sidebar.servers": "Servers",
   "sidebar.switchServer": "Switch server: {name}",
+  "sidebar.moreServers": "More options",
   "sidebar.switchServerError": "Could not open the server list. Try the Server menu.",
   "sidebar.newBot": "New Bot",
   "sidebar.newChat.title": "New chat",

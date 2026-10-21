@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { DesktopWorkspaceSwitcher, openServerMenu } from "./DesktopWorkspaceSwitcher";
+import { DesktopWorkspaceSwitcher, PlaceSwitch, openServerMenu } from "./DesktopWorkspaceSwitcher";
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -82,4 +82,30 @@ it("draws Simple mode's switcher as a rounded pill that names the server in full
   const browser = renderToStaticMarkup(createElement(DesktopWorkspaceSwitcher, { inline: true, pill: true, cloudHome: true }));
   expect(visibleText(browser)).toBe("My Cloud");
   expect(browser).toMatch(/class="[^"]*\bh-8\b[^"]*\brounded-full\b/);
+});
+
+it("shows This computer and My Cloud side by side, marks where you are, and switches only to the other place", () => {
+  const onSwitch = vi.fn(), onMenu = vi.fn();
+  const props = { onSwitch, onMenu, menuOpen: false, pill: false, compact: false };
+  const html = renderToStaticMarkup(createElement(PlaceSwitch, { ...props, place: "cloud" }));
+  expect(visibleText(html)).toBe("This computerMy Cloud");
+  expect(html).toMatch(/data-place="local"[^>]*aria-pressed="false"|aria-pressed="false"[^>]*data-place="local"/);
+  expect(html).toMatch(/data-place="cloud"[^>]*aria-pressed="true"|aria-pressed="true"[^>]*data-place="cloud"/);
+  expect(html).toContain('aria-label="More options"');
+  expect(html).toContain('data-tour="server-switcher"');
+  // Walk the element tree for the buttons' handlers.
+  const buttons: Array<{ props: Record<string, any> }> = [];
+  const walk = (node: any) => { if (!node || typeof node !== "object") return; if (Array.isArray(node)) return node.forEach(walk); if (node.type === "button") buttons.push(node); walk(node.props?.children); };
+  walk(PlaceSwitch({ ...props, place: "cloud" }));
+  const by = (id: string) => buttons.find(button => button.props["data-place"] === id)!;
+  by("cloud").props.onClick(); expect(onSwitch).not.toHaveBeenCalled();
+  by("local").props.onClick(); expect(onSwitch).toHaveBeenCalledWith("local");
+  buttons.find(button => button.props["aria-label"] === "More options")!.props.onClick(); expect(onMenu).toHaveBeenCalledOnce();
+});
+
+it("keeps one icon per place when compact", () => {
+  const html = renderToStaticMarkup(createElement(PlaceSwitch, { place: "local", onSwitch: () => {}, onMenu: () => {}, menuOpen: false, pill: false, compact: true }));
+  expect(visibleText(html)).toBe("");
+  expect(html).toContain('title="This computer"');
+  expect(html).toContain('title="My Cloud"');
 });

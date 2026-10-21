@@ -2982,7 +2982,22 @@ ipcMain.handle("environments:add-from-link", localWorkspaceOnly("environments:ad
 ipcMain.handle("environments:forget", localWorkspaceOnly("environments:forget", (_event, id, purge) => forgetEnvironment(typeof id === "string" ? id : "", purge === true)));
 
 // A cloud page may open the native chooser, never choose a destination or edit the saved list.
-ipcMain.handle("workspaces:state", workspaceOnly(() => workspaceSummary(environmentsState)));
+// `place` and `cloudAvailable` let the sidebar show This computer and My Cloud side by side. They say nothing about any
+// other saved server.
+function workspacePlace() {
+  const cloud = cloudHomeEntry();
+  const active = activeEnvironment(environmentsState);
+  const place = !active || active.kind === "local" ? "local" : cloud && active.id === cloud.id ? "cloud" : "other";
+  return { place, cloudAvailable: Boolean(cloud) };
+}
+ipcMain.handle("workspaces:state", workspaceOnly(() => ({ ...workspaceSummary(environmentsState), ...workspacePlace() })));
+// A page can ask for one of two fixed destinations. Main resolves each from the saved list; the page names no server.
+ipcMain.handle("workspaces:switch", workspaceOnly(async (_event, place) => {
+  if (place !== "local" && place !== "cloud") throw new Error("Choose This computer or My Cloud");
+  const target = place === "local" ? LOCAL_ID : cloudHomeEntry()?.id;
+  if (!target) throw new Error("My Cloud isn't set up on this computer");
+  await workspaceMenuAction(() => switchEnvironment(target));
+}));
 let workspaceMenuOpen = false;
 ipcMain.handle("workspaces:menu", workspaceOnly(async (_event, from) => {
   if (workspaceMenuOpen) return;

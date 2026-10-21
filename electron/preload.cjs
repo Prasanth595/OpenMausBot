@@ -78,10 +78,13 @@ if (isLocalPage && !desktopRemoteClient && process.argv.includes("--omb-company-
 
 const bridge = {
   platform: process.platform,
-  // Safe on a cloud page: the person chooses in a native menu; no direct switching, saved-list reads, host files or secrets.
+  // Safe on a cloud page: the person chooses in a native menu or between the two fixed places, This computer and My Cloud;
+  // no other switching, saved-list reads, host files or secrets.
   workspaces: {
     state: () => ipcRenderer.invoke("workspaces:state"),
     menu: (options) => ipcRenderer.invoke("workspaces:menu", ...(options?.from === "howto" ? ["howto"] : [])),
+    // Only the two fixed places; the main process resolves which saved server "cloud" is. No server can be named.
+    switchTo: (place) => ipcRenderer.invoke("workspaces:switch", place === "cloud" ? "cloud" : "local"),
   },
   getCapabilities: () => ipcRenderer.invoke("desktop:capabilities"),
   onCapabilitiesChanged: (cb) => {

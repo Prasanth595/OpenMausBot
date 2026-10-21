@@ -146,7 +146,9 @@ const __APP_VERSION__: string;
       };
       workspaces?: {
         /** `color`: a saved server's colour name (its owner chose it while setting the Cloud up). */
-        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string }>;
+        state: () => Promise<{ local: boolean; name: string; origin?: string; color?: string; place?: "local" | "cloud" | "other"; cloudAvailable?: boolean }>;
+        /** Go to This computer or to My Cloud. It cannot name any other server. */
+        switchTo?: (place: "local" | "cloud") => Promise<void>;
         /** The native server menu; resolves when it closes. `from: "howto"`: the Show me how tip opened it. */
         menu: (options?: { from?: "howto" }) => Promise<void>;
       };

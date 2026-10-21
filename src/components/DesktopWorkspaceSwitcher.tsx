@@ -31,6 +31,26 @@ export function useCloudPower(cloudHome: boolean): { sleeps: boolean; waking: bo
   return { sleeps, waking };
 }
 
+/** This computer and My Cloud as two buttons, with the native menu one click away for any other saved server. */
+export function PlaceSwitch({ place, onSwitch, onMenu, menuOpen, pill, compact }: {
+  place: "local" | "cloud" | "other"; onSwitch: (to: "local" | "cloud") => void; onMenu: () => void; menuOpen: boolean; pill: boolean; compact: boolean;
+}) {
+  const places = [{ id: "local" as const, Icon: Laptop, text: t("place.local") }, { id: "cloud" as const, Icon: Cloud, text: t("cloudSetup.myCloud") }];
+  return <div role="group" data-place-switch aria-label={t("sidebar.servers")} data-tour="server-switcher"
+    className={cn("flex min-w-0 items-center gap-0.5 rounded-lg bg-raised/50 p-0.5", pill && "rounded-full")} style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}>
+    {places.map(({ id, Icon, text }) => <button key={id} type="button" aria-pressed={place === id} data-place={id} title={text} onClick={() => place !== id && onSwitch(id)}
+      className={cn("flex h-7 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[12.5px] font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+        pill && "rounded-full", place === id ? "bg-canvas text-ink shadow-sm" : "text-ink-secondary hover:bg-control hover:text-ink")}>
+      <Icon size={14} aria-hidden="true" className="shrink-0" />
+      {!compact && <span className="min-w-0 truncate">{text}</span>}
+    </button>)}
+    <button type="button" aria-label={t("sidebar.moreServers")} title={t("sidebar.moreServers")} aria-haspopup="menu" aria-expanded={menuOpen} onClick={onMenu}
+      className={cn("flex h-7 w-6 shrink-0 items-center justify-center rounded-md text-ink-secondary hover:bg-control hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus", pill && "rounded-full")}>
+      <ChevronDown size={12} aria-hidden="true" />
+    </button>
+  </div>;
+}
+
 /**
  * Security: the dropdown is native; a remote workspace cannot choose a destination or read the other workspaces saved
  * here.
@@ -42,7 +62,7 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
   const power = useCloudPower(cloudHome);
   const onLine = t(power.sleeps ? "cloudSetup.sleepsWhenIdle" : "cloudSetup.alwaysOn");
   const waking = power.waking ? t("cloudHome.waking") : "";
-  const [current, setCurrent] = useState<{ local: boolean; name: string; origin?: string; color?: string } | null>(null);
+  const [current, setCurrent] = useState<{ local: boolean; name: string; origin?: string; color?: string; place?: "local" | "cloud" | "other"; cloudAvailable?: boolean } | null>(null);
   const [open, setOpen] = useState(false);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -82,6 +102,17 @@ export function DesktopWorkspaceSwitcher({ compact = false, inline = false, pill
     void openServerMenu(bridge, { howTo, onClosed: onMenuClosed }).catch(() => setError(t("sidebar.switchServerError")))
       .finally(() => setOpen(false));
   };
+  const switchTo = bridge.switchTo;
+  const sideBySide = !rail && current?.cloudAvailable === true && typeof switchTo === "function";
+  const chooseTo = (to: "local" | "cloud") => {
+    setError("");
+    void switchTo?.(to).catch(() => setError(t("sidebar.switchServerError")));
+  };
+  if (sideBySide) return <div data-workspace-switcher={inline ? "inline" : "side-by-side"} className={inline ? "flex min-w-0 flex-1" : cn("py-1.5", compact ? "px-2" : "px-3")}>
+    <PlaceSwitch place={current?.place ?? "other"} onSwitch={chooseTo} onMenu={openMenu} menuOpen={open} pill={pill} compact={compact} />
+    {error && <p role="alert" className={inline ? "absolute right-2 top-full z-40 mt-1 w-56 max-w-[calc(100%-1rem)] rounded-md bg-menu px-2 py-1 text-[11px] text-danger shadow-lg" : "mt-1 text-[11px] text-danger"}>{error}</p>}
+    {waking && !error && <p role="status" data-cloud-waking className={inline ? "absolute right-2 top-full z-40 mt-1 w-56 max-w-[calc(100%-1rem)] rounded-md bg-menu px-2 py-1 text-[11px] text-ink-secondary shadow-lg" : "mt-1 text-[11px] text-ink-secondary"}>{waking}</p>}
+  </div>;
   if (rail) return <div data-workspace-switcher="rail" className="relative">
     <button type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open} data-cloud-home-indicator={cloudHome || undefined}
       data-tour="server-switcher" title={title} onClick={openMenu} className={cn(SIMPLE_RAIL_BUTTON, "aria-expanded:bg-raised")}
