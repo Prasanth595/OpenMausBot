@@ -1,6 +1,6 @@
 # Configurable approval review verification
 
-This PR is independently based on upstream 0.1.109 (`8c7ac58e`). It adds isolated
+This branch is independently based on upstream 0.1.122 (`087f01f31`). It adds isolated
 review for app-owned Auto gates and Claude when its native reviewer explicitly
 reports inactive. A native active or unknown reviewer remains authoritative.
 
@@ -30,6 +30,11 @@ terminal access, and denied native tools. The selected model and variant must
 be acknowledged before the prompt; otherwise the action goes to the person.
 The stable rubric and authorization evidence precede each exact
 action, and oversized or incomplete evidence falls back to a human card.
+
+On 2026-10-21, OpenCode v2.0.32 reviewed a synthetic read through the local
+Splash model in a temporary profile and returned `allow`. No proposed tool ran.
+This checks the real ACP route; the fake ACP tests cover exact variant selection
+and failure handling.
 
 Claude Code 2.1.296 reports Low through Max, without None, in its read-only
 `--help` metadata. The native fixture rejects unsupported flags independently;
