@@ -3,6 +3,13 @@ import React, { useEffect, useId, useMemo, useRef } from 'react'
 
 import { MASCOT_BODIES } from "../../shared/mascot-bodies"
 import {
+  customMascotDefinitionOf,
+  customMascotDefinitionSchema,
+  customMascotOutlinePathData,
+  type CustomMascotPoint,
+  type CustomMascotShape,
+} from "../../shared/mascot-profile"
+import {
   EXPRESSIONS,
   EXPRESSION_COUNT,
   FACE_BOX,
@@ -13,7 +20,7 @@ import {
   MOUTH_STROKE,
   mouthFrame,
   type Ring,
-} from "./cursor-face-data"
+} from "../../shared/cursor-face-data.ts"
 import { GLYPH_EASE_MS, MOTION, VIEW_SPAN, bodyTransform, faceTravelUnits, morphUnitsPerMs, nextMascotFrame, type BodyMotion } from "./mascot-motion"
 import { mascotClock, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock"
 
@@ -33,17 +40,46 @@ export {
 export type { Ring }
 
 
-export interface CursorSilhouette {
+interface CursorSilhouetteBase {
   name: string
+  anchor: { x: number; y: number; scale: number }
+}
+
+export type BuiltinCursorSilhouette = CursorSilhouetteBase & {
   fit: string
-  /** SVG markup for the body. The token {{GRADIENT}} is replaced with the instance gradient. */
   body: string
   clip: string
-  anchor: { x: number; y: number; scale: number }
+  outline?: never
+}
+
+export type CustomCursorSilhouette = CursorSilhouetteBase & {
+  outline: readonly CustomMascotPoint[]
+  fit?: never
+  body?: never
+  clip?: never
+}
+
+export type CursorSilhouette = BuiltinCursorSilhouette | CustomCursorSilhouette
+
+function isCustomCursorSilhouette(silhouette: CursorSilhouette): silhouette is CustomCursorSilhouette {
+  return Array.isArray((silhouette as CustomCursorSilhouette).outline)
 }
 
 const { id: _cursorBodyId, ...cursorSilhouette } = MASCOT_BODIES.cursor;
 export const DEFAULT_SILHOUETTE: CursorSilhouette = cursorSilhouette;
+
+const customSilhouetteCache = new WeakMap<CustomMascotShape, CursorSilhouette | null>()
+
+export function customMascotSilhouette(shape: CustomMascotShape): CursorSilhouette | undefined {
+  const cached = customSilhouetteCache.get(shape)
+  if (cached !== undefined) return cached ?? undefined
+  const parsed = customMascotDefinitionSchema.safeParse(customMascotDefinitionOf(shape))
+  const silhouette = parsed.success && customMascotOutlinePathData(parsed.data.outline)
+    ? { name: parsed.data.name, anchor: parsed.data.anchor, outline: parsed.data.outline }
+    : null
+  customSilhouetteCache.set(shape, silhouette)
+  return silhouette ?? undefined
+}
 
 export const DEFAULT_GRADIENT: [string, string, string] = ["#9FE6B5","#3FAE6E","#1C7A4C"]
 
@@ -1238,7 +1274,10 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
 
     const dimension = typeof size === 'number' ? `${size}px` : size
     const label = title === undefined ? `${silhouette.name} mascot` : title
-    const body = silhouette.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
+    const custom = isCustomCursorSilhouette(silhouette)
+    const customPath = custom ? customMascotOutlinePathData(silhouette.outline) : ""
+    const body = custom ? "" : silhouette.body.replace(/\{\{GRADIENT\}\}/g, `url(#${uid}-grad)`)
+    const fit = custom ? "" : silhouette.fit
 
     return (
       <svg
@@ -1259,17 +1298,25 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
             <stop offset="100%" stopColor={gradient[2]} />
           </linearGradient>
           {/* The fit goes on the clipPath itself: browsers ignore a <g> inside one, which is also why silhouette.clip is pre-flattened. */}
-          <clipPath
-            id={`${uid}-clip`}
-            transform={silhouette.fit || undefined}
-            dangerouslySetInnerHTML={{ __html: silhouette.clip }}
-          />
+          {custom ? (
+            <clipPath id={`${uid}-clip`}><path d={customPath} /></clipPath>
+          ) : (
+            <clipPath
+              id={`${uid}-clip`}
+              transform={fit || undefined}
+              dangerouslySetInnerHTML={{ __html: silhouette.clip }}
+            />
+          )}
         </defs>
         <g transform={flip ? `translate(${FACE_BOX} 0) scale(-1 1)` : undefined}>
           <g ref={trailLayer} />
           <g ref={bodyGroup}>
           <g ref={bodyContent}>
-          <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
+          {custom ? (
+            <path d={customPath} fill={`url(#${uid}-grad)`} />
+          ) : (
+            <g transform={fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />
+          )}
           <g clipPath={`url(#${uid}-clip)`}>
             <g transform={anchorTransform(silhouette.anchor)}>
               <path ref={eye0} fill={eyeColor} />

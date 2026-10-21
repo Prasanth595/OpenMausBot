@@ -5,6 +5,7 @@ import type { WireBot } from "../../shared/wire.ts";
 import { deleteAttachment, saveImage } from "../attachments.ts";
 import { avatarGenerationRequestSchema, avatarGenerationStateMatches, generateAvatarImage, snapshotAvatarGenerationState } from "../avatar-image.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
+import { validateCustomMascotDefinition } from "../custom-mascot-validation.ts";
 import { commandAllowlistCandidate, type CommandAllowlistStore } from "../command-allowlist.ts";
 import type { AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
@@ -58,6 +59,29 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
   return async ({ req, res, url, path, method, auth, json, readBody }) => {
     let m: RegExpMatchArray | null = null;
     const requirePinnedClientThread = pinnedClientThread(auth, req);
+    m = path.match(/^\/api\/bots\/([\w-]+)\/mascot-shapes$/);
+    if (m && method === "POST") {
+      const body = await readBody(req);
+      if (!body || typeof body !== "object" || Array.isArray(body) || Object.keys(body).some((key) => key !== "shape")) {
+        return json(res, 400, { error: "body must contain only a shape" });
+      }
+      let shape: ReturnType<typeof validateCustomMascotDefinition>;
+      try {
+        shape = validateCustomMascotDefinition(body.shape);
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : "custom mascot is invalid" });
+      }
+      let bot: BotRecord | null;
+      try {
+        bot = store.addOrSelectMascotShape(m[1], shape);
+      } catch (error) {
+        return json(res, 400, { error: error instanceof Error ? error.message : "custom mascot could not be saved" });
+      }
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      const visible = wireBot(bot);
+      broadcast({ kind: "bot", bot: visible });
+      return json(res, 201, { bot: visible });
+    }
     m = path.match(/^\/api\/bots\/([\w-]+)\/avatar\/generate$/);
     if (m && method === "POST") {
       const existing = store.bot(m[1]);

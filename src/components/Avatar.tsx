@@ -8,12 +8,13 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
-import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
+import { CursorAvatar, customMascotSilhouette, type CursorAvatarHandle, type CursorSilhouette } from "./CursorAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
 import { CarvedAvatar } from "./CarvedAvatar";
+import { selectedCustomMascot, type MascotProfile } from "../../shared/mascot-profile";
 
 export const EYE_SCALE = 1.12;
 export const MOUTH_WEIGHT = 11;
@@ -90,6 +91,7 @@ export type MausAvatarProps = {
   trackPointer?: boolean;
   animated?: boolean;
   bodyId?: BotBodyId;
+  silhouette?: CursorSilhouette;
   gradient?: [string, string, string];
 };
 
@@ -135,11 +137,12 @@ function GradientAvatarComponent(
     trackPointer = true,
     animated = true,
     bodyId,
+    silhouette: requestedSilhouette,
     gradient,
   }: MausAvatarProps,
   ref: React.Ref<MausAvatarHandle>,
 ) {
-  const silhouette = MASCOT_BODIES[botMascotBody(bodyId)];
+  const silhouette = requestedSilhouette ?? MASCOT_BODIES[botMascotBody(bodyId)];
   const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
     blink: () => inner.current?.blink(),
@@ -214,6 +217,7 @@ export type BotAvatarProps = Omit<MausAvatarProps, "color" | "gradient"> & {
     avatarFocusX?: number;
     avatarFocusY?: number;
     mascotBody?: BotBodyId | null;
+    mascotProfile?: MascotProfile;
   };
 };
 
@@ -246,9 +250,12 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
   });
 
   if (outcome !== "flatImage") {
+    const customShape = selectedCustomMascot(bot.mascotProfile);
+    const customSilhouette = customShape ? customMascotSilhouette(customShape) : undefined;
     return (
       <MausAvatar
         bodyId={wornBody(bot.mascotBody, bot.color, dressed)}
+        silhouette={customSilhouette}
         {...mascotProps}
         color={bot.color}
         gradient={readable ? roomAvatarGradient(bot.color) : undefined}

@@ -52,7 +52,7 @@ vi.mock("./HighLevelCard", () => ({
   HighLevelCard: () => createElement("div", { "data-highlevel-card": true }, "Connect HighLevel"),
 }));
 import { APPS_PREVIEW_COUNT, PluginsPanel, USED_BY_AVATAR_SIZE, botsUsingService } from "./PluginsPanel";
-import { FACE_BOX } from "./cursor-face-data";
+import { FACE_BOX } from "../../shared/cursor-face-data.ts";
 import { MASCOT_BODIES } from "../../shared/mascot-bodies";
 
 const CARDS = 0;

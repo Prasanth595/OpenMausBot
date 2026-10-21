@@ -20,6 +20,7 @@ import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { scrubbedSkillRequest } from "./skill-request-card.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
+import { addOrSelectCustomMascot, createMascotProfile, legacyMascotBody, mascotProfileSchema, selectBuiltinMascot, type CustomMascotShape } from "../shared/mascot-profile.ts";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
@@ -666,6 +667,16 @@ export class Store {
     const clearModelCopies = !existsSync(THREAD_MODEL_COPIES_CLEARED) && (botsLoaded || !existsSync(BOTS_FILE));
     const fillAskedAts = !existsSync(ASKED_AT_FILLED) && (botsLoaded || !existsSync(BOTS_FILE));
     for (const b of this.bots) {
+      const profile = mascotProfileSchema.safeParse(b.mascotProfile);
+      if (profile.success) {
+        b.mascotProfile = profile.data;
+      } else {
+        b.mascotProfile = createMascotProfile(b.mascotBody);
+        botsMigrated = true;
+      }
+      const legacyBody = legacyMascotBody(b.mascotProfile);
+      if (b.mascotBody !== legacyBody) botsMigrated = true;
+      b.mascotBody = legacyBody;
       if (b.projects?.some((project) => "modelSelection" in project)) {
         b.projects = b.projects.map(({ id, name, emoji }) => ({ id, name, ...(isProjectEmoji(emoji) ? { emoji } : {}) }));
         botsMigrated = true;
@@ -843,7 +854,7 @@ export class Store {
 
   private saveBots(bots: BotRecord[] = this.bots, registerSections = true) {
     if (registerSections) this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
-    writeFileAtomicIfChanged(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
+    writeFileAtomicIfChanged(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, mascotBody: _legacyMascotBody, ...bot }) => ({
       ...bot,
       tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
     })), null, 2), { mode: 0o600 });
@@ -1460,7 +1471,7 @@ export class Store {
     profile: Partial<
       Pick<
         BotRecord,
-        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "modelSelection" | "section" | "cwd" | "visibility" | "toolScope"
+        "name" | "title" | "description" | "soul" | "color" | "mascotExpression" | "mascotBody" | "mascotProfile" | "modelSelection" | "section" | "cwd" | "visibility" | "toolScope"
       >
     > = {},
     opts: {
@@ -1472,6 +1483,9 @@ export class Store {
     this.rememberSections([profile.section]);
     const name = profile.name?.trim() || pickBotName(this.bots.map((b) => b.name));
     const section = sectionKey(profile.section);
+    const mascotProfile = profile.mascotProfile === undefined
+      ? createMascotProfile(profile.mascotBody)
+      : mascotProfileSchema.parse(profile.mascotProfile);
     const bot: BotRecord = {
       id: opts.id ?? newId(),
       threadId: opts.threadId ?? newId(),
@@ -1483,7 +1497,8 @@ export class Store {
       notifications: true,
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
-      ...(profile.mascotBody ? { mascotBody: profile.mascotBody } : {}),
+      mascotProfile,
+      mascotBody: legacyMascotBody(mascotProfile),
       // Restricted from its first frame: no one else is ever told it exists.
       ...(profile.visibility && profile.visibility !== "everyone" ? { visibility: structuredClone(profile.visibility) } : {}),
       ...(toolScope.scope ? { toolScope: toolScope.scope } : {}),
@@ -1658,6 +1673,13 @@ export class Store {
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
+    if (patch.mascotProfile !== undefined) {
+      const mascotProfile = mascotProfileSchema.parse(patch.mascotProfile);
+      patch = { ...patch, mascotProfile, mascotBody: legacyMascotBody(mascotProfile) };
+    } else if (patch.mascotBody !== undefined) {
+      const mascotProfile = selectBuiltinMascot(bot.mascotProfile, patch.mascotBody ?? "cursor");
+      patch = { ...patch, mascotProfile, mascotBody: legacyMascotBody(mascotProfile) };
+    }
     if (patch.connectorTools !== undefined) {
       const parsed = parseConnectorTools(patch.connectorTools);
       if (!parsed.ok) throw new Error(parsed.error);
@@ -1714,6 +1736,10 @@ export class Store {
     const bot = this.bot(id);
     if (!bot) return null;
     const next = { ...bot, ...patch };
+    if (patch.mascotBody !== undefined) {
+      next.mascotProfile = selectBuiltinMascot(bot.mascotProfile, patch.mascotBody ?? "cursor");
+      next.mascotBody = legacyMascotBody(next.mascotProfile);
+    }
     if (patch.soul !== undefined) {
       next.soulHash = soulHash(patch.soul);
       next.soulDrift = false;
@@ -1725,6 +1751,23 @@ export class Store {
         console.warn(`[bot-folder] could not write SOUL.md mirror for ${id}: ${(e as Error).message}`);
       }
     }
+    this.emit({ type: "bot", botId: id });
+    return bot;
+  }
+
+  addOrSelectMascotShape(id: string, shape: CustomMascotShape): BotRecord | null {
+    const bot = this.bot(id);
+    if (!bot) return null;
+    const mascotProfile = addOrSelectCustomMascot(bot.mascotProfile, structuredClone(shape));
+    const next: BotRecord = {
+      ...bot,
+      mascotProfile,
+      mascotBody: legacyMascotBody(mascotProfile),
+      avatarUrl: undefined,
+      avatarCrop: "mascot",
+    };
+    this.saveBots(this.bots.map((candidate) => candidate.id === id ? next : candidate));
+    Object.assign(bot, next);
     this.emit({ type: "bot", botId: id });
     return bot;
   }

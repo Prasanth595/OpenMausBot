@@ -5,6 +5,8 @@ import type { MausColor } from "./store.ts";
 import { botBodyId, type BotBodyId } from "../shared/bot-body.ts";
 import { takeImportName } from "../shared/import-name.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
+import { mascotProfileSchema, type MascotProfile } from "../shared/mascot-profile.ts";
+import { validateMascotProfile } from "./custom-mascot-validation.ts";
 import { optionalText, requiredText } from "../shared/package-format.ts";
 
 export const TEAM_MANIFEST_FORMAT = "openmaus.team" as const;
@@ -54,6 +56,7 @@ const memberSchema = z.object({
     color: z.enum(COLORS, { error: "is not supported" }),
     mascotExpression: optionalText(80),
     mascotBody: optionalText(40),
+    mascotProfile: mascotProfileSchema.optional(),
   }),
 });
 
@@ -98,6 +101,7 @@ export interface TeamManifestMember {
     color: MausColor;
     mascotExpression?: string;
     mascotBody?: string;
+    mascotProfile?: MascotProfile;
   };
 }
 
@@ -145,6 +149,7 @@ interface ExportableBot {
   color: MausColor;
   mascotExpression?: string | null;
   mascotBody?: string | null;
+  mascotProfile?: MascotProfile;
 }
 
 interface ExportableTeam {
@@ -171,6 +176,7 @@ export function parseTeamManifest(value: TeamManifestInput): ParsedTeamManifest 
     const appearance: TeamManifestMember["appearance"] = { color: member.appearance.color };
     if (member.appearance.mascotExpression) appearance.mascotExpression = member.appearance.mascotExpression;
     if (member.appearance.mascotBody) appearance.mascotBody = member.appearance.mascotBody;
+    if (member.appearance.mascotProfile) appearance.mascotProfile = member.appearance.mascotProfile;
     return {
       key: member.key,
       name: member.name,
@@ -215,6 +221,7 @@ export interface ImportedMemberProfile {
   color: MausColor;
   mascotExpression?: string;
   mascotBody?: BotBodyId;
+  mascotProfile?: MascotProfile;
 }
 
 /** Everything an untrusted manifest may seed into a new bot, and nothing else:
@@ -237,6 +244,7 @@ export function importedMemberProfile(
   if (member.appearance.mascotExpression) profile.mascotExpression = member.appearance.mascotExpression;
   // Free text in the manifest: safe-parsed so an untrusted value never reaches a BotRecord unvalidated.
   if (member.appearance.mascotBody) profile.mascotBody = botBodyId(member.appearance.mascotBody);
+  if (member.appearance.mascotProfile) profile.mascotProfile = validateMascotProfile(member.appearance.mascotProfile);
   return profile;
 }
 
@@ -267,6 +275,7 @@ export function createTeamManifest(team: ExportableTeam, bots: ExportableBot[]):
     const appearance: TeamManifestMember["appearance"] = { color: bot.color };
     if (bot.mascotExpression) appearance.mascotExpression = bot.mascotExpression;
     if (bot.mascotBody) appearance.mascotBody = bot.mascotBody;
+    if (bot.mascotProfile?.shapes.length) appearance.mascotProfile = bot.mascotProfile;
     return {
       key,
       name: bot.name,

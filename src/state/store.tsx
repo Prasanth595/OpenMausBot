@@ -30,6 +30,7 @@ import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import { desktopCapabilitiesNow } from "@/lib/desktop";
 import { sameModelSelection } from "../../shared/thread-model";
 import type { BotBodyId } from "../../shared/bot-body";
+import type { MascotProfile } from "../../shared/mascot-profile";
 import type { QuestionRequestCardData } from "../../shared/ask-question";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { ModelRequestCardData } from "../../shared/model-request";
@@ -297,6 +298,7 @@ export interface Bot {
   color: MausColor;
   mascotExpression?: string | null;
   mascotBody?: BotBodyId | null;
+  mascotProfile?: MascotProfile;
   avatarUrl?: string | null;
   avatarCrop?: BotAvatarCrop;
   avatarZoom?: number;
