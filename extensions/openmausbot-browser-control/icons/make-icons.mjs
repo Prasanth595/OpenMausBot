@@ -3,7 +3,7 @@
 // omb-16/32/48/128.png using only Node's zlib (unbreakable, no deps).
 // Delete this file after regenerating if you prefer a designer-supplied set.
 import { deflateSync } from "node:zlib";
-import { writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 

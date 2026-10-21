@@ -34,6 +34,9 @@ export default defineConfig({
       "enterprise/**/*.test.ts",
       "scripts/**/*.test.mjs",
       "scripts/**/*.test.ts",
+      // the browser-control extension ships with the app, so its service
+      // worker is covered by the same suite as the rest of it
+      "extensions/**/*.test.ts",
     ],
     setupFiles: ["server/testing/setup.ts"],
     // the suite spawns fake provider CLIs and a real harness server;

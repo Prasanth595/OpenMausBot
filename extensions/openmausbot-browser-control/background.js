@@ -32,9 +32,8 @@ let backoffMs = 1000;
 // ── settings ────────────────────────────────────────────────────────────────
 
 async function getSettings() {
-  const { serverUrl = "", token = "", allowAllSites = true } =
-    await chrome.storage.local.get(["serverUrl", "token", "allowAllSites"]);
-  return { serverUrl, token, allowAllSites };
+  const { serverUrl = "", token = "" } = await chrome.storage.local.get(["serverUrl", "token"]);
+  return { serverUrl, token };
 }
 
 function cleanOrigin(url) {
@@ -112,19 +111,36 @@ async function activeTab() {
   return tab;
 }
 
-async function injectableTabs() {
-  const tabs = await chrome.tabs.query({});
-  if (await getSettings().then((s) => s.allowAllSites)) return tabs.filter((t) => everyUrl(t.url));
-  const allowlist = (await chrome.storage.local.get("allowlist")).allowlist || "";
-  const hosts = allowlist.split(/\s*,\s*|\s*\n\s*/).filter(Boolean);
-  return tabs.filter((t) => {
-    try {
-      const host = new URL(t.url || "about:blank").hostname;
-      return hosts.some((h) => host === h || host.endsWith("." + h));
-    } catch {
-      return false;
-    }
-  });
+// The hosts the user allowed on the options page, one per line or separated
+// by commas. An empty list means every web page — that is what the options
+// page tells the user, and there is no second switch to contradict it.
+async function allowedHosts() {
+  const { allowlist = "" } = await chrome.storage.local.get(["allowlist"]);
+  return allowlist
+    .split(/\s*,\s*|\s*\n\s*/)
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/** A host is allowed when the user left the list empty (every web page), or
+ *  when the host is one of the listed hosts or a subdomain of one. */
+async function hostAllowed(hostname) {
+  const hosts = await allowedHosts();
+  if (!hosts.length) return true;
+  const host = String(hostname || "").toLowerCase();
+  if (!host) return false;
+  return hosts.some((allowed) => host === allowed || host.endsWith("." + allowed));
+}
+
+/** The tab a page-scoped command acts on, once the user has allowed the site
+ *  it is on. Every handler that reads or drives the page comes through here;
+ *  `navigate` checks its destination instead, so a bot can still steer a
+ *  browser away from a site it may not touch. */
+async function allowedActiveTab() {
+  const tab = await activeTab();
+  if (!everyUrl(tab.url)) throw new Error("This tab is not a web page");
+  if (!(await hostAllowed(new URL(tab.url).hostname))) throw new Error("Host is not in the allowlist");
+  return tab;
 }
 
 function everyUrl(url) {
@@ -157,38 +173,37 @@ const HANDLERS = {
     const parsed = new URL(url);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") throw new Error("Only http(s) URLs can be opened");
     const tab = await activeTab();
-    const { allowAllSites } = await getSettings();
-    if (!allowAllSites && !hostAllowed(parsed.hostname)) throw new Error("Host is not in the allowlist");
+    if (!(await hostAllowed(parsed.hostname))) throw new Error("Host is not in the allowlist");
     await chrome.tabs.update(tab.id, { url: parsed.toString() });
     return { tabId: tab.id };
   },
 
   async click(args) {
-    const tab = await activeTab();
+    const tab = await allowedActiveTab();
     await ensureContentScript(tab.id);
     return sendToTab(tab.id, { action: "click", ...args });
   },
 
   async type(args) {
-    const tab = await activeTab();
+    const tab = await allowedActiveTab();
     await ensureContentScript(tab.id);
     return sendToTab(tab.id, { action: "type", ...args });
   },
 
   async press({ key }) {
-    const tab = await activeTab();
+    const tab = await allowedActiveTab();
     await ensureContentScript(tab.id);
     return sendToTab(tab.id, { action: "press", key });
   },
 
   async scroll({ deltaY = 600 } = {}) {
-    const tab = await activeTab();
+    const tab = await allowedActiveTab();
     await ensureContentScript(tab.id);
     return sendToTab(tab.id, { action: "scroll", deltaY });
   },
 
   async read() {
-    const tab = await activeTab();
+    const tab = await allowedActiveTab();
     await ensureContentScript(tab.id);
     const page = await sendToTab(tab.id, { action: "read" });
     return { ...page, tabId: tab.id };
@@ -196,12 +211,15 @@ const HANDLERS = {
 
   async eval({ expression }) {
     if (typeof expression !== "string" || expression.length > 100_000) throw new Error("expression must be a short string");
-    const tab = await activeTab();
+    const tab = await allowedActiveTab();
     const [{ result }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       world: "MAIN", // Page world: reads page state, matches window scope.
       func: (src) => {
         // Return JSON-serializable result; errors become thrown strings.
+        // Evaluating the caller's expression IS this command: the bot drives
+        // the page, the same way a page.evaluate() would.
+        // oxlint-disable-next-line no-eval -- the command is the eval.
         return (0, eval)(src);
       },
       args: [expression],
@@ -210,16 +228,12 @@ const HANDLERS = {
   },
 
   async screenshot({ jpeg = true, quality = 80 } = {}) {
-    const tab = await activeTab();
+    const tab = await allowedActiveTab();
     const format = jpeg ? "jpeg" : "png";
     const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format, quality });
     return { dataUrl, tabId: tab.id };
   },
 };
-
-function hostAllowed(hostname) {
-  return true; // Coarse gate; fine-grained allowlist is enforced in injectableTabs().
-}
 
 async function onMessage(event) {
   if (typeof event.data !== "string" || event.data.length > MAX_SOCKET_BUFFER) return;
