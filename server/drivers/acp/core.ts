@@ -42,11 +42,12 @@ import type {
   RuntimeEventListener,
   SendTurnInput,
   ProviderErrorCode,
+  PermissionReviewOptions,
   RequestOutcome,
   TextGenerationOptions,
   TurnImageInput,
 } from "../../contracts.ts";
-import { newEventId, newId, TurnNotStartedError } from "../../contracts.ts";
+import { newEventId, newId, PERMISSION_REVIEW_IDLE_TIMEOUT_MS, PERMISSION_REVIEW_SYSTEM_PROMPT, TurnNotStartedError } from "../../contracts.ts";
 import { augmentedPath } from "../../env-path.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 import { MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
@@ -150,6 +151,10 @@ export interface AcpSupport {
   effortLevels?: readonly EffortLevel[];
   /** Discover and select opaque model variants through ACP config options. */
   modelVariants?: boolean;
+  /** An isolated tool-free ACP session can review exact actions. */
+  approvalReview?: boolean;
+  /** Restrict native tools in the separate approval-review process. */
+  configureApprovalReviewEnv?(env: Record<string, string | undefined>): void;
   /** Default CLI binary name if the instance config doesn't override it. */
   defaultCli: string;
   /** Optional live model catalog; a failed lookup keeps the last usable one. `config` lets a
@@ -1769,9 +1774,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         return { state: "available", version: probe.version, authenticated: await support.isAuthenticated(env, config, instanceId) };
       };
 
-    /** Memory upkeep's one-shot: a fresh process and session, no MCP servers, an empty folder, and
+    /** Isolated text's one-shot: a fresh process and session, no MCP servers, an empty folder, and
      * every tool, file or permission request refused. */
-      const generateMemoryText = async (prompt: string, options: TextGenerationOptions = {}): Promise<string> => {
+      const generateMemoryText = async (
+        prompt: string, options: TextGenerationOptions = {}, review?: { model: string; variant?: string },
+      ): Promise<string> => {
         if (startupModelRefresh) await startupModelRefresh;
         const turnConfig: AcpConfig = { ...config, fullAuto: false };
         const env = childEnv(turnConfig);
@@ -1780,8 +1787,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         }
         const cwd = mkdtempSync(join(tmpdir(), "omb-acp-memory-"));
         try {
-          const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd } as SendTurnInput;
+          const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd,
+            ...(review ? { model: review.model, variant: review.variant } : {}) } as SendTurnInput;
           support.applyTurnEnv?.(env, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });
+          if (review) support.configureApprovalReviewEnv?.(env);
           const launch = support.resolveCommand ? await support.resolveCommand(env, turnConfig, instanceId) : { command: turnConfig.cli };
           const spawnEnv = launch.env ?? env;
           return await runAcpOneShot({
@@ -1793,12 +1802,32 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             env: spawnEnv,
             cwd,
             prompt,
-            defaultModel: models.default,
+            defaultModel: review?.model ?? models.default,
             pickAuthMethod: (methods) => support.pickAuthMethod(methods, spawnEnv),
             authRequired: support.authFailure === "fail-request" ? "if-requested" : support.authFailure === "fail",
             loginNote: support.loginNote,
-            ...(support.configureSession ? {
-              configure: ({ request, sessionId, session }) => support.configureSession!({
+            configure: async ({ request, sessionId, session }) => {
+              if (review) {
+                const configId = support.selectModel?.configId;
+                if (!configId) throw new Error(`${support.displayName} cannot select an exact review model`);
+                let current = session;
+                const selected = (result: any) => (Array.isArray(result?.configOptions) ? result.configOptions : [])
+                  .find((entry: any) => entry?.id === configId)?.currentValue;
+                if (!offeredModels(current, configId).includes(review.model)) throw new Error(`${support.displayName} does not offer the review model`);
+                if (selected(current) !== review.model) {
+                  current = await request("session/set_config_option", { sessionId, configId, value: review.model });
+                }
+                if (selected(current) !== review.model) throw new Error(`${support.displayName} did not select the review model`);
+                if (review.variant !== undefined) {
+                  const option = acpVariantOption(current);
+                  if (!option?.options.some((entry) => entry.id === review.variant)) throw new Error(`${support.displayName} does not offer the review variant`);
+                  if (option.currentValue !== review.variant) {
+                    current = await request("session/set_config_option", { sessionId, configId: option.configId, value: review.variant });
+                  }
+                  if (acpVariantOption(current)?.currentValue !== review.variant) throw new Error(`${support.displayName} did not select the review variant`);
+                }
+              }
+              if (support.configureSession) await support.configureSession({
                 request,
                 sessionId,
                 env: spawnEnv,
@@ -1807,9 +1836,11 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 sessionModels: Array.isArray(session?.models?.availableModels) ? session.models.availableModels : [],
                 currentModelId: session?.models?.currentModelId,
                 notice: () => undefined,
-              }),
-            } : {}),
+              });
+              return review ? { model: review.model } : undefined;
+            },
             options,
+            ...(review ? { maxOutputChars: 8_192 } : {}),
           });
         } finally {
           // On Windows the engine can hold the folder a moment after exit.
@@ -1822,6 +1853,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         driverKind: DRIVER_KIND,
         displayName: input.displayName,
         ...(support.backgroundText === false ? {} : { generateMemoryText }),
+        ...(support.approvalReview ? { reviewPermission: (prompt: string, review: PermissionReviewOptions) =>
+          generateMemoryText(`${PERMISSION_REVIEW_SYSTEM_PROMPT}\n\n${prompt}`,
+            { signal: review.signal, onUsage: review.onUsage, timeoutMs: PERMISSION_REVIEW_IDLE_TIMEOUT_MS },
+            { model: review.model, variant: review.variant }) } : {}),
         enabled: input.enabled,
         get models() {
           return models;

@@ -25,6 +25,9 @@ Reviewer effort defaults to None when the provider advertises it, otherwise
 the lowest advertised effort (Low for Claude). Variant-only providers retain
 their exact variant without adding an effort. An explicit unsupported effort
 is refused rather than replaced. The working agent’s effort is unchanged.
+OpenCode reviews use a fresh ACP process with no MCP servers, no client file or
+terminal access, and denied native tools. The selected model and variant must
+be acknowledged before the prompt; otherwise the action goes to the person.
 The stable rubric and authorization evidence precede each exact
 action, and oversized or incomplete evidence falls back to a human card.
 
