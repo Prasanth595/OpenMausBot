@@ -144,6 +144,8 @@ import {
   type Runtime,
 } from "./container-computer.ts";
 import { attachForTurn, saveBotAttachment } from "./bot-attachment.ts";
+import { endpointDisplayUrl } from "./openai-compat-endpoints.ts";
+import { isDirectModelDriver } from "../shared/model-arrangement.ts";
 import {
   cacheUntilConfigChanges,
   ensureDirs,
@@ -12921,8 +12923,11 @@ async function describeInstances() {
   const ownReady = cloudCredit !== null && engines.some(instance => !selectionContext.company(instance.instanceId) && readyToRun(instance, selectionContext));
   return engines.map((instance) => {
     const entry = configs[instance.instanceId];
+    const directUrl = isDirectModelDriver(instance.driverKind)
+      ? endpointDisplayUrl(entry?.config) : undefined;
     const described = {
       ...instance,
+      ...(directUrl ? { url: directUrl } : {}),
       ...(entry?.icon ? { icon: entry.icon } : {}),
       ...(entry?.access ? { access: entry.access } : {}), ...(heldKeys?.refusal(instance.instanceId) ? { snapshot: { state: "unavailable" as const, reason: TRIAL_KEY_HELD } } : {}),
     };

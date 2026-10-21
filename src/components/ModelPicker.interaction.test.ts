@@ -149,8 +149,8 @@ describe("ModelPicker with a signed-out or missing Claude", () => {
     expect(browsing).toContain("Sign in to Claude");
     expect(browsing).toContain("data-claude-sign-in");
     expect(browsing).toContain("2 models will appear after setup.");
-    expect(browsing).not.toContain(">Opus 5.5<");
-    expect(browsing).not.toContain(">Sonnet 5<");
+    expect(browsing).not.toContain('class="truncate">Opus 5.5</span>');
+    expect(browsing).not.toContain('class="truncate">Sonnet 5</span>');
     expect(browsing).not.toContain("No model providers are available.");
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
@@ -159,7 +159,7 @@ describe("ModelPicker with a signed-out or missing Claude", () => {
     fixture.instances = [signedOut()];
     const html = menu(open(bot("claude", "claude-opus-5-5")).html);
     expect(html).toContain("Sign in to Claude");
-    expect(html).not.toContain(">Opus 5.5<");
+    expect(html).not.toContain('class="truncate">Opus 5.5</span>');
     expect(html).not.toContain("No model providers are available.");
   });
 

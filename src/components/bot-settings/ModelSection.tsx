@@ -7,6 +7,7 @@ import { ProposalStatus } from "./ProposalStatus";
 import { ThreadModelsLine } from "../ThreadModelsLine";
 import { t } from "@/lib/i18n";
 import { Select } from "../Select";
+import { ModelArrangementCard } from "../ModelArrangementCard";
 
 export function ModelSection({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
@@ -28,6 +29,13 @@ export function ModelSection({ bot }: { bot: Bot }) {
             </div>
           }
         />
+        <div className="mt-3">
+          <ModelArrangementCard
+            instance={state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId)}
+            selection={bot.modelSelection}
+            endpointUrl={bot.modelSelection.instanceId === "openaiCompat" ? state.config?.openaiCompat?.url : undefined}
+          />
+        </div>
         {!draft && <ThreadModelsLine bot={bot} className="mt-3" />}
       </div>
 

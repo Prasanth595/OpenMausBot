@@ -491,6 +491,7 @@ export interface InstanceInfo {
   instanceId: string;
   driverKind: string;
   displayName: string;
+  url?: string;
   icon?: import("../../shared/provider-icon").ProviderIcon;
   readOnly?: boolean;
   trialCredit?: "active" | "used_up" | "ended";

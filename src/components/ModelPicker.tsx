@@ -22,11 +22,14 @@ import { COMPACT_SQUARE } from "@/lib/compact-chip";
 import { threadsOnOwnModel } from "../../shared/thread-model";
 import { ThreadModelsLine } from "./ThreadModelsLine";
 import { Select } from "./Select";
+import { ModelArrangementCard } from "./ModelArrangementCard";
+import { modelArrangement } from "@/lib/model-arrangement";
 
 type ModelOption = InstanceInfo["models"]["options"][number];
 const COMPACT_MODEL_COUNT = 5;
 
 function modelLabel(instance: InstanceInfo | undefined, model: string): string {
+  if (model === "agent-default") return t("model.arrangement.unknownModel");
   return instance?.models.options.find((option) => option.id === model)?.label ?? model;
 }
 
@@ -256,7 +259,7 @@ function ModelRow({
       )}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <span className="truncate">{option.label}</span>
+        <span className="truncate">{option.id === "agent-default" ? t("model.arrangement.agentConfigured") : option.label}</span>
         {option.provider && (
           <span
             className="shrink-0 rounded bg-inset px-1.5 py-px text-[10px] text-ink-secondary"
@@ -401,7 +404,7 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
   };
   return (
     <div className="flex w-14 shrink-0 flex-col gap-1 overflow-y-auto border-r border-hairline/40 bg-panel p-2">
-      {subscription.length > 0 && <EngineGroupLabel className="px-0 pb-0.5 pt-0.5 text-center text-[9px]">{t("model.rail.cloud")}</EngineGroupLabel>}
+      {subscription.length > 0 && <EngineGroupLabel className="px-0 pb-0.5 pt-0.5 text-center text-[9px]">{t("model.arrangement.accounts")}</EngineGroupLabel>}
       {subscription.map(railButton)}
       {(api.length > 0 || onAddApiKeys) && <EngineGroupLabel className={cn("px-0 pb-0.5 text-center text-[9px] leading-tight", subscription.length > 0 ? "pt-2" : "pt-0.5")}>{t("model.rail.apiKeys")}</EngineGroupLabel>}
       {api.map(railButton)}
@@ -417,7 +420,7 @@ export function ModelEngineRail({ instances, selectedInstance, claudeInstance, o
           <Plus size={16} aria-hidden="true" />
         </button>
       )}
-      {local.length > 0 && <EngineGroupLabel className="px-0 pb-0.5 pt-2 text-center text-[9px]">{t("model.rail.local")}</EngineGroupLabel>}
+      {local.length > 0 && <EngineGroupLabel className="px-0 pb-0.5 pt-2 text-center text-[9px]">{t("model.arrangement.customConnections")}</EngineGroupLabel>}
       {local.map(railButton)}
     </div>
   );
@@ -761,6 +764,13 @@ export function ModelPicker({
         modelProvider(active, selection.model) ? ` · ${modelProvider(active, selection.model)}` : ""
       }${selectedVariantLabel ? ` · ${selectedVariantLabel}` : selection.effort ? ` · ${t("model.effort.summary", { level: effortLabel(selection.effort) })}` : ""}`
     : selection.model;
+  const activeEndpoint = active?.instanceId === "openaiCompat" ? state.config?.openaiCompat?.url : undefined;
+  const activeArrangement = modelArrangement(active, selection, activeEndpoint);
+  const browsingSelection = railInstance?.instanceId === selection.instanceId ? selection
+    : { instanceId: railInstance?.instanceId ?? selection.instanceId, model: railInstance?.models.default ?? "" };
+  const arrangementCard = <ModelArrangementCard instance={railInstance} selection={browsingSelection}
+    endpointUrl={railInstance?.instanceId === "openaiCompat" ? state.config?.openaiCompat?.url : undefined}
+    changing={Boolean(railInstance && railInstance.instanceId !== selection.instanceId)} />;
   const followLine = follows === true ? `\n${t("model.followsBot", { name: profile.name })}` : follows === false ? `\n${t("model.ownModel")}` : "";
 
   const trigger = (
@@ -796,6 +806,7 @@ export function ModelPicker({
         <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
       )}
       <span className={cn("flex min-w-0 items-center gap-1", !contained && active && "@max-4xl/chathead:hidden")}>
+        <span data-model-agent className="max-w-[100px] truncate text-ink-secondary">{activeArrangement.agent} ·</span>
         <span className="max-w-[160px] truncate">
           {active && showActiveAccount && (
             <span data-model-account className="text-ink-secondary">{active.displayName} · </span>
@@ -856,6 +867,7 @@ export function ModelPicker({
           <div className="flex min-h-0 min-w-0 flex-1">
           {simpleView ? (
             <SimpleModelPane
+              arrangement={arrangementCard}
               providers={simpleProviders}
               onProvider={browseSimple}
               account={railInstance && simpleAccounts.length > 1 ? (
@@ -912,6 +924,7 @@ export function ModelPicker({
             onAddApiKeys={window.ogb?.remoteClient?.active === true ? undefined : openApiKeys} />}
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+            <div className="shrink-0 p-2 pb-0">{arrangementCard}</div>
             {threadId && (
               <div className="shrink-0 border-b border-hairline/40 px-3 py-2">
                 <div role="group" aria-label={t("model.scope.label")} className="flex gap-1">

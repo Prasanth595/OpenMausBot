@@ -44,6 +44,7 @@ export function SimpleModelPane({
   effort,
   variantsRow,
   onManage,
+  arrangement,
 }: {
   providers: RailProvider[];
   onProvider: (instance: InstanceInfo) => void;
@@ -65,11 +66,13 @@ export function SimpleModelPane({
   effort?: { levels: EffortLevel[]; current?: EffortLevel; onPick: (level: EffortLevel) => void } | null;
   variantsRow?: ReactNode;
   onManage: () => void;
+  arrangement?: ReactNode;
 }) {
   const row = "flex w-full min-w-0 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[13px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
   const note = "px-2 py-1.5 text-[12.5px] text-ink-secondary";
   return (
     <div data-simple-model-pane className="flex min-h-0 w-full flex-col">
+      {arrangement && <div className="shrink-0 p-2 pb-0">{arrangement}</div>}
       <div className="flex min-h-0 flex-1">
         <div
           data-simple-providers
@@ -159,17 +162,18 @@ export function SimpleModelPane({
                     const current = option.id === currentModelId;
                     const blurb = modelBlurb(option);
                     const route = option.provider && repeatedLabels?.has(option.label) ? option.provider : undefined;
+                    const label = option.id === "agent-default" ? t("model.arrangement.agentConfigured") : option.label;
                     return (
                       <button
                         key={option.id}
                         type="button"
                         aria-pressed={current}
-                        aria-label={option.provider ? `${option.label} · ${option.provider}` : undefined}
-                        title={[option.label, option.provider, blurb].filter(Boolean).join(" · ")}
+                        aria-label={option.provider ? `${label} · ${option.provider}` : undefined}
+                        title={[label, option.provider, blurb].filter(Boolean).join(" · ")}
                         onClick={() => onPick(option.id)}
                         className={cn(row, "font-medium text-ink", current ? "bg-raised-hover" : "hover:bg-control/60")}
                       >
-                        <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                        <span className="min-w-0 flex-1 truncate">{label}</span>
                         {route && (
                           <span data-simple-route className="max-w-[45%] shrink-0 truncate text-[11.5px] font-normal text-ink-secondary">{route}</span>
                         )}
