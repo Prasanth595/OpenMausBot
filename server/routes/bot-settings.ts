@@ -88,6 +88,7 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       if (!existing) return json(res, 404, { error: "no such bot" });
       // Snapshot the fields this request owns before the first await, so a late result cannot win.
       const initialAvatar = snapshotAvatarGenerationState(existing);
+      const initialAppearanceRevision = store.botAppearanceRevision(existing);
       const parsed = avatarGenerationRequestSchema.safeParse(await readBody(req));
       if (!parsed.success) {
         return json(res, 400, { error: `prompt must be at most 400 characters` });
@@ -95,7 +96,8 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       const generated = await generateAvatarImage(cfg, existing, parsed.data.prompt);
       const current = store.bot(existing.id);
       if (!current) return json(res, 404, { error: "no such bot" });
-      if (!avatarGenerationStateMatches(initialAvatar, current)) {
+      if (current !== existing || store.botAppearanceRevision(current) !== initialAppearanceRevision ||
+          !avatarGenerationStateMatches(initialAvatar, current)) {
         return json(res, 409, { error: "avatar changed while generation was in progress" });
       }
       const saved = saveImage(generated.bytes, generated.mime);
