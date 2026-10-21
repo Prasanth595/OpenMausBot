@@ -440,6 +440,70 @@ describe("RuntimeCoordinator: the run adapter", () => {
     expect(resumes[0]!.text).toContain(`\n\n[OpenMausBot question from @builder on assignment ${built.id}: waiting on Milind]\nIt asks Milind: "Which region should I deploy to?".`);
     expect(w.coordinator.node("gen-1")?.status).toBe("waiting");
     expect(w.coordinator.node(tested.id)?.status).toBe("running");
+  it.each(["cards", "trailing question"])("returns partial work to the caller after a %s wait survives reload and settles", async (waitKind) => {
+    const dir = mkdtempSync(join(tmpdir(), "runtime-coordinator-partial-"));
+    const partial = "Read North Star and inspected source. PR checks remain unverified.";
+    const question = "May I read the PR checks?";
+    const text = waitKind === "cards" ? partial : `${partial}\nNEEDS INPUT: ${question}`;
+    try {
+      const before = world(node => node.botId === "builder"
+        ? { ok: true, text, evidence: { commands: 1, toolCalls: 3 }, ...(waitKind === "cards" ? { cards: { question, ids: ["pr-card"] } } : {}) }
+        : undefined, { inputWaitMs: 40 }, dir);
+      const { node } = send(before, chief, "gen-1", undefined, builder, "Review GitHub against North Star");
+      before.coordinator.tick(); await flush();
+      expect(before.coordinator.node(node.id)).toMatchObject({ status: "waiting", result: text, question });
+      ended(before, "gen-1");
+      before.coordinator.close();
+      const after = world(undefined, { inputWaitMs: 40 }, dir);
+      expect(after.coordinator.node(node.id)).toMatchObject({ status: "waiting", result: text });
+      expect(after.host.runs).toEqual([]);
+      await sleep(60);
+      after.coordinator.tick(); await flush();
+      if (waitKind === "cards") {
+        expect(after.coordinator.node(node.id)).toMatchObject({ status: "waiting", result: text });
+        expect(after.host.runs).toEqual([]);
+        after.coordinator.cancelDirect("builder-work", "Stopped while PR permission was pending");
+        after.coordinator.tick(); await flush();
+        expect(after.coordinator.node(node.id)).toMatchObject({ status: "cancelled", outcome: "stopped", result: text });
+      } else {
+        expect(after.coordinator.node(node.id)).toMatchObject({ status: "failed", outcome: "expired", outcomeDetail: "the person did not answer", result: text });
+      }
+      expect(after.host.reports[0]?.child.result).toBe(text);
+      const resume = after.host.runs.find(run => run.node.id === "gen-1");
+      expect(resume?.resumed).toBe(true);
+      expect(resume?.text).toContain(`What @builder said: ${JSON.stringify(text)}`);
+      expect(resume?.text).toContain("Observed by the harness: 1 command, 3 tool calls.");
+      if (waitKind !== "cards") expect(resume?.text).toContain("Expiry is not approval");
+      expect(resume?.text).not.toContain("nothing ran");
+      expect(after.host.runs.filter(run => run.node.id === node.id)).toEqual([]);
+      after.coordinator.close();
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
+
+  it("withholds retained partial text and observations when the route closes before the caller resumes", async () => {
+    const partial = "Synthetic private North Star assessment";
+    const w = world(node => node.botId === "builder"
+      ? { ok: true, text: `${partial}\nNEEDS INPUT: Read PR checks?`, evidence: { toolCalls: 3, summary: "Synthetic private observation" } }
+      : undefined, { inputWaitMs: 40 });
+    const { node } = send(w, chief, "gen-1", undefined, builder, "Review GitHub against North Star");
+    w.coordinator.tick(); await flush();
+    ended(w, "gen-1");
+    w.host.busyAnswer = n => n.botId === "chief";
+    await sleep(60);
+    w.coordinator.tick();
+    expect(w.coordinator.node(node.id)).toMatchObject({ status: "failed", outcome: "expired", result: expect.stringContaining(partial) });
+    expect(w.host.runs).toHaveLength(1);
+    const validate = w.host.validate;
+    w.host.validate = (n, parent) => n.botId === "builder" && parent ? "The recipient is no longer an allowed peer" : validate(n, parent);
+    w.host.busyAnswer = () => false;
+    w.coordinator.tick(); await flush();
+    const resume = w.host.runs.find(run => run.node.id === "gen-1");
+    expect(resume?.text).toContain("Result withheld: The recipient is no longer an allowed peer");
+    expect(resume?.text).not.toContain(partial);
+    expect(resume?.text).not.toContain("Synthetic private observation");
+    expect(resume?.text).not.toContain("3 tool calls");
   });
 
   it("reads a provider failure as a failed turn, and a stop as stopped", async () => {

@@ -150,7 +150,7 @@ export class Runtime {
     this.turns.delete(rootId);
     const evidence = result.evidence ? { evidence: result.evidence } : {};
     const outcome: RunResult = result.needsInput
-      ? { kind: "needs_input", question: result.needsInput.question, ...(result.needsInput.cards ? { cards: result.needsInput.cards } : {}), ...evidence }
+      ? { kind: "needs_input", text: result.text, question: result.needsInput.question, ...(result.needsInput.cards ? { cards: result.needsInput.cards } : {}), ...evidence }
       : result.continue
         ? { kind: "continue", text: result.text, note: result.continue.note, ...(result.continue.handoffPath ? { handoffPath: result.continue.handoffPath } : {}), ...evidence }
         : result.ok
@@ -465,6 +465,7 @@ export class Runtime {
     }
     delete n.guard;
     if (result.kind === "needs_input") {
+      if (result.text?.trim()) n.result = clip(result.text, RESULT_MAX);
       n.status = "needs_input"; n.question = clip(result.question, BRIEF_MAX); n.lastActivityAt = now;
       if (result.cards?.length) n.cards = result.cards; else delete n.cards;
       this.store.update(n, { kind: "parked", at: now, detail: `needs_input: ${clip(result.question, DETAIL_MAX)}` });

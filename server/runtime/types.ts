@@ -69,7 +69,7 @@ export type Outcome =
   | "budget"
   | "provider_error"
   | "denied"           // a permission the level did not cover was refused
-  | "expired"          // a wait on the person ran out: not run, not refused
+  | "expired"          // a queue or person wait ran out; earlier work may have run
   | "stopped"          // the person stopped it
   | "refused"          // validation refused it at dispatch
   | "duplicate";
@@ -239,7 +239,7 @@ export interface RunInput {
 export type RunResult =
   | { kind: "completed"; text: string; evidence?: TurnEvidence }
   | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence }
-  | { kind: "needs_input"; question: string; cards?: string[]; evidence?: TurnEvidence }
+  | { kind: "needs_input"; question: string; text?: string; cards?: string[]; evidence?: TurnEvidence }
   /** The turn stopped short (a step cap, a seat it could not get) and the
    * same node continues in place with its next execution. */
   | { kind: "continue"; text: string; note: string; handoffPath?: string; evidence?: TurnEvidence };
@@ -322,8 +322,8 @@ export interface Limits {
   /** A turn with no activity for this long is stalled (the host says what
    * counts as activity by touching progress()). */
   turnStallMs: number;
-  /** How long a parked assignment waits on the person before it expires:
-   * not run, not refused. */
+  /** How long a parked assignment waits on the person before it expires.
+   * Expiry does not approve the pending action or discard earlier work. */
   inputWaitMs: number;
 }
 
