@@ -7,6 +7,20 @@ cd "$(dirname "$0")"
 REPO=$(git remote get-url origin | sed -E 's#.*github.com[:/]##; s#\.git$##')
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 
+# The branch often lives in a fork, not in the base repository, and a
+# cross-fork pull request has to name the head owner. Derive it from the
+# push remote rather than assuming the branch is in `origin`.
+HEAD_OWNER=""
+FORK_URL=$(git remote get-url fork 2>/dev/null || true)
+if [ -n "$FORK_URL" ]; then
+  FORK_REPO=$(printf '%s' "$FORK_URL" | sed -E 's#.*github.com[:/]##; s#\.git$##')
+  FORK_OWNER=${FORK_REPO%%/*}
+  BASE_OWNER=${REPO%%/*}
+  if [ -n "$FORK_OWNER" ] && [ "$FORK_OWNER" != "$BASE_OWNER" ]; then
+    HEAD_OWNER="$FORK_OWNER:"
+  fi
+fi
+
 # GCM_INTERACTIVE=Never makes `git credential fill` fail fast instead of
 # popping a sign-in window — sign-in belongs to `git push`, not to this script.
 CRED=$(printf "protocol=https\nhost=github.com\n\n" | GCM_INTERACTIVE=Never git credential fill 2>/dev/null || true)
@@ -17,7 +31,7 @@ if [ -z "${TOKEN:-}" ]; then
   exit 1
 fi
 
-export OMB_REPO="$REPO" OMB_BRANCH="$BRANCH" OMB_TOKEN="$TOKEN"
+export OMB_REPO="$REPO" OMB_BRANCH="$HEAD_OWNER$BRANCH" OMB_TOKEN="$TOKEN"
 node -e '
 const { OMB_REPO: repo, OMB_BRANCH: branch, OMB_TOKEN: token } = process.env;
 const body = require("fs").readFileSync(".omb-pr-body.md", "utf8");
