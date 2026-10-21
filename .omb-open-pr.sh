@@ -29,7 +29,7 @@ fetch(`https://api.github.com/repos/${repo}/pulls`, {
     "Content-Type": "application/json",
   },
   body: JSON.stringify({
-    title: "Windows CUA packaging, Vision unified driver, Deepgram dictate + call STT, API-engine computer use",
+    title: "Windows CUA packaging, Vision unified driver + fleet model picker, REA reverse-engineering skill, Deepgram dictate + call STT, API-engine computer use",
     base: "main",
     head: branch,
     body,
