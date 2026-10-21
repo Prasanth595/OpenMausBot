@@ -11,7 +11,7 @@ import { json, readBody } from "../harness/http.ts";
 import { closeMessageDb } from "../message-db.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { validateCustomMascotDefinition } from "../custom-mascot-validation.ts";
-import { Store } from "../store.ts";
+import { Store, type BotRecord, type BotWireProjection } from "../store.ts";
 import type { ModelSelection } from "../contracts.ts";
 import { createBotSettingsRoutes, type BotSettingsRouteDeps } from "./bot-settings.ts";
 import { dispatchRoutes } from "./table.ts";
@@ -70,15 +70,31 @@ function appearanceFiles() {
   return existsSync(ATTACHMENTS_DIR) ? readdirSync(ATTACHMENTS_DIR).sort() : [];
 }
 
+function wireBot(record: BotRecord): WireBot {
+  const {
+    tasks: _tasks,
+    avatarUrl: _avatarUrl,
+    resumeCursors: _resumeCursors,
+    approvalGrant: _approvalGrant,
+    lastProfileRequestId: _lastProfileRequestId,
+    lastTeamSetupReceipt: _lastTeamSetupReceipt,
+    packageBase: _packageBase,
+    assignedSkills: _assignedSkills,
+    ...publicFields
+  } = record;
+  const projection: BotWireProjection = publicFields;
+  return { ...projection, avatarUrl: record.avatarUrl ?? null, tasks: [] };
+}
+
 describe("Store bot appearance revisions", () => {
   it("tracks explicit avatar, body, profile, color, and expression choices without persisting the revision", () => {
     const store = new Store(() => selection);
     const bot = store.createBot({ name: "Revision fixture" });
-    let expected = store.botAppearanceRevision(bot);
+    let expected = store.appearanceRevisions.get(bot);
     const checkBump = (choose: () => void) => {
       choose();
       expected += 1;
-      expect(store.botAppearanceRevision(bot)).toBe(expected);
+      expect(store.appearanceRevisions.get(bot)).toBe(expected);
     };
 
     checkBump(() => { store.patchBot(bot.id, { avatarUrl: bot.avatarUrl }); });
@@ -96,7 +112,8 @@ describe("Store bot appearance revisions", () => {
     const restoredStore = new Store(() => selection);
     const restored = restoredStore.bot(bot.id);
     expect(restored).not.toBeNull();
-    expect(restoredStore.botAppearanceRevision(restored!)).toBe(0);
+    if (!restored) throw new Error("restored bot is missing");
+    expect(restoredStore.appearanceRevisions.get(restored)).toBe(0);
   });
 });
 
@@ -127,7 +144,7 @@ describe("POST /api/bots/:id/avatar/generate", () => {
       store,
       cfg,
       broadcast: () => {},
-      wireBot: (record) => record as unknown as WireBot,
+      wireBot,
     } as unknown as BotSettingsRouteDeps);
     const app = createServer(async (req, res) => {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");

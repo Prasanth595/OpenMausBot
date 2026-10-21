@@ -21,7 +21,7 @@ import { redactSecretsInText } from "./redact.ts";
 import { scrubbedSkillRequest } from "./skill-request-card.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
 import { mascotStateForCreation, mascotStateWithCustomShape, normalizeStoredBotMascotState, type CustomMascotShape } from "./mascot-profile-store.ts";
-import { applyBotProfilePatch, normalizeBotPatch } from "./store-bot-patches.ts";
+import { applyBotProfilePatch, BotAppearanceRevisionTracker, normalizeBotPatch } from "./store-bot-patches.ts";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
@@ -313,11 +313,6 @@ export interface BotRecord extends Omit<WireBot, "avatarUrl" | "tasks"> {
   assignedSkills?: string[];
 }
 
-function hasBotAppearanceChoice(patch: Partial<BotRecord>): boolean {
-  return (["avatarUrl", "avatarCrop", "mascotBody", "mascotProfile", "color", "mascotExpression"] as const)
-    .some((field) => Object.hasOwn(patch, field));
-}
-
 export type BotWirePrivateKeys = "resumeCursors" | "tasks" | "avatarUrl" | "approvalGrant" | "lastProfileRequestId" | "lastTeamSetupReceipt" | "packageBase" | "assignedSkills";
 export type BotWireProjection = Pick<BotRecord, Exclude<keyof BotRecord, BotWirePrivateKeys>>;
 export type BotWireProjectionIsExact = AssertExact<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection> & AssertSameKeys<Omit<WireBot, "avatarUrl" | "tasks">, BotWireProjection>;
@@ -457,7 +452,7 @@ export class Store {
   private registeringInitialSections = true;
   /** Clearing this slot must not clear a concurrently running task's activity. */
   private legacyActivities = new Map<string, BotActivity>();
-  private appearanceRevisions = new WeakMap<BotRecord, number>();
+  readonly appearanceRevisions = new BotAppearanceRevisionTracker();
 
   constructor(
     defaultSelection: () => ModelSelection,
@@ -1456,14 +1451,6 @@ export class Store {
     return this.bots.find((b) => b.id === id) ?? null;
   }
 
-  botAppearanceRevision(bot: BotRecord): number {
-    return this.appearanceRevisions.get(bot) ?? 0;
-  }
-
-  private recordBotAppearanceChoice(bot: BotRecord): void {
-    this.appearanceRevisions.set(bot, this.botAppearanceRevision(bot) + 1);
-  }
-
   botByThread(threadId: string) {
     return this.bots.find((b) => b.threadId === threadId || b.tasks?.some((t) => t.threadId === threadId)) ?? null;
   }
@@ -1675,14 +1662,13 @@ export class Store {
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
-    const appearanceChoice = hasBotAppearanceChoice(patch);
     const normalized = normalizeBotPatch(bot, patch);
     patch = normalized.patch;
     const toAsk = patch.modelSelection ? (bot.tasks ?? []).filter((task) => task.modelSelection === undefined &&
       this.switchNeedsAsk(id, task.threadId, bot.modelSelection, patch.modelSelection!)) : [];
     // Revocations take effect in memory even when the disk write fails.
     Object.assign(bot, patch);
-    if (appearanceChoice) this.recordBotAppearanceChoice(bot);
+    this.appearanceRevisions.recordChoice(bot, patch);
     for (const task of toAsk) Object.assign(task, structuredClone(ASK_NOW));
     const task = this.activeTask(id);
     if (task) {
@@ -1721,7 +1707,7 @@ export class Store {
     const next = applyBotProfilePatch(bot, patch);
     this.saveBots(this.bots.map((candidate) => candidate.id === id ? next : candidate));
     Object.assign(bot, next);
-    if (hasBotAppearanceChoice(patch)) this.recordBotAppearanceChoice(bot);
+    this.appearanceRevisions.recordChoice(bot, patch);
     if (patch.soul !== undefined) {
       try { writeSoulMirror(id, patch.soul); } catch (e) {
         console.warn(`[bot-folder] could not write SOUL.md mirror for ${id}: ${(e as Error).message}`);
@@ -1734,15 +1720,10 @@ export class Store {
   addOrSelectMascotShape(id: string, shape: CustomMascotShape): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
-    const next: BotRecord = {
-      ...bot,
-      ...mascotStateWithCustomShape(bot.mascotProfile, shape),
-      avatarUrl: undefined,
-      avatarCrop: "mascot",
-    };
+    const next: BotRecord = { ...bot, ...mascotStateWithCustomShape(bot.mascotProfile, shape) };
     this.saveBots(this.bots.map((candidate) => candidate.id === id ? next : candidate));
     Object.assign(bot, next);
-    this.recordBotAppearanceChoice(bot);
+    this.appearanceRevisions.record(bot);
     this.emit({ type: "bot", botId: id });
     return bot;
   }

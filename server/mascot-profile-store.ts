@@ -10,6 +10,7 @@ import {
 import type { BotRecord } from "./store.ts";
 
 export type BotMascotState = Pick<BotRecord, "mascotBody" | "mascotProfile">;
+type BotCustomMascotState = BotMascotState & { avatarUrl: undefined; avatarCrop: "mascot" };
 export type { CustomMascotShape };
 type BotMascotInput = Partial<BotMascotState>;
 
@@ -58,7 +59,7 @@ export function mascotStateForBody(profile: MascotProfile | undefined, bodyId: s
   return { mascotProfile, mascotBody: legacyMascotBody(mascotProfile) };
 }
 
-export function mascotStateWithCustomShape(profile: MascotProfile | undefined, shape: CustomMascotShape): BotMascotState {
+export function mascotStateWithCustomShape(profile: MascotProfile | undefined, shape: CustomMascotShape): BotCustomMascotState {
   const mascotProfile = addOrSelectCustomMascot(profile, structuredClone(shape));
-  return { mascotProfile, mascotBody: legacyMascotBody(mascotProfile) };
+  return { mascotProfile, mascotBody: legacyMascotBody(mascotProfile), avatarUrl: undefined, avatarCrop: "mascot" };
 }

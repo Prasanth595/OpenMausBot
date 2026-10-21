@@ -5,6 +5,23 @@ import { mascotStateForBody, mascotStateForProfile } from "./mascot-profile-stor
 import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts";
 import { soulHash } from "./bot-folder.ts";
 
+export class BotAppearanceRevisionTracker {
+  private revisions = new WeakMap<BotRecord, number>();
+
+  get(bot: BotRecord): number {
+    return this.revisions.get(bot) ?? 0;
+  }
+
+  record(bot: BotRecord): void {
+    this.revisions.set(bot, this.get(bot) + 1);
+  }
+
+  recordChoice(bot: BotRecord, patch: Partial<BotRecord>): void {
+    const fields = ["avatarUrl", "avatarCrop", "mascotBody", "mascotProfile", "color", "mascotExpression"] as const;
+    if (fields.some((field) => Object.hasOwn(patch, field))) this.record(bot);
+  }
+}
+
 export function normalizeBotPatch(bot: BotRecord, input: Partial<BotRecord>) {
   let patch = input;
   if (patch.mascotProfile !== undefined) {
