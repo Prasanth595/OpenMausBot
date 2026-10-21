@@ -360,15 +360,21 @@ const serverSupervisor = createServerSupervisor({
     companyBackupSchedule?.reconcile();
     routineWake.stop();
   },
-  onExhausted() {
+  onExhausted({ retrying, reason }) {
     // No modal: a Mac left alone would stay down until someone clicked it.
-    // The supervisor keeps retrying on a long backoff; this only tells the person.
-    slog("server recovery: quick retries exhausted; retrying in 5, 15, then every 30 minutes");
+    // Do not promise another attempt when a still-owned child stops recovery.
+    slog(retrying
+      ? "server recovery: quick retries exhausted; retrying in 5, 15, then every 30 minutes"
+      : `server recovery stopped: ${reason}; no retry scheduled`);
     try {
       if (Notification.isSupported()) {
         new Notification({
           title: "O servidor dos bots parou",
-          body: "O OpenMausBot continua tentando religá-lo sozinho (em 5, 15 e depois a cada 30 min). Turnos interrompidos não foram reenviados.",
+          body: retrying
+            ? "O OpenMausBot continua tentando religá-lo sozinho (em 5, 15 e depois a cada 30 min). Turnos interrompidos não foram reenviados."
+            : reason === "stuck-child"
+              ? "A recuperação automática parou. Não foi possível confirmar o encerramento do processo anterior; nenhum segundo servidor foi iniciado. Verifique o log antes de reiniciar o OpenMausBot."
+              : "As tentativas de recuperação automática se esgotaram. Verifique o log antes de reiniciar o OpenMausBot. Turnos interrompidos não foram reenviados.",
         }).show();
       }
     } catch (error) {

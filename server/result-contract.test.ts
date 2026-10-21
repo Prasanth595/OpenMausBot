@@ -52,6 +52,31 @@ describe("the result a turn declares", () => {
     expect(resultProblem({ kind: "nothing", detail: "x" })).toBeNull();
   });
 
+  it.each([
+    ["~", 3], ["~", 7], ["`", 4], ["`", 7],
+  ] as const)("does not treat a verdict inside a %s fence of width %i as the result", (marker, width) => {
+    const text = [
+      "Exemplo de relatório:",
+      `${marker.repeat(width)}text`,
+      "RESULTADO: feito — PR #1234",
+      marker.repeat(width - 1),
+      "RESULTADO: feito — PR #5678",
+      marker.repeat(width),
+      "A escrita ainda não foi concluída.",
+    ].join("\n");
+    expect(declaredResult(text)).toEqual({ kind: "missing" });
+    expect(declaredResult(`${text}\nRESULTADO: parcial — faltou a escrita`)).toEqual({
+      kind: "partial", detail: "faltou a escrita",
+    });
+  });
+
+  it.each(["~~~text", "~~~~~~~", "````text"])(
+    "ignores an unclosed %s code example through the end of the answer",
+    opening => {
+      expect(declaredResult(["Exemplo:", opening, "RESULTADO: feito — PR #1234"].join("\n"))).toEqual({ kind: "missing" });
+    },
+  );
+
   it("asks for the line in the prompts it adds", () => {
     expect(ROUTINE_RESULT_CONTRACT).toContain("RESULTADO: feito —");
     expect(ROUTINE_RESULT_CONTRACT).toContain("RESULTADO: parcial —");

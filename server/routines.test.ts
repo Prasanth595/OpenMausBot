@@ -214,6 +214,56 @@ describe("bounded scheduled overlap and run health", () => {
     expect(h.manager.listRuns().every(run => run.status === "running")).toBe(true);
   });
 
+  it.each(["createTask", "joinConversation", "createGoalTask"] as const)(
+    "records a %s allocation failure without stranding the next scheduled routine",
+    async (allocation) => {
+      const h = harness(start);
+      const createTask = h.options.createTask;
+      const createGoalTask = h.options.createGoalTask!;
+      const failure = new Error("Fixture task allocation failed");
+      if (allocation === "createTask") {
+        h.options.createTask = (...args) => {
+          if (args[0] === "broken-bot") throw failure;
+          return createTask(...args);
+        };
+      } else if (allocation === "joinConversation") {
+        h.options.joinConversation = (run) => {
+          if (run.botId === "broken-bot") throw failure;
+          return null;
+        };
+      } else {
+        h.options.createGoalTask = (...args) => {
+          if (args[0] === "broken-group") throw failure;
+          return createGoalTask(...args);
+        };
+      }
+      // New definitions are listed first, so the broken routine dispatches
+      // before the healthy sibling in this same scheduled batch.
+      const healthy = h.manager.create({ ...input(), name: "Healthy sibling", botId: "healthy-bot" });
+      const broken = h.manager.create({ ...input(), name: "Broken allocation", botId: "broken-bot",
+        ...(allocation === "createGoalTask" ? { target: "room-goal" as const, groupId: "broken-group" } : {}),
+      });
+      h.setNow(start + 5 * 60_000);
+      await expect(h.manager.tick()).resolves.toBeUndefined();
+
+      expect(h.manager.listRuns().find(run => run.routineId === broken.id)).toMatchObject({
+        status: "failed", error: "Fixture task allocation failed",
+      });
+      expect(h.failed).toHaveLength(1);
+      expect(h.manager.listRoutines().find(routine => routine.id === broken.id)?.failureStreak).toBe(1);
+      expect(h.manager.listRuns().find(run => run.routineId === healthy.id)).toMatchObject({ status: "running" });
+      expect(h.started.map(turn => turn.botId)).toEqual(["healthy-bot"]);
+
+      await h.manager.tick();
+      expect(h.failed).toHaveLength(1);
+      expect(h.started).toHaveLength(1);
+      const persisted = JSON.parse(readFileSync(h.options.file!, "utf8"));
+      expect(persisted.runs.find((run: RoutineRun) => run.routineId === broken.id)).toMatchObject({
+        status: "failed", error: "Fixture task allocation failed",
+      });
+    },
+  );
+
   it("does not treat cancellation or a missed occurrence as a successful or failed attempt", async () => {
     const h = harness(start);
     const routine = h.manager.create(input());

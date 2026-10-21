@@ -10,6 +10,8 @@
 // ID, an owner item, a quoted command), not its content: that is the
 // requester's or a dedicated verifier's job.
 
+import { fromMarkdown } from "mdast-util-from-markdown";
+
 const OPTIONS = [
   "- `RESULTADO: feito — <prova>`: a prova é algo que outra pessoa consegue conferir (link, ID da mensagem enviada, número da PR ou da issue, commit, o id do item em \"Precisa de você\" como o149, ou o comando entre crases com a saída que mostra o efeito).",
   "- `RESULTADO: nada a fazer — <o que você conferiu e como>`: a passada conferiu e não havia trabalho (vigia, medição, revisão sem novidade).",
@@ -50,7 +52,23 @@ const MENTIONS = /^\s*(?:(?:[>#*+-]|\d+[.)])\s*)*[*_`]*\s*resultado\b\s*[*_`]*\s
 /** The verdict the last RESULTADO line of a turn's answer declares (code
  * blocks are not the answer: a quoted example there is not the verdict). */
 export function declaredResult(text: string): DeclaredResult {
-  const lines = text.replace(/```[\s\S]*?(?:```|$)/g, "").split("\n");
+  const lines = text.split("\n");
+  // Use the existing Markdown parser so tildes, longer fences, nested
+  // examples and unclosed blocks cannot turn example text into a receipt.
+  type MarkdownNode = {
+    type: string;
+    children?: MarkdownNode[];
+    position?: { start: { line: number }; end: { line: number } };
+  };
+  const nodes: MarkdownNode[] = [fromMarkdown(text)];
+  while (nodes.length) {
+    const node = nodes.pop()!;
+    if (node.type === "code" && node.position) {
+      lines.fill("", node.position.start.line - 1, node.position.end.line);
+    } else if (node.children) {
+      nodes.push(...node.children);
+    }
+  }
   for (let i = lines.length - 1; i >= 0; i--) {
     const line = lines[i]!;
     const match = LINE.exec(line);

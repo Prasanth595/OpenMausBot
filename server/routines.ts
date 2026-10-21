@@ -1607,14 +1607,22 @@ export class RoutineManager {
         const startedAt = this.now();
         const suffix = ` · ${new Date(startedAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`;
         const title = `${run.routineName.slice(0, 80 - suffix.length).trimEnd()}${suffix}`;
-        const joined = run.target === "room-goal" ? null : (run.retryAt !== undefined && run.threadId) || this.options.joinConversation?.(run) || null;
-        const task = joined
-          ? { threadId: joined }
-          : run.target === "room-goal"
-          ? run.groupId
-            ? this.options.createGoalTask?.(run.groupId, title) ?? null
-            : null
-          : this.options.createTask(run.botId, title, run.triggerSource === "webhook", run);
+        let task: { threadId: string } | null;
+        try {
+          const joined = run.target === "room-goal" ? null : (run.retryAt !== undefined && run.threadId) || this.options.joinConversation?.(run) || null;
+          task = joined
+            ? { threadId: joined }
+            : run.target === "room-goal"
+            ? run.groupId
+              ? this.options.createGoalTask?.(run.groupId, title) ?? null
+              : null
+            : this.options.createTask(run.botId, title, run.triggerSource === "webhook", run);
+        } catch (error) {
+          // An unavailable task must fail its own receipt, not strand every
+          // later run. Persistence failures still propagate from failRun.
+          this.failRun(run, error instanceof Error ? error.message : String(error));
+          continue;
+        }
         if (!task) {
           this.failRun(run, run.target === "room-goal"
             ? "Could not create a room task for this goal"

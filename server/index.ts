@@ -10961,6 +10961,9 @@ function startCcSession(bot: BotRecord, threadId: string, replyThreadId: string,
     const priority = delegation ? startPriority("", "low") : startPriority(input.title, body.priority);
     const queued = ccStartQueue.add({ id: randomUUID().slice(0, 8), botId: bot.id, threadId, ...(replyThreadId !== threadId ? { replyThreadId } : {}), body, title: input.title, ...(issueNumber(input.title, input.brief) ? { issue: issueNumber(input.title, input.brief) } : {}), priority, at: Date.now(), ...(delegation ? { delegation } : {}) });
     if (queued === null) return { status: 409, body: { error: `já há ${CC_MAX_RUNNING} sessões do Claude Code ocupando as vagas e a fila de espera está cheia (${START_QUEUE_MAX}); espere uma relatar, ou tire um start seu da fila (cc_session_archive com o id dele)` } };
+    if (ccStartQueue.of(bot.id).some(item => item.id === queued.id && item.dispatching)) {
+      return { status: 409, body: { error: `o início de "${input.title}" tem resultado não confirmado (id ${queued.id}); não enfileirei nem iniciei outra sessão. Confira cc_session_list e a sessão real antes de reconciliar esse registro.` } };
+    }
     const why = taken >= CC_MAX_RUNNING ? `as ${CC_MAX_RUNNING} vagas do Claude Code estão ocupadas` : "há starts esperando na fila (um novo não passa na frente deles)";
     // a delegation: the same start already queued is not this one, and the owner reads no bot hint (INSP-DEL A11)
     if (delegation && queued.duplicate) return { status: 409, body: { error: `um start igual ("${input.title}") já está na fila de sessões (id ${queued.id}); não enfileirei outro` } };
@@ -20833,10 +20836,13 @@ const handleRequestInner = async (req: IncomingMessage, res: ServerResponse) => 
           const started = startCcSession(bot, threadId, replyThreadId, body);
           return json(res, started.status, started.body);
         }
-        // A start still in the queue has no session yet: archive (or stop)
-        // with its queue id takes it out of the queue.
+        // Only an unclaimed start is known not to have a session yet.
+        // A crashed/uncertain dispatch must be reconciled, not called cancelled.
         if ((action === "archive" || action === "stop") && typeof body.sessionId === "string") {
-          const dropped = ccStartQueue.remove(bot.id, body.sessionId.trim());
+          const queueId = body.sessionId.trim();
+          const claimed = ccStartQueue.of(bot.id).find(item => item.id === queueId && item.dispatching);
+          if (claimed) return json(res, 409, { error: "O início dessa sessão está com resultado não confirmado. Confira cc_session_list e a sessão real antes de reconciliar o registro; ela não foi cancelada nem será repetida automaticamente." });
+          const dropped = ccStartQueue.remove(bot.id, queueId);
           if (dropped) {
             if (openThreadOf(bot.id, dropped.threadId)) store.appendMessage(dropped.threadId, { role: "bot", kind: "activity", tool: { name: chipText(`Fila de sessões: "${dropped.title}" saiu da fila (cancelado)`, 240), ok: true } });
             return json(res, 200, { message: `"${dropped.title}" saiu da fila de sessões; não vai abrir.` });
