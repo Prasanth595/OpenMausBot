@@ -4,6 +4,8 @@ let timer: ReturnType<typeof setInterval> | null = null;
 
 export function onSecond(listener: () => void): () => void {
   listeners.add(listener);
+  // A snapshot: a tick may unsubscribe, or a new timer subscribe, during this loop.
+  // oxlint-disable-next-line unicorn/no-useless-spread
   timer ??= setInterval(() => { for (const fn of [...listeners]) fn(); }, 1000);
   return () => {
     listeners.delete(listener);
