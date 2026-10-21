@@ -57,7 +57,7 @@ function profiles(): Record<string, Profile> {
 }
 
 const PROFILES = profiles();
-const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
+const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread", "cancel_job"];
 const CHIEF_TARGET_TOOLS = ["propose_profile", "propose_model"];
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
 const TEAMWORK_TOOLS = ["list_room_targets", "coordinate_bots", "assignment_status", "list_bots", "list_rooms", "list_threads", "close_thread", "start_thread", "post_to_room"];
@@ -209,12 +209,13 @@ describe("agents proxy tools/list golden", () => {
     }
   });
 
-  it("ignores the switches that once picked a catalog profile", () => {
-    expect(wires["default+legacy-switches"]).toBe(wires.default);
+  it("keeps legacy switches inert while withholding job cancellation from external runtimes", () => {
+    const native = toolsOf(wires.default!).filter(tool => tool.name !== "cancel_job");
+    expect(toolsOf(wires["default+legacy-switches"]!)).toEqual(native);
     const profile = catalogProfileFromEnv({ OMB_BOT_ID: "bot-golden", OMB_CHIEF_OF_STAFF: "1", OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1" });
-    expect(JSON.stringify({ tools: availableTools(profile) })).toBe(wires.default);
+    expect(availableTools(profile)).toEqual(native);
     expect(profile).not.toHaveProperty("coordinating");
-    expect(profile).not.toHaveProperty("externalRuntime");
+    expect(profile.externalRuntime).toBe(true);
     expect(profile).not.toHaveProperty("ownThreadCreation");
   });
 

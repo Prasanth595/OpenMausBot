@@ -52,6 +52,18 @@ describe("loopback rules (moved from the server entry, behaviour unchanged)", ()
   });
 });
 
+describe("Chief job cancellation route scope", () => {
+  it("exposes only the narrow snapshot and cancel pair to paired clients", () => {
+    expect(requiredScope("GET", "/api/bots/chief/jobs/root-1/cancellation")).toBe("client");
+    expect(requiredScope("POST", "/api/bots/chief/jobs/root-1/cancel")).toBe("client");
+    for (const [method, path] of [
+      ["POST", "/api/bots/chief/jobs/root-1/cancellation"], ["DELETE", "/api/bots/chief/jobs/root-1/cancel"],
+      ["GET", "/api/bots/chief/requests/1234567890123456"], ["POST", "/api/bots/chief/requests/1234567890123456/interrupt"],
+      ["POST", "/api/internal/jobs/root-1/cancel"],
+    ]) expect(requiredScope(method, path)).toBe("admin");
+  });
+});
+
 describe("origin and cookies", () => {
   it("derives the request origin from Host and the proxy's scheme", () => {
     expect(requestOrigin(request({ host: "bots.example.com" }))).toBe("http://bots.example.com");

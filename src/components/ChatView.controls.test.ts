@@ -53,6 +53,7 @@ vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (props: Compone
   fixture.approval = props;
   return createElement("span", { "data-test-approval-control": true });
 } }));
+vi.mock("./ChiefJobCancel", () => ({ ChiefJobCancel: () => createElement("div", { "data-chief-job-cancel": true }, "Cancel job") }));
 
 const { ChatView, ErrorRow, FailedTurnRow, NewConversationInstead, claudeUpdateTarget } = await import("./ChatView");
 const { activityPreview } = await import("@/lib/failed-turn");
@@ -109,6 +110,17 @@ describe("the header's right side", () => {
     expect(controls).toContain('title="Stop this turn"');
     expect(controls.match(/<button/g)).toHaveLength(1);
     fixture.advanced = true;
+  });
+
+  it("mounts exact job cancellation only for a writable Chief while keeping ordinary Stop", () => {
+    const running = { ...bot, busy: true, waitingForTeammates: true, tasks: (bot.tasks ?? []).map(task => ({ ...task, busy: true })) };
+    expect(header(running).markup).not.toContain("data-chief-job-cancel");
+    const chief = header({ ...running, chiefOfStaff: true });
+    expect(chief.markup).toContain("data-chief-job-cancel");
+    expect(chief.controls).toContain('title="Stop this turn"');
+    fixture.canWrite = false;
+    expect(header({ ...running, chiefOfStaff: true }).markup).not.toContain("data-chief-job-cancel");
+    fixture.canWrite = null;
   });
 
   it("leaves Advanced mode's model, computer and ⋯ exactly as they were, the inspector unlocked", () => {

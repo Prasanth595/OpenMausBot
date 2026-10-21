@@ -21,6 +21,7 @@ export interface CatalogProfile {
   botId: string;
   /** features.chiefEscalations: raise_escalation is mounted. */
   escalations?: boolean;
+  externalRuntime?: boolean;
 }
 
 /** Everything is off unless the harness says "1". */
@@ -35,6 +36,7 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     chief: env.OMB_CHIEF_OF_STAFF === "1",
     botId: env.OMB_BOT_ID ?? "",
     escalations: env.OMB_ESCALATIONS === "1",
+    externalRuntime: env.OMB_EXTERNAL_RUNTIME === "1",
   };
 }
 
@@ -264,6 +266,13 @@ const TOOL_DEFINITIONS = [
       consult: { type: "boolean", description: "True for a question: the teammate answers from what it knows, acting on nothing, and you are resumed with the answer. Leave out for work." },
       done_when: { type: "string", maxLength: 1000, description: "Optional: what must be true for this to count as done, in one or two sentences; the teammate is held to it." },
     }, required: ["bot_ids", "message"] },
+  },
+  {
+    name: "cancel_job",
+    description: "Chief of Staff only. Cancel one exact native job, including running hand-offs, when the person asks. Get its root job id from assignment_status. Partial reports remain available. A changed job is refused; read its current status before trying again.",
+    inputSchema: { type: "object", additionalProperties: false, properties: {
+      job_id: { type: "string", description: "Exact native root job id from job status." },
+    }, required: ["job_id"] },
   },
   {
     name: "assignment_status",
@@ -947,7 +956,7 @@ const SKILL_TOOL_NAMES = new Set(["skills_list", "skill_manage"]);
 export const SHARED_COMPUTER_TOOL_NAMES = new Set(["list_shared_computers", "shared_computer"]);
 const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
 const CHIEF_ONLY_TOOL_NAMES = new Set([
-  "create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread",
+  "create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread", "cancel_job",
 ]);
 const CHIEF_TARGET_TOOL_NAMES = new Set(["propose_profile", "propose_model"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
@@ -969,6 +978,7 @@ export function availableTools(profile: CatalogProfile) {
 
 function catalogTools(profile: CatalogProfile) {
   const BOT_SCOPED_TOOLS = TOOL_DEFINITIONS.filter((tool) =>
+    (!profile.externalRuntime || tool.name !== "cancel_job") &&
     (profile.botId === WATCHER_OPTIONS_CARD_BOT_ID || !WATCHER_TOOL_NAMES.has(tool.name)) &&
     (profile.memoryEnabled !== false || (tool.name !== "memory_update" && tool.name !== "memory_log")) &&
     (profile.escalations === true || tool.name !== "raise_escalation"));

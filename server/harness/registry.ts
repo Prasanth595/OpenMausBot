@@ -3,6 +3,7 @@ import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor } from "../engine-install.ts";
 import { withEngineMemory } from "../engine-memory.ts";
 import { withEngineHomes } from "../engine-homes/engine-homes.ts";
+import { withOfficeExecution, type OfficeExecutionResolver } from "../office-execution.ts";
 export { engineMemory } from "../engine-memory.ts";
 import type {
   AnyProviderDriver,
@@ -76,10 +77,13 @@ export class ProviderRegistry {
   private driversByKind: Map<string, AnyProviderDriver>;
   private readonly enginesBaseDir: string | undefined;
   private readonly npmPresent: () => boolean;
+  private readonly officeExecution: OfficeExecutionResolver | undefined;
 
-  constructor(drivers: readonly AnyProviderDriver[], options: { enginesBaseDir?: string; npmAvailable?: () => boolean } = {}) {
+  constructor(drivers: readonly AnyProviderDriver[], options: { enginesBaseDir?: string; npmAvailable?: () => boolean;
+    officeExecution?: OfficeExecutionResolver } = {}) {
     this.enginesBaseDir = options.enginesBaseDir;
     this.npmPresent = options.npmAvailable ?? npmAvailable;
+    this.officeExecution = options.officeExecution;
     this.driversByKind = new Map(drivers.map((d) => [d.driverKind, d]));
   }
 
@@ -124,6 +128,12 @@ export class ProviderRegistry {
     }
     try {
       const config = entry.config === undefined ? driver.defaultConfig() : driver.decodeConfig(entry.config);
+      if (this.officeExecution) {
+        const route = config as { managed?: unknown; authMode?: unknown };
+        if (entry.driver !== "codex" || route?.managed || route?.authMode === "chatgpt-plan") {
+          throw new Error("The office execution profile permits only the existing native Codex OAuth driver.");
+        }
+      }
       // The RAW config: decodeConfig fills in the driver default, which would flag every instance as overridden.
       const rawCli = cliOfRaw(entry.config);
       if (rawCli) this.cliByInstance.set(instanceId, rawCli);
@@ -133,9 +143,11 @@ export class ProviderRegistry {
         environment: entry.environment ?? {},
         enabled: entry.enabled ?? true,
         config,
+        ...(this.officeExecution ? { officeExecution: true as const } : {}),
       })));
       this.shareSnapshot(live);
-      return { instanceId, live: decorate ? decorate(live) : live };
+      const decorated = decorate ? decorate(live) : live;
+      return { instanceId, live: this.officeExecution ? withOfficeExecution(decorated, this.officeExecution) : decorated };
     } catch (e) {
       return {
         instanceId,
@@ -343,6 +355,12 @@ export class ProviderRegistry {
   }
 
   async disposeAll() {
+    if (this.officeExecution) {
+      const results = await Promise.allSettled([...this.byId.keys()].map(id => this.dispose(id)));
+      const failed = results.find(result => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
+      return;
+    }
     await Promise.allSettled(this.instances().map((i) => i.dispose()));
     this.byId.clear();
     this.cliByInstance.clear();
@@ -351,6 +369,14 @@ export class ProviderRegistry {
 
   async dispose(instanceId: InstanceId) {
     const entry = this.byId.get(instanceId);
+    if (this.officeExecution) {
+      await entry?.live?.dispose();
+      if (this.byId.get(instanceId) !== entry) return;
+      this.byId.delete(instanceId);
+      this.cliByInstance.delete(instanceId);
+      this.lastSnapshots.delete(instanceId);
+      return;
+    }
     this.byId.delete(instanceId);
     this.cliByInstance.delete(instanceId);
     this.lastSnapshots.delete(instanceId);

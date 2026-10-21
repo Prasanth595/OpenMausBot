@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 import type { BeginTurnRequest, Coordinator, CoordinatorHost, CoordinatorOptions, HandoffOptions, HandoffView, HostTurnResult, LiveHandoffEdge, RoomAddress } from "./coordinator.ts";
 import type { WorkOrigin } from "./peer-provenance.ts";
@@ -8,6 +9,7 @@ import { importLegacyDelegations, importLegacyHandoffs, type LegacyThreadResolve
 import { openRuntimeStore, type RuntimeStore } from "./runtime/store.ts";
 import { childrenSince, clip, isTerminal, path } from "./runtime/tree.ts";
 import type { Assignment, EndResult, Origin, Owner, Reply, Requester, RunInput, RunResult, StatusView, TurnRunner } from "./runtime/types.ts";
+import { OfficeControl, OFFICE_WORK_MS, type OfficeControlOptions } from "./office-control.ts";
 
 const NOT_RUNNING = "The originating room task is no longer running";
 const WRONG_SPEAKER = "The handoff belongs to a different room speaker";
@@ -79,6 +81,7 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
     mode: a.mode, reply: a.reply,
   };
   if (a.outcome !== undefined) node.outcome = a.outcome;
+  if (a.requestMessageId !== undefined) node.requestMessageId = a.requestMessageId;
   if (a.outcomeDetail !== undefined) node.outcomeDetail = a.outcomeDetail;
   if (a.question !== undefined) node.question = a.question;
   if (a.cards !== undefined) node.cards = a.cards;
@@ -105,6 +108,7 @@ export class RuntimeCoordinator implements Coordinator {
   private readonly log: (line: string) => void;
   private opened = false;
   private prunedAt: number | undefined;
+  private officeControl: OfficeControl | undefined;
 
   constructor(options: CoordinatorOptions) {
     this.host = options.host;
@@ -118,6 +122,43 @@ export class RuntimeCoordinator implements Coordinator {
       clock: { now: () => this.now(), monotonic: () => performance.now() },
       limits: { depth: 4, requests: REQUESTS_PER_ROOT, executions: EXECUTIONS_PER_ROOT, turnStallMs: TURN_STALL_MS, ...options.runtimeLimits },
       ...(options.log ? { log: options.log } : {}),
+    });
+  }
+
+  configureOfficeControl(options: Omit<OfficeControlOptions, "store" | "cancelAssignment">): OfficeControl {
+    if (this.officeControl) throw new Error("Office control is already configured");
+    this.runtime.enableOfficeControl(OFFICE_WORK_MS);
+    this.officeControl = new OfficeControl({ ...options, store: this.store,
+      cancelAssignment: (id, reason) => reason === "The fixed office execution deadline expired" ? this.runtime.expire(id, reason) : this.runtime.cancel(id, reason),
+    });
+    return this.officeControl;
+  }
+
+  cancellationSnapshot(rootId: string): CoordinatorCancellationSnapshot | undefined {
+    this.ready();
+    const root = this.store.get(rootId);
+    if (!root || root.parentId) return undefined;
+    const assignments = this.store.all({ rootId }).map(row => {
+      const attempt = row.office?.attempts.findLast(value => value.state === "prepared" || value.state === "issued" || value.state === "uncertain" || (value.state === "consumed" && value.finishedAt === undefined));
+      return { id: row.id, botId: row.assignee.botId, threadId: row.assignee.destination.threadId, status: row.status, executions: row.executions,
+        ...(attempt ? { generation: attempt.generation, attemptId: attempt.attemptId, attemptState: attempt.state,
+          ...(attempt.finishedAt !== undefined ? { attemptFinishedAt: attempt.finishedAt } : {}) } : {}) };
+    });
+    return { rootId, sourceBotId: root.assignee.botId, sourceThreadId: root.assignee.destination.threadId,
+      generation: root.id, ...(root.requestMessageId ? { requestMessageId: root.requestMessageId } : {}), assignments,
+      treeVersion: createHash("sha256").update(JSON.stringify(assignments)).digest("hex") };
+  }
+
+  cancelExactRoot(rootId: string, expectedTreeVersion: string, reason: string): boolean {
+    this.ready();
+    return this.store.transaction(() => {
+      const current = this.cancellationSnapshot(rootId);
+      if (!current || current.treeVersion !== expectedTreeVersion) return false;
+      this.runtime.cancel(rootId, reason);
+      for (const row of current.assignments) {
+        if (row.attemptId) this.officeControl?.invalidate({ attemptId: row.attemptId }, reason);
+      }
+      return true;
     });
   }
 
@@ -281,6 +322,7 @@ export class RuntimeCoordinator implements Coordinator {
       level: req.level,
       ...(opener?.requester.kind === "external_runtime" ? { reply: "poll" as const } : {}),
       ...(req.goalRunId ? { goalRunId: req.goalRunId } : {}),
+      ...(req.requestMessageId ? { requestMessageId: req.requestMessageId } : {}),
     });
     return this.project(row);
   }
@@ -427,6 +469,7 @@ export class RuntimeCoordinator implements Coordinator {
   }
 
   close(): void {
+    this.officeControl?.close();
     this.runtime.close();
   }
 
@@ -520,4 +563,28 @@ export class RuntimeCoordinator implements Coordinator {
   private project(a: Assignment): HandoffView {
     return view(a, a.parentId ? this.store.get(a.parentId) : undefined);
   }
+}
+
+export interface CoordinatorCancellationSnapshot {
+  rootId: string;
+  sourceBotId: string;
+  sourceThreadId: string;
+  generation: string;
+  requestMessageId?: string;
+  treeVersion: string;
+  assignments: Array<{ id: string; botId: string; threadId: string; status: Assignment["status"]; executions: number;
+    generation?: string; attemptId?: string; attemptState?: string; attemptFinishedAt?: number }>;
+}
+
+export function configureCoordinatorOfficeControl(coordinator: Coordinator, options: Omit<OfficeControlOptions, "store" | "cancelAssignment">): OfficeControl {
+  if (!(coordinator instanceof RuntimeCoordinator)) throw new Error("Office execution requires the native coordinator");
+  return coordinator.configureOfficeControl(options);
+}
+
+export function coordinatorCancellationSnapshot(coordinator: Coordinator, rootId: string): CoordinatorCancellationSnapshot | undefined {
+  return coordinator instanceof RuntimeCoordinator ? coordinator.cancellationSnapshot(rootId) : undefined;
+}
+
+export function cancelCoordinatorRoot(coordinator: Coordinator, rootId: string, expectedTreeVersion: string, reason: string): boolean {
+  return coordinator instanceof RuntimeCoordinator && coordinator.cancelExactRoot(rootId, expectedTreeVersion, reason);
 }

@@ -24,6 +24,8 @@ import { SharedComputerControl } from "./shared-computer-control.ts";
 import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coordinator, type HandoffOpener, type HandoffOptions, type HandoffView, type HostTurnResult } from "./coordinator.ts";
 import { queuedBehindPersonText, settledWaitingChip, UnansweredApprovals } from "./waiting-on-person.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
+import { createJobCancellation, jobCancellationSnapshotSchema, nativeJobExecutionUnconfirmed, type NativeJobCancellationSnapshot } from "./job-cancellation.ts";
+import { coordinatorCancellationSnapshot, cancelCoordinatorRoot } from "./runtime-coordinator.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../shared/computer-contention.ts";
@@ -242,7 +244,9 @@ import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from ".
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
 import { chiefEscalationsEnabled, NEEDS_INPUT_GATE, peerApprovalGate, RAISED_GATE } from "./escalations.ts";
 import { createChiefNotices } from "./host/chief-notices.ts";
-import { needsInputQuestion } from "./runtime-coordinator.ts";
+import { configureCoordinatorOfficeControl, needsInputQuestion } from "./runtime-coordinator.ts";
+import { handleOfficeControlRequest, officeCwdMatches, officeProfileMatches, type OfficeControl } from "./office-control.ts";
+import { createOfficeDirectiveRequester, loadOfficeControlConfig } from "./office-transport.ts";
 import { RETRY_BLOCKED } from "./incidents.ts";
 
 const SESSION_READ_MAX_CHARS = 8_000;
@@ -796,7 +800,12 @@ function customDomainStatus() {
     serverIpv4: DESKTOP_MANAGED ? null : customDomainIpv4(),
   };
 }
-const registry = new ProviderRegistry(BUILT_IN_DRIVERS);
+const officeControlConfig = loadOfficeControlConfig();
+const officeExecutionPrompt = officeControlConfig
+  ? "All execution runs locally on HEL1. orch-hel1 issues lightweight deterministic directives only. Goliath is suspended: do not contact, wake, or route work to it. Use native coordinate_bots, assignment_status, and cancel_job for assignment, status, cancellation, and results. Do not use SSH or external-machine delegation to bypass the native office workflow."
+  : "";
+let officeControlService: OfficeControl | undefined;
+const registry = new ProviderRegistry(BUILT_IN_DRIVERS, officeControlConfig ? { officeExecution: () => officeControlService } : {});
 const supportsApprovalMode = createApprovalModeSupport(registry);
 registerEnginesBinDir();
 
@@ -1795,6 +1804,9 @@ function endForeignTurns(threadId: string, generation?: string): void {
 }
 
 function revokeInternalCapabilityGeneration(threadId: string, generation: string): void {
+  officeControlService?.invalidate({ threadId, generation }, "The native turn generation was retired");
+  nativeAssignmentByGeneration.delete(generation);
+  nativePeerGenerations.delete(generation);
   if (standInRoots.delete(generation)) coordinator.endTurn(generation, { ok: true, text: "" });
   endForeignTurns(threadId, generation);
   if (guestDrivenTurns.get(threadId) === generation) guestDrivenTurns.delete(threadId);
@@ -2418,6 +2430,43 @@ function noteTeammatesLeftRunning(threadId: string, running: HandoffView[]): voi
       ...(task ? { threadRef: { botId: node.botId, threadId: node.threadId, title: task.title } } : {}),
     });
   }
+}
+
+const exactJobInterruptions = new Map<string, Promise<void>>();
+function interruptExactJobTurn(botId: string, threadId: string, generation: string, _reason?: string): Promise<void> {
+  const key = `${botId}\0${threadId}\0${generation}`;
+  const pending = exactJobInterruptions.get(key);
+  if (pending) return pending;
+  const interruption = interruptExactJobGeneration(botId, threadId, generation).finally(() => { exactJobInterruptions.delete(key); });
+  exactJobInterruptions.set(key, interruption);
+  return interruption;
+}
+
+async function interruptExactJobGeneration(botId: string, threadId: string, generation: string): Promise<void> {
+  const direct = directTurnGenerationByThread.get(threadId) === generation;
+  const room = !direct && turnResourceOwners.get(threadId)?.generation === generation &&
+    activeInternalGenerationByThread.get(threadId) === generation && activeGroupTurnForBot(botId)?.threadId === threadId;
+  if (!direct && !room) return;
+  const bot = botForThread(botId, threadId);
+  const instance = runningTurnInstance(bot, threadId);
+  if (direct) {
+    const owner = directRequestOwners.get(threadId);
+    if (owner?.generation === generation) owner.stopped = true;
+    stopParkedCards(threadId);
+    cancelDirectTurnDispatch(botId, threadId);
+  } else {
+    const group = store.groupByThread(threadId);
+    for (const operation of group ? groupTurnOperations.get(group.id) ?? [] : []) {
+      if (operation.threadId !== threadId || operation.generations?.get(botId) !== generation) continue;
+      operation.cancelled = true;
+      operation.cancellation.abort();
+      if (operation.providerHandshakePending) markCancelledProviderHandshake(threadId, `group:${operation.id}`);
+    }
+  }
+  revokeInternalCapabilityGeneration(threadId, generation);
+  await instance?.adapter.interruptTurn(threadId);
+  if ((direct && directTurnGenerationByThread.get(threadId) === generation) ||
+      (room && turnResourceOwners.get(threadId)?.generation === generation)) closeOpenApprovals(threadId);
 }
 
 async function interruptParkedTurn(botId: string, threadId: string): Promise<void> {
@@ -3088,6 +3137,7 @@ function previewSystemPrompt(bot: BotRecord) {
   });
   const privateWorkspace = instance && supportsWorkspaceFiles(instance.driverKind);
   const built = buildSystemPrompt(persona, bot.soul ?? "", [
+    { id: "office-execution", label: "Office execution", text: officeExecutionPrompt },
     { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(teamHost.profileFor(CLOUD_TEAM ? botMainThread(bot.id) ?? "" : bot.threadId, cfg.profile)) },
     {
       id: "setup",
@@ -3698,6 +3748,7 @@ type GroupTurnOperation = {
   cancelled: boolean;
   cancellation: AbortController;
   providerHandshakePending: boolean;
+  generations?: Map<string, string>;
   queuedQueueIds?: string[];
   line?: RoomRoundLine;
   goalRun?: {
@@ -3715,6 +3766,8 @@ type GroupTurnOperation = {
 
 // Wider than busyBotId (setup and queued responders too), so polling clients never mistake a handoff for completion.
 const groupTurnOperations = new Map<string, Set<GroupTurnOperation>>();
+const nativeAssignmentByGeneration = new Map<string, string>();
+const nativePeerGenerations = new Set<string>();
 const groupSpeakers = new Map<string, { botId: string; name: string; color: string; since?: number }>();
 const roomMemberContexts = new RoomContextTracker({
   heldUntil: (threadId) => cacheKeepWarmStatus(threadId)?.until,
@@ -4108,7 +4161,8 @@ function runRootTurn(node: HandoffView, bot: BotRecord, signal: AbortSignal, com
       done = true; signal.removeEventListener("abort", abort); resolve(outcome);
     };
     const abort = () => {
-      void interruptDirectThread(bot.id, node.threadId).catch(() => {});
+      const generation = activeInternalGenerationByThread.get(node.threadId);
+      if (generation && nativeAssignmentByGeneration.get(generation) === node.id) void interruptExactJobTurn(bot.id, node.threadId, generation).catch(() => {});
       finish({ ok: false, text: "The turn was stopped" });
     };
     signal.addEventListener("abort", abort, { once: true });
@@ -4283,7 +4337,8 @@ const coordinator: Coordinator = createCoordinator({
           done = true; signal.removeEventListener("abort", abort); resolve(outcome);
         };
         const abort = () => {
-          void interruptDirectThread(bot.id, node.threadId).catch(() => {});
+          const generation = activeInternalGenerationByThread.get(node.threadId);
+          if (generation && nativeAssignmentByGeneration.get(generation) === node.id) void interruptExactJobTurn(bot.id, node.threadId, generation).catch(() => {});
           finish({ ok: false, text: "Coordinated work was stopped" });
         };
         signal.addEventListener("abort", abort, { once: true });
@@ -4364,6 +4419,37 @@ const coordinator: Coordinator = createCoordinator({
     },
   },
 });
+if (officeControlConfig) {
+  officeControlService = configureCoordinatorOfficeControl(coordinator, {
+    workerId: officeControlConfig.workerId,
+    controllerHost: officeControlConfig.controllerHost,
+    requestDirective: createOfficeDirectiveRequester(officeControlConfig),
+    resolve: input => {
+      const generation = activeInternalGenerationByThread.get(input.threadId);
+      const assignmentId = generation && nativeAssignmentByGeneration.get(generation);
+      if (!generation || !assignmentId) return undefined;
+      const node = coordinator.node(assignmentId);
+      const bot = store.projectBotForTask(input.botId, input.threadId) ?? store.bot(input.botId);
+      if (!node || !bot || node.botId !== input.botId || node.threadId !== input.threadId || !["source", "running"].includes(node.status)
+        || bot.modelSelection.instanceId !== input.instanceId || registry.cliTarget(input.instanceId)?.driverKind !== input.driverKind) return undefined;
+      const room = node.groupId ? store.group(node.groupId) : undefined;
+      const roomTask = node.groupId ? store.groupTaskByThread(node.groupId, input.threadId) : undefined;
+      const pinnedCwd = node.groupId
+        ? roomTask ? roomTask.pinnedCwd : room?.threadId === input.threadId ? room.pinnedCwd : undefined
+        : store.taskByThread(input.botId, input.threadId)?.cwd;
+      if (!officeCwdMatches(pinnedCwd, input.cwd)) return undefined;
+      const parent = node.parentId ? coordinator.node(node.parentId) : undefined;
+      const approvalMode = node.groupId ? roomTurnLevel(bot, input.threadId, parent) : approvalModeForTurn(bot, nativePeerGenerations.has(generation), input.threadId);
+      const nativeProfile = { ...bot.modelSelection, approvalMode, toolScope: toolScopeForTurn(bot.id) };
+      if (!officeProfileMatches(input, nativeProfile)) return undefined;
+      const profileDigest = createHash("sha256").update(JSON.stringify({ botId: bot.id, instanceId: input.instanceId,
+        driverKind: input.driverKind, modelSelection: nativeProfile, approvalMode: input.approvalMode,
+        configuredCwd: bot.cwd, cwd: input.cwd, soulHash: bot.soulHash })).digest("hex");
+      return { assignmentId, generation, profileDigest };
+    },
+    cancelNative: (binding, reason) => interruptExactJobTurn(binding.botId, binding.threadId, binding.generation, reason),
+  });
+}
 threadsAwaitingTeammates = () => coordinator.awaitingTeammateThreads();
 const groupUsageReader = new GroupUsageReader(DATA_DIR);
 try { groupUsageReader.refresh(); } catch {}
@@ -4930,6 +5016,56 @@ function messagePage(threadId: string, limit: number | undefined, before?: strin
     hasMore: start > 0,
     activeLeafId: store.activeLeaf(threadId),
   };
+}
+
+function chiefJobCancellation(authorize: (chiefId: string, native: NativeJobCancellationSnapshot) => void) {
+  const native = (rootId: string) => {
+      const native = coordinatorCancellationSnapshot(coordinator, rootId);
+      if (!native) return undefined;
+      const owner = directRequestOwners.get(native.sourceThreadId);
+      const assignments = native.assignments.map(assignment => {
+        const generation = [...nativeAssignmentByGeneration].find(([generation, id]) => id === assignment.id &&
+          (directTurnGenerationByThread.get(assignment.threadId) === generation || turnResourceOwners.get(assignment.threadId)?.generation === generation))?.[0];
+        return { ...assignment, ...(generation ? { generation } : {}) };
+      });
+      return { ...native, assignments,
+        treeVersion: createHash("sha256").update(JSON.stringify({ nativeVersion: native.treeVersion, assignments })).digest("hex"),
+        requestMessageId: native.requestMessageId ??
+        (owner?.generations.has(rootId) ? owner.messageId : undefined) };
+  };
+  return createJobCancellation({
+    native,
+    authorize: (chiefId, native) => {
+      const chief = store.bot(chiefId);
+      if (!chief?.chiefOfStaff || chief.hidden || !store.taskByThread(chiefId, native.sourceThreadId)) {
+        throw Object.assign(new Error("Only a visible Chief of Staff can cancel its own source job"), { status: 403 });
+      }
+      const source = native.requestMessageId && store.messagesFor(native.sourceThreadId).find(message => message.id === native.requestMessageId);
+      if (!source || source.role !== "user" || source.kind !== "text" || source.peerAsk || source.steered) throw requestConflict("This job has no proven user request");
+      for (const assignment of native.assignments) {
+        const target = store.bot(assignment.botId);
+        if (target && target.id !== chiefId && !canReachPeer(chief, target)) {
+          throw Object.assign(new Error("Chief team access changed; this job cannot be cancelled here"), { status: 403 });
+        }
+      }
+      authorize(chiefId, native);
+    },
+    source: native => {
+      const owner = directRequestOwners.get(native.sourceThreadId);
+      return { activeLeafId: store.activeLeaf(native.sourceThreadId),
+        activeTurnId: threadBusy(native.sourceBotId, native.sourceThreadId) ? owner?.turnId ?? null : null,
+        executionId: owner?.generation ?? null };
+    },
+    cancelNative: (rootId, treeVersion, reason) => {
+      if (native(rootId)?.treeVersion !== treeVersion) return false;
+      const current = coordinatorCancellationSnapshot(coordinator, rootId);
+      return Boolean(current && cancelCoordinatorRoot(coordinator, rootId, current.treeVersion, reason));
+    },
+    markCancelled: (threadId, messageId) => { store.patchMessage(threadId, messageId, { requestCancelled: true, requestPending: false }); },
+    receipt: (threadId, messageId) => store.messagesFor(threadId).find(message => message.id === messageId)?.jobCancellation,
+    saveReceipt: (threadId, messageId, result) => { store.patchMessage(threadId, messageId, { jobCancellation: result }); },
+    interruptExact: interruptExactJobTurn,
+  });
 }
 
 function guardedRequestSnapshot(botId: string, threadId: string, sendId: string) {
@@ -8096,7 +8232,8 @@ async function startTurn(
   const instanceId = instance.instanceId;
   const automated = commsDepth > 0 || opts?.automationSource !== undefined
     || Boolean(opts?.unattended || opts?.cardContinuation || opts?.peerAsk || opts?.coordination || opts?.compactOnly || opts?.computerSelectionContinuation);
-  const route = routeDirectTurn(bot, task, store.activePath(threadId), resolvedImages, instance, automated, quickFallback.refused(instance.instanceId));
+  const route = officeControlConfig ? { model: bot.modelSelection.model, effort: bot.modelSelection.effort, variant: bot.modelSelection.variant, quickModel: undefined }
+    : routeDirectTurn(bot, task, store.activePath(threadId), resolvedImages, instance, automated, quickFallback.refused(instance.instanceId));
   const { model, effort, variant } = route;
   assertModelVariantSupported({ variant, effort }, instance.adapter.capabilities);
   if (effort && !instance.adapter.capabilities.effortLevels?.includes(effort)) {
@@ -8156,6 +8293,8 @@ async function startTurn(
   const agentsMounted = instance.adapter.capabilities.agentsMcp === true;
 
   const dispatchClaimId = randomUUID();
+  nativeAssignmentByGeneration.set(dispatchClaimId, opts?.coordination?.id ?? dispatchClaimId);
+  if (commsDepth > 0) nativePeerGenerations.add(dispatchClaimId);
   if (guestConfined) guestDrivenTurns.set(threadId, dispatchClaimId);
   const resourceOwner: TurnOwner = { threadId, generation: dispatchClaimId };
   turnResourceOwners.set(threadId, resourceOwner);
@@ -8191,6 +8330,7 @@ async function startTurn(
   if (!opts?.coordination && !opts?.compactOnly && !opts?.cardContinuation) {
     const opener = handoffOpener({ botId: bot.id, threadId }, threadId);
     coordinator.beginTurn({ id: dispatchClaimId, address: { botId: bot.id, threadId }, brief: resolvedImages.text,
+      ...(requestMessageId ? { requestMessageId } : {}),
       level: approvalModeForTurn(bot, commsDepth > 0, threadId), ...(opener ? { opener } : {}), origin: requestOrigin });
   }
   if (!opts?.computerSelectionContinuation && !opts?.cardContinuation && !opts?.automationSource && !opts?.unattended &&
@@ -8791,6 +8931,7 @@ async function startTurn(
       applyAgentsBridge(threadId, integrations, cfg, bot, turnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), cwd));
       const confined = proactive.fence.confines(threadId); if (confined) for (const key of Object.keys(integrations) as Array<keyof typeof integrations>) if (!READ_AND_DRAFT_TOOLS.has(key)) delete integrations[key];
       const prompt = buildSystemPrompt(persona, liveBot?.soul ?? bot.soul ?? "", [
+        { id: "office-execution", label: "Office execution", text: officeExecutionPrompt },
         { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(teamHost.profileFor(threadId, cfg.profile)) },
         { id: "setup", label: "Setup", text: setupSystemPrompt(setupMode, {
           skills: skillAuthoring,
@@ -10162,6 +10303,8 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   const internalGeneration = beginInternalCapabilityGeneration(threadId);
+  nativeAssignmentByGeneration.set(internalGeneration, orchestration?.roomHandoffId ?? orchestration?.coordination?.id ?? internalGeneration);
+  if (operation) { operation.generations ??= new Map(); operation.generations.set(bot.id, internalGeneration); }
   if (roomGuestConfined) guestDrivenTurns.set(threadId, internalGeneration);
   // A room turn is never provably the owner's alone.
   if (CLOUD_HOME) noteForeignTurn(bot.id, threadId, internalGeneration);
@@ -10390,6 +10533,7 @@ async function runClaimedGroupMemberTurn(
     const opener = handoffOpener({ botId: bot.id, threadId }, threadId);
     coordinator.beginTurn({
       id: internalGeneration, address: { groupId: readyGroup.id, threadId, botId: bot.id },
+      ...(latestUser?.id ? { requestMessageId: latestUser.id } : {}),
       brief: roomTurnBrief(threadId, bot, hop > 0 && !orchestration ? hop : 0, latestUser),
       level: preparedApprovalMode, ...(opener ? { opener } : {}), origin: requestWorkOrigin({ line: latestUser }),
       ...(orchestration?.goalRunId ? { goalRunId: orchestration.goalRunId } : {}),
@@ -10628,6 +10772,7 @@ async function runClaimedGroupMemberTurn(
   }
   applyAgentsBridge(threadId, integrations, cfg, bot, turnEngine(instance, providerConfigs(), registry.lastSnapshot(instance.instanceId), cwd));
   const roomSystem = buildSystemPrompt(system, store.bot(bot.id)?.soul ?? bot.soul ?? "", [
+    { id: "office-execution", label: "Office execution", text: officeExecutionPrompt },
     { id: "user-profile", label: "About the user", text: userProfileSystemPrompt(teamHost.profileFor(threadId, cfg.profile)) },
     { id: "files", label: "File locations", text: workspace ? workspaceLocationsPrompt(bot.id, cwd, readyBot.cwd, { attachFile: Boolean(integrations.agents) && !CLOUD_HOME && !HOSTED_WORKSPACE }) : "" },
     { id: "shell", label: "Long-running commands", text: workspace ? longCommandsPrompt(roomComputerPromptKind) : "" },
@@ -13415,6 +13560,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
   let m: RegExpMatchArray | null = null;
   let releaseWorkspaceRequest: (() => void) | undefined;
   try {
+    if (await handleOfficeControlRequest(officeControlService, req, res, path)) return;
     if (method === "GET" && path === "/api/health/hosted") {
       res.setHeader("cache-control", "no-store");
       const hosted = hostedWorkspaceConfiguration();
@@ -14733,13 +14879,24 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return { status: sent ? 200 : 409, body: { receipts, ...(sent ? { message: lead ? `${lead} ${message}` : message } : { error: refused.join("; ") }),
           ...(EXTERNAL && sent ? { rootId: generation } : {}) } };
       };
+      const cancellationJob = /^\/api\/internal\/jobs\/([\w-]{4,128})\/(cancellation|cancel)$/.exec(path);
+      if (cancellationJob && ((method === "GET" && cancellationJob[2] === "cancellation") || (method === "POST" && cancellationJob[2] === "cancel"))) {
+        const cancellation = chiefJobCancellation(() => { requireActiveInternalCapability(); });
+        if (method === "GET") return json(res, 200, cancellation.snapshot(internalSender.id, cancellationJob[1]!));
+        const parsed = jobCancellationSnapshotSchema.safeParse(await readInternalBody());
+        if (!parsed.success || parsed.data.rootId !== cancellationJob[1]) return json(res, 400, { error: "An exact job cancellation snapshot is required" });
+        return json(res, 200, await cancellation.cancel(internalSender.id, parsed.data));
+      }
       if (method === "GET" && path === "/api/internal/assignment-status") {
         const id = url.searchParams.get("id")?.trim() ?? "";
         const fromThreadId = internalCapability.threadId;
         if (!connectorThread(internalSender.id, fromThreadId)) return json(res, 403, { error: "source conversation does not belong to sender" });
         type Row = NonNullable<ReturnType<Coordinator["status"]>>["assignment"];
+        const stopUnconfirmed = (a: Row) => a.office?.attempts.some(attempt => attempt.state === "uncertain" ||
+          ((attempt.state === "consumed" || attempt.consumedAt !== undefined) && attempt.finishedAt === undefined)) === true;
         const shape = (a: Row) => ({
-          id: a.id, botId: a.assignee.botId, botName: store.bot(a.assignee.botId)?.name ?? a.assignee.botId, status: a.status,
+          id: a.id, rootId: a.rootId, botId: a.assignee.botId, botName: store.bot(a.assignee.botId)?.name ?? a.assignee.botId, status: a.status,
+          ...(stopUnconfirmed(a) ? { stopUnconfirmed: true } : {}),
           ...(a.outcome !== undefined ? { outcome: a.outcome } : {}), ...(a.outcomeDetail !== undefined ? { outcomeDetail: a.outcomeDetail } : {}),
           result: a.result, ...(a.question !== undefined ? { question: a.question } : {}), mode: a.mode, reply: a.reply,
           createdAt: a.createdAt, ...(a.startedAt !== undefined ? { startedAt: a.startedAt } : {}), ...(a.finishedAt !== undefined ? { finishedAt: a.finishedAt } : {}),
@@ -14748,8 +14905,25 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const owned = (a: Row) => coordinator.node(a.rootId)?.threadId === fromThreadId;
         const reachable = (a: Row) => { const target = store.bot(a.assignee.botId); return !target || target.id === internalSender.id || canReachPeer(internalSender, target); };
         if (!id) {
+          requireActiveInternalCapability();
           const outstanding = coordinator.outstandingFor(fromThreadId).flatMap(n => { const row = coordinator.status(n.id)?.assignment; return row && reachable(row) ? [shape(row)] : []; });
-          return json(res, 200, { outstanding });
+          if (!internalSender.chiefOfStaff || internalSender.hidden || internalCapability.generation === EXTERNAL_RUNTIME_GENERATION) return json(res, 200, { outstanding });
+          const cancellation = chiefJobCancellation(() => { requireActiveInternalCapability(); });
+          const activeRootIds = new Set(coordinator.active().map(node => node.rootId));
+          const jobs = coordinator.all().filter(node => !node.parentId && node.botId === internalSender.id &&
+            (activeRootIds.has(node.id) || coordinatorCancellationSnapshot(coordinator, node.id)?.assignments.some(nativeJobExecutionUnconfirmed)))
+            .sort((a, b) => b.createdAt - a.createdAt).slice(0, 20).flatMap(node => {
+              try {
+                const source = cancellation.snapshot(internalSender.id, node.id);
+                const request = store.messagesFor(source.sourceThreadId).find(message => message.id === source.requestMessageId);
+                const uncertain = coordinatorCancellationSnapshot(coordinator, node.id)?.assignments.some(nativeJobExecutionUnconfirmed) === true;
+                return [{ jobId: node.id, threadId: source.sourceThreadId, requestMessageId: source.requestMessageId,
+                  title: store.taskByThread(node.botId, node.threadId)?.title ?? "Source job",
+                  status: uncertain ? "local stop unconfirmed" : ENDED.has(node.status) ? "source stopped; hand-offs still active" : node.status,
+                  ...(uncertain ? { stopUnconfirmed: true } : {}), request: request?.text?.slice(0, 200) }];
+              } catch { return []; }
+            });
+          return json(res, 200, { outstanding, jobs });
         }
         if (internalCapability.delegatedThisTurn?.has(id)) {
           return json(res, 409, { error: `Assignment ${id} was handed out during this turn. Finish your response now so the teammate can work; its result returns to this conversation and resumes you. Do not check or wait for it until a later turn.` });
@@ -16062,6 +16236,22 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         },
       });
       return json(res, 200, { message: patched });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/jobs\/([\w-]{4,128})\/(cancellation|cancel)$/);
+    if (m && ((method === "GET" && m[3] === "cancellation") || (method === "POST" && m[3] === "cancel"))) {
+      const cancellation = chiefJobCancellation((_chiefId, native) => {
+        if (auth.kind === "session" && !sessions.isLive(auth.session.id)) throw Object.assign(new Error("Session expired or revoked"), { status: 401 });
+        const visibleNow = visibleTo(viewerFor(auth));
+        if (!visibleNow.bot(native.sourceBotId) || !visibleNow.thread(native.sourceThreadId) ||
+            native.assignments.some(assignment => !visibleNow.thread(assignment.threadId))) {
+          throw Object.assign(new Error("No such Chief job"), { status: 404 });
+        }
+      });
+      res.setHeader("cache-control", "private, no-store");
+      if (method === "GET") return json(res, 200, cancellation.snapshot(m[1]!, m[2]!));
+      const parsed = jobCancellationSnapshotSchema.safeParse(await readBody(req));
+      if (!parsed.success || parsed.data.rootId !== m[2]) return json(res, 400, { error: "An exact job cancellation snapshot is required" });
+      return json(res, 200, await cancellation.cancel(m[1]!, parsed.data));
     }
     m = path.match(/^\/api\/bots\/([\w-]+)\/requests\/([A-Za-z0-9_-]{16,80})(\/interrupt)?$/);
     if (m && ((method === "GET" && !m[3]) || (method === "POST" && m[3]))) {

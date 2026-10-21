@@ -35,6 +35,8 @@ export interface JobNode {
   finishedAt?: number;
   executions: number;
   result?: string;
+  /** Visible root's source request, normalized and bounded to 160 characters. */
+  sourceRequest?: string;
 }
 
 export interface JobView {
@@ -149,9 +151,10 @@ export function jobView(input: JobInput): JobView {
     else if (row.status === "resume") tally.queued += 1;
     else tally[row.status] += 1;
   }
+  const sourceRequest = (row: Assignment) => !row.parentId && shows(row) ? row.brief.replace(/\s+/g, " ").trim().slice(0, 160) : "";
   const version = createHash("sha256").update(JSON.stringify([
     state, conversation.busy, conversation.activity ?? "", conversation.queued, asking.map((row) => row.id),
-    input.rows.map((row) => [row.id, row.status, row.outcome ?? "", row.executions, row.question ?? ""]),
+    input.rows.map((row) => [row.id, row.status, row.outcome ?? "", row.executions, row.question ?? "", sourceRequest(row)]),
   ])).digest("base64url").slice(0, 16);
   const node = (row: Assignment): JobNode => {
     const { destination } = row.assignee;
@@ -167,6 +170,7 @@ export function jobView(input: JobInput): JobView {
       createdAt: row.createdAt, ...(row.startedAt !== undefined ? { startedAt: row.startedAt } : {}),
       ...(row.finishedAt !== undefined ? { finishedAt: row.finishedAt } : {}), executions: row.executions,
       ...(result ? { result: input.full || result.length <= RESULT_CLIP ? result : `${result.slice(0, RESULT_CLIP)}…` } : {}),
+      ...(sourceRequest(row) ? { sourceRequest: sourceRequest(row) } : {}),
     };
   };
   return {

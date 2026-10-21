@@ -529,6 +529,7 @@ export interface WireMessage extends HelperIntroField {
   turnSucceeded?: boolean;
   /** An exact request was stopped; a restart must not revive an old result. */
   requestCancelled?: boolean;
+  jobCancellation?: import("./job-cancellation.ts").JobCancellationResult;
   /** Set before execution and cleared only after the request's verified
    * final turn and dependencies settle. A restart never clears it. */
   requestPending?: boolean;

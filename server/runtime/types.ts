@@ -77,8 +77,38 @@ export type Outcome =
 export type Level = ApprovalMode;
 export type LevelSource = "own" | "chief" | "engine_cap";
 
+export interface OfficeAttempt {
+  version: 1;
+  attemptId: string;
+  assignmentId: string;
+  rootId: string;
+  botId: string;
+  threadId: string;
+  generation: string;
+  workerId: string;
+  instanceId: string;
+  driverKind: string;
+  profileId: string;
+  assignmentDigest: string;
+  profileDigest: string;
+  cwd: string;
+  rootDeadline: number;
+  startBefore: number;
+  kind: "work" | "report";
+  digest: string;
+  capabilityHash: string;
+  state: "prepared" | "issued" | "consumed" | "cancelled" | "uncertain";
+  preparedAt: number;
+  issuedAt?: number;
+  consumedAt?: number;
+  finishedAt?: number;
+  cancelledAt?: number;
+  controllerDecision?: { controllerHost: string; controllerDecisionId: string; policyVersion: "office-control-v1"; decision: "allow" | "deny"; at: number };
+}
+
 export interface Assignment {
   id: string;
+  requestMessageId?: string;
   rootId: string;
   parentId?: string;
   /** Edges from the root: a root is 0. */
@@ -144,6 +174,7 @@ export interface Assignment {
   approved?: boolean;
   /** A room brief shown once per call: every recipient of that call shares it. */
   batchKey?: string;
+  office?: { rootDeadline: number; reportUntil?: number; reportStarted?: boolean; attempts: OfficeAttempt[] };
   version: 1;
 }
 

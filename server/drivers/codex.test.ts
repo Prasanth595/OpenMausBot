@@ -127,17 +127,19 @@ describe("CodexDriver turns (fake app-server)", () => {
   let scratch: string;
 
   const create = async (
-    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string>; managed?: boolean; authMode?: "chatgpt-plan"; cli?: string } = {},
+    opts: { mode?: string; fullAuto?: boolean; environment?: Record<string, string>; managed?: boolean; authMode?: "chatgpt-plan"; cli?: string; officeExecution?: true } = {},
   ) => {
     if (opts.mode) process.env.FAKE_CODEX_MODE = opts.mode;
     instance = await CodexDriver.create({
       instanceId: "codex-test",
       displayName: "Codex Test",
       environment: {
+        ...(opts.officeExecution ? { FAKE_CODEX_MCP_OVERRIDES: "1" } : {}),
         ...(opts.managed ? { HOME: scratch, USERPROFILE: scratch, CODEX_HOME: join(scratch, ".codex"), OPENMAUSBOT_COMPANY_API_KEY: "synthetic-company-fixture" } : {}),
         ...opts.environment,
       },
       enabled: true,
+      ...(opts.officeExecution ? { officeExecution: true as const } : {}),
       config: {
         cli: opts.cli ?? FAKE_CLI,
         fullAuto: opts.fullAuto ?? false,
@@ -3634,6 +3636,165 @@ process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result})+'\\n');});`)
     expect(instance.adapter.capabilities.effortLevels).toEqual([
       "low", "medium", "high", "xhigh", "max",
     ]);
+  });
+
+  it("never starts a native process when Stop wins during memory admission", async () => {
+    await create({ officeExecution: true });
+    const spawn = vi.spyOn(procs, "spawnCli");
+    let admit!: () => void;
+    const admitted = new Promise<void>((resolve) => { admit = resolve; });
+    const assert = vi.fn();
+    const started = await instance.adapter.sendTurn({ threadId: "office-memory-stop", text: "fixture",
+      engineAdmission: () => admitted,
+      executionContext: { attemptId: "office-attempt", signal: new AbortController().signal, deadline: Date.now() + 60_000, assert },
+    });
+    await instance.adapter.interruptTurn("office-memory-stop", started.turnId);
+    admit();
+    await expect(recorder.until((event) => event.type === "turn.completed" && event.threadId === "office-memory-stop"))
+      .resolves.toMatchObject({ ok: false, stopReason: "interrupted" });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(assert).not.toHaveBeenCalled();
+    spawn.mockRestore();
+  });
+
+  it("starts no catalog or helper provider processes in the trusted office profile", async () => {
+    const spawn = vi.spyOn(procs, "spawnCli");
+    await create({ officeExecution: true });
+    await instance.refreshModels?.();
+    await expect(instance.adapter.sendTurn({ threadId: "office-unleased", text: "fixture" })).rejects.toThrow(/controller lease/);
+    await expect(instance.generateMemoryText!("unrequested helper")).rejects.toThrow(/background model/);
+    expect(spawn).not.toHaveBeenCalled();
+    spawn.mockRestore();
+  });
+
+  it("strips inherited and saved proxy or vault settings while preserving the Codex OAuth home", async () => {
+    const blocked = { HTTP_PROXY: "http://fixture.invalid", https_proxy: "http://fixture.invalid",
+      ALL_PROXY: "http://fixture.invalid", NO_PROXY: "fixture.invalid", NODE_USE_ENV_PROXY: "1",
+      AGENT_VAULT_TOKEN: "fixture-vault", PI_PROXY_TOKEN: "fixture-proxy", BASH_ENV: "/fixture/env" };
+    const previous = Object.fromEntries(Object.keys(blocked).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, blocked);
+    try {
+      const oauthHome = join(scratch, "authorized-codex-home");
+      await create({ officeExecution: true, environment: { ...blocked, CODEX_HOME: oauthHome } });
+      const dump = join(scratch, "office-safe-env.json");
+      process.env.FAKE_CODEX_DUMP = dump;
+      await instance.adapter.sendTurn({ threadId: "office-safe-env", text: "fixture",
+        executionContext: { attemptId: "office-attempt", signal: new AbortController().signal, deadline: Date.now() + 60_000, assert: () => {} },
+        integrations: { agents: { command: "node", args: ["fixture-agent-bridge"], env: { ...blocked,
+          HOME: "/wrong-helper-home", USERPROFILE: "/wrong-helper-home", CODEX_HOME: "/wrong-helper-codex",
+          OPENAI_API_KEY: "fixture-forbidden-provider-key", OPENMAUSBOT_CHATGPT_TOKEN: "fixture-forbidden-provider-token" } } },
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === "office-safe-env");
+      const seen = JSON.parse(readFileSync(dump, "utf8"));
+      expect(seen.env.CODEX_HOME).toBe(oauthHome);
+      expect(seen.env.HOME).not.toBe("/wrong-helper-home");
+      expect(seen.env.USERPROFILE).not.toBe("/wrong-helper-home");
+      expect(seen.env.OPENAI_API_KEY).toBeUndefined();
+      expect(seen.env.OPENMAUSBOT_CHATGPT_TOKEN).toBeUndefined();
+      for (const key of Object.keys(blocked)) expect(seen.env[key]).toBeUndefined();
+    } finally {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    }
+  });
+
+  it("checks the exact directive again before turn/start and sends no prompt after revocation", async () => {
+    await create({ officeExecution: true });
+    const dump = join(scratch, "office-prompt-denied.json");
+    process.env.FAKE_CODEX_DUMP = dump;
+    const assert = vi.fn((stage: "process" | "prompt" | "steer") => {
+      if (stage === "prompt") throw new Error("Office directive was revoked before prompt dispatch");
+    });
+    await instance.adapter.sendTurn({ threadId: "office-prompt-denied", text: "must not be dispatched",
+      executionContext: { attemptId: "office-attempt", signal: new AbortController().signal, deadline: Date.now() + 60_000, assert },
+    });
+    await expect(recorder.until((event) => event.type === "turn.completed" && event.threadId === "office-prompt-denied"))
+      .resolves.toMatchObject({ ok: false });
+    expect(assert).toHaveBeenCalledWith("process");
+    expect(assert).toHaveBeenCalledWith("prompt");
+    const seen = JSON.parse(readFileSync(dump, "utf8"));
+    expect(seen.calls.some((call: { method: string }) => call.method === "turn/start")).toBe(false);
+  });
+
+  it("refuses office automatic model review before starting a provider process", async () => {
+    await create({ officeExecution: true });
+    const spawn = vi.spyOn(procs, "spawnCli");
+    await expect(instance.adapter.sendTurn({ threadId: "office-auto-review", text: "fixture", approvalMode: "auto",
+      executionContext: { attemptId: "office-attempt", signal: new AbortController().signal, deadline: Date.now() + 60_000, assert: () => {} },
+    })).rejects.toThrow(/automatic model permission review/);
+    expect(spawn).not.toHaveBeenCalled();
+    spawn.mockRestore();
+  });
+
+  it("refuses custom automatic review and unverified native helper features before any office prompt", async () => {
+    await create({ officeExecution: true });
+    mkdirSync(NATIVE_DIR, { recursive: true });
+    const sentMethods = (threadId: string): string[] => readFileSync(join(NATIVE_DIR, `${threadId}.ndjson`), "utf8")
+      .trim().split("\n").map(line => JSON.parse(line)).filter(entry => entry.dir === "out").map(entry => entry.msg.method);
+    await instance.adapter.sendTurn({ threadId: "office-custom-review", text: "fixture", approvalMode: "custom",
+      executionContext: { attemptId: "office-attempt", signal: new AbortController().signal, deadline: Date.now() + 60_000, assert: () => {} },
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.threadId === "office-custom-review");
+    expect(sentMethods("office-custom-review")).not.toContain("turn/start");
+    expect(recorder.events.some((event) => event.type === "runtime.error" && /automatic model permission review/.test(event.message))).toBe(true);
+    process.env.FAKE_CODEX_IGNORE_FEATURES = "1";
+    try {
+      await instance.adapter.sendTurn({ threadId: "office-unverified-helper", text: "fixture", approvalMode: "ask",
+        executionContext: { attemptId: "office-attempt", signal: new AbortController().signal, deadline: Date.now() + 60_000, assert: () => {} },
+      });
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === "office-unverified-helper");
+      expect(sentMethods("office-unverified-helper")).not.toContain("turn/start");
+    } finally { delete process.env.FAKE_CODEX_IGNORE_FEATURES; }
+  });
+
+  it("refuses an ambient MCP server outside the admitted office integrations before thread start", async () => {
+    await create({ officeExecution: true, environment: { FAKE_CODEX_MCP_OVERRIDES: "" } });
+    mkdirSync(NATIVE_DIR, { recursive: true });
+    await instance.adapter.sendTurn({ threadId: "office-ambient-mcp", text: "fixture",
+      executionContext: { attemptId: "office-attempt", signal: new AbortController().signal, deadline: Date.now() + 60_000, assert: () => {} },
+    });
+    await recorder.until((event) => event.type === "turn.completed" && event.threadId === "office-ambient-mcp");
+    const methods = readFileSync(join(NATIVE_DIR, "office-ambient-mcp.ndjson"), "utf8")
+      .trim().split("\n").map(line => JSON.parse(line)).filter(entry => entry.dir === "out").map(entry => entry.msg.method);
+    expect(methods).not.toContain("thread/start");
+    expect(methods).not.toContain("turn/start");
+    expect(recorder.events.some((event) => event.type === "runtime.error" && /outside the selected configuration/.test(event.message))).toBe(true);
+  });
+
+  it("stops an office native process tree without a provider interrupt grace period", async () => {
+    await create({ mode: "approval", officeExecution: true });
+    const kill = vi.spyOn(procs, "killCliTree");
+    const started = await instance.adapter.sendTurn({ threadId: "office-local-stop", text: "fixture",
+      executionContext: { attemptId: "office-attempt", signal: new AbortController().signal, deadline: Date.now() + 60_000, assert: () => {} },
+    });
+    await recorder.until((event) => event.type === "request.opened" && event.threadId === "office-local-stop");
+    await instance.adapter.interruptTurn("office-local-stop", started.turnId);
+    await expect(recorder.until((event) => event.type === "turn.completed" && event.threadId === "office-local-stop"))
+      .resolves.toMatchObject({ ok: false, stopReason: "interrupted" });
+    expect(kill.mock.calls.length).toBeGreaterThan(0);
+    expect(kill.mock.calls.every((call) => call[1] === 0)).toBe(true);
+    kill.mockRestore();
+  });
+
+  it("reports an unconfirmed office kill and retains the native turn until its process exits", async () => {
+    await create({ mode: "approval", officeExecution: true });
+    const started = await instance.adapter.sendTurn({ threadId: "office-stop-unconfirmed", text: "fixture",
+      executionContext: { attemptId: "office-attempt", signal: new AbortController().signal, deadline: Date.now() + 60_000, assert: () => {} },
+    });
+    await recorder.until((event) => event.type === "request.opened" && event.threadId === "office-stop-unconfirmed");
+    const kill = vi.spyOn(procs, "killCliTree").mockResolvedValue(false);
+    try {
+      await expect(instance.adapter.interruptTurn("office-stop-unconfirmed", started.turnId)).rejects.toThrow(/unconfirmed/);
+      expect(instance.adapter.hasSession("office-stop-unconfirmed")).toBe(true);
+      await expect(instance.adapter.sendTurn({ threadId: "office-stop-unconfirmed", text: "replacement",
+        executionContext: { attemptId: "replacement-attempt", signal: new AbortController().signal, deadline: Date.now() + 60_000, assert: () => {} },
+      })).rejects.toThrow(/already running/);
+    } finally {
+      kill.mockRestore();
+      await instance.adapter.interruptTurn("office-stop-unconfirmed", started.turnId);
+      await recorder.until((event) => event.type === "turn.completed" && event.threadId === "office-stop-unconfirmed");
+    }
   });
 
   it("sends effort on turn/start, and omits the key when unset", async () => {

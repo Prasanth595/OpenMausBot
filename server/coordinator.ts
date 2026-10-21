@@ -25,6 +25,7 @@ export type HandoffStatus = "source" | "queued" | "running" | "waiting" | "resum
 
 export interface HandoffView {
   id: string;
+  requestMessageId?: string;
   rootId: string;
   parentId?: string;
   groupId?: string;
@@ -59,6 +60,7 @@ export interface HandoffView {
 
 export interface BeginTurnRequest {
   id: string;
+  requestMessageId?: string;
   address: RoomAddress;
   brief: string;
   level: Level;

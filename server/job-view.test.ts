@@ -27,6 +27,14 @@ const view = (rows: Assignment[], patch: Partial<JobInput> = {}) => jobView({
 });
 
 describe("the job of a conversation", () => {
+  it("carries a bounded visible source request only on roots for human job actions", () => {
+    const request = "Compare\n  the proposals " + "x".repeat(200);
+    const job = view([root({ brief: request }), child("a1", "priya", { brief: "Private delegated instructions" })]);
+    expect(job.nodes[0]!.sourceRequest).toHaveLength(160);
+    expect(job.nodes[0]!.sourceRequest).toMatch(/^Compare the proposals /);
+    expect(job.nodes[1]).not.toHaveProperty("sourceRequest");
+    expect(JSON.stringify(view([root({ brief: "Hidden source request" })], { visible: () => false }))).not.toContain("Hidden source request");
+  });
   it("is idle when nothing ran since the time asked about", () => {
     expect(view([])).toMatchObject({ state: "idle", reason: "Nothing is running in this conversation", nodes: [], roots: [] });
   });
@@ -103,6 +111,7 @@ describe("the job of a conversation", () => {
     expect(view(rows, { now: 99_000 }).version).toBe(before);
     expect(view([rows[0]!, { ...rows[1]!, status: "completed" }]).version).not.toBe(before);
     expect(view(rows, { conversation: { ...idle, queued: 1 } }).version).not.toBe(before);
+    expect(view([{ ...rows[0]!, brief: "A different visible source" }, rows[1]!]).version).not.toBe(before);
   });
 
   it("counts what the reader may not see without listing it, and clips results unless asked for them whole", () => {

@@ -59,6 +59,7 @@ import { VoiceNoteBubble, type VoiceNoteAttachment } from "./VoiceNoteBubble";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { ThreadChip } from "./ThreadChip";
 import { VerifyCard } from "./VerifyCard";
+import { ChiefJobCancel } from "./ChiefJobCancel";
 import { askText, runSkill, runSteps, runSummary, showRun, skillPrompt } from "@/lib/verify-steps";
 import { useShowRunCard } from "@/lib/run-card-preferences";
 import { sendsMessage, useSendKey } from "@/lib/send-key";
@@ -1308,6 +1309,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       <TranscriptAnnouncer threadKey={transcriptKey} snapshot={announcement} />
 
       <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
+      {bot.chiefOfStaff && canWrite !== false && <ChiefJobCancel botId={bot.id} threadId={bot.threadId}
+        activeLeafId={activeLeafId} busy={bot.busy === true} waiting={bot.waitingForTeammates === true}
+        receipts={messages.flatMap(message => message.jobCancellation ? [message.jobCancellation] : [])} />}
       {lastRunStep && showRun(recordedRun) && showRunCard && runDismissed.get(transcriptKey) !== lastRunStep.id && (
         <div className="flex justify-end px-5 pb-2">
           <VerifyCard
