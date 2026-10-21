@@ -151,7 +151,7 @@ type Computer = { id: string; name: string; section: string | null; state: strin
     await expect.poll(snapshot, { timeout: 10_000 }).not.toContain('complementary "Team computers"');
     await click("Open chat with Ben");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain('log "Conversation with Ben"');
-    await click("Bot's computer");
+    await click("Bot's screen");
     await expect.poll(snapshot, { timeout: 10_000 }).toContain("Ben's screen");
     await expect.poll(snapshot, { timeout: 20_000, interval: 250 }).toContain("Uses Engineering desktop, the cloud desktop this team shares.");
     expect(await snapshot()).not.toContain("Choose Cloud");
