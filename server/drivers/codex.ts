@@ -17,7 +17,7 @@ import { serverVersion } from "../environment.ts";
 import { ChatGptPlanAuthController } from "./chatgpt-plan-auth.ts";
 import { captureCliTree, describeSpawnFailure, execCli, killCliTree, spawnCli, waitForExit } from "../procs.ts";
 import { codexLaunch, codexLaunchesStarting, codexLaunchSlot, codexRpcTimeoutMs, keepStopping, RELAUNCH_EXIT_WAIT_MS, spawnHoldingSlot, tryCodexLaunchSlot } from "./codex-process.ts";
-import { isReservedMcpEnvEntry } from "../mcp-registry.ts";
+import { isReservedMcpEnvEntry, mcpServerNameError } from "../mcp-registry.ts";
 
 import type {
   DriverCreateInput,
@@ -294,8 +294,8 @@ function mcpAppApprovalForm(params: unknown): McpApprovalForm | null {
     content[key] = chosen;
   }
 
-  const tool = boundedLabel(appName) ?? boundedLabel(request.serverName) ?? "app_access";
-  return { tool, summary: message, allowResult: { action: "accept", content } };
+  const label = boundedLabel(appName) ?? boundedLabel(request.serverName) ?? "app_access";
+  return { tool: label.startsWith("mcp__") ? "app_access" : label, summary: message, allowResult: { action: "accept", content } };
 }
 
 /** Thread-config overrides adding `patterns` to the person's shell exclusions. Codex keeps two
@@ -723,6 +723,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
         const mountedNames = new Set<string>();
         const selectedMcp = new Map<string, StdioMcpSpec>();
         const selectedApprovals = new Map<string, McpApprovalMode>();
+        const customMcpNames = new Map<string, string>();
         const directoryMounts = new Set<string>();
         const literalEnvs = new Map<string, Record<string, string>>();
         const scopedServer = (name: string, mountName: string, server: McpServerSpec): StdioMcpSpec | null => {
@@ -781,6 +782,7 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           const mountName = mountedMcpServerName(name, declaredInCodexConfig);
           if (mountName !== name) noteRenamedMcpServer(name, mountName);
           mountSelected(name, mountName, server, "prompt");
+          if (selectedMcp.has(mountName) && !mcpServerNameError(name) && !name.includes("__")) customMcpNames.set(mountName, name);
         }
         if (turn.integrations?.phone) {
           if (turn.toolScope !== undefined) {
@@ -1047,11 +1049,16 @@ export const CodexDriver: ProviderDriver<CodexConfig> = {
           return;
         }
         const runs = searchedServer && asksAbout(CALL_TOOL) ? directoryCallTarget(CALL_TOOL, params._meta?.tool_params) : undefined;
+        const customMcpName = typeof params.serverName === "string" ? customMcpNames.get(params.serverName) : undefined;
+        const customMcpTool = runs ?? mcpTool ?? "mcp";
+        const qualifiedMcpTool = isLegacyMcpPermission && customMcpName && mcpTool && asksAbout(mcpTool)
+          && customMcpTool && /^[A-Za-z0-9_.:-]+$/.test(customMcpTool)
+          ? `mcp__${customMcpName}__${customMcpTool}` : undefined;
         const tool =
           mcpAppApproval
             ? mcpAppApproval.tool
             : isLegacyMcpPermission
-            ? (runs ?? mcpTool ?? "mcp")
+            ? (qualifiedMcpTool ?? (customMcpTool.startsWith("mcp__") ? "mcp" : customMcpTool))
             : isAdditionalPermission
               ? "permissions"
             : method === "item/fileChange/requestApproval" || method === "applyPatchApproval"
