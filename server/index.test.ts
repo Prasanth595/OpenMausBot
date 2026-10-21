@@ -5524,6 +5524,7 @@ describe("harness HTTP API", () => {
       title: "Researcher",
       description: "Finds evidence",
       color: "cyan",
+      mascotBody: "cursor",
     });
     await api("PATCH", `/api/bots/${hidden.id}`, { name: "Archived", hidden: true });
 
@@ -5538,7 +5539,7 @@ describe("harness HTTP API", () => {
     expect(exported.body.team.members.map((member: { name: string }) => member.name)).toEqual(visibleNames);
     expect(exported.body.team.members).toEqual(expect.arrayContaining([
       expect.objectContaining({ key: "mira", name: "Mira", title: "Project Lead", appearance: { color: "purple", mascotExpression: "focused" } }),
-      expect.objectContaining({ key: "scout", name: "Scout", title: "Researcher", appearance: { color: "cyan" } }),
+      expect.objectContaining({ key: "scout", name: "Scout", title: "Researcher", appearance: { color: "cyan", mascotBody: "cursor" } }),
     ]));
     expect(exported.body.team).not.toHaveProperty("room");
     expect(JSON.stringify(exported.body)).not.toMatch(/Archived|autoApprove|alwaysAllow|modelSelection|threadId/);

@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 import { writeFileAtomic, writeFileAtomicIfChanged } from "./atomic.ts";
 import { commitRegistryChange, keptRevocation, saveRegistryFor } from "./registry-save.ts";
-import { parseToolScope, toolScopeWidens } from "../shared/tool-scope.ts";
+import { parseToolScope } from "../shared/tool-scope.ts";
 import { ensureSections, readSections, changeEmptySection } from "./section-context.ts";
 import type { TeamComputers } from "./team-computers.ts";
 import { removeBotFolder, soulFile, soulHash, writeSoulMirror } from "./bot-folder.ts";
@@ -20,7 +20,8 @@ import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { scrubbedSkillRequest } from "./skill-request-card.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
-import { addOrSelectCustomMascot, createMascotProfile, legacyMascotBody, mascotProfileSchema, selectBuiltinMascot, type CustomMascotShape } from "../shared/mascot-profile.ts";
+import { mascotStateForCreation, mascotStateWithCustomShape, normalizeStoredBotMascotState, type CustomMascotShape } from "./mascot-profile-store.ts";
+import { applyBotProfilePatch, normalizeBotPatch } from "./store-bot-patches.ts";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
 import { REMOVED_COMPUTER_DRIVER, type ComputerEngineMove } from "./computer-engine-removal.ts";
@@ -36,7 +37,6 @@ import type {
   WireMessage, WireTask, BotProject as BotProjectRecord,
 } from "../shared/wire.ts";
 import { movesThreadToTop, nextOpenThread } from "../shared/wire.ts";
-import { parseConnectorTools } from "./connector-tools.ts";
 import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
@@ -667,16 +667,7 @@ export class Store {
     const clearModelCopies = !existsSync(THREAD_MODEL_COPIES_CLEARED) && (botsLoaded || !existsSync(BOTS_FILE));
     const fillAskedAts = !existsSync(ASKED_AT_FILLED) && (botsLoaded || !existsSync(BOTS_FILE));
     for (const b of this.bots) {
-      const profile = mascotProfileSchema.safeParse(b.mascotProfile);
-      if (profile.success) {
-        b.mascotProfile = profile.data;
-      } else {
-        b.mascotProfile = createMascotProfile(b.mascotBody);
-        botsMigrated = true;
-      }
-      const legacyBody = legacyMascotBody(b.mascotProfile);
-      if (b.mascotBody !== legacyBody) botsMigrated = true;
-      b.mascotBody = legacyBody;
+      if (normalizeStoredBotMascotState(b)) botsMigrated = true;
       if (b.projects?.some((project) => "modelSelection" in project)) {
         b.projects = b.projects.map(({ id, name, emoji }) => ({ id, name, ...(isProjectEmoji(emoji) ? { emoji } : {}) }));
         botsMigrated = true;
@@ -854,7 +845,7 @@ export class Store {
 
   private saveBots(bots: BotRecord[] = this.bots, registerSections = true) {
     if (registerSections) this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
-    writeFileAtomicIfChanged(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, mascotBody: _legacyMascotBody, ...bot }) => ({
+    writeFileAtomicIfChanged(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
       ...bot,
       tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
     })), null, 2), { mode: 0o600 });
@@ -1483,9 +1474,7 @@ export class Store {
     this.rememberSections([profile.section]);
     const name = profile.name?.trim() || pickBotName(this.bots.map((b) => b.name));
     const section = sectionKey(profile.section);
-    const mascotProfile = profile.mascotProfile === undefined
-      ? createMascotProfile(profile.mascotBody)
-      : mascotProfileSchema.parse(profile.mascotProfile);
+    const mascotState = mascotStateForCreation(profile);
     const bot: BotRecord = {
       id: opts.id ?? newId(),
       threadId: opts.threadId ?? newId(),
@@ -1497,8 +1486,7 @@ export class Store {
       notifications: true,
       color: profile.color ?? COLORS[this.bots.length % COLORS.length],
       ...(profile.mascotExpression ? { mascotExpression: profile.mascotExpression } : {}),
-      mascotProfile,
-      mascotBody: legacyMascotBody(mascotProfile),
+      ...mascotState,
       // Restricted from its first frame: no one else is ever told it exists.
       ...(profile.visibility && profile.visibility !== "everyone" ? { visibility: structuredClone(profile.visibility) } : {}),
       ...(toolScope.scope ? { toolScope: toolScope.scope } : {}),
@@ -1673,29 +1661,8 @@ export class Store {
   patchBot(id: string, patch: Partial<BotRecord>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
-    if (patch.mascotProfile !== undefined) {
-      const mascotProfile = mascotProfileSchema.parse(patch.mascotProfile);
-      patch = { ...patch, mascotProfile, mascotBody: legacyMascotBody(mascotProfile) };
-    } else if (patch.mascotBody !== undefined) {
-      const mascotProfile = selectBuiltinMascot(bot.mascotProfile, patch.mascotBody ?? "cursor");
-      patch = { ...patch, mascotProfile, mascotBody: legacyMascotBody(mascotProfile) };
-    }
-    if (patch.connectorTools !== undefined) {
-      const parsed = parseConnectorTools(patch.connectorTools);
-      if (!parsed.ok) throw new Error(parsed.error);
-      patch = { ...patch, connectorTools: parsed.grants };
-    }
-    if (Object.hasOwn(patch, "toolScope")) {
-      const parsed = parseToolScope(patch.toolScope);
-      if (!parsed.ok) throw new Error(parsed.error);
-      patch = { ...patch, toolScope: parsed.scope };
-    }
-    const wideningToolScope = Object.hasOwn(patch, "toolScope") && toolScopeWidens(bot.toolScope, patch.toolScope);
-    const nextToolScope = patch.toolScope;
-    if (wideningToolScope) {
-      patch = { ...patch };
-      delete patch.toolScope;
-    }
+    const normalized = normalizeBotPatch(bot, patch);
+    patch = normalized.patch;
     const toAsk = patch.modelSelection ? (bot.tasks ?? []).filter((task) => task.modelSelection === undefined &&
       this.switchNeedsAsk(id, task.threadId, bot.modelSelection, patch.modelSelection!)) : [];
     // Revocations take effect in memory even when the disk write fails.
@@ -1710,10 +1677,10 @@ export class Store {
       }
       bot.unread = bot.tasks!.some(taskCountsAsBotUnread);
     }
-    if (wideningToolScope) {
+    if (normalized.wideningToolScope) {
       // New authority goes live only after its durable save succeeds.
-      this.saveBots(this.bots.map((candidate) => candidate === bot ? { ...bot, toolScope: nextToolScope } : candidate));
-      bot.toolScope = nextToolScope;
+      this.saveBots(this.bots.map((candidate) => candidate === bot ? { ...bot, toolScope: normalized.nextToolScope } : candidate));
+      bot.toolScope = normalized.nextToolScope;
     } else this.saveBots();
     this.emit({ type: "bot", botId: id });
     return bot;
@@ -1735,15 +1702,7 @@ export class Store {
   patchBotProfile(id: string, patch: BotProfilePatch & Partial<Pick<BotRecord, "cwd" | "lastProfileRequestId">>): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
-    const next = { ...bot, ...patch };
-    if (patch.mascotBody !== undefined) {
-      next.mascotProfile = selectBuiltinMascot(bot.mascotProfile, patch.mascotBody ?? "cursor");
-      next.mascotBody = legacyMascotBody(next.mascotProfile);
-    }
-    if (patch.soul !== undefined) {
-      next.soulHash = soulHash(patch.soul);
-      next.soulDrift = false;
-    }
+    const next = applyBotProfilePatch(bot, patch);
     this.saveBots(this.bots.map((candidate) => candidate.id === id ? next : candidate));
     Object.assign(bot, next);
     if (patch.soul !== undefined) {
@@ -1758,11 +1717,9 @@ export class Store {
   addOrSelectMascotShape(id: string, shape: CustomMascotShape): BotRecord | null {
     const bot = this.bot(id);
     if (!bot) return null;
-    const mascotProfile = addOrSelectCustomMascot(bot.mascotProfile, structuredClone(shape));
     const next: BotRecord = {
       ...bot,
-      mascotProfile,
-      mascotBody: legacyMascotBody(mascotProfile),
+      ...mascotStateWithCustomShape(bot.mascotProfile, shape),
       avatarUrl: undefined,
       avatarCrop: "mascot",
     };

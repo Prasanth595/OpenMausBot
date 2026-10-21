@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { flushSync } from "react-dom";
-import type { BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireGroup, OptionCardData as WireOptionCard } from "../../shared/wire";
+import type { BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireBot, WireGroup, OptionCardData as WireOptionCard } from "../../shared/wire";
 import { movesThreadToTop } from "../../shared/wire";
 import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-surface";
 import type { NotificationLogEntry } from "../../shared/notification";
@@ -30,7 +30,6 @@ import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode";
 import { desktopCapabilitiesNow } from "@/lib/desktop";
 import { sameModelSelection } from "../../shared/thread-model";
 import type { BotBodyId } from "../../shared/bot-body";
-import type { MascotProfile } from "../../shared/mascot-profile";
 import type { QuestionRequestCardData } from "../../shared/ask-question";
 import type { ProfileRequestCardData } from "../../shared/profile-request";
 import type { ModelRequestCardData } from "../../shared/model-request";
@@ -281,7 +280,7 @@ export interface TaskUsage {
   context?: { tokens: number; window?: number };
 }
 
-export interface Bot {
+export interface Bot extends Pick<WireBot, "mascotProfile"> {
   toolScope?: ToolScope;
   waitingForTeammates?: boolean;
   id: string;
@@ -298,7 +297,6 @@ export interface Bot {
   color: MausColor;
   mascotExpression?: string | null;
   mascotBody?: BotBodyId | null;
-  mascotProfile?: MascotProfile;
   avatarUrl?: string | null;
   avatarCrop?: BotAvatarCrop;
   avatarZoom?: number;

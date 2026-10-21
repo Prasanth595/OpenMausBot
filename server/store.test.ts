@@ -21,6 +21,7 @@ import * as mdb from "./message-db.ts";
 import { peerAllowKey } from "./peer-approval-key.ts";
 import { canAccessTeam } from "./peer-roster.ts";
 import { Store, toWireTask, type BotRecord } from "./store.ts";
+import { createTeamManifest } from "./team-manifest.ts";
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { SECTION_CONTEXTS_FILE, readSectionContext, writeSectionContext } from "./section-context.ts";
 import { TeamComputers } from "./team-computers.ts";
@@ -1732,12 +1733,12 @@ describe("custom mascot profile persistence", () => {
     store.patchBotProfile(bot.id, { mascotBody: "star" });
     expect(saved.mascotProfile).toMatchObject({ selected: { kind: "builtin", bodyId: "star" }, shapes: [shape] });
     const disk = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as Array<Record<string, unknown>>;
-    expect(disk[0]).not.toHaveProperty("mascotBody");
+    expect(disk[0]).toHaveProperty("mascotBody", "star");
     store.deleteBot(source.id);
     expect(new Store(selection).bot(bot.id)?.mascotProfile).toEqual(saved.mascotProfile);
   });
 
-  it("migrates a legacy builtin body into the profile and removes its persisted adapter", () => {
+  it("migrates a legacy builtin body into the profile and preserves its explicit body", () => {
     const store = new Store(selection);
     const bot = store.createBot({ name: "Legacy body", mascotBody: "circle" });
     const bots = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as Array<Record<string, unknown>>;
@@ -1748,8 +1749,30 @@ describe("custom mascot profile persistence", () => {
     const restored = new Store(selection).bot(bot.id)!;
     expect(restored.mascotProfile).toMatchObject({ version: 1, selected: { kind: "builtin", bodyId: "circle" }, shapes: [] });
     const migrated = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as Array<Record<string, unknown>>;
-    expect(migrated[0]).not.toHaveProperty("mascotBody");
+    expect(migrated[0]).toHaveProperty("mascotBody", "circle");
     expect(migrated[0]).toHaveProperty("mascotProfile");
+  });
+
+  it("keeps absent and explicit cursor bodies distinct through Store reload and team export", () => {
+    const store = new Store(selection);
+    const implicit = store.createBot({ name: "Implicit mascot" }, { seedMessages: false });
+    const explicit = store.createBot({ name: "Explicit mascot", mascotBody: "cursor" }, { seedMessages: false });
+    const persisted = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as Array<Record<string, unknown>>;
+    expect(persisted.find((bot) => bot.id === implicit.id)).not.toHaveProperty("mascotBody");
+    expect(persisted.find((bot) => bot.id === explicit.id)).toHaveProperty("mascotBody", "cursor");
+
+    const reloaded = new Store(selection);
+    const implicitAfterReload = reloaded.bot(implicit.id)!;
+    const explicitAfterReload = reloaded.bot(explicit.id)!;
+    expect(implicitAfterReload).not.toHaveProperty("mascotBody");
+    expect(explicitAfterReload).toHaveProperty("mascotBody", "cursor");
+
+    const exported = createTeamManifest(
+      { name: "Mascot presence", memberIds: [implicit.id, explicit.id] },
+      [implicitAfterReload, explicitAfterReload],
+    );
+    expect(exported.team.members[0]!.appearance).not.toHaveProperty("mascotBody");
+    expect(exported.team.members[1]!.appearance).toHaveProperty("mascotBody", "cursor");
   });
 });
 

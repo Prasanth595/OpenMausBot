@@ -6,6 +6,7 @@ import type { Routine } from "@/lib/routines";
 import type { BotOverview } from "@/lib/bot-overview-types";
 import type { Bot, BotSettingsSection, Message } from "@/state/store";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN } from "../../shared/bot-avatar";
+import { BOT_BODY_IDS } from "../../shared/bot-body";
 import type { ManagedSkill } from "./bot-settings/SkillsSection";
 import type { BotApps } from "./bot-settings/useBotApps";
 
@@ -418,10 +419,10 @@ describe("the hero", () => {
 describe("the avatar editor", () => {
   const editor = (bot: Bot) => capture(() => AvatarEditorCard({ bot, activeState: "idle", onPatch: patch, onClose }));
 
-  it("picks one of the ten bodies, ten Halloween bodies, ten colors and a face for the mascot", () => {
+  it("picks each available body, ten colors and a face for the mascot", () => {
     const bot = makeBot();
     const rendered = editor(bot);
-    expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(20);
+    expect(rendered.html.match(/aria-label="Use the \w+ body"/g)).toHaveLength(BOT_BODY_IDS.length);
     expect(rendered.html).toContain(">Halloween<");
     click(find(rendered, "aria-label", "Use the Pumpkin body"));
     expect(patch).toHaveBeenLastCalledWith({ mascotBody: "pumpkin" });
