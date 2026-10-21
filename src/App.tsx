@@ -307,7 +307,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
         <TeamMapPage />
       ) : state.activeView === "files" ? (
         <FilesView />
-      ) : state.activeView === "today" ? <TodayPage /> : state.activeView === "routines" ? (
+      ) : state.activeView === "today" ? <TodayPage /> : state.activeView === "apps" ? <PluginsPanel page /> : state.activeView === "routines" ? (
         <TriggersPage onBack={closeCalendar} onOpenRoom={openCalendarRoom} />
       ) : !remoteClient && localVmWorkspaceBotId ? (
         <LocalVmWorkspace
