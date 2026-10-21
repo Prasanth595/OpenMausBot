@@ -7,6 +7,7 @@
 import { findCliCandidates } from "../env-path.ts";
 import { installNpmEngine, npmAvailable, serverInstallFor } from "../engine-install.ts";
 import { remoteCatalogFor } from "../model-catalog-remote.ts";
+import { mergeEnginesIntoVision } from "../vision-catalog.ts";
 import type {
   AnyProviderDriver,
   InstanceConfigMap,
@@ -252,7 +253,7 @@ export class ProviderRegistry {
       return found;
     };
     const npmPresent = this.npmPresent();
-    return Promise.all(
+    const rows = await Promise.all(
       this.entries().map(async (entry) => {
         const driver = this.driversByKind.get(entry.shadow?.driverKind ?? entry.live!.driverKind);
         if (entry.shadow) {
@@ -320,6 +321,9 @@ export class ProviderRegistry {
         };
       }),
     );
+    // The unified Vision engine reports the whole fleet's collected models
+    // (server/vision-catalog.ts); every other row passes through untouched.
+    return mergeEnginesIntoVision(rows);
   }
 
   async disposeAll() {
