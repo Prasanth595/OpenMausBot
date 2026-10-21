@@ -33,6 +33,7 @@ interface MascotDraft extends CustomMascotDefinition {
 interface CustomMascotCreatorProps {
   bot: Bot;
   disabled?: boolean;
+  onSelectionStart?: () => void;
   onClose: () => void;
 }
 
@@ -64,7 +65,7 @@ function draftFromImport(imported: ReturnType<typeof importCustomMascotSvg>): Ma
   return { ...imported, anchor, fitContext };
 }
 
-export function CustomMascotCreator({ bot, disabled = false, onClose }: CustomMascotCreatorProps) {
+export function CustomMascotCreator({ bot, disabled = false, onSelectionStart, onClose }: CustomMascotCreatorProps) {
   const { state, dispatch } = useStore();
   const { request } = useBotEditor();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -120,6 +121,7 @@ export function CustomMascotCreator({ bot, disabled = false, onClose }: CustomMa
 
   const saveDefinition = async (shape: CustomMascotDefinition, closeOnSuccess: boolean) => {
     if (disabled || saving) return;
+    onSelectionStart?.();
     setSaving(true);
     setSaveError(null);
     try {
