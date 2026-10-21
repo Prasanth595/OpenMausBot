@@ -167,6 +167,8 @@ export interface WireTask {
   /** Runtime-only state, reset on load and never persisted. */
   activity?: BotActivity;
   busy?: boolean;
+  /** Opaque live-run identity for explicit steering; absent outside a running direct turn. */
+  activeRunId?: string;
   /** Epoch ms when this task's current busy stretch began; runtime-only. */
   turnStartedAt?: number;
   /** Where this conversation works when pinned; absent = follow the bot. */
@@ -374,6 +376,8 @@ export interface WireBot {
   installedPackage?: InstalledPackageMetadata;
   /** Aggregate of task and room activity; transient, reset on load. */
   busy?: boolean;
+  /** Opaque live-run identity for explicit steering; absent outside a running direct turn. */
+  activeRunId?: string;
   /** What the bot is doing right now; transient like busy. */
   activity?: BotActivity;
   createdAt: number;
@@ -470,6 +474,9 @@ export interface WireMessage {
   webhookPost?: boolean;
   /** user messages sent INTO a running turn (capabilities.queueing). */
   steered?: boolean;
+  steerUncertain?: boolean;
+  /** Original composer intent, retained for idempotent retries and run attribution. */
+  composerDelivery?: import("./composer-delivery.js").ComposerDelivery;
   /** user messages a peer bot handed to this thread's RUNNING turn: peer
    * context folded in mid-turn, never a new request. The text is stored
    * enveloped exactly as injected. */

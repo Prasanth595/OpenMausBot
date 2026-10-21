@@ -40,6 +40,7 @@ describe("what the app may do", () => {
     ["PATCH", "/api/bots/bot_123"],
     ["POST", "/api/sidebar-sections"],
     ["POST", "/api/bots/bot_123/messages"],
+    ["POST", "/api/bots/bot_123/messages/explicit"],
     ["PATCH", "/api/bots/bot_123/cards/msg_2"],
     ["POST", "/api/bots/bot_123/respond"],
     ["POST", "/api/bots/bot_123/interrupt"],

@@ -24,6 +24,7 @@ interface QueueEntry {
     prompt: string;
     replyToId?: string;
     sendId?: string;
+    composerDelivery?: Message["composerDelivery"];
     dataContext?: Message["dataContext"];
     reason?: SteerQueueReason;
     /** Queued by a bot running unattended: the drained turn inherits it (a queue is a delay, not a person at the keyboard). */
@@ -99,7 +100,7 @@ export function queueSteeredMessage(
   botId: string,
   threadId: string,
   text: string,
-  options: { prompt?: string; replyToId?: string; sendId?: string; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string } = {},
+  options: { prompt?: string; replyToId?: string; sendId?: string; composerDelivery?: Message["composerDelivery"]; dataContext?: Message["dataContext"]; reason?: SteerQueueReason; unattended?: boolean; peerAsk?: Message["peerAsk"]; origin?: WorkOrigin; sender?: ResolvedSender; trigger?: UsageTrigger; callId?: string; via?: "call"; reaction?: string } = {},
 ): QueuedSteer {
   const id = newId();
   const entry = queues.get(threadId) ?? { botId, items: [] };
@@ -110,6 +111,7 @@ export function queueSteeredMessage(
     prompt: options.prompt ?? text,
     replyToId: options.replyToId,
     sendId: options.sendId,
+    composerDelivery: options.composerDelivery,
     dataContext: options.dataContext,
     reason: options.reason,
     unattended: options.unattended,
@@ -192,6 +194,7 @@ export function drainSteeredMessages(
           text: item.text,
           replyToId: item.replyToId,
           sendId: item.sendId,
+          composerDelivery: item.composerDelivery,
           ...(item.dataContext ? { dataContext: item.dataContext } : {}),
           queueId: item.messageId,
           peerAsk: item.peerAsk,
@@ -235,11 +238,11 @@ export function queuedSteeredMessage(
   botId: string,
   threadId: string,
   sendId: string,
-): { id: string; text: string; replyToId?: string; reason?: SteerQueueReason } | null {
+): { id: string; text: string; replyToId?: string; composerDelivery?: Message["composerDelivery"]; reason?: SteerQueueReason } | null {
   const entry = queues.get(threadId);
   if (!entry || entry.botId !== botId) return null;
   const item = entry.items.find((candidate) => candidate.sendId === sendId);
-  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId, ...(item.reason ? { reason: item.reason } : {}) } : null;
+  return item ? { id: item.messageId, text: item.text, replyToId: item.replyToId, ...(item.composerDelivery ? { composerDelivery: item.composerDelivery } : {}), ...(item.reason ? { reason: item.reason } : {}) } : null;
 }
 
 export function cancelSteeredMessage(botId: string, messageId: string, expectedThreadId?: string): boolean {
