@@ -15,6 +15,8 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 
+import { resolveCliSpawn } from "./env-path.ts";
+
 /** One result the harness hands back to the model as the tool's answer. */
 export interface McpToolResult {
   isError: boolean;
@@ -78,7 +80,11 @@ export class McpStdioClient {
   /** Spawn, handshake, and (optionally) refresh the tool list. */
   static async start(spec: { command: string; args: string[]; env?: Record<string, string> }): Promise<McpStdioClient> {
     const client = new McpStdioClient();
-    client.child = spawn(spec.command, spec.args, {
+    // npm's CLIs ship as `npx.cmd`, a batch shim Node cannot execute
+    // directly. resolveCliSpawn rewrites the shim to the node script it
+    // wraps, the same way the permission gate spawns the servers it fronts.
+    const resolved = resolveCliSpawn(spec.command, spec.args);
+    client.child = spawn(resolved.command, resolved.args, {
       stdio: ["pipe", "pipe", "pipe"],
       env: { ...process.env, ...spec.env },
       windowsHide: true,
@@ -106,7 +112,7 @@ export class McpStdioClient {
   }
 
   /** Call tools/list once so the harness can prove the mount before promising it to the model. */
-  async listTools(): Promise<Array<{ name: string; description?: string }>> {
+  async listTools(): Promise<Array<{ name: string; description?: string; inputSchema?: unknown }>> {
     const result = await this.rpc("tools/list", {});
     const tools = isRecord(result) && Array.isArray(result.tools) ? result.tools : [];
     this.tools = tools
@@ -114,6 +120,9 @@ export class McpStdioClient {
       .map((tool) => ({
         name: typeof tool.name === "string" ? tool.name : "",
         description: typeof tool.description === "string" ? tool.description : undefined,
+        // The advertised JSON Schema is part of the mount contract: the
+        // runtime needs it to tell the model what arguments a tool accepts.
+        inputSchema: isRecord(tool.inputSchema) ? tool.inputSchema : undefined,
       }))
       .filter((tool) => tool.name);
     return this.tools;

@@ -36,7 +36,18 @@ export interface ApiToolbox {
   close(): Promise<void>;
 }
 
-const MAX_TOOLS_PER_TURN = 64;
+// A mount-sanity cap, not a budget: built-ins mount first, and a custom
+// catalog like REA's 207-tool surface must survive whole (its orchestration
+// tools sit last in the list — truncating it would mount a catalog nobody
+// can use). Two large servers still degrade instead of overflowing.
+const MAX_TOOLS_PER_TURN = 256;
+
+// Above this much argument-schema per server, every model request pays a
+// serious token tax; warn once with the number and the way out (scope the
+// server to specific bots in Bot Settings -> MCP servers) instead of
+// silently taxing every turn of every API-engine bot.
+const CATALOG_SCHEMA_WARN_BYTES = 64 * 1024;
+const warnedCatalogServers = new Set<string>();
 
 export async function buildApiToolbox(integrations: ApiToolboxIntegrations): Promise<ApiToolbox> {
   const clients: Array<{ label: string; client: McpStdioClient }> = [];
@@ -62,12 +73,31 @@ export async function buildApiToolbox(integrations: ApiToolboxIntegrations): Pro
         toolListProblems.push(`${label}: mounted but exposed no tools`);
         continue;
       }
+      {
+        const schemaBytes = listed.reduce((sum, tool) => {
+          try {
+            return sum + JSON.stringify(tool.inputSchema ?? {}).length;
+          } catch {
+            return sum;
+          }
+        }, 0);
+        if (schemaBytes > CATALOG_SCHEMA_WARN_BYTES && !warnedCatalogServers.has(label)) {
+          warnedCatalogServers.add(label);
+          console.warn(
+            `api-tools: ${label} advertises ${listed.length} tools with ~${Math.round(schemaBytes / 1024)} KB of argument schemas; ` +
+              `scope it to specific bots in Bot Settings -> MCP servers if that is not intended`,
+          );
+        }
+      }
       clients.push({ label, client });
       for (const tool of listed) {
         if (tools.length >= MAX_TOOLS_PER_TURN) break;
         tools.push({
           name: tool.name,
           description: tool.description,
+          // The schema the model needs to shape arguments; a server that
+          // advertises none still gets a valid empty object schema.
+          parameters: tool.inputSchema ?? { type: "object", properties: {} },
           execute: async (args) => {
             try {
               return await client.callTool(tool.name, args);

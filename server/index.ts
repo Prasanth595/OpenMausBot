@@ -4800,6 +4800,7 @@ async function startTurn(
         providerText,
         [
           ...(instance.adapter.capabilities.phoneMcp === true ? ["phoneMcp"] : []),
+          ...(instance.adapter.capabilities.customMcp === true ? ["customMcp"] : []),
           ...(skillAuthoring ? ["skillAuthoring"] : []),
         ],
         availableSkills(),
@@ -6179,7 +6180,13 @@ async function runGroupMemberTurn(
     ),
     selectBundledSkills(
       latestUser?.text ?? "",
-      skillAuthoring ? ["skillAuthoring"] : [],
+      [
+        // A skill that needs the user's own MCP servers is matched against the
+        // request, not the room transcript: a bot mentioning a topic earlier
+        // must not turn it on for an unrelated message.
+        ...(instance.adapter.capabilities.customMcp === true ? ["customMcp"] : []),
+        ...(skillAuthoring ? ["skillAuthoring"] : []),
+      ],
       skills,
     ),
   );

@@ -167,6 +167,30 @@ IF EXIST "%dp0%\\node.exe" (
 endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\pkg\\bin\\ombfake.js" %*
 `;
 
+// ...and the shape npm 7 and later write, which binds the target to a
+// variable before running it. The helper script is named FIRST, so a parser
+// that takes the first script it finds runs the helper instead of the CLI.
+const MODERN_JS_SHIM = `@ECHO OFF
+
+SETLOCAL
+
+SET "NODE_EXE=%~dp0\\node.exe"
+IF NOT EXIST "%NODE_EXE%" (
+  SET "NODE_EXE=node"
+)
+
+SET "NPM_PREFIX_JS=%~dp0\\node_modules\\npm\\bin\\npm-prefix.js"
+SET "NPX_CLI_JS=%~dp0\\node_modules\\pkg\\bin\\ombfake.js"
+FOR /F "delims=" %%F IN ('CALL "%NODE_EXE%" "%NPM_PREFIX_JS%"') DO (
+  SET "NPM_PREFIX_NPX_CLI_JS=%%F\\node_modules\\pkg\\bin\\ombfake.js"
+)
+IF EXIST "%NPM_PREFIX_NPX_CLI_JS%" (
+  SET "NPX_CLI_JS=%NPM_PREFIX_NPX_CLI_JS%"
+)
+
+"%NODE_EXE%" "%NPX_CLI_JS%" %*
+`;
+
 describe("resolveCli", () => {
   it.skipIf(process.platform === "win32")("is identity off Windows — the kernel already resolves PATH and #!", () => {
     expect(resolveCli("claude", ["-p", "hi"])).toEqual({ command: "claude", args: ["-p", "hi"] });
@@ -217,8 +241,24 @@ winOnly("resolveCli (Windows)", () => {
     expect(stdout.trim()).toBe("js target -p,hi");
   });
 
-  it("prefers the PATHEXT hit over the extensionless sibling npm installs beside it", () => {
-    shimWith("ombfake.cmd", EXE_SHIM, "ombfake.exe", "MZ-not-really");
+  it("runs the script npm 7+ binds to a variable, not the helper it names first", async () => {
+    // npm 7+ writes `SET "NPX_CLI_JS=%~dp0\...cli.js"` and runs
+    // `"%NODE_EXE%" "%NPX_CLI_JS%" %*`. The helper it also names comes first
+    // in the file, and running that instead prints an npm prefix and exits.
+    shimWith("ombfake.cmd", MODERN_JS_SHIM, "ombfake.js", "console.log('js target ' + process.argv.slice(2).join(','));\n");
+    mkdirSync(join(dir, "node_modules", "npm", "bin"), { recursive: true });
+    writeFileSync(join(dir, "node_modules", "npm", "bin", "npm-prefix.js"), "console.log('helper');\n");
+    onPath();
+    const r = resolveCli("ombfake", ["-p", "hi"]);
+    expect(r.args).toEqual([join(dir, "node_modules", "pkg", "bin", "ombfake.js"), "-p", "hi"]);
+    expect(r.command.toLowerCase()).toMatch(/node\.exe$/);
+    const stdout = await new Promise<string>((resolve, reject) =>
+      execFile(r.command, r.args, (err, out) => (err ? reject(err) : resolve(out))),
+    );
+    expect(stdout.trim()).toBe("js target -p,hi");
+  });
+
+  it("prefers the PATHEXT hit over the extensionless sibling npm installs beside it", () => {    shimWith("ombfake.cmd", EXE_SHIM, "ombfake.exe", "MZ-not-really");
     writeFileSync(join(dir, "ombfake"), "#!/bin/sh\n# the POSIX shim — unrunnable here\n");
     onPath();
     expect(resolveCli("ombfake", []).command).toBe(join(dir, "node_modules", "pkg", "bin", "ombfake.exe"));

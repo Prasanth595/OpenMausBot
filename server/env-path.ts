@@ -272,16 +272,50 @@ function parseCmdShim(shim: string): ResolvedSpawn | null {
     return null;
   }
   const dir = dirname(shim);
-  const targets = [...text.matchAll(/"%~?dp0%?\\?([^"]+)"/g)]
-    .map((m) => join(dir, m[1]))
-    .filter((p) => isFile(p) && basename(p).toLowerCase() !== "node.exe");
-  const script = targets.find((p) => /\.[cm]?js$/i.test(p));
+  // npm 7 and later bind the target to a variable first —
+  // `SET "NPX_CLI_JS=%~dp0\node_modules\npm\bin\npx-cli.js"` — and run it as
+  // `"%NODE_EXE%" "%NPX_CLI_JS%" %*`. npm 6 wrote the path straight into the
+  // command instead. A parser written for the older shape finds nothing in
+  // the current one, and the shim then has to be run by a shell, which is
+  // exactly what this function exists to avoid. So read both shapes.
+  const bindings = new Map<string, string>();
+  for (const match of text.matchAll(/set\s+"?([A-Za-z_][A-Za-z0-9_]*)=([^"\r\n]*)/gi)) {
+    const bound = shimPath(dir, match[2]);
+    if (bound) bindings.set(match[1]!.toUpperCase(), bound);
+  }
+  // The script the shim actually runs sits on a line that passes the
+  // arguments through; a SET line is a definition, not the invocation. The
+  // last candidate wins because a shim may name a helper it also uses.
+  const candidates: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.includes("%*")) continue;
+    for (const token of line.matchAll(/"([^"]+)"/g)) {
+      const value = token[1]!;
+      const direct = shimPath(dir, value);
+      if (direct) {
+        candidates.push(direct);
+        continue;
+      }
+      const bound = bindings.get(value.replace(/^%/, "").replace(/%$/, "").toUpperCase());
+      if (bound) candidates.push(bound);
+    }
+  }
+  const script = candidates.find((p) => /\.[cm]?js$/i.test(p) && isFile(p));
   if (script) {
     const node = nodeExe(dir);
     if (node) return { command: node, args: [script] };
   }
-  const exe = targets.find((p) => extname(p).toLowerCase() === ".exe");
+  const exe = candidates.find(
+    (p) => extname(p).toLowerCase() === ".exe" && basename(p).toLowerCase() !== "node.exe" && isFile(p),
+  );
   return exe ? { command: exe, args: [] } : null;
+}
+
+/** A path a shim builds from its own directory: %~dp0\x, %dp0%\x, %dp0%x. */
+function shimPath(dir: string, value: string): string | null {
+  const match = value.match(/%~?dp0%?\\([^"%]+)/i);
+  if (!match) return null;
+  return join(dir, match[1]!);
 }
 
 /** `#!/usr/bin/env node` → `node <script>`. Only node: nothing else has a

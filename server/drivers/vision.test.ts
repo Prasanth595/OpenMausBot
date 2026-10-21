@@ -91,6 +91,19 @@ describe("VisionDriver", () => {
     await inst.dispose();
   });
 
+  it("advertises the harness tool loop, including the user's own MCP servers", async () => {
+    const inst = await VisionDriver.create({
+      instanceId: "test-caps",
+      displayName: "Caps",
+      enabled: true,
+      config: { url: "http://localhost:3001/v1", apiKeyEnv: "FREELLMAPI_API_KEY" },
+      environment: {},
+    });
+    expect(inst.adapter.capabilities.apiToolLoop).toBe(true);
+    expect(inst.adapter.capabilities.customMcp).toBe(true);
+    await inst.dispose();
+  });
+
   it("exposes a refreshed model catalog from the proxy's /models", async () => {
     vi.stubGlobal(
       "fetch",

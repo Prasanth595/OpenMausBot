@@ -4,6 +4,7 @@ import type {
   ProviderInstance,
   RuntimeEvent,
   RuntimeEventListener,
+  RuntimeTool,
   SendTurnInput,
 } from "../contracts.ts";
 import { newEventId, newId } from "../contracts.ts";
@@ -34,9 +35,63 @@ interface Completion {
 interface CompletionJson {
   choices?: Array<{
     message?: AssistantMessageJson;
-    delta?: { content?: unknown; reasoning_content?: unknown };
+    delta?: { content?: unknown; reasoning_content?: unknown; tool_calls?: unknown };
   }>;
   usage?: { prompt_tokens?: number; completion_tokens?: number };
+}
+
+/** One OpenAI-style function definition advertised in the request body. */
+interface OpenAIToolDefinition {
+  type: "function";
+  function: { name: string; description: string; parameters: unknown };
+}
+
+/** Catalogs like REA's (207 tools, four mega-schemas over 100 KB each) carry
+ * more argument schema than any request should: every turn pays it in tokens.
+ * Oversized schemas collapse to a permissive object — the tool still validates
+ * its own arguments and its structured error is fed back to the model — while
+ * every tool keeps its name and full description, which is what selection
+ * actually needs. 2 KB keeps even the biggest real catalogs near ~57k tokens.
+ */
+const TOOL_SCHEMA_BYTE_BUDGET = 2048;
+const PERMISSIVE_SCHEMA = { type: "object", properties: {}, additionalProperties: true };
+const SCHEMA_OMITTED_NOTE = " (argument schema omitted here for size; pass the arguments the tool expects and it will report what it needs)";
+let warnedSchemaCollapse = false;
+
+/** Harness-mounted RuntimeTools, flattened to the wire format the model reads. */
+const toolDefinitions = (tools: RuntimeTool[]): OpenAIToolDefinition[] => {
+  let collapsed = 0;
+  const defs = tools.map((tool) => {
+    const parameters = tool.parameters ?? { type: "object", properties: {} };
+    let advertised = parameters;
+    let description = tool.description ?? "";
+    try {
+      if (JSON.stringify(parameters).length > TOOL_SCHEMA_BYTE_BUDGET) {
+        advertised = PERMISSIVE_SCHEMA;
+        description += SCHEMA_OMITTED_NOTE;
+        collapsed += 1;
+      }
+    } catch {
+      advertised = PERMISSIVE_SCHEMA; // un-serializable schema must never poison the request
+      collapsed += 1;
+    }
+    return { type: "function" as const, function: { name: tool.name, description, parameters: advertised } };
+  });
+  if (collapsed > 0 && !warnedSchemaCollapse) {
+    warnedSchemaCollapse = true;
+    console.warn(
+      `api-tools: ${collapsed}/${tools.length} tool schemas exceeded ${TOOL_SCHEMA_BYTE_BUDGET} bytes and were advertised without argument schemas`,
+    );
+  }
+  return defs;
+};
+
+/** Streaming providers split one call across deltas: id and name arrive once,
+ * arguments arrive as string fragments. Fragments are reassembled by index. */
+interface ChatToolCallFragment {
+  index?: unknown;
+  id?: unknown;
+  function?: { name?: unknown; arguments?: unknown };
 }
 
 interface NativeLog {
@@ -75,6 +130,9 @@ interface RuntimeOptions<Config> {
     phoneMcp?: boolean;
     agentsMcp?: boolean;
     composioMcp?: boolean;
+    /** True when the harness toolbox may spawn the user's own MCP servers
+     * (config.json mcpServers) for each turn. */
+    customMcp?: boolean;
     images?: boolean;
   };
 }
@@ -84,8 +142,8 @@ const usageFrom = (usage: CompletionJson["usage"]): Usage | null =>
     ? { input: usage.prompt_tokens ?? 0, output: usage.completion_tokens ?? 0 }
     : null;
 
-/** Normalize an assistant message's tool_calls (non-streaming responses only;
- * tool loops on streaming endpoints buffer to a decision first). */
+/** Normalize an assistant message's tool_calls from a non-streaming response;
+ * the streaming path reassembles fragmented tool_call deltas as they arrive. */
 interface AssistantToolCallJson {
   id?: unknown;
   function?: { name?: unknown; arguments?: unknown };
@@ -130,12 +188,18 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     stream: boolean,
     signal?: AbortSignal,
     onDelta?: (delta: string, kind: "assistant_text" | "reasoning_text") => void,
+    tools: OpenAIToolDefinition[] = [],
   ): Promise<Completion> => {
     const timeout = AbortSignal.timeout(options.timeoutMs);
     const response = await fetch(`${options.apiUrl}/chat/completions`, {
       method: "POST",
       headers: { authorization: `Bearer ${options.apiKey}`, "content-type": "application/json" },
-      body: JSON.stringify(options.requestBody(model, messages, stream)),
+      // Advertised tools ride the request body; a turn that mounted no tools
+      // sends no `tools` key at all so strict endpoints see the old shape.
+      body: JSON.stringify({
+        ...options.requestBody(model, messages, stream),
+        ...(tools.length > 0 ? { tools } : {}),
+      }),
       signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     });
     if (!response.ok) {
@@ -162,6 +226,8 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
     let text = "";
     let reasoning = "";
     let usage: Usage | null = null;
+    // Reassembled tool calls: index -> { id, name, arguments }.
+    const toolCallParts = new Map<number, { id: string; name: string; args: string }>();
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -196,13 +262,34 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
             text += contentDelta;
             onDelta?.(contentDelta, "assistant_text");
           }
+          if (Array.isArray(delta?.tool_calls)) {
+            for (const fragment of delta.tool_calls as ChatToolCallFragment[]) {
+              if (typeof fragment !== "object" || fragment === null) continue;
+              const index = typeof fragment.index === "number" ? fragment.index : 0;
+              const part = toolCallParts.get(index) ?? { id: "", name: "", args: "" };
+              if (typeof fragment.id === "string" && fragment.id) part.id = fragment.id;
+              const name = fragment.function?.name;
+              if (typeof name === "string" && name && !part.name) part.name = name;
+              const args = fragment.function?.arguments;
+              if (typeof args === "string") part.args += args;
+              toolCallParts.set(index, part);
+            }
+          }
           if (chunk.usage) usage = usageFrom(chunk.usage);
         }
       }
     } finally {
       await reader.cancel().catch(() => {});
     }
-    return { text, reasoning, usage, toolCalls: [] };
+    const toolCalls = [...toolCallParts.entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([index, part]) => ({
+        id: part.id || `call_${index}`,
+        name: part.name,
+        arguments: part.args || "{}",
+      }))
+      .filter((call) => call.name);
+    return { text, reasoning, usage, toolCalls };
   };
 
   const messagesFor = (turn: SendTurnInput): OpenAIChatMessage[] => [
@@ -238,13 +325,18 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
       // loop below is the ONLY consumer; whatever happens, the toolbox is
       // closed exactly once, after the last model round-trip.
       const toolbox = turn.tools;
+      const toolDefs = toolbox && toolbox.list.length > 0 ? toolDefinitions(toolbox.list) : [];
+      // Calls already executed this turn. A transient failure after one of
+      // them must not replay the round that produced it: the provider would
+      // see the tool result and could request the same operation again.
+      let handledToolCalls = 0;
       try {
         for (;;) {
           try {
             const completion = await complete(messages, model, true, abort.signal, (delta, streamKind) => {
               if (streamKind === "assistant_text") streamedText = true;
               emit({ ...base(turn.threadId, turnId), type: "content.delta", streamKind, delta });
-            });
+            }, toolDefs);
             appendNative(turn.threadId, {
               dir: "in",
               source: options.nativeLog.source,
@@ -299,6 +391,9 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
                   summary: call.name,
                 });
                 let result: { isError: boolean; text: string; images: Array<{ data: string; mimeType: string }> };
+                // Counted before execution: a failed call may still have taken
+                // effect, so it forbids a retry just like a successful one.
+                handledToolCalls += 1;
                 try {
                   result = await tool.execute(args);
                 } catch (error) {
@@ -360,6 +455,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               options.retryScale !== undefined &&
               !aborted &&
               !streamedText &&
+              handledToolCalls === 0 &&
               verdict.transient &&
               attempt < RETRY_MAX_ATTEMPTS - 1
             ) {
@@ -421,6 +517,7 @@ export function createOpenAIChatRuntime<Config>(options: RuntimeOptions<Config>)
               ...(options.capabilities.phoneMcp ? { phoneMcp: true } : {}),
               ...(options.capabilities.agentsMcp ? { agentsMcp: true } : {}),
               ...(options.capabilities.composioMcp ? { composioMcp: true } : {}),
+              ...(options.capabilities.customMcp ? { customMcp: true } : {}),
             }
           : {}),
         ...(options.capabilities?.images ? { images: true } : {}),

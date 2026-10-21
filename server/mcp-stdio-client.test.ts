@@ -3,12 +3,15 @@
 // (server/api-toolbox.ts), exercised against a real child process running
 // the fake MCP server (server/testing/fake-mcp-server.mjs).
 import { spawn, type ChildProcess } from "node:child_process";
+import { copyFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApiToolbox } from "./api-toolbox.ts";
 import { McpStdioClient } from "./mcp-stdio-client.ts";
+import { removeTempDir } from "./testing/cleanup.ts";
 
 const FAKE = join(import.meta.dirname, "testing", "fake-mcp-server.mjs");
 
@@ -45,6 +48,9 @@ describe("McpStdioClient", () => {
     const client = await McpStdioClient.start(spec("ok", { FAKE_MCP_TOOLS: JSON.stringify(SERVER_TOOLS) }));
     const listed = await client.listTools();
     expect(listed.map((tool) => tool.name)).toEqual(["computer_screenshot", "computer_click"]);
+    // The advertised schema is part of the contract the runtime forwards to
+    // the model — it must survive the list normalization intact.
+    expect(listed[1]!.inputSchema).toEqual({ type: "object", properties: { x: { type: "number" } } });
     const result = await client.callTool("computer_screenshot", { echo: "hello" });
     expect(result).toMatchObject({ isError: false, text: "hello" });
     await client.close();
@@ -79,6 +85,46 @@ describe("McpStdioClient", () => {
     // The raw process exits on its own; nothing to clean up beyond the guard.
     spawnFake("exit-immediately");
   });
+
+  // npm's CLIs ship as `npx.cmd`, a batch shim Node cannot execute directly.
+  // The mount has to survive that, or every npx-based MCP server — REA among
+  // them — silently contributes no tools on Windows.
+  it.skipIf(process.platform !== "win32")("mounts a server behind a .cmd batch shim", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-mcp-shim-"));
+    try {
+      // The shape npm 7+ writes: the script is bound to a variable and the
+      // shim runs it through node.
+      copyFileSync(FAKE, join(dir, "fake-mcp.mjs"));
+      const shim = join(dir, "fake-mcp.cmd");
+      writeFileSync(
+        shim,
+        [
+          "@ECHO OFF",
+          "SETLOCAL",
+          'SET "NODE_EXE=%~dp0\\node.exe"',
+          'IF NOT EXIST "%NODE_EXE%" (',
+          '  SET "NODE_EXE=node"',
+          ")",
+          'SET "FAKE_JS=%~dp0\\fake-mcp.mjs"',
+          '"%NODE_EXE%" "%FAKE_JS%" %*',
+          "",
+        ].join("\r\n"),
+        "utf8",
+      );
+      const client = await McpStdioClient.start({
+        command: shim,
+        args: [],
+        env: { FAKE_MCP_MODE: "ok", FAKE_MCP_TOOLS: JSON.stringify(SERVER_TOOLS) },
+      });
+      const listed = await client.listTools();
+      expect(listed.map((tool) => tool.name)).toEqual(["computer_screenshot", "computer_click"]);
+      const result = await client.callTool("computer_screenshot", { echo: "through cmd" });
+      expect(result).toMatchObject({ isError: false, text: "through cmd" });
+      await client.close();
+    } finally {
+      await removeTempDir(dir);
+    }
+  });
 });
 
 describe("buildApiToolbox", () => {
@@ -89,6 +135,8 @@ describe("buildApiToolbox", () => {
     try {
       expect(toolbox.tools.map((tool) => tool.name)).toEqual(["computer_screenshot", "computer_click"]);
       expect(toolbox.toolListProblems).toEqual([]);
+      expect(toolbox.tools[0]!.parameters).toEqual({ type: "object", properties: {} });
+      expect(toolbox.tools[1]!.parameters).toEqual({ type: "object", properties: { x: { type: "number" } } });
       const result = await toolbox.tools[1]!.execute({ x: 5, echo: "clicked" });
       expect(result).toMatchObject({ isError: false, text: "clicked" });
     } finally {

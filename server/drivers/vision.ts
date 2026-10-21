@@ -158,16 +158,18 @@ export const VisionDriver: ProviderDriver<VisionConfig> = {
       billing: "metered",
       includeUsageInCompleted: true,
       // The harness runs the OpenAI-compatible tool loop for API engines:
-      // computer (Local VM, This computer), the built-in browser, and phone
-      // tools are executed server-side and fed back as tool messages. Every
-      // flag here gates a surface startTurn may mount — nothing is promised
-      // that sendTurn cannot execute.
+      // computer (Local VM, This computer), the built-in browser, phone
+      // tools, and the user's own MCP servers (config.json mcpServers) are
+      // executed server-side and fed back as tool messages. Every flag here
+      // gates a surface startTurn may mount — nothing is promised that
+      // sendTurn cannot execute.
       capabilities: {
         apiToolLoop: true,
         computerMcp: true,
         localComputerMcp: true,
         browserMcp: true,
         phoneMcp: true,
+        customMcp: true,
         images: true,
       },
       nativeLog: {
