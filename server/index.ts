@@ -7805,7 +7805,6 @@ async function acceptDirectSend(
         const receipt = existingDirectSendReceipt(store.messagesFor(threadId), () => queuedSteeredMessage(botId, threadId, sendId), { threadId, sendId, text, replyToId: replyTo?.id, delivery: input.delivery });
         if (receipt) return receipt;
       }
-
       // Provider discovery yields, and probes afresh for an engine installed or signed in since; the transcript reservation after these checks must stay synchronous.
       const profile = store.bot(botId);
       if (profile && ((!profile.modelSelection.instanceId && !profile.modelSelection.model) ||
@@ -7857,6 +7856,7 @@ async function acceptDirectSend(
           throw new DirectSendRefused(409, { error: "This run cannot accept the message. Your draft is unchanged.", code: "steer_refused" });
         }
         const delivered = steered !== "refused";
+        const uncertain = input.delivery?.mode === "steer" && (steered === "indeterminate" || !current.busy || directTurnGenerationByThread.get(threadId) !== input.delivery.runId);
         if (delivered) {
           if (!input.delivery && steered === "steered" && !current.busy) {
             throw Object.assign(
@@ -7875,7 +7875,7 @@ async function acceptDirectSend(
             ...(dataContext ? { dataContext } : {}), ...(app?.fromApp ? { fromApp: app.fromApp } : {}),
             steered: true,
             ...(input.delivery ? { composerDelivery: input.delivery } : {}),
-            ...(input.delivery?.mode === "steer" && steered === "indeterminate" ? { steerUncertain: true } : {}),
+            ...(uncertain ? { steerUncertain: true } : {}),
             sender,
             ...spokenLineFields(via, callId),
           });

@@ -1,4 +1,4 @@
-import { applyComposerSendReceipt } from "./composer-send-receipt";
+import { applyComposerSendReceipt, applyQueuedSteerReceipt } from "./composer-send-receipt";
 import type { ComposerDelivery } from "../../shared/composer-delivery";
 import { cloudAsleep, onCloudPower } from "../lib/cloud-power";
 import { api, ApiError } from "./api";
@@ -2564,14 +2564,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "steerQueued":
           void api(`/api/bots/${action.botId}/queue/${action.queueId}/steer`, { method: "POST", body: JSON.stringify({ threadId: action.threadId }) })
             .then((body) => {
-              if (body?.steered === true && Array.isArray(body.messages) && typeof body.threadId === "string") {
-                for (const message of body.messages) {
-                  rawDispatch({ type: "messageAdded", threadId: body.threadId, message });
-                }
-                for (const queueId of body.queueIds ?? []) {
-                  rawDispatch({ type: "consumePendingQueued", threadId: body.threadId, queueId });
-                }
-              } else if (body?.queued === true && body.blockedBy === "images") {
+              if (!applyQueuedSteerReceipt(body, rawDispatch, showError, action.onError) && body?.queued === true && body.blockedBy === "images") {
                 wrapped({ type: "notice", notice: { kind: "steer-images", botName: null } });
               }
               action.onSettled?.();

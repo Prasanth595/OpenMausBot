@@ -342,6 +342,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
           queueId: item.messageId,
           peerAsk: item.peerAsk,
           steered: true,
+          ...(steered === "indeterminate" ? { steerUncertain: true } : {}),
           sender: item.sender,
           ...spokenLineFields(item.via, item.callId),
           ...(item.fromApp ? { fromApp: item.fromApp } : {}),
@@ -351,7 +352,7 @@ export function createBotMessageRoutes(deps: BotMessageRouteDeps): RouteHandler 
         for (const message of messages) handoffs.steered(bot.threadId, steerTarget, instance?.instanceId, message.id);
         const queueIds = held.items.map((item) => item.messageId);
         settleHeldSteeredQueue(held);
-        return json(res, 200, { ok: true, steered: true, threadId: bot.threadId, messages, queueIds });
+        return json(res, 200, { ...(steered === "indeterminate" ? { ok: false, uncertain: true } : { ok: true, steered: true }), threadId: bot.threadId, messages, queueIds });
       }
       if (steered === "indeterminate") {
         // No destination left: settle, so a restart cannot replay words a dead turn may have run.

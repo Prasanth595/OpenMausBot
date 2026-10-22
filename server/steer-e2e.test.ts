@@ -237,6 +237,8 @@ posixOnly("mid-turn steering e2e", () => {
       writeFileSync(steerGate, "release pending write");
       const result = await pending;
       expect(result.status).toBe(202);
+      expect(result.body).toMatchObject({ ok: false, uncertain: true, message: { steerUncertain: true } });
+      expect(result.body.steered).toBeUndefined();
       expect(result.body.message).toMatchObject({ parentId: anchor, composerDelivery: { mode: "steer", runId } });
       expect(askedAt(created.id, created.threadId)).toBe(before);
       const bot = await getBot(created.id);
@@ -250,6 +252,30 @@ posixOnly("mid-turn steering e2e", () => {
       await api("POST", `/api/bots/${created.id}/interrupt`);
       await waitFor(async () => !(await getBot(created.id)).busy, "race cleanup");
     }
+  }, 40_000);
+
+  it("an indeterminate queued steer remains uncertain on explicit-send retry without replay", async () => {
+    const created = (await api("POST", "/api/bots")).body.bot;
+    const instances = (await api("GET", "/api/instances")).body.instances;
+    const model = instances.find((i: any) => i.instanceId === "codexUnknown").models.default;
+    await api("PATCH", `/api/bots/${created.id}`, { modelSelection: { instanceId: "codexUnknown", model } });
+    const path = `/api/bots/${created.id}/messages/explicit`;
+    await api("POST", path, { text: "hold queued uncertain run", delivery: { mode: "queue" } });
+    await waitFor(async () => (await getBot(created.id)).messages.some((m: any) => m.card), "queued uncertain run ready");
+    const body = { text: "possibly received from queue", sendId: "uncertain-queued-steer", delivery: { mode: "queue" } };
+    const queued = await api("POST", path, body);
+    expect(queued.body.queued).toBe(true);
+    const moved = await api("POST", `/api/bots/${created.id}/queue/${queued.body.queueId}/steer`, { threadId: created.threadId });
+    expect(moved.body).toMatchObject({ ok: false, uncertain: true, queueIds: [queued.body.queueId],
+      messages: [expect.objectContaining({ steerUncertain: true, composerDelivery: body.delivery })] });
+    expect(moved.body.steered).toBeUndefined();
+    const replay = await api("POST", path, body);
+    expect(replay.body).toMatchObject({ ok: false, uncertain: true, message: { id: moved.body.messages[0].id } });
+    expect((await api("GET", "/api/bots")).body.botQueuedMessages[created.threadId] ?? []).toEqual([]);
+    const dump = JSON.parse(readFileSync(join(home, "unknown-steer.json"), "utf8"));
+    expect(dump.calls.filter((call: any) => call.method === "turn/steer")).toHaveLength(1);
+    await api("POST", `/api/bots/${created.id}/interrupt`);
+    await waitFor(async () => !(await getBot(created.id)).busy, "queued uncertain run stopped");
   }, 40_000);
 
   it("an explicit steer refusal never falls back to the queue, and malformed intent is rejected", async () => {
