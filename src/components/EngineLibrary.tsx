@@ -4,6 +4,7 @@ import { useStore, type InstanceInfo } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { InstanceProviderMark } from "./ProviderIcons";
+import { isDirectModelDriver } from "../../shared/model-arrangement";
 
 export function engineReady(instance: InstanceInfo): boolean {
   if (instance.driverKind === "clineAgent") {
@@ -45,6 +46,9 @@ export function EngineCard({ instance, children, summary }: { instance: Instance
             <InstanceProviderMark instance={instance} size={28} />
           </span>
           <div className="min-w-0 flex-1">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-ink-secondary">
+              {t(isDirectModelDriver(instance.driverKind) ? "model.connection.directBadge" : "model.connection.agentBadge")}
+            </div>
             <div className="truncate text-[15px] font-semibold tracking-[-0.015em] text-ink" title={title}>{title}</div>
             <div className="mt-1 truncate text-[12px] text-ink-secondary" title={subtitle}>{subtitle}</div>
           </div>

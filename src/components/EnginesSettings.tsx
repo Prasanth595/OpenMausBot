@@ -13,6 +13,7 @@ import { AntigravityFreeSpace } from "./AntigravityFreeSpace";
 import { CacheKeepWarmSettings } from "./CacheKeepWarmSettings";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { Select } from "./Select";
+import { isDirectModelDriver } from "../../shared/model-arrangement";
 
 interface ProbeResult {
   ok: boolean;
@@ -384,26 +385,44 @@ export function EnginesSettings() {
     return group && groups.get(group)?.[0] === instance ? group : null;
   };
   const rows = listed.filter((instance) => !accountGroupOf(instance) || groupOf(instance));
+  const agentApps = rows.filter((instance) => !isDirectModelDriver(instance.driverKind));
+  const directModels = rows.filter((instance) => isDirectModelDriver(instance.driverKind));
+  const renderEngine = (instance: InstanceInfo) => {
+    const group = groupOf(instance);
+    return group
+      ? <AccountsCard group={group} accounts={groups.get(group)!} advanced={<EngineAdvanced instance={instance} />} />
+      : <EngineRow instance={instance} />;
+  };
+  const isReady = (instance: InstanceInfo) => {
+    const group = groupOf(instance);
+    return group ? accountsReady(groups.get(group)!) : engineReady(instance);
+  };
 
   return (
     <div className="flex min-w-0 flex-col gap-6 pb-2">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 flex-1 basis-60 space-y-2 px-4">
-          <h1 className="text-[22px] font-semibold tracking-tight text-ink">{t("settings.engines.title")}</h1>
-          <p className="mt-2 max-w-lg text-[13px] leading-relaxed text-ink-secondary">{t("engines.library.intro")}</p>
+          <h1 className="text-[22px] font-semibold tracking-tight text-ink">{t("model.connection.title")}</h1>
+          <p className="mt-2 max-w-2xl text-[13px] leading-relaxed text-ink-secondary">{t("model.connection.intro")}</p>
         </div>
         <RefreshEngines />
       </div>
-      <EngineSections
-        instances={rows}
-        isReady={(instance) => { const group = groupOf(instance); return group ? accountsReady(groups.get(group)!) : engineReady(instance); }}
-        renderEngine={(instance) => {
-          const group = groupOf(instance);
-          return group
-            ? <AccountsCard group={group} accounts={groups.get(group)!} advanced={<EngineAdvanced instance={instance} />} />
-            : <EngineRow instance={instance} />;
-        }}
-      />
+      <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,340px),1fr))] items-start gap-6">
+        <section data-connection-kind="agent" aria-labelledby="agent-connections-title" className="min-w-0 space-y-4">
+          <div className="rounded-2xl border border-hairline/40 bg-inset/50 px-5 py-4">
+            <h2 id="agent-connections-title" className="text-[17px] font-semibold text-ink">{t("model.connection.agentTitle")}</h2>
+            <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-ink-secondary">{t("model.connection.agentDescription")}</p>
+          </div>
+          <EngineSections instances={agentApps} isReady={isReady} renderEngine={renderEngine} />
+        </section>
+        <section data-connection-kind="direct" aria-labelledby="direct-connections-title" className="min-w-0 space-y-4">
+          <div className="rounded-2xl border border-hairline/40 bg-inset/50 px-5 py-4">
+            <h2 id="direct-connections-title" className="text-[17px] font-semibold text-ink">{t("model.connection.directTitle")}</h2>
+            <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-ink-secondary">{t("model.connection.directDescription")}</p>
+          </div>
+          <EngineSections instances={directModels} isReady={isReady} renderEngine={renderEngine} />
+        </section>
+      </div>
       <CacheKeepWarmSettings />
     </div>
   );

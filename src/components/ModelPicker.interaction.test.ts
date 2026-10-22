@@ -204,10 +204,10 @@ describe("the way into API keys", () => {
     expect(opened.html).not.toContain(">Add API keys<");
   });
 
-  it("ends the rail's API keys group with a way to add one", () => {
+  it("offers API-key setup alongside the model choices", () => {
     fixture.instances = [codex];
     const opened = open(bot("codex", "gpt-5.6"));
-    expect(opened.html).toContain(">API keys<");
+    expect(opened.html).toContain('data-rail-add-api-key="true"');
     const add = rail(opened)!.props as { onAddApiKeys?: () => void };
     add.onAddApiKeys!();
     expect(fixture.dispatch).toHaveBeenCalledWith({ type: "toggleAppSettings", open: true, section: "connections" });

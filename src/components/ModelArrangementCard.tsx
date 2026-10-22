@@ -9,21 +9,31 @@ export function ModelArrangementCard({ instance, selection, endpointUrl, changin
   changing?: boolean;
 }) {
   const arrangement = modelArrangement(instance, selection, endpointUrl);
-  const location = t(`model.arrangement.${arrangement.location}`);
   const supported = [
     instance?.capabilities?.agentsMcp || instance?.capabilities?.composioMcp ? t("model.arrangement.mcp") : null,
     instance?.capabilities?.browserMcp ? t("model.arrangement.browser") : null,
     instance?.capabilities?.computerMcp || instance?.capabilities?.localComputerMcp ? t("model.arrangement.computer") : null,
   ].filter((item): item is string => item !== null);
+  const locationDetail = t(`model.arrangement.${arrangement.location}Detail`);
   return (
-    <div data-model-arrangement className="rounded-xl border border-hairline/50 bg-inset/50 px-3 py-2.5 text-[12px] text-ink-secondary">
-      <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-        <span>{t("model.arrangement.agent")}</span><strong className="min-w-0 truncate font-medium text-ink">{arrangement.agent}</strong>
-        <span>{t("model.arrangement.model")}</span><strong className="min-w-0 truncate font-medium text-ink">{arrangement.model ?? t("model.arrangement.unknownModel")}</strong>
-        <span>{t("model.arrangement.via")}</span><span className="min-w-0 truncate text-ink" title={arrangement.route ?? undefined}>{arrangement.route ?? t("model.arrangement.unknownRoute")}</span>
-        <span>{t("model.arrangement.inference")}</span><span className="text-ink">{location}</span>
-      </div>
-      {!arrangement.model && <p className="mt-2">{t("model.arrangement.modelSetIn", { place: arrangement.modelControlledBy })}</p>}
+    <div data-model-arrangement data-agent-kind={arrangement.direct ? "openmausbot" : "connected"}
+      data-inference-location={arrangement.location} data-model-known={Boolean(arrangement.model)}
+      className="min-w-0 rounded-xl border border-hairline/50 bg-inset/50 p-3 text-[12px] leading-relaxed text-ink-secondary">
+      <p className="text-[13px] font-semibold text-ink">
+        {t(arrangement.direct ? "model.arrangement.directRuns" : "model.arrangement.agentRuns", { agent: arrangement.agent })}
+      </p>
+      <p className="mt-1 break-words text-ink">
+        {arrangement.model ? t("model.arrangement.usingModel", { model: arrangement.model }) : t("model.arrangement.unknownModel")}
+      </p>
+      {!arrangement.model && <p>{t("model.arrangement.modelSetIn", { place: arrangement.modelControlledBy })}</p>}
+      {arrangement.route ? (
+        <p className="mt-1 break-words">
+          {t(arrangement.direct ? "model.arrangement.directSource" : "model.arrangement.runtimeSource", {
+            route: arrangement.route, agent: arrangement.agent,
+          })}
+        </p>
+      ) : !arrangement.direct && <p className="mt-1">{t("model.arrangement.unknownRuntimeRoute", { agent: arrangement.agent })}</p>}
+      {(arrangement.location !== "unknown" || arrangement.route) && <p className="mt-1">{locationDetail}</p>}
       <details className="mt-2 border-t border-hairline/40 pt-2">
         <summary className="cursor-pointer font-medium text-ink">{t("model.arrangement.details")}</summary>
         <div className="mt-2 space-y-1.5 leading-relaxed">

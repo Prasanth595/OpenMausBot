@@ -1,16 +1,19 @@
-# Model and agent picker
+# Agents and model connections
 
-The picker displays four separate facts: the agent running the turn, the selected
-model (when reported), the connection used to reach it, and the inference
-location (when evidenced). A bot keeps its existing `instanceId` and model ID;
-the description is derived from those values and does not migrate selections.
+Settings places agent apps and direct model connections in separate sections. An
+agent app runs the conversation and uses a model; a direct API or endpoint supplies
+a model while OpenMausBot runs the conversation. The bot settings summary says
+which agent runs the bot, which model is selected when known, and where inference
+runs when evidenced. The picker groups its choices the same way. A bot keeps its
+existing `instanceId` and model ID; the description is derived from those values
+and does not migrate selections.
 
 ## Responsibility map
 
 | Connection | Agent loop and tools | Model and route | History and compaction | Permissions |
 | --- | --- | --- | --- | --- |
-| Direct hosted APIs (`openai-compat`, Grok API, MiniMax API, Mistral, Cerebras, Groq, Meta) | OpenMausBot's chat runtime mounts its enabled tools and MCP connections. | The picker selects the model. Settings → Connections stores the key and, for compatible APIs, the endpoint. | OpenMausBot retains the transcript and wire history. The harness can checkpoint supported long conversations. | OpenMausBot's tool gate and approval settings. |
-| Direct compatible endpoint on loopback | The same OpenMausBot loop; a local endpoint changes inference location, not the agent. | The picker selects the model; Settings → Connections supplies the URL. | Same as other direct calls. | Same as other direct calls. |
+| Direct hosted APIs (`openai-compat`, Grok API, MiniMax API, Mistral, Cerebras, Groq, Meta) | OpenMausBot's chat runtime mounts its enabled tools and MCP connections. | The picker selects the model. Settings → API keys stores the key and, for compatible APIs, the endpoint. | OpenMausBot retains the transcript and wire history. The harness can checkpoint supported long conversations. | OpenMausBot's tool gate and approval settings. |
+| Direct compatible endpoint on loopback | The same OpenMausBot loop; a local endpoint changes inference location, not the agent. | The picker selects the model; Settings → API keys supplies the URL. | Same as other direct calls. | Same as other direct calls. |
 | Connected runtimes (Claude Code, Codex, OpenCode, pi, and the other registered agent drivers) | The runtime has its own loop and tools. OpenMausBot supplies only supported, enabled integrations; the runtime may have its own MCP settings. | The picker can send a reported model selection. A runtime may choose its own provider or endpoint; that location is not generally reported to OpenMausBot. | OpenMausBot retains the app transcript. The runtime may keep a native session and compact it. Harness checkpoints depend on the selected driver and helper capability; they are not universal. | Native runtime modes and OpenMausBot's gates both matter. Available modes differ by driver. |
 | Custom agent command (`customAcp`) | The configured agent command owns its loop; OpenMausBot offers supported integrations. | The placeholder `agent-default` supplies no model identity. Model choice belongs to the agent configuration. | Native behavior is unknown. OpenMausBot retains the app transcript. | Residual requests use OpenMausBot's gate; native behavior is specific to the command. |
 
