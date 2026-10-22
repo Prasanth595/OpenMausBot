@@ -16876,7 +16876,7 @@ for (const row of chatFollowups()) {
   const messages = store.messagesFor(row.threadId);
   const recovered = messages.find((message) => message.queueId === row.id && message.role === "user") ?? store.appendMessage(row.threadId, {
     role: "user", kind: "text", text: row.payload.text, replyToId: row.payload.replyToId,
-    sendId: row.payload.sendId, queueId: row.id, sender: row.payload.sender,
+    sendId: row.payload.sendId, queueId: row.id, sender: row.payload.sender, composerDelivery: row.payload.composerDelivery,
     ...(row.kind === "channel" ? { channelMode: row.payload.mode, via: row.payload.via } : {}),
     ...(row.kind === "bot" ? spokenLineFields(row.payload.via, row.payload.callId) : {}),
   });
