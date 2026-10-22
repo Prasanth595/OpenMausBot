@@ -4482,7 +4482,12 @@ const coordinator: Coordinator = createCoordinator({
       }
       if (node.groupId) store.patchGroup(node.groupId, { unread: true });
       else store.patchTask(bot.id, node.threadId, { unread: true });
-      notify(buildNotification("delegation-settled", bot, node.threadId, question, { avatarUrl: bot.avatarUrl }));
+      // A muted thread drops "delegation-settled". Assigned work's question then reaches the person only when nobody else
+      // gets it: the runtime wakes the assigner (runtime.ts wake) unless the reply is "none", and a woken assigner whose
+      // thread is gone has nowhere to answer. Cards on the node already notified the person themselves.
+      const assignerWoken = liveParent !== undefined && node.reply !== "none";
+      const askThePerson = node.parentId !== undefined && !assignerWoken && !node.cards?.length && threadMuted(bot.id, node.threadId);
+      notify(buildNotification(askThePerson ? "question" : "delegation-settled", bot, node.threadId, question, { avatarUrl: bot.avatarUrl }));
     },
     levelOf: (target, source) => {
       const bot = store.bot(target.botId);

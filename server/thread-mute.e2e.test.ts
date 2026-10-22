@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
@@ -9,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { NotificationLogEntry } from "../shared/notification.ts";
 import type { WireBot, WireTask } from "../shared/wire.ts";
 import { removeTempDir, waitForExit } from "./testing/cleanup.ts";
+import { readHandoffs } from "./testing/handoff-rows.ts";
 import { freePortBlock } from "./testing/ports.ts";
 import { openSse } from "./testing/sse.ts";
 
@@ -243,6 +245,67 @@ describe("a muted thread waiting on the person", () => {
       stream.close();
       await cleanup([needy.id, beacon.id, ...chiefs]);
     }
+  }, 60_000);
+});
+
+describe("a muted thread a teammate assigned, ending on NEEDS INPUT", () => {
+  const dataDir = () => join(home, ".openmausbot");
+  const woken = (assignmentId: string) => {
+    const db = new DatabaseSync(join(dataDir(), "runtime.db"), { readOnly: true });
+    try {
+      return (db.prepare("SELECT detail FROM assignment_events WHERE assignment_id = ? AND kind = 'woken'").all(assignmentId) as Array<{ detail: string }>)
+        .map((row) => row.detail);
+    } finally { db.close(); }
+  };
+  /** Ava hands Nell work that ends on NEEDS INPUT, through the real coordinator; returns every notice about Nell. */
+  const assign = async (opts: { muted: boolean; reply: "resume" | "none" }) => {
+    const ava = await createBot("Ava");
+    const nell = await createBot("Nell", "needy");
+    const beacon = await createBot("Beacon");
+    const stream = await openSse(`${base}/api/events`);
+    try {
+      expect((await api("PATCH", "/api/config", { features: { muteBotOpenedThreads: opts.muted } })).status).toBe(200);
+      const asked = await api<{ receipts: Array<{ threadId: string }> }>("POST", "/api/internal/coordinate-bots",
+        { botIds: [nell.id], message: "Tag the release.", reply: opts.reply }, await token(ava.id, ava.threadId));
+      expect(asked.status, JSON.stringify(asked.body)).toBe(200);
+      const work = asked.body.receipts[0]!.threadId;
+      expect((await taskOf(nell.id, work))?.notificationsMuted).toBe(opts.muted);
+      // Parked: the runtime's needs_input, which the coordinator's view shows as a question.
+      await expect.poll(() => readHandoffs(dataDir()).find((node) => node.threadId === work)?.question, { timeout: 20_000 })
+        .toBe("which repository should I tag?");
+      const node = readHandoffs(dataDir()).find((candidate) => candidate.threadId === work)!;
+      await expect.poll(async () => (await taskOf(nell.id, work))?.busy, { timeout: 15_000 }).toBe(false);
+      // Nell's thread has parked, so every frame it sent precedes the beacon's.
+      await chat(beacon.id, beacon.threadId, "Ping.");
+      await stream.until((frame) => frame.kind === "notify" && frame.notification?.threadId === beacon.threadId && frame.notification.kind === "done", 15_000);
+      const told = stream.frames.flatMap((frame) => frame.kind === "notify" && frame.notification?.botId === nell.id ? [frame.notification as NotificationLogEntry] : []);
+      return { told, work, wakes: woken(node.id) };
+    } finally {
+      stream.close();
+      await api("PATCH", "/api/config", { features: { muteBotOpenedThreads: false } });
+      await cleanup([ava.id, nell.id, beacon.id]);
+    }
+  };
+  const question = (threadId: string) => expect.objectContaining({ kind: "question", threadId, body: "which repository should I tag?" });
+
+  it("stays silent when the assigner is woken with the question in its live thread", async () => {
+    const { told, wakes } = await assign({ muted: true, reply: "resume" });
+    expect(wakes).toEqual(["needs_input"]);
+    expect(told).toEqual([]);
+  }, 60_000);
+
+  it("tells the person once when the assignment wants no reply", async () => {
+    const { told, work, wakes } = await assign({ muted: true, reply: "none" });
+    expect(wakes).toEqual([]);
+    expect(told).toEqual([question(work)]);
+  }, 60_000);
+
+  // The assigner's thread being gone is in server/thread-mute.test.ts: deleting it, or its bot, cancels the assignment
+  // before it can park, so only the park handler itself can be given a parent without a thread.
+
+  it("is unchanged when the thread is not muted", async () => {
+    const { told, work } = await assign({ muted: false, reply: "resume" });
+    expect(told).toEqual([expect.objectContaining({ kind: "delegation-settled", threadId: work, body: "which repository should I tag?" })]);
   }, 60_000);
 });
 

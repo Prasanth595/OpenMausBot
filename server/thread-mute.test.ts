@@ -1,5 +1,7 @@
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import vm from "node:vm";
+import ts from "typescript";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { DATA_DIR } from "./config.ts";
@@ -132,6 +134,41 @@ describe("what a muted thread reports through the Chief", () => {
       // With a Chief, the escalation still goes out, already counted as told: even its refusal adds nothing.
       expect(started, `chief: ${chief}`).toHaveLength(chief && escalations ? 1 : 0);
     }
+  });
+});
+
+// The coordinator's park handler from index.ts, run without a server: a parent whose thread is gone cannot be reached
+// live, since deleting the thread or its bot cancels the assignment first (thread-mute.e2e.test.ts covers the rest).
+describe("the park handler for a muted thread a teammate assigned", () => {
+  const park = (muted: boolean) => {
+    const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
+    const from = source.indexOf("\n    park: (node, question, restored) => {"), to = source.indexOf("\n    levelOf:", from);
+    if (from < 0 || to <= from) throw new Error("park handler moved");
+    const handler = source.slice(from, to).trim().replace(/^park:/, "globalThis.park =").replace(/,$/, ";");
+    const sent: Notification[] = [];
+    const nell = { id: "nell", name: "Nell", threadId: "nell-main" };
+    const context = vm.createContext({
+      store: {
+        bot: (id: string) => (id === "nell" ? nell : undefined), taskByThread: () => undefined, groupTaskByThread: () => undefined,
+        group: () => undefined, appendMessage() {}, patchGroup() {}, patchTask() {},
+      },
+      // Ava's assignment is still on record; her thread is not.
+      coordinator: { node: (id: string) => (id === "ava-root" ? { id, botId: "ava", threadId: "ava-gone" } : undefined) },
+      newestQuestionChip: () => undefined, buildNotification, threadMuted: () => muted,
+      // index.ts's notify gate for a muted thread.
+      notify: (notification: Notification | null) => {
+        if (notification && (!muted || mutedThreadNotifies(notification.kind))) sent.push(notification);
+      },
+    });
+    vm.runInContext(ts.transpileModule(handler, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText, context);
+    const node = { id: "work", rootId: "ava-root", parentId: "ava-root", threadId: "work-thread", botId: "nell", reply: "resume" };
+    context.park(node, "which repository should I tag?", false);
+    return sent;
+  };
+
+  it("tells the person once when the assigner's thread is gone", () => {
+    expect(park(true)).toEqual([expect.objectContaining({ kind: "question", threadId: "work-thread", body: "which repository should I tag?" })]);
+    expect(park(false)).toEqual([expect.objectContaining({ kind: "delegation-settled", threadId: "work-thread" })]);
   });
 });
 
