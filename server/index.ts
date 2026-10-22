@@ -10886,6 +10886,50 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
       return res.end(attachment.bytes);
     }
 
+    // ── workshop figures: the operator's doors ───────────────────────────
+    // The internal door (from the agents proxy) is the bot's; these are the
+    // panel's. The feature flag is read per request exactly like the
+    // internal door, so the Settings switch stays live without a restart.
+    // Figures are served for <img> previews; the CSP refuses scripts, so an
+    // .svg figure stays a drawing even if it carries hostile markup, and
+    // every other resource is plain text.
+    if (method === "GET" && path === "/api/workshop") {
+      if (!workshopEnabled(cfg)) return json(res, 403, { error: "workshop is not enabled in Settings" });
+      return json(res, 200, { enabled: true, files: listWorkshop() });
+    }
+    m = path.match(/^\/api\/workshop\/files\/([\w.-]+)$/);
+    if (m) {
+      const name = m[1]!;
+      if (!workshopEnabled(cfg)) return json(res, 403, { error: "workshop is not enabled in Settings" });
+      if (method === "GET") {
+        const read = readWorkshop(name);
+        if (!read.ok) return json(res, read.status, { error: read.error });
+        const body = Buffer.from(read.content, "utf8");
+        if (name.endsWith(".svg")) {
+          res.writeHead(200, {
+            "content-type": "image/svg+xml",
+            "content-length": String(body.byteLength),
+            "cache-control": "private, no-cache",
+            "x-content-type-options": "nosniff",
+            "content-security-policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'none'",
+          });
+          return res.end(body);
+        }
+        res.writeHead(200, {
+          "content-type": "text/plain; charset=utf-8",
+          "content-length": String(body.byteLength),
+          "cache-control": "private, no-cache",
+          "x-content-type-options": "nosniff",
+        });
+        return res.end(body);
+      }
+      if (method === "DELETE") {
+        const removed = deleteWorkshop(name);
+        if (!removed.ok) return json(res, removed.status, { error: removed.error });
+        return json(res, 200, removed);
+      }
+    }
+
     // ── search across every transcript ──────────────────────────────────
     // A LIKE scan over the SQLite message store: local transcripts are
     // megabytes at most, so a scan answers in milliseconds and needs no

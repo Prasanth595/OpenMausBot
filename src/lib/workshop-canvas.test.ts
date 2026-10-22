@@ -45,8 +45,9 @@ describe("shapes", () => {
 });
 
 function extend(base: Shape): Shape {
-  // apply the same move every helper uses: drag to (40,40)
-  return { ...base, points: "points" in base ? [...base.points, { x: 40, y: 40 }] : undefined, ...(base.points ? {} : { to: { x: 40, y: 40 } }) } as Shape;
+  if (base.kind === "pen") return { ...base, points: [...base.points, { x: 40, y: 40 }] };
+  if (base.kind === "label") return base;
+  return { ...base, to: { x: 40, y: 40 } };
 }
 
 describe("hit testing", () => {

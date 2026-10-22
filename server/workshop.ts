@@ -13,7 +13,12 @@
 // a single write reaches disk:
 // - names are a single path segment, 1–64 chars, `[A-Za-z0-9._-]` only,
 //   no `.` prefix — so no traversal, no dotfiles, no hidden state;
-// - extensions are `.md`, `.txt`, or `.json`, and `.json` must parse;
+// - extensions are `.md`, `.txt`, `.json`, or `.svg`, and `.json` must
+//   parse. `.svg` exists for the workshop's figure flow (bots sketching
+//   isometric figures for their operator); the panel serves them behind a
+//   no-scripts CSP and previews them through <img>, so a figure stays a
+//   drawing even if it carries hostile markup — agents are still told to
+//   write declarative CSS/SMIL animation only;
 // - at most 24 files, each at most 64 KiB, so a runaway turn cannot fill
 //   the user's disk;
 // - content must be plain UTF-8 text (it arrives as a string or not at
@@ -28,7 +33,7 @@ export const WORKSHOP_DIR = join(DATA_DIR, "workshop");
 
 const MAX_FILES = 24;
 const MAX_BYTES = 64 * 1024;
-const ALLOWED_SUFFIXES = [".md", ".txt", ".json"] as const;
+const ALLOWED_SUFFIXES = [".md", ".txt", ".json", ".svg"] as const;
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 export interface WorkshopListItem {

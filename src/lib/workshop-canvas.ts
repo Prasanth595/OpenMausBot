@@ -301,11 +301,11 @@ export async function sketchToPngFile(
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext("2d");
-  if (!ctx || typeof ctx.toBlob !== "function") return null;
+  if (!ctx || typeof ctx.canvas.toBlob !== "function") return null;
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, width, height);
   renderShapes(ctx, shapes);
-  const blob = await new Promise<Blob | null>((resolve) => ctx.toBlob(resolve, "image/png"));
+  const blob = await new Promise<Blob | null>((resolve) => ctx.canvas.toBlob(resolve, "image/png"));
   if (!blob) return null;
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
   return {

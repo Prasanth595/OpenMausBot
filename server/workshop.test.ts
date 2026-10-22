@@ -33,6 +33,8 @@ describe("validWorkshopName", () => {
     expect(validWorkshopName("expense-runbook.md")).toBe(true);
     expect(validWorkshopName("notes.txt")).toBe(true);
     expect(validWorkshopName("team_prompts.json")).toBe(true);
+    // the figure flow: bots sketch isometric .svg figures into the crate
+    expect(validWorkshopName("figure-pump-engine.svg")).toBe(true);
   });
 
   it("refuses everything that could leave the crate", () => {
@@ -44,6 +46,9 @@ describe("validWorkshopName", () => {
     expect(validWorkshopName(".hidden.md")).toBe(false);
     expect(validWorkshopName("no-suffix")).toBe(false);
     expect(validWorkshopName("wrong.markdown")).toBe(false);
+    // the crate never becomes a code crate — html/scripts stay out
+    expect(validWorkshopName("figure.html")).toBe(false);
+    expect(validWorkshopName("figure.js")).toBe(false);
     expect(validWorkshopName("")).toBe(false);
     expect(validWorkshopName(undefined)).toBe(false);
     expect(validWorkshopName(42)).toBe(false);
@@ -86,6 +91,19 @@ describe("workshop crate mechanics", () => {
     expect(read.content).toBe("line1\nline2\n");
     expect(read.bytes).toBe(12);
     expect(read.updatedAt).toBeTruthy();
+  });
+
+  it("round-trips a figure: write, list, read, delete an .svg", () => {
+    const svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 10 10\"><rect width=\"10\" height=\"10\"/></svg>";
+    const write = writeWorkshop("figure-pump.svg", svg);
+    expect(write.ok).toBe(true);
+    const read = readWorkshop("figure-pump.svg");
+    expect(read.ok).toBe(true);
+    if (!read.ok) throw new Error("expected ok");
+    expect(read.content).toBe(svg);
+    const listed = listWorkshop().find((entry) => entry.name === "figure-pump.svg");
+    expect(listed?.sha256).toBeTruthy();
+    expect(deleteWorkshop("figure-pump.svg").ok).toBe(true);
   });
 
   it("tables unknown reads as 404", () => {
