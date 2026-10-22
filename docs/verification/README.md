@@ -71,6 +71,7 @@ Use only mapped, tested commands:
 - [Welcome flow and guided tour](onboarding.md)
 - [Channels](channels.md)
 - [In-chat team coordination](room-coordination.md)
+- [Current Chief job status and cancellation history](chief-job-status.md)
 - [Chief access to additional departments](team-access.md)
 - [Engines and Doctor](engines.md)
 - [Cline engine and native loopback qualification](cline.md)

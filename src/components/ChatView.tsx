@@ -1311,6 +1311,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       <div ref={composerDockRef} className="pointer-events-none absolute inset-x-0 bottom-0 z-[2] chat-column-dock">
       {bot.chiefOfStaff && canWrite !== false && <ChiefJobCancel botId={bot.id} threadId={bot.threadId}
         activeLeafId={activeLeafId} busy={bot.busy === true} waiting={bot.waitingForTeammates === true}
+        connected={state.connected}
         receipts={messages.flatMap(message => message.jobCancellation ? [message.jobCancellation] : [])} />}
       {lastRunStep && showRun(recordedRun) && showRunCard && runDismissed.get(transcriptKey) !== lastRunStep.id && (
         <div className="flex justify-end px-5 pb-2">

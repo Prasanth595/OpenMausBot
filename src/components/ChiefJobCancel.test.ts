@@ -22,8 +22,8 @@ describe("Chief job cancellation", () => {
   it("keeps a saved partial-cancellation warning visible after native terminal updates", () => {
     const markup = renderToStaticMarkup(createElement(ChiefJobCancel, { botId: "chief", threadId: "source", busy: false, waiting: false,
       receipts: [{ rootId: "root-1", state: "partial", activeIds: ["child"], stoppedIds: ["root-1"], errors: ["Unconfirmed"] }] }));
-    expect(markup).toContain("Cancellation is partial");
-    expect(markup).toContain("Local work has not confirmed it stopped");
+    expect(markup).toContain("Cancellation reported partial");
+    expect(markup).toContain("Review the retained reports");
   });
   it("keeps an exact job action after ordinary Stop left one of its children working", () => {
     expect(chiefJobRoots({ roots: ["root-stopped"], nodes: [

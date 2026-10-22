@@ -86,6 +86,8 @@ it("paired Chief cancellation stops the exact native job after ordinary Stop lef
       const requests = await evaluate("window.officeCancelRequests");
       expect(requests).toEqual([{ path: `${base}/cancellation`, method: "GET", status: 200 }, { path: `${base}/cancel`, method: "POST", status: 200 }]);
       const afterPng = `${fixture.info.logPath}.chief-cancel-after.png`;
+      await expect.poll(() => evaluate(`document.querySelector('[data-current-job-id="${newer.id}"]')?.textContent`), { timeout: 15_000 }).toBe("Job running.");
+      expect(await evaluate(`document.querySelector('[data-current-job-id]')?.textContent`)).not.toContain("Job cancelled.");
       await command("screenshot", afterPng);
       const consoleOutput = await command("console");
       expect(((consoleOutput.messages ?? []) as Array<{ type: string }>).filter(message => message.type === "error")).toEqual([]);
@@ -110,6 +112,21 @@ it("paired Chief cancellation stops the exact native job after ordinary Stop lef
     expect(page.messages.filter((message: any) => message.roomRequest?.id === child.id && message.roomRequest.phase === "result")).toHaveLength(1);
     const source = page.messages.find((message: any) => message.id === fresh.requestMessageId);
     expect(source).toMatchObject({ requestCancelled: true, requestPending: false, jobCancellation: { rootId: root.id, state: "cancelled" } });
+    const currentJob = (await api("GET", `/api/threads/${root.threadId}/job?since=0`, undefined, token)).body.current;
+    expect(currentJob).toMatchObject({ rootId: newer.id, status: "completed", state: "completed" });
+    if (browser && preview) {
+      const command = (...args: string[]) => agentBrowser(browser!.binary, browser!.env, args, 60_000);
+      const footer = async () => (await command("eval", `document.querySelector('[data-current-job-id="${newer.id}"]')?.textContent`)).result;
+      await expect.poll(footer, { timeout: 15_000 }).toBe("Job completed.");
+      await command("reload");
+      await expect.poll(footer, { timeout: 30_000 }).toBe("Job completed.");
+      const reloadedPng = `${fixture.info.logPath}.chief-status-reloaded.png`;
+      await command("screenshot", reloadedPng);
+      const consoleOutput = await command("console");
+      expect(((consoleOutput.messages ?? []) as Array<{ type: string }>).filter(message => message.type === "error")).toEqual([]);
+      evidence.push({ currentJob, afterReload: await footer(), cancelledReceiptPreserved: source.jobCancellation, reloadedPng, console: consoleOutput });
+      console.info(JSON.stringify({ reloadedPng }));
+    }
 
     plan[chief.id] = { steps: [{ arguments: { bot_ids: [expert.id], message: "Hold the job that the Chief will cancel with its tool" } }], reply: "Assigned another job" };
     writeFileSync(join(fixture.info.dataDir, "room-plan.json"), JSON.stringify(plan));

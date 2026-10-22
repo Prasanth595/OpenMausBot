@@ -50,6 +50,18 @@ export interface JobView {
   /** Changes whenever anything a waiter would report changes; pass it back to wait for the next change. */
   version: string;
   conversation: ConversationState;
+  /** Most recent visible source job on the selected transcript branch, before node clipping. */
+  current: {
+    rootId: string;
+    requestMessageId?: string;
+    status: Assignment["status"];
+    outcome?: Assignment["outcome"];
+    state: JobState;
+    reason: string;
+    sourceRequest?: string;
+  } | null;
+  /** Visible source jobs whose native execution still has no confirmed stop. */
+  unconfirmedStops: Array<{ rootId: string; sourceRequest?: string }>;
   roots: string[];
   nodes: JobNode[];
   hidden: number;
@@ -65,6 +77,8 @@ export interface JobInput {
   scopes: readonly string[];
   rows: readonly Assignment[];
   conversation: ConversationState;
+  sourceBotId?: string;
+  requestMessageIds?: ReadonlySet<string>;
   activityOf(row: Assignment): string | undefined;
   nameOf(botId: string): string | undefined;
   titleOf(row: Assignment): string | undefined;
@@ -82,7 +96,7 @@ const names = (rows: readonly Assignment[], label: (row: Assignment) => string) 
   return unique.length > 3 ? `${unique.slice(0, 3).join(", ")} and ${unique.length - 3} more` : unique.join(", ");
 };
 
-export function jobView(input: JobInput): JobView {
+function jobState(input: JobInput) {
   const nameOf = (botId: string) => input.nameOf(botId) ?? botId;
   // The reason never names or quotes work in a conversation the reader may not open.
   const shows = (row: Assignment) => input.visible(row.assignee.destination.threadId);
@@ -142,6 +156,31 @@ export function jobView(input: JobInput): JobView {
     reason = `${leadName}'s work ended ${lead.status === "cancelled" || lead.outcome === "stopped" ? "because it was stopped" : `as ${lead.outcome ?? lead.status}`}${lead.outcomeDetail ? `: ${lead.outcomeDetail}` : ""}`;
   }
 
+  return { state, reason, starts, counts, parked, asking };
+}
+
+export function jobView(input: JobInput): JobView {
+  const { state, reason, starts, counts, parked, asking } = jobState(input);
+  const nameOf = (botId: string) => input.nameOf(botId) ?? botId;
+  const shows = (row: Assignment) => input.visible(row.assignee.destination.threadId);
+  const { conversation } = input;
+  const sourceRequest = (row: Assignment) => !row.parentId && shows(row) ? row.brief.replace(/\s+/g, " ").trim().slice(0, 160) : "";
+  const sourceRoots = input.rows.filter(row => starts.has(row.id) && !row.parentId && row.assignee.destination.threadId === input.threadId
+    && (input.sourceBotId === undefined || row.assignee.botId === input.sourceBotId) && shows(row))
+    .sort((a, b) => a.createdAt - b.createdAt);
+  const currentRoot = sourceRoots.findLast(row => input.requestMessageIds === undefined
+    || (row.requestMessageId !== undefined && input.requestMessageIds.has(row.requestMessageId)));
+  const current: JobView["current"] = currentRoot ? (() => {
+    const summary = jobState({ ...input, rows: input.rows.filter(row => row.id === currentRoot.id || row.rootId === currentRoot.id), scopes: [currentRoot.id],
+      conversation: ended(currentRoot) ? { kind: conversation.kind, busy: false, queued: 0 } : conversation });
+    return { rootId: currentRoot.id, ...(currentRoot.requestMessageId ? { requestMessageId: currentRoot.requestMessageId } : {}), status: currentRoot.status,
+      ...(currentRoot.outcome ? { outcome: currentRoot.outcome } : {}), state: summary.state, reason: summary.reason,
+      ...(sourceRequest(currentRoot) ? { sourceRequest: sourceRequest(currentRoot) } : {}) };
+  })() : null;
+  const unconfirmedRoots = new Set(input.rows.filter(row => row.office?.attempts.some(attempt => attempt.state === "uncertain"
+    || (ended(row) && (attempt.state === "consumed" || attempt.consumedAt !== undefined) && attempt.finishedAt === undefined))).map(row => row.rootId));
+  const unconfirmedStops = sourceRoots.filter(row => unconfirmedRoots.has(row.id)).map(row => ({ rootId: row.id,
+    ...(sourceRequest(row) ? { sourceRequest: sourceRequest(row) } : {}) }));
   const shown = input.rows.filter(shows);
   const listed = shown.slice(-NODES_SHOWN);
   const ordered = [...listed.filter((row) => starts.has(row.id)), ...listed.filter((row) => !starts.has(row.id))];
@@ -151,10 +190,10 @@ export function jobView(input: JobInput): JobView {
     else if (row.status === "resume") tally.queued += 1;
     else tally[row.status] += 1;
   }
-  const sourceRequest = (row: Assignment) => !row.parentId && shows(row) ? row.brief.replace(/\s+/g, " ").trim().slice(0, 160) : "";
   const version = createHash("sha256").update(JSON.stringify([
     state, conversation.busy, conversation.activity ?? "", conversation.queued, asking.map((row) => row.id),
     input.rows.map((row) => [row.id, row.status, row.outcome ?? "", row.executions, row.question ?? "", sourceRequest(row)]),
+    current, unconfirmedStops,
   ])).digest("base64url").slice(0, 16);
   const node = (row: Assignment): JobNode => {
     const { destination } = row.assignee;
@@ -174,7 +213,7 @@ export function jobView(input: JobInput): JobView {
     };
   };
   return {
-    threadId: input.threadId, scope: input.scope, since: input.since, now: input.now, state, reason, version, conversation,
+    threadId: input.threadId, scope: input.scope, since: input.since, now: input.now, state, reason, version, conversation, current, unconfirmedStops,
     roots: [...input.scopes], nodes: ordered.map(node), hidden: input.rows.length - shown.length, counts: tally,
     needsInput: [...parked, ...asking].filter((row) => input.visible(row.assignee.destination.threadId)).map((row) => ({
       id: row.id, botId: row.assignee.botId, botName: nameOf(row.assignee.botId), threadId: row.assignee.destination.threadId,
