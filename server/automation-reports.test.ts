@@ -420,6 +420,15 @@ describe("automation reports", () => {
     expect(f.reports.answeredIn(f.main, "ask-9")).toBe(f.main);
   });
 
+  it("leaves a run missed or failed before it had a conversation to its card, since no line can say so", () => {
+    const f = fixture();
+    const missed = f.finished(null, "Inbox brief", { status: "missed", threadId: undefined, error: "This computer was offline" });
+    const unstarted = f.finished(null, "Inbox brief", { status: "failed", threadId: undefined, error: "Could not create a task for this run" });
+    const queued = f.finished(null, "Inbox brief", { status: "queued", threadId: undefined });
+    const failed = f.finished(null, "Inbox brief", { status: "failed", error: "Signed out" });
+    expect([missed, unstarted, queued, failed].map((run) => f.reports.speaksFor(run))).toEqual([false, false, true, true]);
+  });
+
   it("knows which conversations are a run's own whose last reply goes to another chat", () => {
     const f = fixture();
     const own = f.finished(null, "Inbox brief", { status: "running" });
