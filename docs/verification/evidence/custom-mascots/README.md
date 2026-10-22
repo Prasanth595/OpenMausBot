@@ -23,6 +23,8 @@ This evidence is bound to runtime commit `cf5f530bbb176b769e89be869352df981c764a
 
 Asset URLs, HTTP statuses, source hashes, media hashes, motion samples, and the sanitized action receipt are in [proof.json](proof.json). The image captures are original browser screenshots; the video is a crop of an actual UI recording, with no compositing.
 
+Media hashes refer to repository bytes. The file chooser used a Windows CRLF working copy of `bunny.svg`; Git publishes the equivalent LF-normalized SVG. The receipt records both hashes.
+
 ## Verification limits
 
 The run used a headless Chromium production web renderer with a disposable fake-CLI fixture, a browser loopback allowlist, and no provider turns. No Node outbound preload was installed. Installed Electron and mobile UI were not exercised.

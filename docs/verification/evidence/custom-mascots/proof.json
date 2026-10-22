@@ -137,7 +137,13 @@
     "expression": {
       "selected": "Working",
       "selectedBeforeMotionCapture": true
-    }
+    },
+    "selectedInputSvg": {
+      "bytes": 280,
+      "sha256": "A252CB5E33E8F00E9574C031E785635BC333F02FFD037D896613330B95E682E0",
+      "lineEndings": "CRLF"
+    },
+    "inputSvgRepositoryNormalization": "Git publishes the same SVG with LF line endings; only line endings differ from the selected Windows working copy."
   },
   "motion": {
     "controlsChangedDuringObservation": false,
@@ -206,8 +212,8 @@
     },
     {
       "file": "bunny.svg",
-      "bytes": 280,
-      "sha256": "A252CB5E33E8F00E9574C031E785635BC333F02FFD037D896613330B95E682E0"
+      "bytes": 279,
+      "sha256": "4F81B6F6918A6D1C30452C97D9E0AF48BBD979F537D795B26DB84F4949A78FC6"
     },
     {
       "file": "creator.png",
