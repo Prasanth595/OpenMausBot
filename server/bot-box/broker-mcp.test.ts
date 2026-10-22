@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BOX_BROKER_PORT, type BoxBroker } from "./box.ts";
 import { brokerRemoteMcp, forgetBrokeredMcp, mcpGrantName } from "./broker-mcp.ts";
 import { openCredentialBroker, type CredentialBroker } from "./broker.ts";
+import { testSocketPath } from "./test-socket-path.ts";
 
 const custom = {
   notion: { type: "http" as const, url: "https://mcp.notion.example/mcp", headers: { authorization: "Bearer notion-secret" } },
@@ -17,7 +18,7 @@ describe("remote MCP servers through the broker", () => {
   afterEach(async () => { await credentials?.close(); rmSync(dir, { recursive: true, force: true }); forgetBrokeredMcp(); });
   const broker = async (): Promise<BoxBroker> => {
     dir = mkdtempSync(join(tmpdir(), "omb-bmcp-"));
-    credentials = await openCredentialBroker({ socketPath: join(dir, "b.sock") });
+    credentials = await openCredentialBroker({ socketPath: testSocketPath(dir, "b.sock") });
     return { port: BOX_BROKER_PORT, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revokeThread: credentials.revokeThread, lookup: credentials.lookup };
   };
 

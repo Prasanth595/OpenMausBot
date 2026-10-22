@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { BROKER_PROCESS_TTL_MS, BROKER_THREAD_TTL_MS, BROKER_TOKEN_PREFIX, brokerUrl, openCredentialBroker, type CredentialBroker } from "./broker.ts";
+import { testSocketPath } from "./test-socket-path.ts";
 
 const REAL_KEY = "sk-ant-real-key-0123456789abcdef";
 
@@ -48,7 +49,7 @@ describe("the credential broker", () => {
     });
     await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
     dir = mkdtempSync(join(tmpdir(), "omb-broker-"));
-    broker = await openCredentialBroker({ socketPath: join(dir, "b.sock"), now: () => clock });
+    broker = await openCredentialBroker({ socketPath: testSocketPath(dir, "b.sock"), now: () => clock });
     return (upstream.address() as { port: number }).port;
   }
 
