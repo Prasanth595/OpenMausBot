@@ -83,6 +83,16 @@ describe("importCustomMascotSvg", () => {
     expect(sampler.createElementNS).toHaveBeenCalledTimes(2);
   });
 
+  it("accepts compact adjacent flags in absolute and relative arc commands", () => {
+    const sampler = installSampler();
+    const absolute = "M-1e1 -1e1A1e1 1e1 0e0 011e1 1e1 1e1 1e1 0e0 102e1 1e1L+3e1 -1e1Z";
+    const relative = "m0 0a10 10 0 1010 10l10 0z";
+
+    expect(() => importCustomMascotSvg(svg(absolute), "absolute.svg")).not.toThrow();
+    expect(() => importCustomMascotSvg(svg(relative), "relative.svg")).not.toThrow();
+    expect(sampler.createElementNS).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     ["incomplete line parameters", "M0 0L10Z"],
     ["missing close command", "M0 0L10 10"],

@@ -347,6 +347,8 @@ function tokenizePathData(pathData: string): PathToken[] {
   let index = 0;
   let previousKind: PathToken["kind"] | undefined;
   let commaPending = false;
+  let activeCommand: string | null = null;
+  let commandParameterIndex = 0;
 
   while (index < pathData.length) {
     if (XML_WHITESPACE.test(pathData[index]!)) {
@@ -366,12 +368,22 @@ function tokenizePathData(pathData: string): PathToken[] {
       if (commaPending) invalidSvg("path separators are malformed");
       tokens.push({ kind: "command", value: character });
       previousKind = "command";
+      activeCommand = character.toLowerCase() === "z" ? null : character;
+      commandParameterIndex = 0;
       index++;
     } else {
-      pathNumber.lastIndex = index;
-      const match = pathNumber.exec(pathData);
-      if (!match) invalidSvg("path contains an invalid number");
-      const raw = match[0];
+      const arcFlagPosition = activeCommand?.toLowerCase() === "a" && (commandParameterIndex === 3 || commandParameterIndex === 4);
+      let raw: string;
+      if (arcFlagPosition && (character === "0" || character === "1")) {
+        raw = character;
+        index++;
+      } else {
+        pathNumber.lastIndex = index;
+        const match = pathNumber.exec(pathData);
+        if (!match) invalidSvg("path contains an invalid number");
+        raw = match[0];
+        index = pathNumber.lastIndex;
+      }
       const value = Number(raw);
       if (!Number.isFinite(value) || Math.abs(value) > MAX_PATH_COORDINATE) {
         invalidSvg("path coordinate is outside the supported bounds");
@@ -379,7 +391,9 @@ function tokenizePathData(pathData: string): PathToken[] {
       tokens.push({ kind: "number", raw, value });
       previousKind = "number";
       commaPending = false;
-      index = pathNumber.lastIndex;
+      if (activeCommand !== null) {
+        commandParameterIndex = (commandParameterIndex + 1) % commandArity(activeCommand);
+      }
     }
 
     if (tokens.length > MAX_PATH_COMMANDS * 8 + 1) invalidSvg("path has too many parameters");
