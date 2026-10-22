@@ -80,6 +80,22 @@ describe("native project-memory projection", () => {
     expect(readFileSync(file, "utf8")).toBe(original);
   });
 
+  it("recalls an authorized current revision and returns no result for a stale or foreign pin", () => {
+    const written = service.request(caller, fact);
+    if (!("entry" in written) || !written.entry) throw new Error("Expected saved entry");
+    const pinned = { operation: "recall", entryId: written.entry.id, revision: written.entry.revision };
+    expect(service.request(caller, pinned)).toMatchObject({ no_relevant_memory: false,
+      entries: [{ id: written.entry.id, revision: written.entry.revision, detail: fact.detail }] });
+    expect(service.request(caller, { ...pinned, revision: "0".repeat(64) })).toMatchObject({ no_relevant_memory: true, entries: [] });
+    expect(service.request(other, pinned)).toMatchObject({ no_relevant_memory: true, entries: [] });
+    service.request(caller, { ...fact, detail: "Current corrected canary" });
+    expect(service.request(caller, pinned)).toMatchObject({ no_relevant_memory: true, entries: [] });
+  });
+
+  it.each(["invalid", "0".repeat(63), "0".repeat(65), "A".repeat(64)])("rejects an invalid recall revision %j", revision => {
+    status(() => service.request(caller, { operation: "recall", revision }), 400);
+  });
+
   it.each(["projectId", "scope", "path", "source", "fromBotId", "fromThreadId", "sectionKey", "cwd"])("rejects a model-supplied %s on both reads and writes", key => {
     status(() => service.request(caller, { ...fact, [key]: "forged" }), 400);
     status(() => service.request(caller, { operation: "recall", [key]: "forged" }), 400);

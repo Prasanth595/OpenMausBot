@@ -1969,15 +1969,18 @@
               "recall",
               "remember",
               "forget"
-            ]
+            ],
+            "description": "Recall uses query or entry_id, optional revision and limit. Remember uses kind, name, detail, optional key and aliases. Forget requires entry_id and revision."
           },
           "query": {
             "type": "string",
-            "maxLength": 500
+            "maxLength": 500,
+            "description": "Recall only: search this project's accepted notes."
           },
           "entry_id": {
             "type": "string",
-            "maxLength": 128
+            "maxLength": 128,
+            "description": "Recall or forget: the native entry id returned by remember."
           },
           "limit": {
             "type": "integer",
@@ -1991,11 +1994,13 @@
               "place",
               "decision",
               "term"
-            ]
+            ],
+            "description": "Remember only: the note's category."
           },
           "key": {
             "type": "string",
-            "maxLength": 240
+            "maxLength": 240,
+            "description": "Remember only: a stable note key."
           },
           "name": {
             "type": "string",
@@ -2015,7 +2020,8 @@
           },
           "revision": {
             "type": "string",
-            "pattern": "^[a-f0-9]{64}$"
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "Required for forget; optional for recall to return only this exact saved revision."
           }
         },
         "required": [

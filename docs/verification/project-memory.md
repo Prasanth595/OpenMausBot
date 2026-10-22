@@ -44,8 +44,12 @@ moving a recipient to another section closes the room's project recall.
 `ProjectMemory.request(caller, input)` accepts these operations:
 
 - `remember`: `kind`, `name`, `detail`, optional stable `key` and `aliases`.
-- `recall`: optional `query`, exact `entryId`, and bounded `limit` of 1–25.
+- `recall`: optional `query`, exact `entryId`, current `revision` pin, and bounded `limit` of 1–25.
 - `forget`: exact `entryId` and current `revision` from a remembered entry.
+
+A recall revision pin must be a 64-character lowercase hexadecimal hash.
+A stale revision or foreign project entry returns no result; a pin never
+expands the caller's project scope.
 
 Results identify the project, caller and original native source. Every
 projection reports `canonical: false`, `promoted: false` and

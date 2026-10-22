@@ -36,7 +36,8 @@ export function readProjectMemoryProjects(file: string): ProjectMemoryProject[] 
 
 export const projectMemoryRequestSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("recall"), query: z.string().max(500).default(""),
-    entryId: idSchema.optional(), limit: z.number().int().min(1).max(25).default(12) }).strict(),
+    entryId: idSchema.optional(), revision: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+    limit: z.number().int().min(1).max(25).default(12) }).strict(),
   z.object({ operation: z.literal("remember"), kind: z.enum(TEAM_MEMORY_KINDS), key: z.string().max(240).optional(),
     name: z.string().min(1).max(120), detail: z.string().min(1).max(600),
     aliases: z.array(z.string().min(1).max(120)).max(8).optional() }).strict(),
@@ -136,9 +137,10 @@ export class ProjectMemory {
       principal: { botId: context.botId, threadId: context.threadId },
       boundary: "Native project-memory API and tool scope; this is not an operating-system filesystem sandbox." };
     if (request.operation === "recall") {
-      const entries = request.entryId
+      const current = request.entryId
         ? this.options.memory.list(scope).filter(entry => entry.status === "accepted" && entry.id === request.entryId)
         : this.options.memory.search(scope, request.query, request.limit);
+      const entries = current.filter(entry => request.revision === undefined || entry.revision === request.revision);
       return { ...envelope, operation: request.operation, state: "recalled" as const, no_relevant_memory: entries.length === 0, entries };
     }
     if (!context.canApply) {
