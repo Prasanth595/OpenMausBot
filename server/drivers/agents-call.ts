@@ -85,6 +85,12 @@ function renderAssignmentStatus(r: Json, id: string): string {
   if (result) lines.push(`Result${result.length > RESULT_HEAD ? " (first part)" : ""}: ${result.slice(0, RESULT_HEAD)}`);
   const children = Array.isArray(r.children) ? r.children.filter(jsonRecord) : [];
   if (children.length) lines.push("Its own hand-offs:", ...children.map((child) => `- ${assignmentLine(child)}`));
+  if (jsonRecord(r.usage)) {
+    const observations = Array.isArray(r.usage.observations) ? r.usage.observations : [];
+    lines.push("Job usage across its native attempts and hand-offs (cached input is included in input; missing measurements remain unknown):",
+      JSON.stringify({ rootId: r.usage.rootId, total: r.usage.total, coverage: r.usage.coverage,
+        observationCount: observations.length, observations: observations.slice(-20) }));
+  }
   const settled = a.status === "completed" || a.status === "failed" || a.status === "cancelled" || a.status === "done";
   if (a.stopUnconfirmed === true) lines.push("The local process has not confirmed it stopped. Do not report this job stopped or start replacement work. Retain its partial reports.");
   else if (!settled) lines.push("It is not settled. Its result resumes you on its own; do not wait on it in this turn.");
@@ -682,6 +688,12 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     });
     if (r.error || r.ok !== true) return { text: String(r.error ?? "The log line was not confirmed."), isError: true };
     return { text: `Logged to ${String(r.file)}: ${String(r.line)}` };
+  }
+  if (name === "project_memory") {
+    const body: Json = { ...args };
+    if ("entry_id" in body) { body.entryId = body.entry_id; delete body.entry_id; }
+    const response = await apiResponse("/api/internal/project-memory", { method: "POST", body: JSON.stringify(body) });
+    return { text: JSON.stringify(response.body), ...(!response.ok ? { isError: true } : {}) };
   }
   if (name === "propose_team_memory") {
     const kind = String(args.kind ?? "").trim();

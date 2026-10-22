@@ -432,6 +432,8 @@ export type CardAnswerer = (
 /** One transcript line, serialized as stored. */
 export interface WireMessage extends HelperIntroField {
   roomRequest?: { id: string; phase: "request" | "result" };
+  /** Stable native assignment identity for idempotent lifecycle report delivery. */
+  runtimeReportId?: string;
   id: string;
   role: "bot" | "user";
   kind: "text" | "options" | "activity" | "screen" | "connector" | "secret" | "signin" | "routine.run" | "goal.run" | "digest" | "compaction" | "call" | "widget" | "app";

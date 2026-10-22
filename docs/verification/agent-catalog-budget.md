@@ -31,3 +31,15 @@ constants independently of cancellation.
 Both catalog and bridged goldens are regenerated on HEL1. Budget constants
 are set to their exact measured current profile sizes; the existing upper and
 lower 2% checks remain unchanged.
+
+## Project memory and job usage
+
+The reliability extension adds one native `project_memory` tool and expands
+the existing `assignment_status` description to explain measured usage and
+unknown observations. On HEL1 the native profiles grow by 1,389 UTF-8 bytes;
+bridged profiles grow by 16 bytes for the hidden tool name. Standing external
+runtimes do not receive project memory and grow only by the 134-byte status
+description change (their bridged list remains unchanged).
+
+All 21 full and 21 bridged wire profiles are regenerated on HEL1. Their exact
+measured sizes replace the previous baselines; the 2% regression checks remain.

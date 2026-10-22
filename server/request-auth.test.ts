@@ -64,6 +64,16 @@ describe("Chief job cancellation route scope", () => {
   });
 });
 
+describe("native job usage route scope", () => {
+  it("allows paired clients to read only the thread-scoped usage path", () => {
+    expect(requiredScope("GET", "/api/threads/office/job/usage")).toBe("client");
+    for (const [method, path] of [
+      ["POST", "/api/threads/office/job/usage"], ["DELETE", "/api/threads/office/job/usage"],
+      ["GET", "/api/jobs/root/usage"], ["GET", "/api/usage"], ["GET", "/api/usage.csv"],
+    ]) expect(requiredScope(method, path)).toBe("admin");
+  });
+});
+
 describe("origin and cookies", () => {
   it("derives the request origin from Host and the proxy's scheme", () => {
     expect(requestOrigin(request({ host: "bots.example.com" }))).toBe("http://bots.example.com");

@@ -126,6 +126,11 @@ export class Runtime {
         }
         if (n.status !== "running") continue;
         const handedOut = childrenSince(this.store, n).length > 0;
+        const lastAttempt = n.office?.attempts.at(-1);
+        if (!handedOut && lastAttempt?.consumedAt !== undefined) {
+          this.settle(n, "failed", "interrupted", "The provider turn ended before its assignment result was committed; its work will not be repeated");
+          continue;
+        }
         const outward = handedOut ? [] : this.outwardOf(n);
         if (handedOut) {
           n.status = "waiting"; n.restart = "cut"; n.lastActivityAt = now;
@@ -150,7 +155,14 @@ export class Runtime {
           this.touch(parent);
         }
       }
-      for (const n of this.store.all()) if (isTerminal(n) && n.reportedAt === undefined) this.reportDue.add(n.id);
+      for (const n of this.store.all()) {
+        if (!isTerminal(n)) continue;
+        if (n.reportedAt === undefined) this.reportDue.add(n.id);
+        else if (n.parentId && n.reply !== "none" && !this.store.inbox(wakeOwner(n)).some(item =>
+          item.assignmentId === n.id && (item.kind === "settled" || item.kind === "stalled"))) {
+          this.store.transaction(() => { this.wake(n, n.outcome === "stalled" ? "stalled" : "settled"); });
+        }
+      }
     });
   }
 
@@ -691,11 +703,19 @@ export class Runtime {
       this.safe("report", () => this.runner.report(n, parent));
       if (this.lastThrew) { this.reportDue.add(n.id); return; }
     }
-    n.reportedAt = now;
-    this.store.update(n, { kind: "reported", at: now, detail: ownTurn ? "own turn" : "reported" });
+    try {
+      this.store.transaction(() => {
+        n.reportedAt = now;
+        this.store.update(n, { kind: "reported", at: now, detail: ownTurn ? "own turn" : "reported" });
+        if (n.parentId) this.wake(n, n.outcome === "stalled" ? "stalled" : "settled");
+      });
+    } catch (error) {
+      delete n.reportedAt;
+      this.reportDue.add(n.id);
+      throw error;
+    }
     this.reportDue.delete(n.id);
     this.touch(n);
-    if (n.parentId) this.wake(n, n.outcome === "stalled" ? "stalled" : "settled");
   }
 
   private wake(n: Assignment, kind: InboxKind): boolean {

@@ -265,6 +265,16 @@ export class RuntimeCoordinator implements Coordinator {
     return this.runtime.status(id);
   }
 
+  usageAssignment(input: { assignmentId?: string; generation?: string; threadId: string }): Assignment | undefined {
+    this.ready();
+    const direct = input.assignmentId ? this.store.get(input.assignmentId) : input.generation ? this.store.get(input.generation) : undefined;
+    if (direct?.assignee.destination.threadId === input.threadId) return structuredClone(direct);
+    if (!input.generation) return undefined;
+    const matching = this.store.all().filter(row => row.assignee.destination.threadId === input.threadId
+      && row.office?.attempts.some(attempt => attempt.generation === input.generation && attempt.consumedAt !== undefined));
+    return matching.length === 1 ? structuredClone(matching[0]) : undefined;
+  }
+
   job(threadId: string, since: number, botId?: string): { scopes: string[]; rows: Assignment[] } {
     this.ready();
     const given = new Map<string, Assignment>();
@@ -469,8 +479,8 @@ export class RuntimeCoordinator implements Coordinator {
   }
 
   close(): void {
-    this.officeControl?.close();
     this.runtime.close();
+    this.officeControl?.close();
   }
 
   progress(threadId: string): void {
@@ -583,6 +593,10 @@ export function configureCoordinatorOfficeControl(coordinator: Coordinator, opti
 
 export function coordinatorCancellationSnapshot(coordinator: Coordinator, rootId: string): CoordinatorCancellationSnapshot | undefined {
   return coordinator instanceof RuntimeCoordinator ? coordinator.cancellationSnapshot(rootId) : undefined;
+}
+
+export function coordinatorUsageAssignment(coordinator: Coordinator, input: { assignmentId?: string; generation?: string; threadId: string }): Assignment | undefined {
+  return coordinator instanceof RuntimeCoordinator ? coordinator.usageAssignment(input) : undefined;
 }
 
 export function cancelCoordinatorRoot(coordinator: Coordinator, rootId: string, expectedTreeVersion: string, reason: string): boolean {

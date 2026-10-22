@@ -244,7 +244,7 @@ export class OfficeControl {
     });
   }
 
-  invalidate(filter: { botId?: string; threadId?: string; generation?: string; attemptId?: string }, reason = "Office execution was stopped"): void {
+  invalidate(filter: { botId?: string; threadId?: string; generation?: string; attemptId?: string }, reason = "Office execution was stopped", shutdown = false): void {
     for (const [id, live] of this.live) {
       if ((filter.attemptId && filter.attemptId !== id) || (filter.botId && filter.botId !== live.input.botId)
         || (filter.threadId && filter.threadId !== live.input.threadId) || (filter.generation && filter.generation !== live.binding.generation)) continue;
@@ -256,12 +256,12 @@ export class OfficeControl {
         }
       });
       live.cleanup(); this.live.delete(id); live.controller.abort(new Error(reason));
-      this.options.cancelAssignment(live.binding.assignmentId, reason);
+      if (!shutdown) this.options.cancelAssignment(live.binding.assignmentId, reason);
       try { void Promise.resolve(this.options.cancelNative({ ...live.binding, botId: live.input.botId, threadId: live.input.threadId }, reason)).catch(() => {}); } catch {}
     }
   }
 
-  close(): void { this.closed = true; this.invalidate({}, "Office control was closed"); }
+  close(): void { this.closed = true; this.invalidate({}, "Office control shut down for restart", true); }
 
   private check(node: Assignment, attempt: OfficeAttempt, live: LiveAttempt, expiresAt: number): void {
     if (this.closed || live.controller.signal.aborted || live.input.signal.aborted || terminal(node.status) || node.status !== "running") throw new Error("Office execution was stopped");

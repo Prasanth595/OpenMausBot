@@ -25,7 +25,9 @@ import { createCoordinator, type ComposedTurn, type CoordinateBotsCall, type Coo
 import { queuedBehindPersonText, settledWaitingChip, UnansweredApprovals } from "./waiting-on-person.ts";
 import { assertRequestTarget, guardedRequestPath, requestConflict, requestNeedsInput } from "./guarded-requests.ts";
 import { createJobCancellation, jobCancellationSnapshotSchema, nativeJobExecutionUnconfirmed, type NativeJobCancellationSnapshot } from "./job-cancellation.ts";
-import { coordinatorCancellationSnapshot, cancelCoordinatorRoot } from "./runtime-coordinator.ts";
+import { coordinatorCancellationSnapshot, cancelCoordinatorRoot, coordinatorUsageAssignment } from "./runtime-coordinator.ts";
+import { bindJobUsageTurn, completeJobUsageTurn, readJobUsage, tokenObservation, type JobUsageTurnBinding } from "./job-usage.ts";
+import type { JobUsageAttribution } from "../shared/job-usage.ts";
 import { botAvatarUrlFromStoredPath } from "../shared/bot-avatar.ts";
 import { BOT_PROFILE_LIMITS } from "../shared/bot-profile.ts";
 import { CLOUD_COMPUTER_BUSY_ERROR } from "../shared/computer-contention.ts";
@@ -464,7 +466,8 @@ import { TeamSetupError, TeamSetupRequestService } from "./team-setup-requests.t
 import type { TeamSetupRequest } from "../shared/team-setup.ts";
 import { profileRevision, profileSnapshot } from "./profile-revision.ts";
 import { flushAllProfileHistory, flushProfileHistory, readHistory, recordProfileChange } from "./profile-versions.ts";
-import { TeamMemory, TEAM_MEMORY_KINDS, type TeamMemoryKind } from "./team-memory.ts";
+import { TeamMemory, TeamMemoryConflict, TEAM_MEMORY_KINDS, type TeamMemoryKind } from "./team-memory.ts";
+import { ProjectMemory, ProjectMemoryError, readProjectMemoryProjects } from "./project-memory.ts";
 import { describeTool } from "./activity.ts";
 import { OutboundCounts } from "./outbound-counts.ts";
 import { OutboundRequestService, outboundCard } from "./outbound-requests.ts";
@@ -3768,6 +3771,48 @@ type GroupTurnOperation = {
 const groupTurnOperations = new Map<string, Set<GroupTurnOperation>>();
 const nativeAssignmentByGeneration = new Map<string, string>();
 const nativePeerGenerations = new Set<string>();
+type JobUsageCapture = { binding: JobUsageTurnBinding; row: Pick<UsageRow, "botId" | "botName" | "threadId" | "instanceId" | "driverKind" | "model" | "trigger"> };
+const jobUsageByProviderTurn = new Map<string, JobUsageCapture>();
+const jobUsageTurnKey = (threadId: string, turnId: string) => JSON.stringify([threadId, turnId]);
+function completedJobUsage(capture: JobUsageCapture | undefined): JobUsageAttribution | undefined {
+  return capture ? completeJobUsageTurn(capture.binding, coordinatorUsageAssignment(coordinator, {
+    assignmentId: capture.binding.assignmentId, generation: capture.binding.generation, threadId: capture.binding.threadId,
+  })) : undefined;
+}
+bus.subscribe((event: RuntimeEvent) => {
+  if (event.type === "turn.completed" && event.turnId && shouldIgnoreProviderEvent(event)) {
+    const key = jobUsageTurnKey(event.threadId, event.turnId);
+    const capture = jobUsageByProviderTurn.get(key);
+    if (capture) {
+      jobUsageByProviderTurn.delete(key);
+      const job = completedJobUsage(capture);
+      if (!job) return;
+      bookTurnUsage({ ...capture.row, job, tokenObservation: tokenObservation(event.usage),
+        input: event.usage?.input ?? 0, output: event.usage?.output ?? 0,
+        ...(typeof event.usage?.cachedInput === "number" ? { cachedInput: event.usage.cachedInput } : {}),
+        costUsd: event.cost ?? null }, Boolean(event.usage));
+    }
+    return;
+  }
+  if (event.type !== "turn.started" || !event.turnId || shouldIgnoreProviderEvent(event)) return;
+  const generation = activeInternalGenerationByThread.get(event.threadId);
+  const assignmentId = generation && nativeAssignmentByGeneration.get(generation);
+  const assignment = coordinatorUsageAssignment(coordinator, { assignmentId, generation, threadId: event.threadId });
+  const binding = bindJobUsageTurn(assignment, { generation, turnId: event.turnId });
+  if (!binding || !assignment) return;
+  const bot = store.projectBotForTask(assignment.assignee.botId, event.threadId) ?? store.bot(assignment.assignee.botId);
+  if (!bot) return;
+  const instanceId = event.providerInstanceId ?? bot.modelSelection.instanceId;
+  const routine = activeRoutineRunForThread(event.threadId);
+  jobUsageByProviderTurn.set(jobUsageTurnKey(event.threadId, event.turnId), { binding, row: {
+    botId: bot.id, botName: bot.name, threadId: event.threadId, instanceId,
+    driverKind: registry.get(instanceId)?.driverKind ?? "unknown",
+    model: routedTurnModels.get(event.threadId) ?? store.taskByThread(bot.id, event.threadId)?.modelSelection?.model ?? bot.modelSelection.model,
+    trigger: routine ? { kind: "routine", routineId: routine.routineId, label: routine.routineName }
+      : turnTriggers.get(event.threadId) ?? (assignment.parentId ? { kind: "bot", botId: assignment.requester.botId } : { kind: "owner" }),
+  } });
+  while (jobUsageByProviderTurn.size > 4096) jobUsageByProviderTurn.delete(jobUsageByProviderTurn.keys().next().value!);
+});
 const groupSpeakers = new Map<string, { botId: string; name: string; color: string; since?: number }>();
 const roomMemberContexts = new RoomContextTracker({
   heldUntil: (threadId) => cacheKeepWarmStatus(threadId)?.until,
@@ -4238,7 +4283,7 @@ const coordinator: Coordinator = createCoordinator({
         if (child.groupId ? !room || !store.groupTaskByThread(room.id, child.threadId) : !store.taskByThread(child.botId, child.threadId)) return;
         const cause = followupLine ?? (child.outcome === "interrupted" && child.outcomeDetail ? child.outcomeDetail : child.result);
         const member = room ? store.bot(child.botId) : undefined;
-        store.appendMessage(child.threadId, { role: "bot", kind: "activity",
+        if (!store.messagesFor(child.threadId).some(message => message.runtimeReportId === child.id)) store.appendMessage(child.threadId, { role: "bot", kind: "activity", runtimeReportId: child.id,
           ...(member ? { from: { botId: member.id, name: member.name, color: member.color } } : {}), tool: failedTurnTool(cause) });
         if (room) store.patchGroup(room.id, { unread: true });
         else store.patchTask(child.botId, child.threadId, { unread: true });
@@ -4247,7 +4292,7 @@ const coordinator: Coordinator = createCoordinator({
       // A notice's failure is marked in its own thread, so a restart's recovery cannot send it again.
       if (child.mode === "notify") {
         if (child.status !== "completed" && store.taskByThread(child.botId, child.threadId)) {
-          store.appendMessage(child.threadId, { role: "bot", kind: "activity",
+          if (!store.messagesFor(child.threadId).some(message => message.runtimeReportId === child.id)) store.appendMessage(child.threadId, { role: "bot", kind: "activity", runtimeReportId: child.id,
             tool: { name: `Send failed — ${child.result.split("\n", 1)[0]!.slice(0, 180)}`, ok: false, ...(child.id ? { handoffId: child.id } : {}) } });
         }
         return;
@@ -4256,9 +4301,8 @@ const coordinator: Coordinator = createCoordinator({
       const group = parent.groupId ? store.group(parent.groupId) : undefined;
       if (parent.groupId ? !group || !store.groupTaskByThread(group.id, parent.threadId) : !store.taskByThread(parent.botId, parent.threadId)) return;
       const bot = store.bot(child.botId);
-      if (store.messagesFor(parent.threadId).some(m => m.roomRequest?.id === child.id && m.roomRequest.phase === "result")) return;
       const problem = roomHandoffProblem(child, parent);
-      store.appendMessage(parent.threadId, {
+      if (!store.messagesFor(parent.threadId).some(message => message.roomRequest?.id === child.id && message.roomRequest.phase === "result")) store.appendMessage(parent.threadId, {
         role: "bot", kind: "activity",
         roomRequest: { id: child.id, phase: "result" },
         from: bot ? { botId: bot.id, name: bot.name, color: bot.color } : undefined,
@@ -7205,6 +7249,9 @@ bus.subscribe((event: RuntimeEvent) => {
       }
       break;
     case "turn.completed": {
+      const usageKey = event.turnId ? jobUsageTurnKey(event.threadId, event.turnId) : undefined;
+      const job = completedJobUsage(usageKey ? jobUsageByProviderTurn.get(usageKey) : undefined);
+      if (usageKey) jobUsageByProviderTurn.delete(usageKey);
       settleWaitingOnPersonChips(event.threadId);
       const internal = isInternalTurn(event.threadId);
       clearInternalTurn(event.threadId);
@@ -7344,12 +7391,13 @@ bus.subscribe((event: RuntimeEvent) => {
           ...(typeof tokens?.cachedInput === "number" ? { cachedInput: tokens.cachedInput } : {}),
           ...(promptBytes ? { promptBytes } : {}),
           costUsd: event.cost ?? null,
+          ...(job ? { job, tokenObservation: tokenObservation(event.usage) } : {}),
           trigger: routineRun
             ? { kind: "routine", routineId: routineRun.routineId, label: routineRun.routineName, runId: routineRun.id }
             : internal
               ? { kind: "bot", ...(settledTask?.openedBy?.botId ? { botId: settledTask.openedBy.botId } : {}) }
               : turnTriggers.get(event.threadId) ?? { kind: "owner" },
-        });
+        }, Boolean(event.usage));
         const digestSettled = completedTurnId ? scheduleTurnDigest({
             botId: bot.id,
             botName: bot.name,
@@ -7407,10 +7455,11 @@ bus.subscribe((event: RuntimeEvent) => {
           ...(typeof tokens?.cachedInput === "number" ? { cachedInput: tokens.cachedInput } : {}),
           ...(promptBytes ? { promptBytes } : {}),
           costUsd: event.cost ?? null,
+          ...(job ? { job, tokenObservation: tokenObservation(event.usage) } : {}),
           trigger: routineRun
             ? { kind: "routine", routineId: routineRun.routineId, label: routineRun.routineName, runId: routineRun.id }
             : turnTriggers.get(event.threadId) ?? { kind: "owner" },
-        });
+        }, Boolean(event.usage));
         void flushUsageLedger(DATA_DIR).then(() => {
           groupUsageReader.refresh();
           const current = store.group(group.id);
@@ -9737,6 +9786,31 @@ const validateModelProposal = (selection: ModelSelection, current?: BotRecord): 
   return null;
 };
 const teamMemory = new TeamMemory(join(DATA_DIR, "team-memory.json"));
+const projectMemory = new ProjectMemory({
+  memory: teamMemory,
+  projects: () => readProjectMemoryProjects(join(DATA_DIR, "project-memory-policy.json")),
+  context: ({ botId, threadId }) => {
+    const bot = store.bot(botId);
+    const owner = connectorThread(botId, threadId);
+    const generation = activeInternalGenerationByThread.get(threadId);
+    const assignmentId = generation && (nativeAssignmentByGeneration.get(generation) ?? generation);
+    const node = assignmentId && coordinator.node(assignmentId);
+    if (!bot || bot.hidden || !owner || !node || node.botId !== botId || node.threadId !== threadId || ENDED.has(node.status)) return undefined;
+    const roomTask = owner.group ? store.groupTaskByThread(owner.group.id, threadId) : undefined;
+    const cwd = owner.group
+      ? roomTask ? roomTask.pinnedCwd : owner.group.threadId === threadId ? owner.group.pinnedCwd : undefined
+      : store.taskByThread(botId, threadId)?.cwd;
+    if (typeof cwd !== "string") return undefined;
+    const audience = owner.group?.memberIds.map(id => store.bot(id));
+    if (audience?.some(member => !member || member.hidden)) return undefined;
+    const source = [...store.activePath(threadId)].reverse().find(message => message.role === "user" && message.kind === "text");
+    const personDriven = coordinator.node(node.rootId)?.origin?.kind === "user";
+    return { botId, threadId, botName: bot.name, section: bot.section, cwd, canApply: personDriven && Boolean(appliesDirectly(botId, threadId)),
+      assignmentId: node.id, rootJobId: node.rootId, turnId: generation,
+      ...(source ? { messageId: source.id } : {}),
+      ...(audience ? { audience: audience.map(member => ({ botId: member!.id, section: member!.section })) } : {}) };
+  },
+});
 const teamMemoryRequests = createTeamMemoryRequests({ teamMemory, store, sectionKey: sectionContextKey, decide: (row) => appendDecision(DATA_DIR, row) });
 const outboundRequests = new OutboundRequestService();
 const outboundCounts = new OutboundCounts(join(DATA_DIR, "outbound-counts.json"));
@@ -13341,6 +13415,17 @@ ROUTES.push(createUsageRoutes({
     return bot ? { botId: bot.id, botName: bot.name, model: bot.modelSelection.model, driverKind: registry.get(bot.modelSelection.instanceId)?.driverKind ?? "" } : null;
   },
   canSee: (auth) => { const visible = visibleTo(viewerFor(auth)); return (threadId) => visible.thread(threadId); },
+  jobs: (threadId, since, auth) => {
+    const visible = visibleTo(viewerFor(auth));
+    if (!visible.thread(threadId)) return undefined;
+    const owner = store.botByThread(threadId);
+    const job = coordinator.job(threadId, since, owner?.id);
+    const rows = job.rows.filter(row => visible.thread(row.assignee.destination.threadId));
+    const visibleIds = new Set(rows.map(row => row.id));
+    const visibleRoots = new Set(rows.map(row => row.rootId));
+    return { scopes: job.scopes.filter(id => visibleIds.has(id)), rows,
+      incompleteRoots: [...new Set(job.rows.filter(row => visibleRoots.has(row.rootId) && !visibleIds.has(row.id)).map(row => row.rootId))] };
+  },
 }));
 ROUTES.push(createThreadModelRoutes({
   bot: (id) => store.bot(id),
@@ -14439,6 +14524,19 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         });
         return json(res, 201, proposed);
       }
+      if (method === "POST" && path === "/api/internal/project-memory") {
+        if (url.searchParams.size) return json(res, 400, { error: "Project-memory scope comes from the current native conversation, not query parameters", code: "invalid" });
+        const body = await readInternalBody();
+        requireActiveInternalCapability();
+        try {
+          const result = projectMemory.request({ botId: internalCapability.botId, threadId: internalCapability.threadId }, body);
+          return json(res, result.state === "remembered" ? 201 : 200, result);
+        } catch (error) {
+          if (error instanceof ProjectMemoryError) return json(res, error.status, { error: error.message, code: error.code });
+          if (error instanceof TeamMemoryConflict) return json(res, 409, { error: error.message, code: "conflict" });
+          throw error;
+        }
+      }
       if (method === "POST" && path === "/api/internal/team-memory") {
         const parsed = z.object({
           fromBotId: z.string().min(1).max(128),
@@ -14951,7 +15049,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
               for (const lane of lanes.values()) coordinator.poll(lane);
             }
             const current = coordinator.status(id) ?? status;
-            return json(res, 200, { assignment: shape(current.assignment), children: current.children.map(shape), inbox: current.inbox });
+            await flushUsageLedger(DATA_DIR);
+            const tree = coordinator.job(fromThreadId, 0, internalSender.id).rows.filter(row => row.rootId === current.assignment.rootId && owned(row));
+            const permitted = tree.filter(reachable);
+            const usage = readJobUsage(DATA_DIR, permitted, current.assignment.rootId);
+            if (permitted.length !== tree.length) usage.coverage = { ...usage.coverage, state: "partial", scopeComplete: false, tokens: "partial", costs: "partial" };
+            return json(res, 200, { assignment: shape(current.assignment), children: current.children.filter(reachable).map(shape), inbox: current.inbox, usage });
           }
           await new Promise((wake) => setTimeout(wake, 500));
         }

@@ -162,4 +162,29 @@ describe("native office directives", () => {
     const retry = f.control.prepare(f.input); f.authorize(); const next = await retry;
     next.finish("completed"); f.control.close(); f.store.close();
   });
+
+  it("aborts a consumed native lease on shutdown without cancelling its recoverable assignment", async () => {
+    const f = fixture();
+    const pending = f.control.prepare(f.input);
+    f.authorize();
+    const lease = await pending;
+    lease.assert("process");
+    const before = f.store.get("root")!;
+    before.result = "Durable progress before restart";
+    f.store.update(before);
+    try {
+      f.control.close();
+      expect(lease.signal.aborted).toBe(true);
+      expect(f.nativeStops).toEqual(["generation-1"]);
+      expect(f.store.get("root")).toMatchObject({
+        status: "running", result: "Durable progress before restart",
+        office: { attempts: [{ state: "uncertain", consumedAt: expect.any(Number) }] },
+      });
+      expect(f.store.get("root")?.outcome).toBeUndefined();
+      expect(f.store.get("root")?.finishedAt).toBeUndefined();
+      expect(f.store.get("root")?.reportedAt).toBeUndefined();
+      expect(f.store.events("root").filter(event => event.kind === "cancelled")).toEqual([]);
+      await expect(f.control.prepare(f.input)).rejects.toThrow(/stopped/);
+    } finally { f.control.close(); f.store.close(); }
+  });
 });

@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 import type { BeginTurnRequest, ComposedTurn, CoordinatorHost, HandoffOpener, HandoffOptions, HandoffView, HostTurnResult } from "./coordinator.ts";
 import type { RoomAddress } from "./coordinator.ts";
-import { needsInputQuestion, RuntimeCoordinator, view } from "./runtime-coordinator.ts";
+import { coordinatorUsageAssignment, needsInputQuestion, RuntimeCoordinator, view } from "./runtime-coordinator.ts";
 import { ENVELOPE_MARK } from "./runtime/envelope.ts";
 import type { Assignment, Level, Limits } from "./runtime/types.ts";
 import { removeTempDir } from "./testing/cleanup.ts";
@@ -184,6 +184,18 @@ describe("needsInputQuestion", () => {
 });
 
 describe("RuntimeCoordinator: the requesting turn and its tree", () => {
+  it("supplies a detached exact native assignment for provider-turn usage", () => {
+    const w = world();
+    begun(w, chief, "usage-generation");
+    const snapshot = coordinatorUsageAssignment(w.coordinator, { generation: "usage-generation", threadId: chief.threadId });
+    expect(snapshot).toMatchObject({ id: "usage-generation", rootId: "usage-generation", executions: 1 });
+    snapshot!.assignee.botId = "mutated";
+    expect(w.coordinator.node("usage-generation")?.botId).toBe("chief");
+    expect(coordinatorUsageAssignment(w.coordinator, { assignmentId: "usage-generation", threadId: "other" })).toBeUndefined();
+    expect(coordinatorUsageAssignment(w.coordinator, { generation: "missing", threadId: chief.threadId })).toBeUndefined();
+    w.coordinator.close();
+  });
+
   it("creates the root under the generation, runs the child with the envelope, and resumes the root with the child's report", async () => {
     const w = world((node) => node.botId === "builder" ? { ok: true, text: "Built it on branch csv-export." } : undefined);
     w.host.levels.builder = { level: "edits", driverKind: "claudeAgent" };
