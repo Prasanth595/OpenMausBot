@@ -17,21 +17,24 @@ export interface NotifyBot {
 
 /** What muting a bot conversation thread does to one notice:
  * - "silenced": never reaches the person's devices from a muted thread;
- * - "kept-without-chief": silenced only when the thread's bot has a Chief of Staff, who receives the incident report instead;
+ * - "kept-unless-chief-took-it": silenced only when the Chief of Staff accepted this very report (its incident turn
+ *   started or queued); a missing, refusing, rate-limited or busy-elsewhere Chief leaves it to the person;
  * - "kept": always reaches the person — a gate only they can lift, or account-level spend.
  * "peer-approval" is the approval a bot asks of the person before it acts on a teammate; every other notice is its NotifyKind. */
 export type ThreadMuteNotice = NotifyKind | "peer-approval";
-export type ThreadMuteRule = "silenced" | "kept-without-chief" | "kept";
+export type ThreadMuteRule = "silenced" | "kept-unless-chief-took-it" | "kept";
 export const THREAD_MUTE_POLICY: Record<ThreadMuteNotice, ThreadMuteRule> = {
   done: "silenced",
   "delegation-settled": "silenced",
   mention: "silenced",
   "routine-deferred": "silenced",
-  approval: "silenced",
-  question: "silenced",
-  "sign-in": "silenced",
-  "turn-failed": "kept-without-chief",
-  "routine-failed": "kept-without-chief",
+  // Waits only the person can lift, whether or not a Chief exists. A turn that ends on NEEDS INPUT in a muted thread
+  // also tells the person as a question (chief-notices reportNeedsInput).
+  approval: "kept",
+  question: "kept",
+  "sign-in": "kept",
+  "turn-failed": "kept-unless-chief-took-it",
+  "routine-failed": "kept-unless-chief-took-it",
   // Sent only when no Chief received the incident or escalation (none, out of reach, or it could not start).
   incident: "kept",
   "peer-approval": "kept",
@@ -39,10 +42,10 @@ export const THREAD_MUTE_POLICY: Record<ThreadMuteNotice, ThreadMuteRule> = {
   spend: "kept",
 };
 
-/** Whether a muted thread still sends `notice`; `hasChief` is asked only when the rule depends on it. */
-export function mutedThreadNotifies(notice: ThreadMuteNotice, hasChief: () => boolean): boolean {
-  const rule = THREAD_MUTE_POLICY[notice];
-  return rule === "kept" || (rule === "kept-without-chief" && !hasChief());
+/** Whether a muted thread still sends `notice`. A "kept-unless-chief-took-it" notice is sent: its caller
+ * (chief-notices reportFailure) withholds it, from a muted thread, once the Chief accepted its report. */
+export function mutedThreadNotifies(notice: ThreadMuteNotice): boolean {
+  return THREAD_MUTE_POLICY[notice] !== "silenced";
 }
 
 export interface ThreadMuteDefault {

@@ -14,6 +14,8 @@ import { openSse } from "./testing/sse.ts";
 
 const SERVER_DIR = dirname(fileURLToPath(import.meta.url));
 const FAKE_CLAUDE = join(SERVER_DIR, "testing", "fake-claude-cli.ts");
+const FAKE_ACP = join(SERVER_DIR, "testing", "fake-acp-cli.ts");
+const NEEDS_INPUT_REPLY = "Half done.\nNEEDS INPUT: which repository should I tag?";
 const TEST_CAPABILITY_KEY = "thread-mute-fixture-capability";
 
 interface ThreadRow { threadId: string; muted: boolean; own: boolean }
@@ -40,9 +42,9 @@ const token = async (botId: string, threadId: string): Promise<Record<string, st
   expect(minted.status).toBe(201);
   return { authorization: `Bearer ${minted.body.token}` };
 };
-const createBot = async (name: string) => {
+const createBot = async (name: string, instanceId = "fake", model = "claude-sonnet-5") => {
   const created = (await api<{ bot: WireBot }>("POST", "/api/bots", {})).body.bot;
-  const patched = await api<{ bot: WireBot }>("PATCH", `/api/bots/${created.id}`, { name, notifications: true, modelSelection: { instanceId: "fake", model: "claude-sonnet-5" } });
+  const patched = await api<{ bot: WireBot }>("PATCH", `/api/bots/${created.id}`, { name, notifications: true, modelSelection: { instanceId, model } });
   expect(patched.status).toBe(200);
   return patched.body.bot;
 };
@@ -76,12 +78,21 @@ const cleanup = async (botIds: string[]) => {
 
 beforeAll(async () => {
   chmodSync(FAKE_CLAUDE, 0o755);
+  chmodSync(FAKE_ACP, 0o755);
   home = mkdtempSync(join(tmpdir(), "omb-thread-mute-"));
   const data = join(home, ".openmausbot");
   mkdirSync(data, { recursive: true });
   writeFileSync(join(data, "config.json"), JSON.stringify({
     instances: {
       fake: { driver: "claudeAgent", displayName: "Fake Claude", environment: { FAKE_CLAUDE_TOOL_CALLS: "[]" }, config: { cli: FAKE_CLAUDE } },
+      // Every turn asks to run `echo hi`: on Ask, a tool approval card.
+      asking: { driver: "grokAgent", displayName: "Asking fixture", environment: { FAKE_ACP_MODE: "permission" }, config: { cli: FAKE_ACP, fullAuto: false } },
+      // Every turn stops to ask the person a question no rule may answer.
+      curious: { driver: "grokAgent", displayName: "Curious fixture", environment: { FAKE_ACP_MODE: "question" }, config: { cli: FAKE_ACP, fullAuto: true } },
+      needy: {
+        driver: "claudeAgent", displayName: "Needy fixture", config: { cli: FAKE_CLAUDE },
+        environment: { FAKE_CLAUDE_TOOL_CALLS: "[]", FAKE_CLAUDE_REPLIES: JSON.stringify(Array.from({ length: 8 }, () => NEEDS_INPUT_REPLY)) },
+      },
     },
   }));
   const port = await freePortBlock([0, 1]);
@@ -165,6 +176,72 @@ describe("notifications from a muted thread", () => {
     } finally {
       stream.close();
       await cleanup([bot.id, beacon.id]);
+    }
+  }, 60_000);
+});
+
+describe("a muted thread waiting on the person", () => {
+  const withChief = async (withOne: boolean, botIds: string[]) => {
+    if (!withOne) return [];
+    const chief = await createBot("Charlie");
+    expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, peers: botIds })).status).toBe(200);
+    return [chief.id];
+  };
+
+  it.each([false, true])("still asks for a tool approval, an answer and a sign-in (with a Chief of Staff: %s)", async (chiefInReach) => {
+    const asker = await createBot("Ash", "asking", "fake-model");
+    const curious = await createBot("Cleo", "curious", "fake-model");
+    const signer = await createBot("Sid");
+    const chiefs = await withChief(chiefInReach, [asker.id, curious.id, signer.id]);
+    const stream = await openSse(`${base}/api/events`);
+    try {
+      expect((await api("PATCH", `/api/bots/${asker.id}`, { approvalMode: "ask" })).status).toBe(200);
+      // A sign-in needs a place to sign in on: this bot works in its built-in browser.
+      expect((await api("PATCH", "/api/config", { features: { browser: true } })).status).toBe(200);
+      expect((await api("PATCH", `/api/bots/${signer.id}`, { computer: "browser" })).status).toBe(200);
+      const threads = {
+        approval: await personThread(asker.id, "Deploy"),
+        question: await personThread(curious.id, "Palette"),
+        "sign-in": await personThread(signer.id, "Vendor portal"),
+      };
+      for (const [botId, threadId] of [[asker.id, threads.approval], [curious.id, threads.question], [signer.id, threads["sign-in"]]] as const) {
+        expect((await setMute(botId, threadId, true)).body.task).toMatchObject({ notificationsMuted: true });
+      }
+      expect((await api("POST", `/api/bots/${asker.id}/messages`, { text: "Deploy it.", threadId: threads.approval })).status).toBe(202);
+      expect((await api("POST", `/api/bots/${curious.id}/messages`, { text: "Pick a colour.", threadId: threads.question })).status).toBe(202);
+      const signIn = await api("POST", "/api/internal/request-sign-in", { site: "example.com", reason: "the portal wants a code" },
+        await token(signer.id, threads["sign-in"]));
+      expect(signIn.status, JSON.stringify(signIn.body)).toBe(201);
+      for (const [kind, threadId] of Object.entries(threads)) {
+        const frame = await stream.until((candidate) => candidate.kind === "notify" && candidate.notification?.kind === kind
+          && candidate.notification.threadId === threadId, 20_000);
+        expect(frame.notification.threadId).toBe(threadId);
+      }
+    } finally {
+      stream.close();
+      for (const botId of [asker.id, curious.id]) await api("POST", `/api/bots/${botId}/interrupt`, {}).catch(() => undefined);
+      await api("PATCH", "/api/config", { features: { browser: false } }).catch(() => undefined);
+      await cleanup([asker.id, curious.id, signer.id, ...chiefs]);
+    }
+  }, 90_000);
+
+  it.each([false, true])("tells the person once that a turn ended needing them, with escalations off (with a Chief of Staff: %s)", async (chiefInReach) => {
+    const needy = await createBot("Nell", "needy");
+    const beacon = await createBot("Beacon");
+    const chiefs = await withChief(chiefInReach, [needy.id]);
+    const stream = await openSse(`${base}/api/events`);
+    try {
+      const side = await personThread(needy.id, "Release");
+      expect((await setMute(needy.id, side, true)).status).toBe(200);
+      await chat(needy.id, side, "Tag the release.");
+      // The muted thread settled first, so every frame it sent precedes the beacon's.
+      await chat(beacon.id, beacon.threadId, "Ping.");
+      await stream.until((frame) => frame.kind === "notify" && frame.notification?.threadId === beacon.threadId && frame.notification.kind === "done", 15_000);
+      const told = stream.frames.flatMap((frame) => frame.kind === "notify" && frame.notification?.botId !== beacon.id ? [frame.notification as NotificationLogEntry] : []);
+      expect(told).toEqual([expect.objectContaining({ kind: "question", botId: needy.id, threadId: side, body: "which repository should I tag?" })]);
+    } finally {
+      stream.close();
+      await cleanup([needy.id, beacon.id, ...chiefs]);
     }
   }, 60_000);
 });

@@ -1,6 +1,6 @@
 import { failedTurnTool } from "../../shared/failed-turn.ts";
 import { admit } from "../admission.ts";
-import { ESCALATIONS_THREAD_TITLE, EscalationLedger, escalationChip, escalationDeliverable, escalationText, type Escalation, type EscalationKind } from "../escalations.ts";
+import { ESCALATIONS_THREAD_TITLE, EscalationLedger, escalationChip, escalationDeliverable, escalationText, NEEDS_INPUT_GATE, type Escalation, type EscalationKind } from "../escalations.ts";
 import { chiefForBot, INCIDENTS_THREAD_TITLE, IncidentLedger, incidentChip, incidentContext, incidentText, type Incident, type IncidentKind } from "../incidents.ts";
 import { buildNotification, type Notification } from "../notify.ts";
 import { redactSecretsInText } from "../redact.ts";
@@ -10,11 +10,16 @@ import type { BotRecord, Message, Store } from "../store.ts";
 type PeerAsk = NonNullable<Message["peerAsk"]>;
 
 export type EscalationOutcome = "chief" | "person" | "muted" | "off" | "skipped" | "failed";
+/** "chief": the Chief accepted the report (its turn started or queued; a later refusal tells the person);
+ * "person": the person was told instead; "skipped": nobody was, it folded into assigned work or hit the rate limit. */
+export type IncidentOutcome = "chief" | "person" | "skipped";
 
 export interface ChiefNoticeDeps {
   store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "groupByThread" | "createTask" | "appendMessage" | "messagesFor">;
   assignerOf(threadId: string): unknown;
   notify(notification: Notification | null): void;
+  /** Whether the person muted (or the default mutes) this bot's thread. */
+  muted(botId: string, threadId: string): boolean;
   threadBusy(botId: string, threadId: string): boolean;
   botAtThreadCapacity(botId: string): boolean;
   groupTurnActive(botId: string): boolean;
@@ -47,13 +52,14 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
 
   function deliver(input: {
     chief: BotRecord | null; title: string; bot: BotRecord; threadId: string; chip: string; text: string; alreadyNotified: boolean;
+    personNotice?: Notification;
   }): "chief" | "person" {
     const { chief, bot, threadId } = input;
     const task = store.taskByThread(bot.id, threadId);
     const group = store.groupByThread(threadId);
     const tellThePerson = () => {
       if (!input.alreadyNotified) {
-        deps.notify(buildNotification("incident", bot, threadId, input.chip, {
+        deps.notify(input.personNotice ?? buildNotification("incident", bot, threadId, input.chip, {
           avatarUrl: bot.avatarUrl,
           ...(group ? { group: { id: group.id, name: group.name } } : {}),
         }));
@@ -87,10 +93,12 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     return "chief";
   }
 
-  function reportIncident(input: { kind: IncidentKind; bot: BotRecord; threadId: string; detail: string }): void {
+  function reportIncident(input: {
+    kind: IncidentKind; bot: BotRecord; threadId: string; detail: string; alreadyNotified?: boolean; personNotice?: Notification;
+  }): IncidentOutcome {
     const { bot, threadId } = input;
     const task = store.taskByThread(bot.id, threadId);
-    if (deps.assignerOf(threadId)) return;
+    if (deps.assignerOf(threadId)) return "skipped";
     const group = store.groupByThread(threadId);
     const incident: Incident = {
       kind: input.kind,
@@ -102,12 +110,46 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
       ...incidentContext(deps.store.messagesFor(threadId)),
     };
     const count = incidentLedger.note(threadId);
-    if (count.muted) return;
-    deliver({
+    if (count.muted) return "skipped";
+    return deliver({
       chief: chiefForBot(store.bots, bot), title: INCIDENTS_THREAD_TITLE, bot, threadId,
-      chip: incidentChip(incident), text: incidentText(incident, count),
-      alreadyNotified: input.kind === "could-not-start" || input.kind === "routine-failed",
+      chip: incidentChip(incident), text: incidentText(incident, count), alreadyNotified: input.alreadyNotified === true,
+      ...(input.personNotice ? { personNotice: input.personNotice } : {}),
     });
+  }
+
+  /** A turn that could not start, or a routine that failed: the person hears of it once. From a muted thread the direct
+   * notice waits on the report: the Chief accepting it replaces the notice, anything else leaves exactly one. */
+  function reportFailure(input: {
+    notification: Notification | null; kind: "could-not-start" | "routine-failed"; bot: BotRecord; threadId: string; detail: string;
+  }): void {
+    const { notification, ...incident } = input;
+    if (!notification || !deps.muted(notification.botId, notification.threadId)) {
+      deps.notify(notification);
+      reportIncident({ ...incident, alreadyNotified: true });
+      return;
+    }
+    // "person": delivery sent this notice; "chief": a refusal tells them through incidentRefused, the report not marked
+    // notified; "skipped": nobody else will.
+    if (reportIncident({ ...incident, alreadyNotified: false, personNotice: notification }) === "skipped") deps.notify(notification);
+  }
+
+  /** A turn that ended on NEEDS INPUT. In a muted thread the person hears of it directly, whatever the escalation
+   * setting or Chief, since the Chief's escalations thread may itself be muted; the escalation then counts it as told.
+   * A question for assigned work goes to its assigner, as the escalation's own rule says. */
+  function reportNeedsInput(input: { bot: BotRecord; threadId: string; question: string }): void {
+    const { bot, threadId, question } = input;
+    let told = false;
+    if (deps.muted(bot.id, threadId) && !deps.assignerOf(threadId)) {
+      const group = store.groupByThread(threadId);
+      const notification = buildNotification("question", bot, threadId, question, {
+        avatarUrl: bot.avatarUrl,
+        ...(group ? { group: { id: group.id, name: group.name } } : {}),
+      });
+      deps.notify(notification);
+      told = notification !== null;
+    }
+    reportEscalation({ kind: "needs-input", bot, threadId, gate: NEEDS_INPUT_GATE, reason: question, alreadyNotified: told });
   }
 
   // Advisory: a delivery fault is logged and never reaches the gate, the turn fold or the caller's own outcome.
@@ -142,5 +184,5 @@ export function createChiefNotices(deps: ChiefNoticeDeps) {
     }
   }
 
-  return { reportIncident, reportEscalation, incidentRefused, incidentLastAt: (threadId: string) => incidentLedger.lastAt(threadId) };
+  return { reportIncident, reportFailure, reportNeedsInput, reportEscalation, incidentRefused, incidentLastAt: (threadId: string) => incidentLedger.lastAt(threadId) };
 }

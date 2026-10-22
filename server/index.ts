@@ -239,10 +239,10 @@ import { openCodeProviderKeysAllowed, setOpenCodeProviderKeyPolicy } from "./dri
 import { readMessageText, recallMessages, recentMessages, closeMessageSearch, closeMessageDb, chatFollowups, cancelledChatFollowup, settleChatFollowups, threadsReferencing, logNotification, lastRowAt } from "./message-db.ts";
 import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from "./recall-disclosure.ts";
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
-import { chiefEscalationsEnabled, NEEDS_INPUT_GATE, peerApprovalGate, RAISED_GATE } from "./escalations.ts";
+import { chiefEscalationsEnabled, peerApprovalGate, RAISED_GATE } from "./escalations.ts";
 import { createChiefNotices } from "./host/chief-notices.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
-import { chiefForBot, RETRY_BLOCKED } from "./incidents.ts";
+import { RETRY_BLOCKED } from "./incidents.ts";
 
 const SESSION_READ_MAX_CHARS = 8_000;
 import { promptWithReply, replyTargetIn, transcriptText, type ReplyTarget } from "./replies.ts";
@@ -5458,10 +5458,7 @@ const QUIET_TURN_NEWS: ReadonlySet<Notification["kind"]> = new Set(["done", "tur
 function notify(notification: Notification | null, notice?: ThreadMuteNotice) {
   if (!notification) return;
   if (QUIET_TURN_NEWS.has(notification.kind) && quietTurnThreads.has(notification.threadId)) return;
-  if (threadMuted(notification.botId, notification.threadId) && !mutedThreadNotifies(notice ?? notification.kind, () => {
-    const bot = store.bot(notification.botId);
-    return bot ? chiefForBot(store.bots, bot) !== null : false;
-  })) return;
+  if (threadMuted(notification.botId, notification.threadId) && !mutedThreadNotifies(notice ?? notification.kind)) return;
   broadcast({ kind: "notify", notification: logNotification(notification) });
 }
 
@@ -7272,9 +7269,10 @@ bus.subscribe((event: RuntimeEvent) => {
       const fileIncident = () => { if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: failureDetail }); };
       if (failed && bot) void quotaSwitch.turnFailed(bot, event, internal);
       else if (bot && event.ok) quotaSwitch.turnSucceeded(bot, event.threadId);
-      const question = bot && event.ok && !stopped && completedTurnId && !routineRun && chiefEscalationsEnabled(cfg) ? needsInputQuestion(store.activePath(event.threadId)
+      // Read whatever the escalation setting: a muted thread tells the person directly (chief-notices reportNeedsInput).
+      const question = bot && event.ok && !stopped && completedTurnId && !routineRun ? needsInputQuestion(store.activePath(event.threadId)
         .findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === completedTurnId)?.text ?? "") : undefined;
-      if (bot && question !== undefined) reportEscalation({ kind: "needs-input", bot, threadId: event.threadId, gate: NEEDS_INPUT_GATE, reason: question, alreadyNotified: false });
+      if (bot && question !== undefined) reportNeedsInput({ bot, threadId: event.threadId, question });
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
       const lastContext = turnContext.get(event.threadId);
@@ -7516,8 +7514,8 @@ function runtimeWorkPending(threadId: string): boolean {
         && coordinator.children(root.id).some(child => child.reply !== "none" && child.createdAt >= (root.startedAt ?? 0)))));
 }
 
-const { reportIncident, reportEscalation, incidentRefused, incidentLastAt } = createChiefNotices({
-  store, notify, threadBusy, botAtThreadCapacity, startTurn,
+const { reportIncident, reportFailure, reportNeedsInput, reportEscalation, incidentRefused, incidentLastAt } = createChiefNotices({
+  store, notify, threadBusy, botAtThreadCapacity, startTurn, muted: threadMuted,
   assignerOf: (threadId) => coordinator.assignerOf(threadId),
   groupTurnActive: (botId) => Boolean(activeGroupTurnForBot(botId)),
   escalationsEnabled: () => chiefEscalationsEnabled(cfg),
@@ -8645,8 +8643,8 @@ async function startTurn(
           tool: failedTurnTool(message, placeFailure ? { place: placeFailure.row } : {}),
         });
         if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
-          notify(buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }));
-          reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
+          reportFailure({ notification: buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
+            kind: "could-not-start", bot, threadId, detail: message });
           // Claude settles the interrupt below as exit_before_result; the completion fold must not report it a second time.
           resourceOwner.lazyClaimFailureReported = true;
         }
@@ -9182,10 +9180,8 @@ async function startTurn(
         tool: failedTurnTool(message, e instanceof PlaceUnavailableError ? { place: e.row } : e instanceof TurnUsageLimitRefusedError ? { limitResetsAt: e.resetsAt } : {}),
       });
       if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
-        notify(
-          buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
-        );
-        reportIncident({ kind: "could-not-start", bot, threadId, detail: message });
+        reportFailure({ notification: buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
+          kind: "could-not-start", bot, threadId, detail: message });
       }
       store.setTaskActivity(bot.id, threadId, "idle");
       directTurnBots.delete(threadId);
@@ -9427,8 +9423,8 @@ routines = new RoutineManager({
     const said = alert?.detail ?? run.error, detail = said ? `${run.routineName}: ${said}` : run.routineName;
     automationReports.runFailed(run, said ?? "");
     const notificationBot = routineSourceOwner(run)?.bot ?? bot;
-    notify(buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail));
-    reportIncident({ kind: "routine-failed", bot, threadId: run.threadId ?? bot.threadId, detail });
+    reportFailure({ notification: buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail),
+      kind: "routine-failed", bot, threadId: run.threadId ?? bot.threadId, detail });
   },
   onRunDeferred: (run, alert) => {
     const bot = store.bot(run.botId);

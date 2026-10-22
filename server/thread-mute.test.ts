@@ -6,7 +6,9 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { callTool, type ToolCallContext } from "./drivers/agents-call.ts";
 import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
-import { mutedThreadNotifies, THREAD_MUTE_POLICY, threadNotificationsMuted, type ThreadMuteDefault, type ThreadMuteNotice } from "./notify.ts";
+import { createChiefNotices } from "./host/chief-notices.ts";
+import { INCIDENT_HARD_LIMIT } from "./incidents.ts";
+import { buildNotification, mutedThreadNotifies, THREAD_MUTE_POLICY, threadNotificationsMuted, type Notification, type ThreadMuteDefault, type ThreadMuteNotice } from "./notify.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { Store } from "./store.ts";
 
@@ -15,29 +17,121 @@ const off: ThreadMuteDefault = { botOpened: false, mainThreadId: "main" };
 const on: ThreadMuteDefault = { botOpened: true, mainThreadId: "main" };
 
 describe("which notifications a muted thread still sends", () => {
-  // [bot has a Chief of Staff, bot has none]: true means the person is still notified.
-  const expected: Record<ThreadMuteNotice, [boolean, boolean]> = {
-    done: [false, false],
-    "delegation-settled": [false, false],
-    mention: [false, false],
-    "routine-deferred": [false, false],
-    approval: [false, false],
-    question: [false, false],
-    "sign-in": [false, false],
-    "turn-failed": [false, true],
-    "routine-failed": [false, true],
-    incident: [true, true],
-    "peer-approval": [true, true],
-    spend: [true, true],
+  // true: the muted thread still sends it. A failure is then withheld only once the Chief took its report (below).
+  const expected: Record<ThreadMuteNotice, boolean> = {
+    done: false,
+    "delegation-settled": false,
+    mention: false,
+    "routine-deferred": false,
+    approval: true,
+    question: true,
+    "sign-in": true,
+    "turn-failed": true,
+    "routine-failed": true,
+    incident: true,
+    "peer-approval": true,
+    spend: true,
   };
 
   it("covers every notification kind", () => {
     expect(Object.keys(THREAD_MUTE_POLICY).sort()).toEqual(Object.keys(expected).sort());
   });
 
-  it.each(Object.entries(expected) as Array<[ThreadMuteNotice, [boolean, boolean]]>)("%s, muted, with and without a Chief of Staff", (notice, [withChief, withoutChief]) => {
-    expect(mutedThreadNotifies(notice, () => true)).toBe(withChief);
-    expect(mutedThreadNotifies(notice, () => false)).toBe(withoutChief);
+  it.each(Object.entries(expected) as Array<[ThreadMuteNotice, boolean]>)("%s, muted", (notice, sent) => {
+    expect(mutedThreadNotifies(notice)).toBe(sent);
+  });
+
+  it("keeps every gate only the person can lift", () => {
+    for (const gate of ["approval", "question", "sign-in", "peer-approval"] as const) expect(THREAD_MUTE_POLICY[gate]).toBe("kept");
+    for (const failure of ["turn-failed", "routine-failed"] as const) expect(THREAD_MUTE_POLICY[failure]).toBe("kept-unless-chief-took-it");
+  });
+});
+
+describe("what a muted thread reports through the Chief", () => {
+  const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
+  // The Chief's report turns of the latest team(); a refusal's handler runs before this settles, being registered first.
+  let turns: Array<Promise<unknown>> = [];
+  const flush = () => Promise.allSettled(turns);
+  /** Quinn's muted thread; a Chief of Staff in reach when `chief`, whose report turns start, or are refused. */
+  const team = (opts: { chief: boolean; refuses?: boolean; escalations?: boolean; assigned?: boolean }) => {
+    const store = new Store(selection);
+    const qa = store.createBot({ name: "Quinn" });
+    if (opts.chief) {
+      const chief = store.createBot({ name: "Charlie" });
+      store.patchBot(chief.id, { chiefOfStaff: true, peers: [qa.id] });
+    }
+    const work = store.createTask(qa.id, "QA: PR #9", false, undefined, opener)!;
+    const sent: Notification[] = [], started: string[] = [];
+    turns = [];
+    const notices = createChiefNotices({
+      store, notify: (notification) => { if (notification) sent.push(notification); }, muted: (_botId, threadId) => threadId === work.threadId,
+      threadBusy: () => false, botAtThreadCapacity: () => false, groupTurnActive: () => false,
+      startTurn: (botId) => {
+        started.push(botId);
+        const turn = opts.refuses ? Promise.reject(new Error("the Chief's engine is signed out")) : Promise.resolve();
+        turns.push(turn);
+        return turn;
+      },
+      assignerOf: () => (opts.assigned ? { id: "assignment" } : undefined), escalationsEnabled: () => opts.escalations === true,
+    });
+    const bot = store.bot(qa.id)!;
+    const fail = (kind: "could-not-start" | "routine-failed") => notices.reportFailure({
+      notification: buildNotification(kind === "routine-failed" ? "routine-failed" : "turn-failed", bot, work.threadId, "the engine exited"),
+      kind, bot, threadId: work.threadId, detail: "the engine exited",
+    });
+    return { bot, work, sent, started, notices, fail };
+  };
+  const failures = ["could-not-start", "routine-failed"] as const;
+  const direct = { "could-not-start": "turn-failed", "routine-failed": "routine-failed" } as const;
+
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it.each(failures)("%s: tells the person once when the Chief's report turn is refused", async (kind) => {
+    const { bot, work, sent, started, fail } = team({ chief: true, refuses: true });
+    fail(kind);
+    await flush();
+    expect(started).toHaveLength(1);
+    expect(sent).toEqual([expect.objectContaining({ kind: "incident", botId: bot.id, threadId: work.threadId })]);
+  });
+
+  it.each(failures)("%s: tells the person nothing once the Chief takes the report", async (kind) => {
+    const { sent, started, fail } = team({ chief: true });
+    fail(kind);
+    await flush();
+    expect(started).toHaveLength(1);
+    expect(sent).toEqual([]);
+  });
+
+  it.each(failures)("%s: tells the person once when there is no Chief, the report folds into assigned work, or is rate-limited", async (kind) => {
+    for (const opts of [{ chief: false }, { chief: true, assigned: true }]) {
+      rmSync(DATA_DIR, { recursive: true, force: true });
+      const { sent, started, fail } = team(opts);
+      fail(kind);
+      await flush();
+      expect(started, JSON.stringify(opts)).toEqual([]);
+      expect(sent, JSON.stringify(opts)).toEqual([expect.objectContaining({ kind: direct[kind] })]);
+    }
+    rmSync(DATA_DIR, { recursive: true, force: true });
+    const { sent, fail } = team({ chief: true });
+    for (let i = 0; i < INCIDENT_HARD_LIMIT; i++) fail(kind);
+    await flush();
+    expect(sent).toEqual([]);
+    fail(kind);
+    expect(sent).toEqual([expect.objectContaining({ kind: direct[kind] })]);
+  });
+
+  it.each([false, true])("a turn that ends needing input, with escalations on: %s, tells the person once, Chief or not", async (escalations) => {
+    for (const chief of [false, true]) {
+      rmSync(DATA_DIR, { recursive: true, force: true });
+      const { bot, work, sent, started, notices } = team({ chief, escalations, refuses: true });
+      notices.reportNeedsInput({ bot, threadId: work.threadId, question: "which repository should I tag?" });
+      await flush();
+      expect(sent, `chief: ${chief}`).toEqual([expect.objectContaining({ kind: "question", threadId: work.threadId, body: "which repository should I tag?" })]);
+      // With a Chief, the escalation still goes out, already counted as told: even its refusal adds nothing.
+      expect(started, `chief: ${chief}`).toHaveLength(chief && escalations ? 1 : 0);
+    }
   });
 });
 
