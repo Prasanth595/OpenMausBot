@@ -254,7 +254,7 @@ export function BotAvatar({ bot, size = 44, label, readable = false, ...mascotPr
     const customSilhouette = customShape ? customMascotSilhouette(customShape) : undefined;
     return (
       <MausAvatar
-        bodyId={wornBody(bot.mascotBody, bot.color, dressed)}
+        bodyId={customShape ? undefined : wornBody(bot.mascotBody, bot.color, dressed)}
         silhouette={customSilhouette}
         {...mascotProps}
         color={bot.color}
