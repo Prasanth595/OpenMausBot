@@ -55,8 +55,8 @@ if (process.versions.electron && process.argv.includes(childFlag)) {
       await until(() => evaluate("Boolean(document.querySelector('#approval-review-model option[value=fixture-review-model]'))"), "review models appear");
       assert.equal(await evaluate("[...document.querySelectorAll('button')].find(element => element.textContent.trim() === 'Save').disabled"), true);
       await select("approval-review-model", "fixture-review-model");
-      await until(() => evaluate("Boolean(document.querySelector('#approval-review-effort option[value=none]'))"), "reasoning off is available");
-      await select("approval-review-effort", "none");
+      await until(() => evaluate("document.getElementById('approval-review-model').value === 'fixture-review-model'"), "generic reviewer selected");
+      assert.equal(await evaluate("document.querySelector('#approval-review-effort option[value=none]') === null"), true);
       const instructions = "Require a clearly scoped recipient before sending.";
       await evaluate(`(() => {
         const element = document.getElementById('approval-review-instructions');
@@ -66,23 +66,20 @@ if (process.versions.electron && process.argv.includes(childFlag)) {
       await save();
       await until(async () => {
         const review = (await config()).approvalReview;
-        return review?.model?.model === "fixture-review-model" && review?.model?.effort === "none" && review?.instructions === instructions;
+        return review?.model?.model === "fixture-review-model" && review?.model?.effort === undefined && review?.instructions === instructions;
       }, "saved selected reviewer and instructions");
       await window.loadURL(previewUrl);
       await until(() => evaluate("document.getElementById('approval-review-model')?.value === 'fixture-review-model'"), "reload restores selection");
       await until(() => evaluate("[...document.querySelector('#approval-review-engine').options].some(option => option.value === 'openaiCompat' && !option.disabled)"), "reload finishes loading reviewer catalog");
       assert.equal(await evaluate("document.getElementById('approval-review-instructions').value"), instructions);
-      assert.equal(await evaluate("document.getElementById('approval-review-effort').value"), "none");
-      await select("approval-review-effort", "");
-      await save();
-      await until(async () => {
-        const review = (await config()).approvalReview;
-        return review?.model?.model === "fixture-review-model" && review?.model?.effort === undefined;
-      }, "saved default reasoning-off selection");
-      await window.loadURL(previewUrl);
-      await until(() => evaluate("document.getElementById('approval-review-model')?.value === 'fixture-review-model'"), "reload restores default reasoning selection");
-      await until(() => evaluate("document.getElementById('approval-review-effort')?.value === '' && !document.getElementById('approval-review-effort').disabled"), "reload finishes loading default reviewer effort");
-      assert.equal(await evaluate("document.getElementById('approval-review-effort').value"), "");
+      assert.equal(await evaluate("document.getElementById('approval-review-effort') === null"), true);
+      const genericReview = (await config()).approvalReview;
+      for (const effort of ["none", "high"]) {
+        const unsupported = await fetch(serverUrl + "/api/config", { method: "PUT", headers: { origin: serverUrl, "content-type": "application/json" },
+          body: JSON.stringify({ approvalReview: { model: { instanceId: "openaiCompat", model: "fixture-review-model", effort } } }) });
+        assert.equal(unsupported.status, 400);
+        assert.deepEqual((await config()).approvalReview, genericReview);
+      }
       await select("approval-review-engine", "claude");
       await until(() => evaluate("document.querySelectorAll('#approval-review-model option[value]:not([value=\"\"])').length > 0"), "Claude review models appear");
       const claudeModel = await evaluate("[...document.getElementById('approval-review-model').options].find(option => option.value && !option.disabled).value");
@@ -91,6 +88,12 @@ if (process.versions.electron && process.argv.includes(childFlag)) {
       assert.equal(await evaluate("document.querySelector('#approval-review-effort option[value=none]') === null"), true);
       assert.equal(await evaluate("document.querySelector('#approval-review-effort option[value=\"\"]').textContent"),
         require("../src/locales/en.json")["settings.approvalReview.defaultEffort"].replace("{effort}", await evaluate("document.querySelector('#approval-review-effort option[value=low]').textContent")));
+      await select("approval-review-effort", "high");
+      await save();
+      await until(async () => (await config()).approvalReview?.model?.effort === "high", "save supported Claude effort");
+      await window.loadURL(previewUrl);
+      await until(() => evaluate("document.getElementById('approval-review-effort')?.value === 'high' && !document.getElementById('approval-review-effort').disabled"), "reload restores supported Claude effort");
+      await select("approval-review-effort", "");
       await save();
       await until(async () => (await config()).approvalReview?.model?.instanceId === "claude", "save Claude default reviewer");
       const priorReview = (await config()).approvalReview;
@@ -115,7 +118,7 @@ if (process.versions.electron && process.argv.includes(childFlag)) {
       assert.equal(await evaluate("document.getElementById('approval-review-model').disabled"), true);
       assert.equal(await evaluate("document.getElementById('approval-review-instructions').value"), instructions);
       writeFileSync(join(evidence, "approval-review-settings-session.png"), (await window.webContents.capturePage()).toPNG());
-      const result = { selectedReviewerSaved: true, defaultReasoningOffSaved: true, claudeDefaultLowSaved: true, claudeNoneRejected: true, instructionsSaved: true, reloadPersisted: true, missingModelCannotSave: true, sessionFallbackSaved: true, narrowLayout: true };
+      const result = { selectedReviewerSaved: true, genericDefaultSaved: true, genericUnsupportedEffortRejected: true, claudeExplicitEffortSaved: true, claudeDefaultLowSaved: true, claudeNoneRejected: true, instructionsSaved: true, reloadPersisted: true, missingModelCannotSave: true, sessionFallbackSaved: true, narrowLayout: true };
       writeFileSync(join(evidence, "approval-review-settings-ui.json"), JSON.stringify(result, null, 2));
       console.log(JSON.stringify(result));
       app.exit(0);
