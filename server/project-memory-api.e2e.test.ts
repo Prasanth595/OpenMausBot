@@ -64,6 +64,13 @@ it("binds project memory to current native capabilities, project CWD and revocab
     let alphaToken = await mint(alpha.id, alphaTask.threadId);
     let betaToken = await mint(beta.id, betaTask.threadId);
     const fact = { operation: "remember", kind: "decision", key: "acceptance/canary", name: "Native project canary", detail: "Synthetic amber 7453" };
+    const oversized = await api(path, "POST", { ...fact, detail: "PRIVATE_NOTE_".padEnd(826, "x") }, alphaToken, 400);
+    expect(oversized.code).toBe("invalid");
+    expect(oversized.error).toContain("detail");
+    expect(oversized.error).toContain("600");
+    expect(oversized.error).toContain("826");
+    expect(JSON.stringify(oversized)).not.toContain("PRIVATE_NOTE_");
+    expect((await api(path, "POST", { operation: "recall" }, alphaToken)).entries).toEqual([]);
     const stored = await api(path, "POST", fact, alphaToken, 201);
     expect(stored).toMatchObject({ state: "remembered", canonical: false, promoted: false, untrusted_context: true,
       entry: { detail: fact.detail, source: { botId: alpha.id, threadId: alphaTask.threadId,

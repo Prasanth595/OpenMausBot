@@ -51,6 +51,14 @@ A recall revision pin must be a 64-character lowercase hexadecimal hash.
 A stale revision or foreign project entry returns no result; a pin never
 expands the caller's project scope.
 
+Remembered notes require `kind`, a 1–120 character `name`, and a 1–600
+character `detail`. Store a concise decision or schema summary with a reference
+to the full project artifact. Oversized content is rejected without saving or
+truncating it. Validation errors identify the field, limit and supplied string
+length so a caller can deliberately summarize a refused note. They do not echo
+note content or unknown field names. Scope and write authorization remain
+server-owned; a validation repair never grants access.
+
 Results identify the project, caller and original native source. Every
 projection reports `canonical: false`, `promoted: false` and
 `untrusted_context: true`. A remembered entry includes its content hash and

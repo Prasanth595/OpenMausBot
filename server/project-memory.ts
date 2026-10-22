@@ -128,7 +128,16 @@ export class ProjectMemory {
 
   request(caller: ProjectMemoryCaller, input: unknown) {
     const parsed = projectMemoryRequestSchema.safeParse(input);
-    if (!parsed.success) throw new ProjectMemoryError(400, "invalid", "Invalid project-memory request; scope and provenance are assigned by the server.");
+    if (!parsed.success) {
+      const problems = parsed.error.issues.slice(0, 5).map(issue => {
+        if (issue.code === "unrecognized_keys") return "Unexpected fields; scope and provenance are assigned by the server";
+        const value = issue.path.length === 1 && input !== null && typeof input === "object"
+          ? (input as Record<PropertyKey, unknown>)[issue.path[0]!] : undefined;
+        const received = issue.code === "too_big" && typeof value === "string" ? ` (received ${value.length} characters)` : "";
+        return `${issue.path.join(".") || "request"}: ${issue.message}${received}`;
+      });
+      throw new ProjectMemoryError(400, "invalid", `Invalid project-memory request. ${problems.join("; ")}. Nothing was saved.`);
+    }
     const { context, project, scope } = this.authorize(caller);
     const request = parsed.data;
     const envelope = { schema: "openmaus.project-memory.v1" as const, provider: "openmaus-native-local" as const,

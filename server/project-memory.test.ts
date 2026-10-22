@@ -48,6 +48,45 @@ beforeEach(() => {
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
 describe("native project-memory projection", () => {
+  it.each([601, 826, 1168])("explains a %i-character rejected detail without leaking or truncating it", length => {
+    service.request(caller, fact);
+    const before = readFileSync(file, "utf8");
+    const detail = "PRIVATE_NOTE_".padEnd(length, "x");
+    let rejected: ProjectMemoryError | undefined;
+    try { service.request(caller, { ...fact, detail }); }
+    catch (error) { rejected = error as ProjectMemoryError; }
+    expect(rejected).toMatchObject({ status: 400, code: "invalid" });
+    expect(rejected?.message).toContain("detail");
+    expect(rejected?.message).toContain("600");
+    expect(rejected?.message).toContain(String(length));
+    expect(rejected?.message).not.toContain("PRIVATE_NOTE_");
+    expect(readFileSync(file, "utf8")).toBe(before);
+  });
+
+  it("accepts a 600-character detail without truncation and returns the same revision on recall", () => {
+    const detail = "x".repeat(600);
+    const saved = service.request(caller, { ...fact, detail });
+    if (!("entry" in saved) || !saved.entry) throw new Error("Expected saved entry");
+    expect(saved.entry.detail).toBe(detail);
+    expect(service.request(caller, { operation: "recall", entryId: saved.entry.id, revision: saved.entry.revision }))
+      .toMatchObject({ entries: [{ detail, revision: saved.entry.revision }] });
+  });
+
+  it("identifies missing remember fields without returning submitted values", () => {
+    expect(() => service.request(caller, { operation: "remember" })).toThrow(/kind/);
+    expect(() => service.request(caller, { operation: "remember", kind: "decision", name: "PRIVATE_NOTE" })).toThrow(/detail/);
+  });
+
+  it("does not echo unknown field names in validation diagnostics", () => {
+    try { service.request(caller, { ...fact, PRIVATE_UNKNOWN_KEY: "PRIVATE_VALUE" }); }
+    catch (error) {
+      expect((error as Error).message).not.toMatch(/PRIVATE_UNKNOWN_KEY|PRIVATE_VALUE/);
+      expect((error as ProjectMemoryError).code).toBe("invalid");
+      return;
+    }
+    throw new Error("Expected rejection");
+  });
+
   it("retains trusted provenance and returns an explicitly untrusted noncanonical projection", () => {
     const written = service.request(caller, fact);
     expect(written).toMatchObject({ schema: "openmaus.project-memory.v1", canonical: false, promoted: false,

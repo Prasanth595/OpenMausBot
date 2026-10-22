@@ -25,6 +25,16 @@ describe("native project-memory bridge", () => {
     expect(reply.text).toContain("No current project grant");
   });
 
+  it("returns field-specific write limits so a refused note can be deliberately summarized", async () => {
+    const f = fixture();
+    f.context.client.apiResponse = async () => ({ ok: false, status: 400,
+      body: { code: "invalid", error: "Invalid project-memory request. detail: at most 600 characters (received 826). Nothing was saved." } });
+    const reply = await callTool("project_memory", { operation: "remember", kind: "decision", name: "Schema", detail: "x".repeat(826) }, f.context);
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain("detail"); expect(reply.text).toContain("600"); expect(reply.text).toContain("826");
+    expect(reply.text).toContain("Nothing was saved");
+  });
+
   it("advertises no identity, project or path overrides and excludes standing runtimes", () => {
     const tool = availableTools(catalogProfileFromEnv({})).find(tool => tool.name === "project_memory")!;
     expect(tool).toBeDefined();
