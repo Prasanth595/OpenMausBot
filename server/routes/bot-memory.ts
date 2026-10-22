@@ -26,7 +26,7 @@ import { PASS, type RouteHandler } from "./table.ts";
 export interface BotMemoryRouteDeps {
   bot(id: string): { id: string; memoryUpkeep?: boolean } | null | undefined;
   taskByThread(botId: string, threadId: string): { title?: string } | undefined;
-  upkeep: Pick<MemoryUpkeep, "status" | "tidy">;
+  upkeep: Pick<MemoryUpkeep, "status" | "tidy" | "dream" | "setDreams">;
   /** The caller's About me: the server's profile's, or on a Team Cloud the signed-in person's own. */
   aboutMe(auth: RequestAuth): string;
   saveAboutMe(text: string, auth: RequestAuth): void;
@@ -178,6 +178,21 @@ export function createBotMemoryRoutes(deps: BotMemoryRouteDeps): RouteHandler {
       if (!bot) return json(res, 404, { error: "no such bot" });
       if (!upkeepEnabled(bot)) return json(res, 409, { error: "Switch on Memory upkeep for this bot first." });
       const report = await deps.upkeep.tidy(bot.id);
+      await flushMemoryJournal(bot.id);
+      return json(res, 200, { report, overview: memoryOverview(bot.id) });
+    }
+    m = path.match(/^\/api\/bots\/([\w-]+)\/memory\/dream$/);
+    if (m && (method === "POST" || method === "PATCH")) {
+      const bot = deps.bot(m[1]);
+      if (!bot) return json(res, 404, { error: "no such bot" });
+      if (!upkeepEnabled(bot)) return json(res, 409, { error: "Switch on Memory upkeep for this bot first." });
+      if (method === "PATCH") {
+        const parsed = z.object({ nightly: z.boolean() }).safeParse(await readBody(req));
+        if (!parsed.success) return json(res, 400, { error: "nightly must be true or false" });
+        deps.upkeep.setDreams(bot.id, parsed.data.nightly);
+        return json(res, 200, { enabled: true, ...deps.upkeep.status(bot.id) });
+      }
+      const report = await deps.upkeep.dream(bot.id);
       await flushMemoryJournal(bot.id);
       return json(res, 200, { report, overview: memoryOverview(bot.id) });
     }
