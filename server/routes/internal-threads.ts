@@ -1,8 +1,8 @@
 import { chiefTidies } from "../chief-of-staff.ts";
 import type { Coordinator } from "../coordinator.ts";
-import { threadNotificationsMuted, type ThreadMuteDefault } from "../notify.ts";
 import { reachablePeers } from "../peer-roster.ts";
 import type { BotRecord, Store, TaskRecord } from "../store.ts";
+import { threadNotificationsMuted, type ThreadMuteDefault } from "../thread-mute.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 type ThreadState = "running" | "waiting-on-you" | "queued" | "idle" | "closed";

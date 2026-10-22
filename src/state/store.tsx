@@ -18,7 +18,7 @@ import type { NotificationLogEntry } from "../../shared/notification";
 import { reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
-import { patchGroupTask } from "./thread-edits";
+import { muteChoice, patchGroupTask } from "./thread-edits";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
 export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificationTarget, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
@@ -397,9 +397,8 @@ export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMod
 };
 
 function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
-  const { acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, snoozedUntil, surface, pinned, link, notificationsMuted, ...fields } = patch;
-  return { ...fields, ...(resetApprovalToAsk ? { approvalMode: "ask", autoApprove: false, alwaysAllow: [] } : {}),
-    ...(notificationsMuted === undefined ? {} : { notificationsMuted, followsMuteDefault: false }),
+  const { acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, snoozedUntil, surface, pinned, link, ...fields } = patch;
+  return { ...fields, ...muteChoice(fields), ...(resetApprovalToAsk ? { approvalMode: "ask", autoApprove: false, alwaysAllow: [] } : {}),
     ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }),
     ...(archivedAt === undefined ? {} : { archivedAt: archivedAt ?? undefined }),
     ...(snoozedUntil === undefined ? {} : { snoozedUntil: snoozedUntil ?? undefined }),

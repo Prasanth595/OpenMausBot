@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Archive, ArchiveRestore, Bell, BellOff, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
-import type { AppState, BotProject, Task } from "@/state/store";
+import type { Action, AppState, BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useHeldMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
@@ -216,6 +216,12 @@ type ThreadRowProps = {
   checked?: boolean;
   onToggleSelect?: (task: ThreadRowTask, shiftKey: boolean) => void;
 };
+
+/** A bot thread's Snooze and Mute menu items, each a plain thread setting; a room's threads have neither. */
+export const snoozeAndMuteActions = (dispatch: (action: Action) => void, botId: string) => ({
+  onSnooze: (task: { threadId: string }, snoozedUntil: number | null) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { snoozedUntil } }),
+  onMute: (task: { threadId: string }, notificationsMuted: boolean) => dispatch({ type: "updateTask", botId, threadId: task.threadId, patch: { notificationsMuted } }),
+});
 
 const sameFields = <T extends object>(a: T, b: T): boolean => {
   const keys = Object.keys(a) as (keyof T)[];

@@ -124,7 +124,7 @@ describe("ESCALATIONS_THREAD_TITLE", () => {
 describe("opt-in", () => {
   const untouched = new Proxy({}, { get: (_, key) => () => { throw new Error(`store.${String(key)} was read with escalations off`); } });
   const notices = (enabled: boolean, assigner?: unknown) => createChiefNotices({
-    store: untouched as never, notify: () => { throw new Error("notified"); }, muted: () => false, threadBusy: () => false, botAtThreadCapacity: () => false,
+    store: untouched as never, notify: () => { throw new Error("notified"); }, threadBusy: () => false, botAtThreadCapacity: () => false,
     groupTurnActive: () => false, startTurn: async () => undefined, assignerOf: () => assigner, escalationsEnabled: () => enabled,
   });
   const input = { kind: "needs-input" as const, bot: { id: "b-mira", name: "Mira", threadId: "th_mira" } as never, threadId: "th_mira", gate: NEEDS_INPUT_GATE, reason: "which repo?", alreadyNotified: false };

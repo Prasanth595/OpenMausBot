@@ -198,7 +198,7 @@ import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAle
 import { fleetAvailable, fleetSocketPath } from "./fleet-client.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
-import { buildMentionNotification, buildNotification, buildSpendNotification, muteBotOpenedThreads, mutedThreadNotifies, threadNotificationsMuted, type Notification, type ThreadMuteDefault, type ThreadMuteNotice } from "./notify.ts";
+import { buildMentionNotification, buildNotification, buildSpendNotification, type Notification } from "./notify.ts";
 import {
   isModelVariant,
   TurnNotStartedError, TurnAuthenticationRefusedError, TurnUsageLimitRefusedError,
@@ -241,6 +241,7 @@ import { briefCrossingLabel, claimRecallCrossings, recallCrossingLabel } from ".
 import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine } from "./recent-work.ts";
 import { chiefEscalationsEnabled, peerApprovalGate, RAISED_GATE } from "./escalations.ts";
 import { createChiefNotices } from "./host/chief-notices.ts";
+import { createThreadMute, type ThreadMuteNotice } from "./thread-mute.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
 import { RETRY_BLOCKED } from "./incidents.ts";
 
@@ -3169,19 +3170,12 @@ if (browserCleanupReferencesReconciled) browserCleanup.startPending();
 
 let threadsAwaitingTeammates = (): ReadonlySet<string> => new Set<string>();
 let cacheKeepWarmStatus = (_threadId: string): KeepWarmStatus | undefined => undefined;
-const threadMuteDefault = (botId: string, mainThreadId = botMainThread(botId)): ThreadMuteDefault =>
-  ({ botOpened: muteBotOpenedThreads(cfg), mainThreadId });
-function threadMuted(botId: string, threadId: string): boolean {
-  const task = store.taskByThread(botId, threadId);
-  return task !== undefined && threadNotificationsMuted(task, threadMuteDefault(botId));
-}
-const wireTask = (task: TaskRecord, bot: Pick<BotRecord, "id" | "modelSelection">, awaiting = threadsAwaitingTeammates(),
-  muteDefault = threadMuteDefault(bot.id)): WireTask => {
+const threadMute = createThreadMute({ store, config: cfg, mainThread: botMainThread, notify, chief: () => ({ reportIncident, reportEscalation }), assignerOf: (threadId) => coordinator.assignerOf(threadId) });
+const wireTask = (task: TaskRecord, bot: Pick<BotRecord, "id" | "modelSelection">, awaiting = threadsAwaitingTeammates(), muteDefault = threadMute.defaultFor(bot.id)): WireTask => {
   // Snoozes heal on read against the server clock; the 0 sentinel ("until new activity") survives reads.
   const { snoozedUntil, ...base } = toWireTask(task, bot.modelSelection);
   const keepWarm = cacheKeepWarmStatus(task.threadId);
-  const coordinated = { ...base, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(teamHost.ownTurn(task.threadId) ? { private: true as const } : {}),
-    notificationsMuted: threadNotificationsMuted(task, muteDefault), followsMuteDefault: task.notificationsMuted === undefined };
+  const coordinated = { ...base, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(teamHost.ownTurn(task.threadId) ? { private: true as const } : {}), ...threadMute.wire(task, muteDefault) };
   const asleep = snoozedUntil === 0 || (snoozedUntil !== undefined && snoozedUntil > Date.now());
   return asleep ? { ...coordinated, snoozedUntil } : coordinated;
 };
@@ -3193,7 +3187,7 @@ const wireBot = (bot: BotRecord): WireBot => {
   const visible = approvalGrant && !approvalGrant.threadOnly
     ? { ...rest, approvalMode: "ask" as const, autoApprove: false }
     : { ...rest, approvalMode: approvalModeFor(rest) };
-  const awaiting = threadsAwaitingTeammates(), mainThreadId = botMainThread(bot.id), muteDefault = threadMuteDefault(bot.id, mainThreadId);
+  const awaiting = threadsAwaitingTeammates(), mainThreadId = botMainThread(bot.id), muteDefault = threadMute.defaultFor(bot.id, mainThreadId);
   return { ...visible, waitingForTeammates: awaiting.has(bot.threadId) && !threadBusy(bot.id, bot.threadId),
     mainThreadId,
     avatarUrl: visible.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot, awaiting, muteDefault)) } : {}) };
@@ -3209,7 +3203,7 @@ function toolScopeForTurn(botId: string) {
 
 const wireTrustedApprovalBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   const { resumeCursors: _resumeCursors, tasks, approvalGrant: _approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, assignedSkills: _assignedSkills, ...rest } = bot;
-  const awaiting = threadsAwaitingTeammates(), mainThreadId = botMainThread(bot.id), muteDefault = threadMuteDefault(bot.id, mainThreadId);
+  const awaiting = threadsAwaitingTeammates(), mainThreadId = botMainThread(bot.id), muteDefault = threadMute.defaultFor(bot.id, mainThreadId);
   return { ...rest, approvalMode: approvalModeFor(rest), mainThreadId, avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot, awaiting, muteDefault)) } : {}) };
 };
 
@@ -4482,12 +4476,7 @@ const coordinator: Coordinator = createCoordinator({
       }
       if (node.groupId) store.patchGroup(node.groupId, { unread: true });
       else store.patchTask(bot.id, node.threadId, { unread: true });
-      // A muted thread drops "delegation-settled". Assigned work's question then reaches the person only when nobody else
-      // gets it: the runtime wakes the assigner (runtime.ts wake) unless the reply is "none", and a woken assigner whose
-      // thread is gone has nowhere to answer. Cards on the node already notified the person themselves.
-      const assignerWoken = liveParent !== undefined && node.reply !== "none";
-      const askThePerson = node.parentId !== undefined && !assignerWoken && !node.cards?.length && threadMuted(bot.id, node.threadId);
-      notify(buildNotification(askThePerson ? "question" : "delegation-settled", bot, node.threadId, question, { avatarUrl: bot.avatarUrl }));
+      notify(buildNotification(threadMute.parkedKind(bot.id, node, liveParent), bot, node.threadId, question, { avatarUrl: bot.avatarUrl }));
     },
     levelOf: (target, source) => {
       const bot = store.bot(target.botId);
@@ -5459,12 +5448,9 @@ const providerLabel = (provider: string): string => {
 const quietTurnThreads = new Set<string>();
 const QUIET_TURN_NEWS: ReadonlySet<Notification["kind"]> = new Set(["done", "turn-failed", "incident"]);
 
-/** `notice` names a notification whose kind alone does not say what it is to a muted thread (a peer approval is an "approval"). */
 function notify(notification: Notification | null, notice?: ThreadMuteNotice) {
-  if (!notification) return;
-  if (QUIET_TURN_NEWS.has(notification.kind) && quietTurnThreads.has(notification.threadId)) return;
-  if (threadMuted(notification.botId, notification.threadId) && !mutedThreadNotifies(notice ?? notification.kind)) return;
-  broadcast({ kind: "notify", notification: logNotification(notification) });
+  if (notification && QUIET_TURN_NEWS.has(notification.kind) && quietTurnThreads.has(notification.threadId)) return;
+  if (notification && threadMute.lets(notification, notice)) broadcast({ kind: "notify", notification: logNotification(notification) });
 }
 
 const roomTurnLevels = createRoomTurnLevels();
@@ -7274,10 +7260,9 @@ bus.subscribe((event: RuntimeEvent) => {
       const fileIncident = () => { if (broken) reportIncident({ kind: "failed", bot: broken, threadId: event.threadId, detail: failureDetail }); };
       if (failed && bot) void quotaSwitch.turnFailed(bot, event, internal);
       else if (bot && event.ok) quotaSwitch.turnSucceeded(bot, event.threadId);
-      // Read whatever the escalation setting: a muted thread tells the person directly (chief-notices reportNeedsInput).
       const question = bot && event.ok && !stopped && completedTurnId && !routineRun ? needsInputQuestion(store.activePath(event.threadId)
         .findLast((message) => message.role === "bot" && message.kind === "text" && message.turnId === completedTurnId)?.text ?? "") : undefined;
-      if (bot && question !== undefined) reportNeedsInput({ bot, threadId: event.threadId, question });
+      if (bot && question !== undefined) threadMute.reportNeedsInput({ bot, threadId: event.threadId, question });
       const lastReported = turnUsage.get(event.threadId);
       turnUsage.delete(event.threadId);
       const lastContext = turnContext.get(event.threadId);
@@ -7519,8 +7504,8 @@ function runtimeWorkPending(threadId: string): boolean {
         && coordinator.children(root.id).some(child => child.reply !== "none" && child.createdAt >= (root.startedAt ?? 0)))));
 }
 
-const { reportIncident, reportFailure, reportNeedsInput, reportEscalation, incidentRefused, incidentLastAt } = createChiefNotices({
-  store, notify, threadBusy, botAtThreadCapacity, startTurn, muted: threadMuted,
+const { reportIncident, reportEscalation, incidentRefused, incidentLastAt } = createChiefNotices({
+  store, notify, threadBusy, botAtThreadCapacity, startTurn,
   assignerOf: (threadId) => coordinator.assignerOf(threadId),
   groupTurnActive: (botId) => Boolean(activeGroupTurnForBot(botId)),
   escalationsEnabled: () => chiefEscalationsEnabled(cfg),
@@ -8648,7 +8633,7 @@ async function startTurn(
           tool: failedTurnTool(message, placeFailure ? { place: placeFailure.row } : {}),
         });
         if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
-          reportFailure({ notification: buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
+          threadMute.reportFailure({ notification: buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
             kind: "could-not-start", bot, threadId, detail: message });
           // Claude settles the interrupt below as exit_before_result; the completion fold must not report it a second time.
           resourceOwner.lazyClaimFailureReported = true;
@@ -9185,7 +9170,7 @@ async function startTurn(
         tool: failedTurnTool(message, e instanceof PlaceUnavailableError ? { place: e.row } : e instanceof TurnUsageLimitRefusedError ? { limitResetsAt: e.resetsAt } : {}),
       });
       if (opts?.automationSource === undefined && !opts?.commsDepth && !opts?.cardContinuation) {
-        reportFailure({ notification: buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
+        threadMute.reportFailure({ notification: buildNotification("turn-failed", bot, threadId, redactSecretsInText(message), { avatarUrl: bot.avatarUrl }),
           kind: "could-not-start", bot, threadId, detail: message });
       }
       store.setTaskActivity(bot.id, threadId, "idle");
@@ -9428,7 +9413,7 @@ routines = new RoutineManager({
     const said = alert?.detail ?? run.error, detail = said ? `${run.routineName}: ${said}` : run.routineName;
     automationReports.runFailed(run, said ?? "");
     const notificationBot = routineSourceOwner(run)?.bot ?? bot;
-    reportFailure({ notification: buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail),
+    threadMute.reportFailure({ notification: buildNotification("routine-failed", notificationBot, routineSourceThread(run) ?? run.threadId ?? bot.threadId, detail),
       kind: "routine-failed", bot, threadId: run.threadId ?? bot.threadId, detail });
   },
   onRunDeferred: (run, alert) => {
@@ -10201,7 +10186,6 @@ function roomRoutingInput(
 const roomPostBudgets = new Map<string, RoomPostBudget>();
 const ROOM_POST_MAX_CHARS = 4_000;
 
-// The bus notifies only for peer approval cards: a gate the person alone lifts, so it reaches them even from a muted thread.
 const approvalBus: ApprovalBus = { store, broadcast, notify: (notification) => notify(notification, "peer-approval"), autoApply: fullAccessForSource,
   onPeerApprovalPending: (from, target, action, sourceThreadId, message) => void reportEscalation({
     kind: "peer-approval", bot: from, threadId: sourceThreadId, gate: peerApprovalGate(action, target.name), reason: message, alreadyNotified: true }) };
@@ -14323,11 +14307,10 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 200, { bots });
       }
       if (await dispatchRoutes([createInternalThreadRoutes({
-        store, coordinator, from: internalSender, fromThreadId: internalCapability.threadId,
+        store, coordinator, from: internalSender, fromThreadId: internalCapability.threadId, muteDefault: threadMute.defaultFor, readBody: readInternalBody, requireActive: requireActiveInternalCapability,
         ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
         shown: CLOUD_TEAM ? teamHost.readableFrom(internalCapability.threadId) : cloudLendingView(internalCapability) ? cloudOwnerOnlyThread : () => true,
-        threadBusy, queuedThreadPosition, muteDefault: threadMuteDefault,
-        readBody: readInternalBody, requireActive: requireActiveInternalCapability,
+        threadBusy, queuedThreadPosition,
       })], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/attach-file") {
         const from = internalSender;

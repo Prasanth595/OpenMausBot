@@ -10,9 +10,10 @@ import { callTool, type ToolCallContext } from "./drivers/agents-call.ts";
 import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
 import { createChiefNotices } from "./host/chief-notices.ts";
 import { INCIDENT_HARD_LIMIT } from "./incidents.ts";
-import { buildNotification, mutedThreadNotifies, THREAD_MUTE_POLICY, threadNotificationsMuted, type Notification, type ThreadMuteDefault, type ThreadMuteNotice } from "./notify.ts";
+import { buildNotification, type Notification } from "./notify.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { Store } from "./store.ts";
+import { createThreadMute, mutedThreadNotifies, THREAD_MUTE_POLICY, threadNotificationsMuted, type ThreadMuteDefault, type ThreadMuteNotice } from "./thread-mute.ts";
 
 const opener = { botId: "chief", name: "Chief", at: 1 };
 const off: ThreadMuteDefault = { botOpened: false, mainThreadId: "main" };
@@ -63,25 +64,28 @@ describe("what a muted thread reports through the Chief", () => {
       store.patchBot(chief.id, { chiefOfStaff: true, peers: [qa.id] });
     }
     const work = store.createTask(qa.id, "QA: PR #9", false, undefined, opener)!;
+    store.patchTask(qa.id, work.threadId, { notificationsMuted: true });
     const sent: Notification[] = [], started: string[] = [];
+    const notify = (notification: Notification | null) => { if (notification) sent.push(notification); };
+    const assignerOf = () => (opts.assigned ? { id: "assignment" } : undefined);
     turns = [];
     const notices = createChiefNotices({
-      store, notify: (notification) => { if (notification) sent.push(notification); }, muted: (_botId, threadId) => threadId === work.threadId,
-      threadBusy: () => false, botAtThreadCapacity: () => false, groupTurnActive: () => false,
+      store, notify, threadBusy: () => false, botAtThreadCapacity: () => false, groupTurnActive: () => false,
       startTurn: (botId) => {
         started.push(botId);
         const turn = opts.refuses ? Promise.reject(new Error("the Chief's engine is signed out")) : Promise.resolve();
         turns.push(turn);
         return turn;
       },
-      assignerOf: () => (opts.assigned ? { id: "assignment" } : undefined), escalationsEnabled: () => opts.escalations === true,
+      assignerOf, escalationsEnabled: () => opts.escalations === true,
     });
+    const mute = createThreadMute({ store, config: {}, mainThread: () => qa.threadId, notify, chief: () => notices, assignerOf });
     const bot = store.bot(qa.id)!;
-    const fail = (kind: "could-not-start" | "routine-failed") => notices.reportFailure({
+    const fail = (kind: "could-not-start" | "routine-failed") => mute.reportFailure({
       notification: buildNotification(kind === "routine-failed" ? "routine-failed" : "turn-failed", bot, work.threadId, "the engine exited"),
       kind, bot, threadId: work.threadId, detail: "the engine exited",
     });
-    return { bot, work, sent, started, notices, fail };
+    return { bot, work, sent, started, mute, fail };
   };
   const failures = ["could-not-start", "routine-failed"] as const;
   const direct = { "could-not-start": "turn-failed", "routine-failed": "routine-failed" } as const;
@@ -127,8 +131,8 @@ describe("what a muted thread reports through the Chief", () => {
   it.each([false, true])("a turn that ends needing input, with escalations on: %s, tells the person once, Chief or not", async (escalations) => {
     for (const chief of [false, true]) {
       rmSync(DATA_DIR, { recursive: true, force: true });
-      const { bot, work, sent, started, notices } = team({ chief, escalations, refuses: true });
-      notices.reportNeedsInput({ bot, threadId: work.threadId, question: "which repository should I tag?" });
+      const { bot, work, sent, started, mute } = team({ chief, escalations, refuses: true });
+      mute.reportNeedsInput({ bot, threadId: work.threadId, question: "which repository should I tag?" });
       await flush();
       expect(sent, `chief: ${chief}`).toEqual([expect.objectContaining({ kind: "question", threadId: work.threadId, body: "which repository should I tag?" })]);
       // With a Chief, the escalation still goes out, already counted as told: even its refusal adds nothing.
@@ -147,6 +151,12 @@ describe("the park handler for a muted thread a teammate assigned", () => {
     const handler = source.slice(from, to).trim().replace(/^park:/, "globalThis.park =").replace(/,$/, ";");
     const sent: Notification[] = [];
     const nell = { id: "nell", name: "Nell", threadId: "nell-main" };
+    // index.ts's notify, gated by its thread mute; the work thread is the only thread the mute knows.
+    const notify = (notification: Notification | null) => { if (notification && threadMute.lets(notification)) sent.push(notification); };
+    const threadMute = createThreadMute({
+      store: { taskByThread: (_botId: string, threadId: string) => (threadId === "work-thread" ? { threadId, notificationsMuted: muted } : undefined), groupByThread: () => undefined } as never,
+      config: {}, mainThread: () => nell.threadId, notify, chief: () => { throw new Error("the park handler reports nothing to a Chief"); }, assignerOf: () => undefined,
+    });
     const context = vm.createContext({
       store: {
         bot: (id: string) => (id === "nell" ? nell : undefined), taskByThread: () => undefined, groupTaskByThread: () => undefined,
@@ -154,11 +164,7 @@ describe("the park handler for a muted thread a teammate assigned", () => {
       },
       // Ava's assignment is still on record; her thread is not.
       coordinator: { node: (id: string) => (id === "ava-root" ? { id, botId: "ava", threadId: "ava-gone" } : undefined) },
-      newestQuestionChip: () => undefined, buildNotification, threadMuted: () => muted,
-      // index.ts's notify gate for a muted thread.
-      notify: (notification: Notification | null) => {
-        if (notification && (!muted || mutedThreadNotifies(notification.kind))) sent.push(notification);
-      },
+      newestQuestionChip: () => undefined, buildNotification, threadMute, notify,
     });
     vm.runInContext(ts.transpileModule(handler, { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText, context);
     const node = { id: "work", rootId: "ava-root", parentId: "ava-root", threadId: "work-thread", botId: "nell", reply: "resume" };

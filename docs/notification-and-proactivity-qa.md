@@ -38,7 +38,7 @@ a room's mentions notify as before.
 
 A muted thread's messages, unread state and sidebar waits are unchanged; what
 reaches the person's devices follows one table, `THREAD_MUTE_POLICY` in
-`server/notify.ts`:
+`server/thread-mute.ts`:
 
 | Notification | Muted, bot has a Chief of Staff | Muted, no Chief of Staff |
 |---|---|---|

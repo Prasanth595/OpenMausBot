@@ -24,7 +24,7 @@ import type { WidgetPayload } from "./widget.ts";
 import type { AppFromRef, AppPayload } from "./app.ts";
 import type { GroupGoalRunCardData } from "./group-goal-run.ts";
 import type { RuntimeEvent } from "./runtime-events.ts";
-import type { NotificationLogEntry } from "./notification.ts";
+import type { NotificationLogEntry, WireThreadMute } from "./notification.ts";
 import type { Routine, RoutineRun } from "./routines.ts";
 import type { WebhookAttempt, WebhookTrigger } from "./webhooks.ts";
 import type { PublishedPageCard } from "./published-page.ts";
@@ -125,7 +125,7 @@ export interface BotMovedTo {
 
 /** One task = one conversation with its own context, thread and provider
  * session. */
-export interface WireTask {
+export interface WireTask extends WireThreadMute {
   /** Outstanding handoffs, not an active provider turn. */
   waitingForTeammates?: boolean;
   threadId: string;
@@ -156,19 +156,6 @@ export interface WireTask {
   /** 0 means "until new activity"; a future epoch ms means "until then", and
    * an expired value reads as absent. Absent = not snoozed. */
   snoozedUntil?: number;
-  /** Muted: the thread's notifications stay off the person's devices, except
-   * the ones `THREAD_MUTE_POLICY` (server/notify.ts) keeps: everything waiting
-   * on the person (approvals, questions, sign-ins, a turn that ended needing
-   * input), escalations and incidents no Chief of Staff received, a failure
-   * unless the Chief took its report, and spend alerts. Its messages and
-   * unread state are unchanged. Stored only once a person or a Chief of Staff
-   * chose it; always the effective value on the wire. */
-  notificationsMuted?: boolean;
-  /** Who chose `notificationsMuted`; a Chief of Staff never changes the person's choice. */
-  notificationsMutedBy?: "person" | "chief";
-  /** true: nobody chose, so `features.muteBotOpenedThreads` decides. Derived
-   * at projection, never stored. */
-  followsMuteDefault?: boolean;
   /** The thread's own model when a person picked one in it, else its bot's.
    * Always the effective one on the wire. */
   modelSelection?: ModelSelection;
