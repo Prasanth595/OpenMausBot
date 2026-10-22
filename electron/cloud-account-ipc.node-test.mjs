@@ -1,3 +1,4 @@
+import { openTeamHome } from "./cloud-home.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -30,7 +31,7 @@ test("production personal Cloud IPC guards exact local main frame and forwards n
   assert.ok(start >= 0 && end > start);
   const handlers = new Map(), calls = [], frame = { url: `${origin}/` }, contents = { mainFrame: frame };
   localOrigin.setLocalOrigin(origin);
-  const context = vm.createContext({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+  const context = vm.createContext({ openTeamHome, ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
     rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" },
     ensureCloudAccount: () => Object.fromEntries(methods.map(method => [method, (...args) => { calls.push([method, ...args]); return { status: "signed-out" }; }])),
@@ -44,6 +45,29 @@ test("production personal Cloud IPC guards exact local main frame and forwards n
       { sender: contents, senderFrame: { url: "https://remote.example.test" } }, { sender: contents }]) assert.throws(() => handle(sender), /only available/);
   }
   assert.deepEqual(calls, bridgeMethods.map(method => method === "connectHomeForPhone" ? ["connectHome", "phone"] : [method]));
+});
+test("a team's Cloud opens from the page by its id alone: the team comes from the verified session, and opens as the switcher opens it", async () => {
+  const f = preload();
+  await f.bridge.cloudAccount.openTeam({ toString: () => "team-acme" }, { origin: "https://evil.example.test" });
+  assert.deepEqual(f.invoked, [["cloud-account:openTeam", "team-acme"]]);
+  const source = readFileSync(new URL("./main.mjs", import.meta.url), "utf8"), start = source.indexOf("const workspaceOnly ="), end = source.indexOf('ipcMain.handle("organization:settings-opened"', start);
+  const handlers = new Map(), shown = [], frame = { url: `${origin}/` }, contents = { mainFrame: frame };
+  const acme = { id: "team-acme", name: "Acme", role: "member", machine: { status: "ready", origin: "https://omb-t-2.fly.dev" } };
+  let state = { status: "connected", teams: [acme] };
+  localOrigin.setLocalOrigin(origin);
+  const context = vm.createContext({ openTeamHome, ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
+    rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" }, ensureCloudAccount: () => ({ state: () => state }),
+    showHome: async options => { shown.push(JSON.parse(JSON.stringify(options))); } });
+  vm.runInContext(source.slice(start, end), context);
+  const open = handlers.get("cloud-account:openTeam"), page = { sender: contents, senderFrame: frame };
+  await open(page, "team-acme");
+  assert.deepEqual(shown, [{ place: { team: "team-acme", name: "Acme" } }]);
+  await assert.rejects(async () => open(page, "team-other"), /not in that team/);
+  state = { status: "unavailable", teams: [acme] };
+  await assert.rejects(async () => open(page, "team-acme"), /not in that team/, "only a connected session's teams");
+  assert.throws(() => open({ sender: contents, senderFrame: { url: "https://remote.example.test" } }, "team-acme"), /only available/);
+  assert.equal(shown.length, 1);
 });
 test("a checkout from the page carries only a plan and a source, as text; the server menu only 'howto'", async () => {
   const f = preload();
@@ -62,7 +86,7 @@ test("main opens a checkout only for a plan the offer sells now and one of this 
   localOrigin.setLocalOrigin(origin);
   let allowed = true;
   const offer = { plans: [{ tier: "starter", amount: 1500 }, { tier: "pro", amount: 4900, trialDays: 7 }], recommended: "pro" };
-  const context = vm.createContext({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+  const context = vm.createContext({ openTeamHome, ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     localOnly: localOrigin.localOnly, workspaceSenderAllowed: environments.workspaceSenderAllowed, mainWindow: { webContents: contents },
     rendererOrigin: () => origin, environmentsState: { environments: [], activeId: "local" }, CHECKOUT_SOURCES, cloudOffersReady: async () => allowed,
     ensureCloudAccount: () => ({ offer: async () => offer, checkout: async (...args) => { calls.push(args); return { outcome: "opened", state: { status: "connected" } }; } }),
