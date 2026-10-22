@@ -6,7 +6,7 @@ interface NativeJobView {
   version?: string;
   roots: string[];
   nodes: Array<{ id: string; rootId?: string; parentId?: string; botId: string; threadId: string; status: string; sourceRequest?: string }>;
-  current?: { rootId: string; status: string; outcome?: string; state: string; reason: string; sourceRequest?: string } | null;
+  current?: { rootId: string; status: string; outcome?: string; state: string; reason: string; sourceRequest?: string; legacyTaskOutcome?: true } | null;
   unconfirmedStops?: Array<{ rootId: string; sourceRequest?: string }>;
 }
 
@@ -34,13 +34,15 @@ export function ChiefJobCancelActions({ chief, canWrite, roots, pending, onCance
 
 function currentJobMessage(current: NonNullable<NativeJobView["current"]>): string {
   if (current.status === "cancelled") return "Job cancelled. Partial reports are retained.";
+  if (current.state === "blocked") return `Job blocked: ${current.reason}`;
   if (current.state === "needs-input") return "Job needs your input.";
   if (current.outcome === "interrupted") return "Job interrupted. Work will not be repeated.";
   if (current.state === "failed") return "Job failed.";
   if (current.state === "stalled") return "Job stalled.";
   if (current.status === "queued" || current.status === "resume") return "Job queued.";
   if (current.status === "waiting") return current.state === "running" ? "Waiting on teammates." : "Waiting to continue.";
-  if (current.state === "completed") return "Job completed.";
+  if (current.state === "completed") return current.legacyTaskOutcome
+    ? "Engine turn finished. Task outcome unrecorded and unverified." : "Job completed.";
   return "Job running.";
 }
 
@@ -72,7 +74,7 @@ export function ChiefJobCancel({ botId, threadId, activeLeafId, busy, waiting, c
           if (revision.current !== current || abort.signal.aborted) return;
           setSnapshot(previous => previous?.key === key && previous.job?.version && previous.job.version === job.version ? previous : { key, job });
           version = job.version ?? "";
-          if (!version || chiefJobRoots(job, botId, threadId).length === 0) break;
+          if (!version || (chiefJobRoots(job, botId, threadId).length === 0 && !["running", "needs-input"].includes(job.current?.state ?? ""))) break;
         } while (!abort.signal.aborted);
       } catch {
         if (revision.current === current && !abort.signal.aborted) setSnapshot({ key, failed: true });
@@ -125,6 +127,7 @@ export function ChiefJobCancel({ botId, threadId, activeLeafId, busy, waiting, c
     <ChiefJobCancelActions chief canWrite roots={roots} sourceRequests={sourceRequests} pending={pending?.rootId ?? null} onCancel={rootId => { void cancel(rootId); }} />
     <p role="status" data-current-job-id={job?.current?.rootId} title={job?.current?.reason}
       className="mt-1 text-right text-[12px] text-ink-secondary">{status}</p>
+    {job?.current?.legacyTaskOutcome && <p data-legacy-task-outcome className="mt-1 text-right text-[12px] text-ink-secondary">The engine turn finished; the requested-task disposition was not recorded.</p>}
     {[...warnings].map(([rootId, warning]) => <p key={rootId} role="status" data-unconfirmed-job-id={rootId} title={rootId}
       className="mt-1 text-right text-[12px] text-ink-secondary">{rootId === job?.current?.rootId ? "" : `Earlier job${warning.request ? ` — ${warning.request}` : ""}: `}
       {warning.unconfirmed ? "Cancellation is partial. Local work has not confirmed it stopped; partial reports are retained."

@@ -54,6 +54,10 @@ const assignmentSchema = z.object({
   outcome: z.enum(["done", "needs_input", "cap_continued", "stalled", "interrupted", "budget", "provider_error", "denied",
     "expired", "stopped", "refused", "duplicate"]).optional(),
   outcomeDetail: z.string().optional(),
+  disposition: z.discriminatedUnion("state", [
+    z.object({ state: z.literal("completed") }).strict(),
+    z.object({ state: z.literal("blocked"), reason: z.string().min(1) }).strict(),
+  ]).optional(),
   level: z.enum(APPROVAL_MODES),
   levelSource: z.enum(["own", "chief", "engine_cap"]),
   executions: z.number().int().nonnegative(),

@@ -106,6 +106,8 @@ export interface OfficeAttempt {
   controllerDecision?: { controllerHost: string; controllerDecisionId: string; policyVersion: "office-control-v1"; decision: "allow" | "deny"; at: number };
 }
 
+export type TaskDisposition = { state: "completed" } | { state: "blocked"; reason: string };
+
 export interface Assignment {
   id: string;
   requestMessageId?: string;
@@ -128,6 +130,8 @@ export interface Assignment {
   status: Status;
   outcome?: Outcome;
   outcomeDetail?: string;
+  /** Explicit requested-task outcome, independently of the engine turn lifecycle. */
+  disposition?: TaskDisposition;
   level: Level;
   levelSource: LevelSource;
   /** Turns started for it, including resumes and reruns. */
@@ -268,7 +272,7 @@ export interface RunInput {
 }
 
 export type RunResult =
-  | { kind: "completed"; text: string; evidence?: TurnEvidence }
+  | { kind: "completed"; text: string; evidence?: TurnEvidence; disposition?: TaskDisposition }
   | { kind: "failed"; outcome: Exclude<Outcome, "done" | "needs_input">; text: string; evidence?: TurnEvidence }
   | { kind: "needs_input"; question: string; text?: string; cards?: string[]; evidence?: TurnEvidence }
   /** The turn stopped short (a step cap, a seat it could not get) and the
@@ -277,6 +281,7 @@ export type RunResult =
 
 /** How a host-run root turn ended (Runtime.end). */
 export interface EndResult {
+  disposition?: TaskDisposition;
   ok: boolean;
   text: string;
   evidence?: TurnEvidence;

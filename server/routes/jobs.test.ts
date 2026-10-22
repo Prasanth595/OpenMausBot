@@ -102,7 +102,7 @@ describe("GET /api/threads/:id/job", () => {
     await expect.poll(() => f.subscribers()).toBe(1);
     f.store.setActiveLeaf(f.threadId, firstRequest.id);
     const switched = (await held).body;
-    expect(switched.current).toMatchObject({ rootId: "first", requestMessageId: firstRequest.id, status: "cancelled", state: "failed" });
+    expect(switched.current).toMatchObject({ rootId: "first", requestMessageId: firstRequest.id, status: "cancelled", state: "cancelled" });
     expect(switched.version).not.toBe(second.version);
     const unmatched = f.store.branchMessage(f.threadId, firstRequest.id, "Unstarted branch")!;
     expect(f.store.activeLeaf(f.threadId)).toBe(unmatched.id);

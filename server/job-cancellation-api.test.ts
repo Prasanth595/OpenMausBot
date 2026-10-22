@@ -1,14 +1,23 @@
-import { writeFileSync } from "node:fs";
+import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
+import { closeSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.ts";
+import { launchVerificationServer, runControlOmb, verificationServerArgs, verificationServerEnvironment } from "../scripts/control-omb.ts";
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { agentBrowser, ensureUiBrowser, sessionEnv } from "../scripts/testing/control-omb-ui.ts";
+import { TASK_RESULT_PROMPT } from "./task-disposition.ts";
 import { mountPreview, type MountedPreview } from "../scripts/testing/preview-fixture.ts";
 
 it("paired Chief cancellation stops the exact native job after ordinary Stop left a running hand-off", async () => {
   const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true });
   const evidence: unknown[] = [];
+  const assertProducerPrompt = async (path: string, contains: string) => {
+    await expect.poll(() => JSON.stringify(JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).prompt), { timeout: 15_000 }).toContain(contains);
+    const dump = JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8"));
+    expect(dump.systemPrompt).toContain(TASK_RESULT_PROMPT);
+    evidence.push({ producerPath: path, systemPrompt: dump.systemPrompt, prompt: dump.prompt });
+  };
   const api = async (method: string, path: string, body?: unknown, token?: string) => {
     const response = await fetch(`${fixture.info.url}${path}`, { method,
       headers: { "content-type": "application/json", origin: fixture.info.url, ...(token ? { authorization: `Bearer ${token}` } : {}) },
@@ -19,6 +28,7 @@ it("paired Chief cancellation stops the exact native job after ordinary Stop lef
   };
   const cli = (...args: string[]) => runControlOmb([...args, "--url", fixture.info.url]) as Promise<any>;
   const rows = () => readHandoffs(fixture.info.dataDir);
+  let restarted: ChildProcess | undefined;
   let preview: MountedPreview | undefined;
   let browser: { binary: string; env: NodeJS.ProcessEnv } | undefined;
   try {
@@ -33,6 +43,7 @@ it("paired Chief cancellation stops the exact native job after ordinary Stop lef
     await cli("send", "--bot", chief.id, "--task", chief.activeTaskId, "--text", "Assign the exact cancellation fixture job");
     await expect.poll(() => rows().some(row => row.parentId && row.status === "running"), { timeout: 20_000 }).toBe(true);
     const child = rows().find(row => row.parentId && row.status === "running")!;
+    await assertProducerPrompt("delegated native turn", "Hold this exact job for cancellation");
     const root = rows().find(row => row.id === child.rootId)!;
     const invitation = await api("POST", "/api/auth/pairing", { label: "Chief cancellation fixture", scopes: ["client"] });
     const accepted = await api("POST", "/api/auth/pair", { code: invitation.body.code, label: "Paired Chief fixture" });
@@ -48,6 +59,8 @@ it("paired Chief cancellation stops the exact native job after ordinary Stop lef
     await cli("send", "--bot", chief.id, "--task", root.threadId, "--text", "Keep this newer independent request running");
     await expect.poll(() => rows().some(row => !row.parentId && row.id !== root.id && row.botId === chief.id && row.status === "source"), { timeout: 15_000 }).toBe(true);
     const newer = rows().find(row => !row.parentId && row.id !== root.id && row.botId === chief.id && row.status === "source")!;
+    await expect.poll(() => JSON.parse(readFileSync(fixture.fixtureDumpPath, "utf8")).systemPrompt).toContain(TASK_RESULT_PROMPT);
+    await assertProducerPrompt("ordinary first root native turn", "Keep this newer independent request running");
     const snapshot = await api("GET", `${base}/cancellation`, undefined, token);
     expect(snapshot.status).toBe(200);
     expect(snapshot.body).toMatchObject({ rootId: root.id, sourceBotId: chief.id, sourceThreadId: root.threadId, generation: root.id });
@@ -106,6 +119,21 @@ it("paired Chief cancellation stops the exact native job after ordinary Stop lef
     expect(rows().find(row => row.id === newer.id)?.status).toBe("source");
     writeFileSync(newerGate, "finish the newer fixture request");
     expect((await cli("wait", "--bot", chief.id, "--task", root.threadId, "--timeout", "15")).status).toBe("settled");
+    const delegatedJob = (await api("GET", `/api/threads/${child.threadId}/job?since=0`)).body;
+    expect(delegatedJob.current).toMatchObject({ rootId: child.id, status: "cancelled", state: "cancelled" });
+    evidence.push({ delegatedJob });
+    if (browser) {
+      const delegatedPreview = await mountPreview(fixture, { entry: "/scripts/testing/job-status-preview.tsx", route: "/__delegated-status.html", title: "Delegated native job status", logLevel: "silent", proxyHeaders: { authorization: `Bearer ${token}` } });
+      const command = (...args: string[]) => agentBrowser(browser!.binary, browser!.env, args, 60_000);
+      try {
+        await command("open", `${delegatedPreview.previewUrl}?bot=${expert.id}&thread=${child.threadId}`);
+        await expect.poll(async () => (await command("eval", "document.querySelector('[data-current-job-id]')?.textContent")).result, { timeout: 30_000 }).toBe("Job cancelled. Partial reports are retained.");
+        const delegatedCancelledPng = `${fixture.info.logPath}.delegated-cancelled.png`; await command("screenshot", delegatedCancelledPng); evidence.push({ delegatedCancelledPng });
+      } finally { await delegatedPreview.close(); }
+      await command("open", preview!.previewUrl);
+      await expect.poll(async () => (await command("eval", `(() => { const row = document.querySelector('[data-sidebar-bot-row="${chief.id}"]'); row?.click(); return Boolean(row); })()`)).result, { timeout: 30_000 }).toBe(true);
+    }
+
     const page = (await api("GET", `/api/threads/${root.threadId}/messages?limit=100`)).body;
     expect(page.messages.some((message: any) => message.text === "NEWER_CHIEF_REQUEST_FINISHED")).toBe(true);
     expect(page.messages.some((message: any) => message.text === "MUST_NOT_RESUME_CANCELLED_JOB")).toBe(false);
@@ -113,13 +141,13 @@ it("paired Chief cancellation stops the exact native job after ordinary Stop lef
     const source = page.messages.find((message: any) => message.id === fresh.requestMessageId);
     expect(source).toMatchObject({ requestCancelled: true, requestPending: false, jobCancellation: { rootId: root.id, state: "cancelled" } });
     const currentJob = (await api("GET", `/api/threads/${root.threadId}/job?since=0`, undefined, token)).body.current;
-    expect(currentJob).toMatchObject({ rootId: newer.id, status: "completed", state: "completed" });
+    expect(currentJob).toMatchObject({ rootId: newer.id, status: "completed", state: "completed", legacyTaskOutcome: true });
     if (browser && preview) {
       const command = (...args: string[]) => agentBrowser(browser!.binary, browser!.env, args, 60_000);
       const footer = async () => (await command("eval", `document.querySelector('[data-current-job-id="${newer.id}"]')?.textContent`)).result;
-      await expect.poll(footer, { timeout: 15_000 }).toBe("Job completed.");
+      await expect.poll(footer, { timeout: 15_000 }).toBe("Engine turn finished. Task outcome unrecorded and unverified.");
       await command("reload");
-      await expect.poll(footer, { timeout: 30_000 }).toBe("Job completed.");
+      await expect.poll(footer, { timeout: 30_000 }).toBe("Engine turn finished. Task outcome unrecorded and unverified.");
       const reloadedPng = `${fixture.info.logPath}.chief-status-reloaded.png`;
       await command("screenshot", reloadedPng);
       const consoleOutput = await command("console");
@@ -144,12 +172,101 @@ it("paired Chief cancellation stops the exact native job after ordinary Stop lef
     expect(toolPage.messages.some((message: any) => message.text === "NATURAL_CANCEL_TOOL_FINISHED")).toBe(true);
     expect(toolPage.messages.some((message: any) => message.jobCancellation?.rootId === toolChild.rootId && message.jobCancellation.state === "cancelled")).toBe(true);
     evidence.push({ naturalChiefTool: { rootId: toolChild.rootId, childId: toolChild.id, status: rows().find(row => row.id === toolChild.id)?.status } });
+    plan[chief.id] = { reply: "Inspected publication prerequisites; the requested tool is absent.\n\nOPENMAUS_TASK_RESULT: {\"state\":\"blocked\",\"reason\":\"GitHub publishing tool unavailable\"}" };
+    writeFileSync(join(fixture.info.dataDir, "room-plan.json"), JSON.stringify(plan));
+    await cli("send", "--bot", chief.id, "--task", root.threadId, "--text", "Publish with the deliberately absent fixture tool");
+    const blockedWait = await cli("wait", "--bot", chief.id, "--task", root.threadId, "--timeout", "15");
+    const blockedJob = (await api("GET", `/api/threads/${root.threadId}/job?since=0`)).body;
+    expect(blockedJob.current).toMatchObject({ status: "completed", state: "blocked", reason: "GitHub publishing tool unavailable", sourceRequest: "Publish with the deliberately absent fixture tool" });
+    await assertProducerPrompt("ordinary blocked root finish", "Publish with the deliberately absent fixture tool");
+    const blockedNode = blockedJob.nodes.find((node: any) => node.id === blockedJob.current.rootId);
+    expect(blockedNode).toMatchObject({ disposition: { state: "blocked", reason: "GitHub publishing tool unavailable" }, result: "Inspected publication prerequisites; the requested tool is absent.\n\nOPENMAUS_TASK_RESULT: {\"state\":\"blocked\",\"reason\":\"GitHub publishing tool unavailable\"}" });
+    if (browser && preview) {
+      const command = (...args: string[]) => agentBrowser(browser!.binary, browser!.env, args, 60_000);
+      await expect.poll(async () => (await command("eval", `document.querySelector('[data-current-job-id="${blockedJob.current.rootId}"]')?.textContent`)).result, { timeout: 15_000 }).toBe("Job blocked: GitHub publishing tool unavailable");
+      const blockedPng = `${fixture.info.logPath}.blocked.png`;
+      await command("screenshot", blockedPng);
+      evidence.push({ blockedPng });
+    }
+    const legacy = (await cli("new-bot", "--name", "Legacy Publication", "--section", "Leadership")).bot;
+    plan[legacy.id] = { reply: "Legacy publication account: completed without a typed task result" };
+    writeFileSync(join(fixture.info.dataDir, "room-plan.json"), JSON.stringify(plan));
+    await cli("send", "--bot", legacy.id, "--task", legacy.activeTaskId, "--text", "Preserve this legacy successful publication lifecycle");
+    await cli("wait", "--bot", legacy.id, "--task", legacy.activeTaskId, "--timeout", "15");
+    const legacyBefore = (await api("GET", `/api/threads/${legacy.activeTaskId}/job?since=0`)).body;
+    expect(legacyBefore.current).toMatchObject({ status: "completed", state: "completed", legacyTaskOutcome: true, sourceRequest: "Preserve this legacy successful publication lifecycle" });
+    const exited = once(fixture.child, "exit"); fixture.child.kill("SIGTERM"); await exited;
+    const env = verificationServerEnvironment(process.env, fixture.info.dataDir, new URL(fixture.info.url).port ? Number(new URL(fixture.info.url).port) : 0);
+    const log = openSync(fixture.info.logPath, "a");
+    restarted = spawn(process.execPath, verificationServerArgs(env), { cwd: process.cwd(), env, stdio: ["ignore", log, log] });
+    closeSync(log);
+    await expect.poll(async () => {
+      try { return (await api("GET", `/api/threads/${root.threadId}/job?since=0`)).body.current?.state; } catch { return null; }
+    }, { timeout: 20_000 }).toBe("blocked");
+    if (browser && preview) {
+      const command = (...args: string[]) => agentBrowser(browser!.binary, browser!.env, args, 60_000);
+      await command("reload");
+      await expect.poll(async () => (await command("eval", `document.querySelector('[data-current-job-id="${blockedJob.current.rootId}"]')?.textContent`)).result, { timeout: 30_000 }).toBe("Job blocked: GitHub publishing tool unavailable");
+      const restartedPng = `${fixture.info.logPath}.blocked-restarted.png`; await command("screenshot", restartedPng); evidence.push({ restartedPng });
+    }
+    const blockedAfterRestart = (await api("GET", `/api/threads/${root.threadId}/job?since=0`)).body;
+    expect(blockedAfterRestart.current).toEqual(blockedJob.current);
+    expect(blockedAfterRestart.nodes.find((node: any) => node.id === blockedNode.id)).toEqual(blockedNode);
+    evidence.push({ blockedAfterRestart });
+    const legacyAfter = (await api("GET", `/api/threads/${legacy.activeTaskId}/job?since=0`)).body;
+    expect(legacyAfter.current).toEqual(legacyBefore.current);
+    expect(legacyAfter.nodes).toEqual(legacyBefore.nodes);
+    if (browser) {
+      const command = (...args: string[]) => agentBrowser(browser!.binary, browser!.env, args, 60_000);
+      const legacyPreview = await mountPreview(fixture, { entry: "/scripts/testing/job-status-preview.tsx", route: "/__legacy-job.html", title: "Legacy untyped lifecycle", logLevel: "silent" });
+      try {
+        await command("open", `${legacyPreview.previewUrl}?bot=${legacy.id}&thread=${legacy.activeTaskId}`);
+        const legacyFooter = async () => (await command("eval", "document.querySelector('[data-current-job-id]')?.textContent")).result;
+        await expect.poll(legacyFooter, { timeout: 30_000 }).toBe("Engine turn finished. Task outcome unrecorded and unverified.");
+        await command("reload");
+        await expect.poll(legacyFooter, { timeout: 30_000 }).toBe("Engine turn finished. Task outcome unrecorded and unverified.");
+        const legacyPng = `${fixture.info.logPath}.legacy-restarted.png`; await command("screenshot", legacyPng); evidence.push({ legacyBefore, legacyAfter, legacyPng });
+      } finally { await legacyPreview.close(); }
+      await command("open", preview!.previewUrl);
+      await expect.poll(async () => (await command("eval", `(() => { const row = document.querySelector('[data-sidebar-bot-row="${chief.id}"]'); row?.click(); return Boolean(row); })()`)).result, { timeout: 30_000 }).toBe(true);
+    }
+    plan[chief.id] = { reply: 'PUBLISHED_FIXTURE_SUCCESS\n\nOPENMAUS_TASK_RESULT: {"state":"completed"}' };
+    writeFileSync(join(fixture.info.dataDir, "room-plan.json"), JSON.stringify(plan));
+    await cli("send", "--bot", chief.id, "--task", root.threadId, "--text", "Complete the newer isolated success request");
+    await cli("wait", "--bot", chief.id, "--task", root.threadId, "--timeout", "15");
+    const successAfterRestart = (await api("GET", `/api/threads/${root.threadId}/job?since=0`)).body;
+    expect(successAfterRestart.current).toMatchObject({ status: "completed", state: "completed" });
+    expect(successAfterRestart.current.legacyTaskOutcome).toBeUndefined();
+    expect(successAfterRestart.nodes.find((node: any) => node.id === successAfterRestart.current.rootId).disposition).toEqual({ state: "completed" });
+    expect(successAfterRestart.current.rootId).not.toBe(blockedJob.current.rootId);
+    evidence.push({ blockedWait, blockedJob, successAfterRestart });
+    if (browser) {
+      const command = (...args: string[]) => agentBrowser(browser!.binary, browser!.env, args, 60_000);
+      await command("reload");
+      await expect.poll(async () => (await command("eval", `document.querySelector('[data-current-job-id="${successAfterRestart.current.rootId}"]')?.textContent`)).result, { timeout: 30_000 }).toBe("Job completed.");
+      const successPng = `${fixture.info.logPath}.success-after-restart.png`; await command("screenshot", successPng); evidence.push({ successPng });
+    }
+
+    plan[chief.id] = { steps: [{ arguments: { bot_ids: [expert.id], message: "Return a bounded explicit completion report" } }], reply: "Assigned bounded fixture work", resumeReply: 'Reviewed the teammate result.\n\nOPENMAUS_TASK_RESULT: {"state":"completed"}' };
+    plan[expert.id] = { reply: 'Checked the fixture file.\n\nOPENMAUS_TASK_RESULT: {"state":"completed"}' };
+    writeFileSync(join(fixture.info.dataDir, "room-plan.json"), JSON.stringify(plan));
+    await cli("send", "--bot", chief.id, "--task", root.threadId, "--text", "Delegate and review the bounded fixture work");
+    await cli("wait", "--bot", chief.id, "--task", root.threadId, "--timeout", "20");
+    const resumedJob = (await api("GET", `/api/threads/${root.threadId}/job?since=0`)).body;
+    expect(resumedJob.current).toMatchObject({ status: "completed", state: "completed" });
+    const resumedRoot = resumedJob.nodes.find((node: any) => node.id === resumedJob.current.rootId);
+    expect(resumedRoot.disposition).toEqual({ state: "completed" });
+    expect(resumedRoot.executions).toBeGreaterThan(1);
+    await assertProducerPrompt("resumed root native turn", "Your downstream room requests have settled");
+    evidence.push({ resumedJob });
+
   } finally {
     const evidencePath = `${fixture.info.logPath}.job-cancellation.json`;
     writeFileSync(evidencePath, JSON.stringify({ fixture: fixture.info, evidence, limitation: "Isolated HTTP/native runtime with fake providers only" }, null, 2));
     console.info(JSON.stringify({ evidencePath, logPath: fixture.info.logPath }));
     if (browser) await agentBrowser(browser.binary, browser.env, ["close"]).catch(() => {});
     await preview?.close();
+    if (restarted && restarted.exitCode === null) { const exited = once(restarted, "exit"); restarted.kill("SIGTERM"); await exited; }
     await fixture.close();
   }
 }, process.env.OMB_UI_E2E === "1" ? 240_000 : 60_000);

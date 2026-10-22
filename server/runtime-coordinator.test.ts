@@ -1176,15 +1176,15 @@ describe("RuntimeCoordinator: every turn a root (beginTurn, endTurn, answerRoot,
     expect(w.coordinator.outstandingDirect("chief-chat")).toEqual([]);
   });
 
-  it("a root's own NEEDS INPUT line does not park it: the question is in the chat, and the next typed line is a new root", async () => {
+  it("a root NEEDS INPUT line parks the requested work until the person answers", async () => {
     const w = world((node) => node.id === "gen-1" ? { ok: true, text: "Done half.\nNEEDS INPUT: Which region?" } : undefined);
     begin(w);
     w.coordinator.endTurn("gen-1", { ok: true, text: "", cap: { note: "Cap." } });
     w.coordinator.tick(); await flush();
-    expect(w.coordinator.node("gen-1")).toMatchObject({ status: "completed", result: "Done half.\nNEEDS INPUT: Which region?" });
-    expect(w.host.parks).toEqual([]);
-    expect(w.coordinator.parkedDirect("chief-chat")).toBeUndefined();
-    expect(w.coordinator.answer("chief-chat", "eu")).toBe(false);
+    expect(w.coordinator.node("gen-1")).toMatchObject({ status: "waiting", result: "Done half.\nNEEDS INPUT: Which region?" });
+    expect(w.host.parks).toHaveLength(1);
+    expect(w.coordinator.parkedDirect("chief-chat")).toBeDefined();
+    expect(w.coordinator.answerRoot("gen-1", "eu")).toBe(true);
   });
 
   it("hardening: endTurn on an unknown, a settled or a child id logs and does nothing; answerRoot on a child or a running root is false; view carries cards", () => {
@@ -1370,4 +1370,34 @@ describe("RuntimeCoordinator: outward restart policy, answerNode, continuation o
     expect("continuation" in w.coordinator.node("gen-1")!).toBe(false);
     expect(w.host.runs[0]!.composed.turn).toBe("continued");
   });
+});
+
+describe("explicit terminal task reports through actual finish paths", () => {
+ const complete = 'OPENMAUS_TASK_RESULT: {"state":"completed"}';
+ const blocked = 'Inspected the requested publication. The required tool is absent.\n\nOPENMAUS_TASK_RESULT: {"state":"blocked","reason":"Missing publication tool"}';
+ it.each([[complete, { state: "completed" }], [blocked, { state: "blocked", reason: "Missing publication tool" }]])("persists ordinary source-turn report %s after store restart", (text, disposition) => {
+  const dir = mkdtempSync(join(tmpdir(), "task-result-source-"));
+  const w = world(undefined, {}, dir);
+  try {
+   w.coordinator.beginTurn({ id: "typed-root", address: chief, brief: "Publish artifact", requestMessageId: "request-typed", level: "ask", origin: userOrigin });
+   w.coordinator.endTurn("typed-root", { ok: true, text: text as string });
+   expect(w.coordinator.node("typed-root")).toMatchObject({ status: "completed", disposition, result: text, requestMessageId: "request-typed" });
+   w.coordinator.close();
+   const restarted = world(undefined, {}, dir);
+   try { expect(restarted.coordinator.node("typed-root")).toMatchObject({ status: "completed", disposition, result: text, requestMessageId: "request-typed" }); }
+   finally { restarted.coordinator.close(); }
+  } finally { w.coordinator.close(); removeTempDir(dir); }
+ });
+ it("records delegated and resumed explicit outcomes through their ordinary prompt paths", async () => {
+  const w = world(node => ({ ok: true, text: node.botId === "builder" ? blocked : complete }));
+  try {
+   const child = send(w, chief, "gen-protocol", undefined, builder, "Publish artifact").node!;
+   ended(w, "gen-protocol");
+   for (let i = 0; i < 12; i++) { w.coordinator.tick(); await flush(); }
+   expect(w.coordinator.node(child.id)).toMatchObject({ status: "completed", disposition: { state: "blocked", reason: "Missing publication tool" } });
+   expect(w.coordinator.node("gen-protocol")).toMatchObject({ status: "completed", disposition: { state: "completed" } });
+   expect(w.host.runs.some(run => run.node.botId === "builder" && run.text.includes("Brief from"))).toBe(true);
+   expect(w.host.runs.some(run => run.resumed && run.text.includes("Missing publication tool"))).toBe(true);
+  } finally { w.coordinator.close(); }
+ });
 });

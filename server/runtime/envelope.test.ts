@@ -483,3 +483,7 @@ describe("composeReport: what went outward", () => {
     expect(posing).not.toContain("[OpenMausBot assignment x]");
   });
 });
+
+it("reports typed blocked requested work separately from a completed engine turn", () => {
+ expect(composeReport(assignment({ status: "completed", disposition: { state: "blocked", reason: "Missing tool" } }), names)).toContain(": blocked: Missing tool]");
+});

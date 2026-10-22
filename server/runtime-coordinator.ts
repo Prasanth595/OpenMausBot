@@ -1,3 +1,4 @@
+import { taskDisposition } from "./task-disposition.ts";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
@@ -80,6 +81,7 @@ export function view(a: Assignment, parent?: Assignment): HandoffView {
     lastProgressAt: a.lastActivityAt, approvalGranted: a.approved ?? false, kind: kindOf(groupId, parent), restarts: a.restarts,
     mode: a.mode, reply: a.reply,
   };
+  if (a.disposition !== undefined) node.disposition = a.disposition;
   if (a.outcome !== undefined) node.outcome = a.outcome;
   if (a.requestMessageId !== undefined) node.requestMessageId = a.requestMessageId;
   if (a.outcomeDetail !== undefined) node.outcomeDetail = a.outcomeDetail;
@@ -340,7 +342,9 @@ export class RuntimeCoordinator implements Coordinator {
   endTurn(id: string, result: HostTurnResult): void {
     this.ready();
     const cards = result.cards && result.cards.ids.length > 0 ? result.cards : undefined;
-    const end: EndResult = { ok: result.ok, text: result.text, ...(result.evidence ? { evidence: result.evidence } : {}),
+    const disposition = result.ok ? result.disposition ?? taskDisposition(result.text) : undefined;
+    const question = result.ok ? needsInputQuestion(result.text) : undefined;
+    const end: EndResult = { ...(disposition ? { disposition } : {}), ...(question ? { needsInput: { question } } : {}), ok: result.ok, text: result.text, ...(result.evidence ? { evidence: result.evidence } : {}),
       ...(cards ? { needsInput: { question: cards.question, cards: cards.ids } } : {}),
       ...(result.cap ? { continue: { note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}) } } : {}),
       ...(result.stalled ? { stalled: true } : {}) };
@@ -547,7 +551,8 @@ export class RuntimeCoordinator implements Coordinator {
     if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
     const question = root ? undefined : needsInputQuestion(result.text);
     if (question !== undefined) return { kind: "needs_input", text: result.text, question, ...evidence(result) };
-    return { kind: "completed", text: result.text, ...evidence(result) };
+    const disposition = result.disposition ?? taskDisposition(result.text);
+    return { kind: "completed", text: result.text, ...(disposition ? { disposition } : {}), ...evidence(result) };
   }
 
   private live(): Assignment[] {

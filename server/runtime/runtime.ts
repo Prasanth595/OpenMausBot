@@ -201,7 +201,7 @@ export class Runtime {
       : result.continue
         ? { kind: "continue", text: result.text, note: result.continue.note, ...(result.continue.handoffPath ? { handoffPath: result.continue.handoffPath } : {}), ...evidence }
         : result.ok
-          ? { kind: "completed", text: result.text, ...evidence }
+          ? { kind: "completed", text: result.text, ...(result.disposition ? { disposition: result.disposition } : {}), ...evidence }
           : { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence };
     try {
       this.withBatch(() => this.finishTurn(n, outcome, live));
@@ -528,6 +528,9 @@ export class Runtime {
       }
       return;
     }
+    if (result.kind === "completed" && result.disposition) n.disposition = result.disposition.state === "blocked"
+      ? { state: "blocked", reason: clip(result.disposition.reason, DETAIL_MAX) } : { state: "completed" };
+    else delete n.disposition;
     n.result = clip(result.text, RESULT_MAX);
     const kids = awaited(this.store.children(n.id));
     const unseen = live !== undefined && kids.some(c => isTerminal(c) && !live.carried.has(c.id));

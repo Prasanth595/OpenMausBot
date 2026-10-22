@@ -52,6 +52,7 @@ export interface HandoffView {
   reply: Reply;
   outcome?: Outcome;
   outcomeDetail?: string;
+  disposition?: Assignment["disposition"];
   question?: string;
   cards?: string[];
   continuation?: { note: string; handoffPath?: string; count: number };
@@ -71,6 +72,7 @@ export interface BeginTurnRequest {
 
 /** `cap` continues the same node in place (a step cap, a seat it could not get); `cards` parks it on the person. */
 export interface HostTurnResult {
+  disposition?: Assignment["disposition"];
   ok: boolean;
   text: string;
   evidence?: TurnEvidence;

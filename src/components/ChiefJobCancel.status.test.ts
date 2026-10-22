@@ -160,3 +160,16 @@ describe("current Chief job status", () => {
     finish({ ...cancelled, rootId: "new" }); await Promise.resolve();
   });
 });
+
+it("renders blocked reason independently of a completed engine turn", async () => {
+ fixture.api.mockResolvedValue({ ...job(), current: { rootId: "new", status: "completed", state: "blocked", reason: "GitHub tool unavailable" } });
+ render(); await vi.waitFor(() => expect(text()).toContain("Job blocked: GitHub tool unavailable"));
+ expect(text()).not.toContain("Job completed.");
+});
+
+it("discloses an untyped historical task outcome separately from completed lifecycle", async () => {
+ fixture.api.mockResolvedValue({ ...job(), current: { ...job().current, legacyTaskOutcome: true } });
+ render(); await vi.waitFor(() => expect(text()).toContain("requested-task disposition was not recorded"));
+ expect(text()).not.toContain("Job completed.");
+ expect(host.querySelector("[data-current-job-id]")?.textContent).toBe("Engine turn finished. Task outcome unrecorded and unverified.");
+});

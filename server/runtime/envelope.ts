@@ -103,6 +103,7 @@ export function composeEnvelope(a: Assignment, names: EnvelopeNames, _parent?: A
 }
 
 function outcomeLabel(a: Assignment): string {
+  if (a.disposition?.state === "blocked") return `blocked: ${quote(a.disposition.reason, DETAIL_MAX)}`;
   const detail = a.outcomeDetail ? `: ${quote(a.outcomeDetail, DETAIL_MAX)}` : "";
   if (a.status === "completed") return `done${detail}`;
   return `${a.status}${a.outcome && a.outcome !== "done" ? ` (${a.outcome})` : ""}${detail}`;

@@ -3,8 +3,8 @@ import { createHash } from "node:crypto";
 import type { Assignment } from "./runtime/types.ts";
 
 export type JobScope = "job" | "turn";
-export type JobState = "running" | "needs-input" | "completed" | "failed" | "stalled" | "idle";
-export const FINAL_JOB_STATES: ReadonlySet<JobState> = new Set(["needs-input", "completed", "failed", "stalled", "idle"]);
+import type { JobState } from "../shared/job-state.ts";
+export { FINAL_JOB_STATES, type JobState } from "../shared/job-state.ts";
 
 export interface ConversationState {
   kind: "bot" | "room";
@@ -26,6 +26,7 @@ export interface JobNode {
   status: Assignment["status"];
   outcome?: Assignment["outcome"];
   outcomeDetail?: string;
+  disposition?: Assignment["disposition"];
   question?: string;
   mode: Assignment["mode"];
   reply: Assignment["reply"];
@@ -59,6 +60,8 @@ export interface JobView {
     state: JobState;
     reason: string;
     sourceRequest?: string;
+    /** Legacy engine completion has no independently recorded task disposition. */
+    legacyTaskOutcome?: true;
   } | null;
   /** Visible source jobs whose native execution still has no confirmed stop. */
   unconfirmedStops: Array<{ rootId: string; sourceRequest?: string }>;
@@ -95,6 +98,26 @@ const names = (rows: readonly Assignment[], label: (row: Assignment) => string) 
   const unique = [...new Set(rows.map(label))];
   return unique.length > 3 ? `${unique.slice(0, 3).join(", ")} and ${unique.length - 3} more` : unique.join(", ");
 };
+
+function currentTasks(rows: readonly Assignment[]): Assignment[] {
+  const latest = new Map<string, Assignment>();
+  const superseded = new Set<string>();
+  const byId = new Map(rows.map(row => [row.id, row]));
+  for (const row of [...rows].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))) {
+    const key = JSON.stringify([row.parentId, row.assignee.botId, row.assignee.destination.threadId, row.assignee.destination.groupId, row.mode, row.brief]);
+    const prior = latest.get(key);
+    if (row.rework && prior && row.parentId) superseded.add(prior.id);
+    latest.set(key, row);
+  }
+  return rows.filter(row => {
+    const seen = new Set<string>();
+    for (let node: Assignment | undefined = row; node; node = node.parentId ? byId.get(node.parentId) : undefined) {
+      if (superseded.has(node.id) || seen.has(node.id)) return false;
+      seen.add(node.id);
+    }
+    return true;
+  });
+}
 
 function jobState(input: JobInput) {
   const nameOf = (botId: string) => input.nameOf(botId) ?? botId;
@@ -147,13 +170,34 @@ function jobState(input: JobInput) {
   } else if (!lead) {
     state = "idle";
     reason = "Nothing is running in this conversation";
-  } else if (lead.status === "completed" || lead.status === "waiting") {
+  } else if (lead.status === "cancelled") {
+    state = "cancelled";
+    reason = `${leadName} was stopped`;
+  } else if (lead.disposition?.state === "blocked") {
+    state = "blocked";
+    reason = lead.disposition.reason;
+  } else if (lead.status === "waiting") {
+    state = "running";
+    reason = `${leadName} is waiting to continue`;
+  } else if (lead.status === "completed") {
     state = "completed";
-    const failed = input.rows.filter((row) => row.id !== lead.id && (row.status === "failed" || row.status === "cancelled"));
-    reason = `${leadName} finished${failed.length ? `; ${plural(failed.length, "teammate task", "teammate tasks")} did not complete (${names(failed, label)})` : ""}`;
+    const children = currentTasks(input.rows).filter(row => row.rootId === lead.rootId && row.id !== lead.id && row.reply !== "none");
+    const unresolved = children.filter(row => !ended(row));
+    const blocked = children.find(row => row.disposition?.state === "blocked");
+    const failed = children.filter(row => row.status === "failed" || row.status === "cancelled");
+    if (unresolved.length) {
+      state = unresolved.some(row => row.status === "needs_input") ? "needs-input" : "running";
+      reason = `Waiting on ${plural(unresolved.length, "teammate task", "teammate tasks")}: ${names(unresolved, label)}`;
+    } else if (blocked) {
+      state = "blocked";
+      reason = shows(blocked) && blocked.disposition?.state === "blocked" ? blocked.disposition.reason : "A teammate's requested work is blocked";
+    } else if (failed.length) {
+      state = "failed";
+      reason = `${plural(failed.length, "teammate task", "teammate tasks")} did not complete (${names(failed, label)})`;
+    } else reason = `${leadName} finished`;
   } else {
     state = lead.outcome === "stalled" ? "stalled" : "failed";
-    reason = `${leadName}'s work ended ${lead.status === "cancelled" || lead.outcome === "stopped" ? "because it was stopped" : `as ${lead.outcome ?? lead.status}`}${lead.outcomeDetail ? `: ${lead.outcomeDetail}` : ""}`;
+    reason = `${leadName}'s work ended ${lead.outcome === "stopped" ? "because it was stopped" : `as ${lead.outcome ?? lead.status}`}${lead.outcomeDetail ? `: ${lead.outcomeDetail}` : ""}`;
   }
 
   return { state, reason, starts, counts, parked, asking };
@@ -165,21 +209,36 @@ export function jobView(input: JobInput): JobView {
   const shows = (row: Assignment) => input.visible(row.assignee.destination.threadId);
   const { conversation } = input;
   const sourceRequest = (row: Assignment) => !row.parentId && shows(row) ? row.brief.replace(/\s+/g, " ").trim().slice(0, 160) : "";
-  const sourceRoots = input.rows.filter(row => starts.has(row.id) && !row.parentId && row.assignee.destination.threadId === input.threadId
+  const byId = new Map(input.rows.map(row => [row.id, row]));
+  const within = (row: Assignment, scopeId: string): boolean => {
+    const seen = new Set<string>();
+    for (let node: Assignment | undefined = row; node && !seen.has(node.id); node = node.parentId ? byId.get(node.parentId) : undefined) {
+      if (node.id === scopeId) return true;
+      seen.add(node.id);
+    }
+    return false;
+  };
+  const requestOrder = new Map([...(input.requestMessageIds ?? [])].map((id, index) => [id, index]));
+  const sourceRoots = input.rows.filter(row => starts.has(row.id) && row.assignee.destination.threadId === input.threadId
     && (input.sourceBotId === undefined || row.assignee.botId === input.sourceBotId) && shows(row))
-    .sort((a, b) => a.createdAt - b.createdAt);
-  const currentRoot = sourceRoots.findLast(row => input.requestMessageIds === undefined
+    .sort((a, b) => {
+      const left = a.requestMessageId ? requestOrder.get(a.requestMessageId) : undefined;
+      const right = b.requestMessageId ? requestOrder.get(b.requestMessageId) : undefined;
+      return left !== undefined && right !== undefined ? left - right : a.createdAt - b.createdAt;
+    });
+  const currentRoot = sourceRoots.findLast(row => row.parentId !== undefined || input.requestMessageIds === undefined
     || (row.requestMessageId !== undefined && input.requestMessageIds.has(row.requestMessageId)));
   const current: JobView["current"] = currentRoot ? (() => {
-    const summary = jobState({ ...input, rows: input.rows.filter(row => row.id === currentRoot.id || row.rootId === currentRoot.id), scopes: [currentRoot.id],
+    const summary = jobState({ ...input, rows: input.rows.filter(row => within(row, currentRoot.id)), scopes: [currentRoot.id],
       conversation: ended(currentRoot) ? { kind: conversation.kind, busy: false, queued: 0 } : conversation });
     return { rootId: currentRoot.id, ...(currentRoot.requestMessageId ? { requestMessageId: currentRoot.requestMessageId } : {}), status: currentRoot.status,
       ...(currentRoot.outcome ? { outcome: currentRoot.outcome } : {}), state: summary.state, reason: summary.reason,
+      ...(currentRoot.status === "completed" && currentRoot.disposition === undefined && summary.state === "completed" ? { legacyTaskOutcome: true as const } : {}),
       ...(sourceRequest(currentRoot) ? { sourceRequest: sourceRequest(currentRoot) } : {}) };
   })() : null;
-  const unconfirmedRoots = new Set(input.rows.filter(row => row.office?.attempts.some(attempt => attempt.state === "uncertain"
-    || (ended(row) && (attempt.state === "consumed" || attempt.consumedAt !== undefined) && attempt.finishedAt === undefined))).map(row => row.rootId));
-  const unconfirmedStops = sourceRoots.filter(row => unconfirmedRoots.has(row.id)).map(row => ({ rootId: row.id,
+  const unconfirmedRows = input.rows.filter(row => row.office?.attempts.some(attempt => attempt.state === "uncertain"
+    || (ended(row) && (attempt.state === "consumed" || attempt.consumedAt !== undefined) && attempt.finishedAt === undefined)));
+  const unconfirmedStops = sourceRoots.filter(row => unconfirmedRows.some(member => within(member, row.id))).map(row => ({ rootId: row.id,
     ...(sourceRequest(row) ? { sourceRequest: sourceRequest(row) } : {}) }));
   const shown = input.rows.filter(shows);
   const listed = shown.slice(-NODES_SHOWN);
@@ -192,7 +251,7 @@ export function jobView(input: JobInput): JobView {
   }
   const version = createHash("sha256").update(JSON.stringify([
     state, conversation.busy, conversation.activity ?? "", conversation.queued, asking.map((row) => row.id),
-    input.rows.map((row) => [row.id, row.status, row.outcome ?? "", row.executions, row.question ?? "", sourceRequest(row)]),
+    input.rows.map((row) => [row.id, row.status, row.outcome ?? "", row.executions, row.question ?? "", row.disposition ?? null, sourceRequest(row)]),
     current, unconfirmedStops,
   ])).digest("base64url").slice(0, 16);
   const node = (row: Assignment): JobNode => {
@@ -203,7 +262,7 @@ export function jobView(input: JobInput): JobView {
       id: row.id, rootId: row.rootId, ...(row.parentId ? { parentId: row.parentId } : {}), depth: row.depth,
       botId: row.assignee.botId, botName: nameOf(row.assignee.botId), threadId: destination.threadId,
       ...(title ? { threadTitle: title } : {}), ...(destination.groupId ? { groupId: destination.groupId } : {}),
-      status: row.status, ...(row.outcome ? { outcome: row.outcome } : {}), ...(row.outcomeDetail ? { outcomeDetail: row.outcomeDetail } : {}),
+      status: row.status, ...(row.disposition ? { disposition: row.disposition } : {}), ...(row.outcome ? { outcome: row.outcome } : {}), ...(row.outcomeDetail ? { outcomeDetail: row.outcomeDetail } : {}),
       ...(row.question ? { question: row.question } : {}), mode: row.mode, reply: row.reply,
       awaited: input.scope === "job" ? counts(row) : starts.has(row.id),
       createdAt: row.createdAt, ...(row.startedAt !== undefined ? { startedAt: row.startedAt } : {}),
