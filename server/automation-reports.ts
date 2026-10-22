@@ -246,9 +246,9 @@ export function createAutomationReports(deps: AutomationReportDeps) {
       if (run.target === "bot" && run.status === "failed" && run.deliver !== "brief" && run.threadId && destination(run)) hold(run.id, { kind: "failure", run, detail });
     },
     /** This run's result, questions and failure come to its bot's chat as lines of their own.
-     * A run missed or failed before it had a conversation has no line to say so, and keeps its card. */
+     * A missed run, or one that failed before it had a conversation, has no line to say so, and keeps its card. */
     speaksFor(run: RoutineRun): boolean {
-      return run.target === "bot" && destination(run) !== null && (Boolean(run.threadId) || (run.status !== "missed" && run.status !== "failed"));
+      return run.target === "bot" && destination(run) !== null && run.status !== "missed" && (run.status !== "failed" || Boolean(run.threadId));
     },
     /** This conversation is a run's own, and only its last reply reaches the chat the run reports to. */
     reportsElsewhere(threadId: string): boolean {
