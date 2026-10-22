@@ -224,7 +224,7 @@ export interface ModelSelection {
   variant?: string;
 }
 
-export interface Task extends Pick<WireTask, "private"> {
+export interface Task extends Pick<WireTask, "private" | "notificationsMuted" | "followsMuteDefault"> {
   waitingForTeammates?: boolean;
   threadId: string;
   routineRunId?: string;
@@ -384,7 +384,7 @@ export function currentTaskBot(bot: Bot, threadId = bot.threadId): Bot {
   };
 }
 
-export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMode" | "autoApprove" | "pinnedMessageId">> & {
+export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMode" | "autoApprove" | "pinnedMessageId" | "notificationsMuted">> & {
   acknowledgeLocalAuto?: boolean;
   updateBotDefault?: boolean;
   resetApprovalToAsk?: boolean;
@@ -397,8 +397,9 @@ export type TaskUpdatePatch = Partial<Pick<Task, "modelSelection" | "approvalMod
 };
 
 function taskPatchFields(patch: TaskUpdatePatch): Partial<Task> {
-  const { acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, snoozedUntil, surface, pinned, link, ...fields } = patch;
+  const { acknowledgeLocalAuto: _localAck, updateBotDefault: _modelDefault, resetApprovalToAsk, projectId, archivedAt, snoozedUntil, surface, pinned, link, notificationsMuted, ...fields } = patch;
   return { ...fields, ...(resetApprovalToAsk ? { approvalMode: "ask", autoApprove: false, alwaysAllow: [] } : {}),
+    ...(notificationsMuted === undefined ? {} : { notificationsMuted, followsMuteDefault: false }),
     ...(projectId === undefined ? {} : { projectId: projectId ?? undefined }),
     ...(archivedAt === undefined ? {} : { archivedAt: archivedAt ?? undefined }),
     ...(snoozedUntil === undefined ? {} : { snoozedUntil: snoozedUntil ?? undefined }),

@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Archive, ArchiveRestore, BellOff, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, Bell, BellOff, Check, ChevronRight, Clock, Clock3, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2 } from "lucide-react";
 import type { AppState, BotProject, Task } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { useHeldMenuMotion } from "./MenuMotion";
@@ -17,7 +17,7 @@ import { localizedTaskTitle } from "@/lib/task-title";
 
 export { isSnoozed, orderedThreadList };
 
-type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "waitingForTeammates" | "link"> & {
+type ThreadRowTask = Pick<Task, "threadId" | "title" | "projectId" | "busy" | "activity" | "unread" | "openedBy" | "closedBy" | "archivedAt" | "snoozedUntil" | "notificationsMuted" | "waitingForTeammates" | "link"> & {
   queued?: boolean;
   pinned?: boolean;
   createdAt?: number;
@@ -209,6 +209,7 @@ type ThreadRowProps = {
   onArchive?: (task: ThreadRowTask, archivedAt: number | null) => void;
   onPin?: (task: ThreadRowTask, pinned: boolean) => void;
   onSnooze?: (task: ThreadRowTask, snoozedUntil: number | null) => void;
+  onMute?: (task: ThreadRowTask, notificationsMuted: boolean) => void;
   onLink?: (task: ThreadRowTask, link: string | null) => void;
   onRefreshPermissions?: (task: ThreadRowTask) => void;
   selectMode?: boolean;
@@ -224,7 +225,7 @@ const sameFields = <T extends object>(a: T, b: T): boolean => {
 const sameThreadRow = ({ task: previousTask, ...previous }: ThreadRowProps, { task, ...next }: ThreadRowProps): boolean =>
   sameFields(previousTask, task) && sameFields(previous, next);
 
-export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onLink, onRefreshPermissions, activityLabel, now, selectMode = false, checked = false, onToggleSelect }: ThreadRowProps) {
+export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, current, compact, folders, onSelect, onRename, onRegenerateTitle, onDelete, onMove, onArchive, onPin, onSnooze, onMute, onLink, onRefreshPermissions, activityLabel, now, selectMode = false, checked = false, onToggleSelect }: ThreadRowProps) {
   const [menu, setMenu] = useState<{ left: number; top: number } | null>(null);
   const menuMotion = useHeldMenuMotion(menu);
   const [renaming, setRenaming] = useState(false);
@@ -294,7 +295,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); finishRename(true); } else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finishRename(false); } }}
         dir="auto" className="m-1 min-w-0 flex-1 rounded border border-accent/50 bg-inset px-2 py-1 text-[12.5px] text-ink outline-none" /> : <button
         type="button" data-sidebar-thread-row={task.threadId} aria-current={current ? "page" : undefined}
-        title={[displayTitle, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
+        title={[displayTitle, updatedStamp, status, closed ? t("task.closed") : null, archived ? t("task.archived") : null, snoozed ? t("task.snoozed") : null, task.notificationsMuted ? t("task.muted") : null, task.unread ? t("task.unread") : null].filter(Boolean).join(" · ")}
         {...(selectMode ? { role: "checkbox", "aria-checked": checked, "aria-disabled": !tickable, "aria-label": t("task.bulk.rowCheck", { title: displayTitle }) } : {})}
         onClick={choose} onDoubleClick={selectMode ? undefined : startRename} onContextMenu={contextMenu}
         onKeyDown={(event) => { if (opensRowMenuFromKey(event.key, event.shiftKey, selectMode)) { event.preventDefault(); const rect = event.currentTarget.getBoundingClientRect(); openMenu(rect.left, rect.bottom); } }}
@@ -337,6 +338,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         </Select>
       </label>}
       {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task, task.pinned !== true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised">{task.pinned === true ? <PinOff size={12} /> : <Pin size={12} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
+      {onMute && <button type="button" onClick={() => { setMenu(null); onMute(task, task.notificationsMuted !== true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised">{task.notificationsMuted ? <Bell size={12} /> : <BellOff size={12} />}{task.notificationsMuted ? t("task.unmuteNotifications") : t("task.muteNotifications")}</button>}
       {onLink && task.link && <button type="button" onClick={() => { setMenu(null); onLink(task, null); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Link2Off size={12} />{t("task.removeLink")}</button>}
       {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(task, isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
       {onSnooze && <div className="px-2.5 pt-1">
