@@ -340,8 +340,9 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
       const where = thread.own === true ? "yours" : `on @${String(thread.botName)}${typeof thread.openedBy === "string" && thread.openedBy ? `, opened by @${thread.openedBy}` : ""}`;
       const state = stateWord[String(thread.state)] ?? String(thread.state);
       const unread = thread.unread === true ? ", unread for the person" : "";
+      const muted = thread.muted === true ? ", notifications muted" : "";
       const handoff = typeof thread.delegationId === "string" && thread.delegationId ? ` [delegation id: ${thread.delegationId}]` : "";
-      return `- #${String(thread.title)} (${where}, ${state}${unread}) [thread id: ${String(thread.threadId)}]${handoff}`;
+      return `- #${String(thread.title)} (${where}, ${state}${unread}${muted}) [thread id: ${String(thread.threadId)}]${handoff}`;
     });
     return { text: `Threads, newest first:\n${lines.join("\n")}` };
   }
@@ -351,6 +352,16 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     const r = await api(`/api/internal/threads/${encodeURIComponent(threadId)}/close`, { method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID }) });
     if (r.error) return { text: `Couldn't close that thread: ${String(r.error)}`, isError: true };
     return { text: `Closed #${String(r.title)}${r.botName ? ` on @${String(r.botName)}` : ""}. It stays in the person's sidebar, idle, with a note that you closed it.` };
+  }
+  if (name === "mute_thread") {
+    const threadId = String(args.thread_id ?? "").trim();
+    if (!threadId || typeof args.muted !== "boolean") return { text: "mute_thread needs the thread_id from list_threads and muted: true or false.", isError: true };
+    const r = await api(`/api/internal/threads/${encodeURIComponent(threadId)}/mute`, { method: "POST", body: JSON.stringify({ fromBotId: BOT_ID, fromThreadId: THREAD_ID, muted: args.muted }) });
+    if (r.error) return { text: `Couldn't change that thread's notifications: ${String(r.error)}`, isError: true };
+    const where = `#${String(r.title)}${r.botName ? ` on @${String(r.botName)}` : ""}`;
+    return { text: r.muted === true
+      ? `Muted ${where}: it no longer notifies the person, except when it fails or escalates; what it waits on still shows in their sidebar.`
+      : `Unmuted ${where}: it notifies the person again.` };
   }
   if (name === "start_thread") {
     const title = String(args.title ?? "").trim();

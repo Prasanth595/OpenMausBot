@@ -318,6 +318,20 @@ const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "mute_thread",
+    description:
+      "Chief of Staff only: mute or unmute the person's phone and desktop notifications for one thread a bot opened — yours, or one opened in your reachable team (list_threads shows which are muted). A muted thread notifies only when it fails or escalates; its approvals and questions still wait in the person's sidebar, and its messages and unread state are unchanged. A thread the person started, and each bot's main chat, are the person's to mute. Use it when the person asks for quieter threads; if it is refused, do not retry it.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        thread_id: { type: "string", description: "The thread id from list_threads." },
+        muted: { type: "boolean", description: "true mutes the thread; false lets it notify again." },
+      },
+      required: ["thread_id", "muted"],
+    },
+  },
+  {
     name: "start_thread",
     description:
       "Open a separate job on yourself: one conversation with its own history and its own run, shown to the person as a row under you, without switching the person's selected conversation. Use it only when the user requests independent jobs (for example one review per pull request, \"review each pull request\" — one thread per pull request) instead of doing them inside this conversation. The title becomes the row's name, so make it short and specific, and write it as #Title when you mention it to the person; give complete instructions, since the run will not see this conversation. You can open at most five per turn; a self-opened job cannot open more jobs. This is not a teammate handoff: use coordinate_bots for teammates (thread \"new\" opens a fresh thread on them) and their automatic replies. If a call is refused, do not retry it: say what you still wanted opened.",
@@ -946,7 +960,7 @@ const SKILL_TOOL_NAMES = new Set(["skills_list", "skill_manage"]);
 export const SHARED_COMPUTER_TOOL_NAMES = new Set(["list_shared_computers", "shared_computer"]);
 const VOICE_TOOL_NAMES = new Set(["send_voice_note"]);
 const CHIEF_ONLY_TOOL_NAMES = new Set([
-  "create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread",
+  "create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread", "mute_thread",
 ]);
 const CHIEF_TARGET_TOOL_NAMES = new Set(["propose_profile", "propose_model"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);

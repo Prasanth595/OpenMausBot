@@ -15,6 +15,40 @@ export interface NotifyBot {
   notifications?: boolean;
 }
 
+// A muted thread keeps its failure and incident alerts: an escalation or incident must reach the person even from a thread they silenced.
+export const SILENCED_BY_THREAD_MUTE: Record<NotifyKind, boolean> = {
+  done: true,
+  "delegation-settled": true,
+  mention: true,
+  "routine-deferred": true,
+  approval: true,
+  question: true,
+  "sign-in": true,
+  incident: false,
+  "turn-failed": false,
+  "routine-failed": false,
+  spend: false,
+};
+
+export interface ThreadMuteDefault {
+  botOpened: boolean;
+  mainThreadId: string | undefined;
+}
+
+export interface MutableThread {
+  threadId: string;
+  notificationsMuted?: boolean;
+  openedBy?: object;
+}
+
+export function muteBotOpenedThreads(cfg: { features?: { muteBotOpenedThreads?: boolean } }): boolean {
+  return cfg.features?.muteBotOpenedThreads === true;
+}
+
+export function threadNotificationsMuted(task: MutableThread, byDefault: ThreadMuteDefault): boolean {
+  return task.notificationsMuted ?? (byDefault.botOpened && task.openedBy !== undefined && task.threadId !== byDefault.mainThreadId);
+}
+
 export function buildSpendNotification(
   bot: Pick<NotifyBot, "id" | "name">,
   threadId: string,

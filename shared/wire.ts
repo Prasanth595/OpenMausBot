@@ -156,6 +156,15 @@ export interface WireTask {
   /** 0 means "until new activity"; a future epoch ms means "until then", and
    * an expired value reads as absent. Absent = not snoozed. */
   snoozedUntil?: number;
+  /** Muted: the thread sends no notifications to the person's devices — not
+   * when it finishes, nor when it waits on an approval, answer or sign-in —
+   * except failures, incidents and escalations. Its messages and unread state
+   * are unchanged. Stored only once a person or a Chief of Staff chose it;
+   * always the effective value on the wire. */
+  notificationsMuted?: boolean;
+  /** true: nobody chose, so `features.muteBotOpenedThreads` decides. Derived
+   * at projection, never stored. */
+  followsMuteDefault?: boolean;
   /** The thread's own model when a person picked one in it, else its bot's.
    * Always the effective one on the wire. */
   modelSelection?: ModelSelection;

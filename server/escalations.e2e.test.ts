@@ -102,6 +102,34 @@ it("delivers a pending peer-comm approval card to the Chief's escalations thread
   }
 }, 150_000);
 
+it("escalates a peer approval waiting in a muted thread to the person, since its approval notification stayed quiet", async () => {
+  const { url, api, control, messages, plan, useCli, close } = await launch();
+  try {
+    const ada = (await control(["new-bot", "--name", "Ada", "--section", "Ops"])).bot;
+    await api("PATCH", `/api/bots/${ada.id}`, { approvePeerComms: true, approvalMode: "ask", notifications: true });
+    const hedge = (await control(["new-bot", "--name", "Hedge", "--section", "Ops"])).bot;
+    await api("PATCH", `/api/bots/${ada.id}/tasks/${ada.activeTaskId}`, { notificationsMuted: true });
+    await useCli();
+    plan(ada.activeTaskId, {
+      tools: [{ name: "coordinate_bots", server: "agents", input: { bot_ids: [hedge.id], message: "Hedge, a quick one.", consult: true } }],
+      replies: ["I asked Hedge and will wait for the person's say-so."],
+    });
+    const stream = await openSse(`${url}/api/events`, { origin: url });
+    try {
+      await control(["send", "--bot", ada.id, "--text", "Check with Hedge."]);
+      await expect.poll(async () => (await messages(ada.activeTaskId)).some((m) => m.kind === "options" && m.card?.requestId), { timeout: 20_000 }).toBe(true);
+      const escalated = await stream.until((frame) => frame.kind === "notify" && frame.notification?.kind === "incident"
+        && frame.notification.threadId === ada.activeTaskId, 20_000);
+      expect(escalated.notification.body).toMatch(/approval card to contact @Hedge is waiting on the person/);
+      expect(stream.frames.some((frame) => frame.kind === "notify" && frame.notification?.kind === "approval")).toBe(false);
+    } finally {
+      stream.close();
+    }
+  } finally {
+    await close();
+  }
+}, 150_000);
+
 it("delivers a teammate turn that ends needing input to the Chief's escalations thread", async () => {
   const { api, control, dump, messages, plan, useCli, turnEnded, escalationsThread, close } = await launch();
   try {

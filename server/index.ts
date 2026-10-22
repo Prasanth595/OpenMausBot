@@ -198,7 +198,7 @@ import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAle
 import { fleetAvailable, fleetSocketPath } from "./fleet-client.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
-import { buildMentionNotification, buildNotification, buildSpendNotification, type Notification } from "./notify.ts";
+import { buildMentionNotification, buildNotification, buildSpendNotification, muteBotOpenedThreads, SILENCED_BY_THREAD_MUTE, threadNotificationsMuted, type Notification, type ThreadMuteDefault } from "./notify.ts";
 import {
   isModelVariant,
   TurnNotStartedError, TurnAuthenticationRefusedError, TurnUsageLimitRefusedError,
@@ -3169,11 +3169,19 @@ if (browserCleanupReferencesReconciled) browserCleanup.startPending();
 
 let threadsAwaitingTeammates = (): ReadonlySet<string> => new Set<string>();
 let cacheKeepWarmStatus = (_threadId: string): KeepWarmStatus | undefined => undefined;
-const wireTask = (task: TaskRecord, botModel: ModelSelection, awaiting = threadsAwaitingTeammates()): WireTask => {
+const threadMuteDefault = (botId: string, mainThreadId = botMainThread(botId)): ThreadMuteDefault =>
+  ({ botOpened: muteBotOpenedThreads(cfg), mainThreadId });
+function threadMuted(botId: string, threadId: string): boolean {
+  const task = store.taskByThread(botId, threadId);
+  return task !== undefined && threadNotificationsMuted(task, threadMuteDefault(botId));
+}
+const wireTask = (task: TaskRecord, bot: Pick<BotRecord, "id" | "modelSelection">, awaiting = threadsAwaitingTeammates(),
+  muteDefault = threadMuteDefault(bot.id)): WireTask => {
   // Snoozes heal on read against the server clock; the 0 sentinel ("until new activity") survives reads.
-  const { snoozedUntil, ...base } = toWireTask(task, botModel);
+  const { snoozedUntil, ...base } = toWireTask(task, bot.modelSelection);
   const keepWarm = cacheKeepWarmStatus(task.threadId);
-  const coordinated = { ...base, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(teamHost.ownTurn(task.threadId) ? { private: true as const } : {}) };
+  const coordinated = { ...base, waitingForTeammates: awaiting.has(task.threadId) && !task.busy, ...(keepWarm ? { cacheKeepWarm: keepWarm } : {}), ...(teamHost.ownTurn(task.threadId) ? { private: true as const } : {}),
+    notificationsMuted: threadNotificationsMuted(task, muteDefault), followsMuteDefault: task.notificationsMuted === undefined };
   const asleep = snoozedUntil === 0 || (snoozedUntil !== undefined && snoozedUntil > Date.now());
   return asleep ? { ...coordinated, snoozedUntil } : coordinated;
 };
@@ -3185,10 +3193,10 @@ const wireBot = (bot: BotRecord): WireBot => {
   const visible = approvalGrant && !approvalGrant.threadOnly
     ? { ...rest, approvalMode: "ask" as const, autoApprove: false }
     : { ...rest, approvalMode: approvalModeFor(rest) };
-  const awaiting = threadsAwaitingTeammates();
+  const awaiting = threadsAwaitingTeammates(), mainThreadId = botMainThread(bot.id), muteDefault = threadMuteDefault(bot.id, mainThreadId);
   return { ...visible, waitingForTeammates: awaiting.has(bot.threadId) && !threadBusy(bot.id, bot.threadId),
-    mainThreadId: botMainThread(bot.id),
-    avatarUrl: visible.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot.modelSelection, awaiting)) } : {}) };
+    mainThreadId,
+    avatarUrl: visible.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot, awaiting, muteDefault)) } : {}) };
 };
 
 function toolScopeForTurn(botId: string) {
@@ -3201,8 +3209,8 @@ function toolScopeForTurn(botId: string) {
 
 const wireTrustedApprovalBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   const { resumeCursors: _resumeCursors, tasks, approvalGrant: _approvalGrant, lastProfileRequestId: _lastProfileRequestId, lastTeamSetupReceipt: _lastTeamSetupReceipt, packageBase: _packageBase, assignedSkills: _assignedSkills, ...rest } = bot;
-  const awaiting = threadsAwaitingTeammates();
-  return { ...rest, approvalMode: approvalModeFor(rest), mainThreadId: botMainThread(bot.id), avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot.modelSelection, awaiting)) } : {}) };
+  const awaiting = threadsAwaitingTeammates(), mainThreadId = botMainThread(bot.id), muteDefault = threadMuteDefault(bot.id, mainThreadId);
+  return { ...rest, approvalMode: approvalModeFor(rest), mainThreadId, avatarUrl: rest.avatarUrl ?? null, ...(tasks ? { tasks: tasks.map((task) => wireTask(task, bot, awaiting, muteDefault)) } : {}) };
 };
 
 function previewSystemPrompt(bot: BotRecord) {
@@ -3828,7 +3836,7 @@ const storedAvatarExists = (avatarUrl: string): boolean =>
 
 const publicBot = (bot: NonNullable<ReturnType<typeof store.bot>>) => {
   const wired = wireBot(bot), tasks = store.tasks(bot.id);
-  return { ...wired, ...messagePage(bot.threadId, DEFAULT_PAGE), tasks: tasks === bot.tasks && wired.tasks ? wired.tasks : tasks.map((task) => wireTask(task, bot.modelSelection)) };
+  return { ...wired, ...messagePage(bot.threadId, DEFAULT_PAGE), tasks: tasks === bot.tasks && wired.tasks ? wired.tasks : tasks.map((task) => wireTask(task, bot)) };
 };
 const publicBotQueuedMessages = () => queuedSteerSnapshot((botId, threadId) => Boolean(store.taskByThread(botId, threadId)));
 
@@ -5447,8 +5455,10 @@ const quietTurnThreads = new Set<string>();
 const QUIET_TURN_NEWS: ReadonlySet<Notification["kind"]> = new Set(["done", "turn-failed", "incident"]);
 
 function notify(notification: Notification | null) {
-  if (notification && QUIET_TURN_NEWS.has(notification.kind) && quietTurnThreads.has(notification.threadId)) return;
-  if (notification) broadcast({ kind: "notify", notification: logNotification(notification) });
+  if (!notification) return;
+  if (QUIET_TURN_NEWS.has(notification.kind) && quietTurnThreads.has(notification.threadId)) return;
+  if (SILENCED_BY_THREAD_MUTE[notification.kind] && threadMuted(notification.botId, notification.threadId)) return;
+  broadcast({ kind: "notify", notification: logNotification(notification) });
 }
 
 const roomTurnLevels = createRoomTurnLevels();
@@ -10188,7 +10198,8 @@ const ROOM_POST_MAX_CHARS = 4_000;
 
 const approvalBus: ApprovalBus = { store, broadcast, notify, autoApply: fullAccessForSource,
   onPeerApprovalPending: (from, target, action, sourceThreadId, message) => void reportEscalation({
-    kind: "peer-approval", bot: from, threadId: sourceThreadId, gate: peerApprovalGate(action, target.name), reason: message, alreadyNotified: true }) };
+    kind: "peer-approval", bot: from, threadId: sourceThreadId, gate: peerApprovalGate(action, target.name), reason: message,
+    alreadyNotified: !threadMuted(from.id, sourceThreadId) }) };
 
 const { quotaSwitch, harnessCardOutcome } = createQuotaSwitchHost({ store, coordinator, registry, turnStops, approvalBus, hostedModels, providerConfigs, policyModelRefusal, checkedTaskModelSwitch, threadBusy, directRequestOwners, startOrQueueDirectMessage });
 
@@ -14310,7 +14321,8 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         store, coordinator, from: internalSender, fromThreadId: internalCapability.threadId,
         ownsThread: (botId, threadId) => Boolean(connectorThread(botId, threadId)),
         shown: CLOUD_TEAM ? teamHost.readableFrom(internalCapability.threadId) : cloudLendingView(internalCapability) ? cloudOwnerOnlyThread : () => true,
-        threadBusy, queuedThreadPosition,
+        threadBusy, queuedThreadPosition, muteDefault: threadMuteDefault,
+        readBody: readInternalBody, requireActive: requireActiveInternalCapability,
       })], { req, res, url, path, method, auth, json, readBody })) return;
       if (method === "POST" && path === "/api/internal/attach-file") {
         const from = internalSender;
