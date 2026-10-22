@@ -1,148 +1,273 @@
 {
-  "schemaVersion": 1,
-  "capturedAtUtc": "2026-10-21T15:21:24.131Z",
-  "runtimeSourceCommit": "1dccf24c3242f8a5095bc577e7f5fedb65e2b262",
-  "upstreamBaseCommit": "97a4a1cab96ab3d07b0c7dac275f69afc6e7a8dc",
-  "environment": {
-    "os": "Windows",
-    "browser": "Chromium",
+  "schemaVersion": 2,
+  "capturedOnUtc": "2026-10-22",
+  "runtimeSourceCommit": "cf5f530bbb176b769e89be869352df981c764a82",
+  "pullRequest": {
+    "number": 3240,
+    "checksUrl": "https://github.com/milind-soni/OpenMausBot/pull/3240",
+    "ciStatus": "Consult live exact-head checks; this receipt does not claim that the full pnpm test run passed."
+  },
+  "build": {
+    "command": "pnpm build",
+    "result": "pass",
+    "receipt": "20261021T232757Z-21d22407"
+  },
+  "renderer": {
+    "type": "headless Chromium production web renderer",
     "browserVersion": "151.0.7922.34",
-    "headless": true,
-    "renderer": "Vite production preview",
-    "apiRestartedAfterRuntimeCommit": true,
-    "previewRestartedAfterRuntimeCommit": true,
-    "disposableFakeProviderFixture": true,
+    "playwrightVersion": "1.62.1",
+    "viewports": [
+      "900x900",
+      "900x600"
+    ],
+    "reducedMotion": "no-preference",
+    "prefersReducedMotion": false,
+    "pageErrors": 0,
+    "consoleWarnings": 0,
+    "consoleErrors": 0,
+    "blockedExternalRequests": 0,
+    "observedAssetRequestsInSettingsContext": 34,
+    "non200AssetRequestsInSettingsContext": 0,
+    "productionAssets": [
+      {
+        "urlPath": "/",
+        "httpStatus": 200,
+        "bytes": 878,
+        "distSha256": "9FB230B209A9E3136ED1A66405467E08A87D397ECDB56CA10C7B9C9489A27C39",
+        "servedSha256": "9FB230B209A9E3136ED1A66405467E08A87D397ECDB56CA10C7B9C9489A27C39",
+        "servedBytesAndSha256MatchedDisk": true
+      },
+      {
+        "urlPath": "/assets/index-DArp56Of.js",
+        "httpStatus": 200,
+        "bytes": 7282871,
+        "distSha256": "E72F68C212D21D016B6BA15EA9748DBD783492F0D195A0B2BC5BBCFEA4AA99E8",
+        "servedSha256": "E72F68C212D21D016B6BA15EA9748DBD783492F0D195A0B2BC5BBCFEA4AA99E8",
+        "servedBytesAndSha256MatchedDisk": true
+      },
+      {
+        "urlPath": "/assets/index-D8WFUxpg.css",
+        "httpStatus": 200,
+        "bytes": 264003,
+        "distSha256": "6F958E2D1AD814A61AAD2624ADAC4B906BEC3D96DA93EFEB335D76772CD47082",
+        "servedSha256": "6F958E2D1AD814A61AAD2624ADAC4B906BEC3D96DA93EFEB335D76772CD47082",
+        "servedBytesAndSha256MatchedDisk": true
+      },
+      {
+        "urlPath": "/assets/BotSettingsDialog-DZxPfVdX.js",
+        "httpStatus": 200,
+        "bytes": 149553,
+        "distSha256": "194ED61457491BD1F776F9AC2973889785544AC03B8B3A424E1F658F588CB957",
+        "servedSha256": "194ED61457491BD1F776F9AC2973889785544AC03B8B3A424E1F658F588CB957",
+        "servedBytesAndSha256MatchedDisk": true
+      }
+    ]
+  },
+  "fixture": {
+    "isolatedDisposableFixture": true,
+    "providerCli": "fake",
     "realProviderTurns": 0,
-    "unhandledPageErrors": 0,
-    "reducedMotion": "no-preference"
+    "browserNetworkPolicy": "Loopback allowlist only",
+    "nodeOutboundPreloadInstalled": false
   },
-  "productionBundle": {
-    "indexSha256": "09FA2290677813306D6498A03706EB0FE761D4BF2D2A48E0C9CC6CCE561D427B",
-    "servedIndexSha256": "09FA2290677813306D6498A03706EB0FE761D4BF2D2A48E0C9CC6CCE561D427B",
-    "module": "/assets/index-C84gzftk.js",
-    "moduleSha256": "2FE3408908E74C264AEDC7E88E69780E090D0FF698CB8663676417495D08E589",
-    "servedModuleSha256": "2FE3408908E74C264AEDC7E88E69780E090D0FF698CB8663676417495D08E589",
-    "httpStatus": {
-      "index": 200,
-      "module": 200
-    }
-  },
-  "uiChecks": {
-    "realFileChooser": true,
-    "defaultFaceFit": {
-      "horizontal": 114,
-      "vertical": 150,
-      "faceSize": 0.625,
-      "fitMessage": "The face fits inside the outline.",
-      "saveEnabledWithoutNudge": true
+  "ui": {
+    "mode": "Settings Simple",
+    "inputSvg": "bunny.svg",
+    "inputSvgSelectedWithVisibleFileChooser": true,
+    "defaultFit": {
+      "passed": true,
+      "saveEnabledWithoutAdjustment": true,
+      "anchor": {
+        "x": 113.824,
+        "y": 150.426,
+        "scale": 0.6237
+      }
     },
-    "saveStatus": 201,
-    "storedOutlinePoints": 512,
-    "rawSvgPersisted": false,
-    "reload": "pass",
-    "twoShapeLibrary": 2,
-    "crossBotCopy": "pass",
-    "crossBotSaveStatus": 201,
-    "resetRetainsLibraryAndReselects": "pass",
+    "save": {
+      "httpStatus": 201,
+      "profileSelectedAfterSave": true,
+      "rawSvgPersisted": false
+    },
+    "customProfile": {
+      "name": "Custom Bunny",
+      "outlinePointCount": 512,
+      "anchor": {
+        "x": 113.824,
+        "y": 150.426,
+        "scale": 0.6237
+      },
+      "legacyBodyProjection": "cursor",
+      "avatarCrop": "mascot",
+      "rawSvgPersisted": false,
+      "nonSquareSilhouetteVisibleInPreviewHeaderAndSidebar": true
+    },
+    "reload": {
+      "profileStillSelected": true,
+      "libraryRetained": true
+    },
+    "crossBotCopy": {
+      "usedVisibleUiControl": true,
+      "httpStatus": 201,
+      "numericOutlinePreserved": true,
+      "outlinePointCount": 512
+    },
     "nativeCat": {
-      "status": 200,
-      "mascotBody": "kitten"
+      "displayName": "Cat",
+      "bodyId": "kitten",
+      "httpStatus": 200,
+      "profileReadbackMatched": true
     },
     "halloweenCat": {
-      "status": 200,
-      "mascotBody": "cat"
+      "displayName": "Halloween Cat",
+      "bodyId": "cat",
+      "httpStatus": 200,
+      "secondCatTileSelected": true,
+      "profileReadbackMatched": true
     },
-    "openOutline": "rejected",
-    "faceClipGuard": true,
-    "expressionControls": [
-      "Curious",
-      "Happy",
-      "Idle"
-    ]
+    "bunnyRestoredAfterHalloween": {
+      "selectedThroughUi": true,
+      "profileReadbackMatched": true
+    },
+    "reset": {
+      "httpStatus": 200,
+      "selectedBodyId": "cursor",
+      "libraryRetained": true,
+      "libraryShapeCount": 1
+    },
+    "expression": {
+      "selected": "Working",
+      "selectedBeforeMotionCapture": true
+    }
   },
   "motion": {
-    "result": "pass",
-    "continuousSeconds": 8,
-    "noControlChangesDuringCapture": true,
-    "observedPoseChanges": true,
-    "file": "motion.mp4",
-    "resolution": "760x460",
-    "sourceSegmentStartSeconds": 98.36,
-    "crop": {
-      "x": 1040,
-      "y": 690,
-      "width": 380,
-      "height": 230,
-      "scale": 2
-    },
-    "processing": "Trim, fixed crop, and scale of actual UI recording; normal speed; no compositing.",
-    "independentlyInspectedFrames": [
-      "motion-t0.png",
-      "motion-t5.png"
-    ]
+    "controlsChangedDuringObservation": false,
+    "observedTransformWindowMs": 17107,
+    "bodyTransformSamples": [
+      {
+        "elapsedMs": 0,
+        "value": "translate(0.00 1.71) translate(114.2705 228.541) scale(1.0751 0.9249) translate(-114.2705 -228.541)"
+      },
+      {
+        "elapsedMs": 7330,
+        "value": "translate(0.00 -0.44)"
+      },
+      {
+        "elapsedMs": 17107,
+        "value": "translate(0.00 1.49) translate(114.2705 228.541) scale(1.0658 0.9342) translate(-114.2705 -228.541)"
+      }
+    ],
+    "clipFile": "motion.mp4",
+    "durationDescription": "about 10 seconds",
+    "containerDurationSeconds": 10.0,
+    "videoTrackDurationSeconds": 10.0,
+    "frameCount": 250,
+    "frameRate": 25,
+    "resolution": "900x900",
+    "audioTrack": false,
+    "normalSpeed": true,
+    "capturedFromActualUiRecording": true,
+    "compositing": false,
+    "clipWithinUnchangedControlObservation": true
   },
-  "independentAgentAcceptance": {
-    "code": "pass",
+  "historicalConsoleObservation": {
+    "scope": "prior 1dcc receipt",
+    "reportedCount": 12,
+    "description": "Nonfatal SVG negative-ellipse messages while visiting built-in/Halloween states.",
+    "freshCf5ActionMotionCount": 0,
+    "baselineAttribution": "unknown"
+  },
+  "independentReview": {
+    "source": "pass",
     "visual": "pass",
     "motion": "pass",
-    "focusedTestRun": {
-      "files": 11,
-      "passed": 100
-    },
-    "remainingBlockingFindings": 0
-  },
-  "knownConsoleObservation": {
-    "initialCatalogNonfatalSvgMessages": 12,
-    "messageKind": "Negative ellipse rx/ry during built-in/Halloween catalog actions.",
-    "freshBunnyImportAndMotionConsoleErrors": 0,
-    "baselineOriginEstablished": false
+    "overall": "accepted"
   },
   "limits": [
-    "Full pnpm test not run locally.",
-    "Installed Electron not exercised.",
-    "Mobile runtime UI not exercised.",
-    "Full-density team import performance not measured."
+    "Browser-only evidence: installed Electron and mobile UI were not exercised.",
+    "Full pnpm test status is not asserted here; consult live PR checks.",
+    "No real provider turns; the fixture used a fake CLI.",
+    "The browser used a loopback allowlist; no Node outbound preload was installed."
   ],
-  "media": {
-    "applied.png": {
-      "bytes": 120241,
-      "sha256": "259344c38778945aa20e47c567b6d726d6e7c38658c96dff2ea913dd62601d4a"
+  "media": [
+    {
+      "file": "applied.png",
+      "bytes": 61364,
+      "sha256": "ABBF211B9B97944B19BF76B2605F7593BB6EC8AE80DB2FC9B31CB10E674E23F7"
     },
-    "before.png": {
-      "bytes": 35079,
-      "sha256": "3127a525f672e41e6bf52a9bad6e5e55ab6533ff19f46813b8b48b2bea590c1d"
+    {
+      "file": "before.png",
+      "bytes": 41927,
+      "sha256": "332CB2075A1CF722812F0C13989391C02E577B75F4440C379604915F03B69972"
     },
-    "bunny.svg": {
+    {
+      "file": "bunny-restored-after-cat.png",
+      "bytes": 81276,
+      "sha256": "C92F036AAD2CC7733DC9F8B7490A20AC5039B5D9726A678FF498983B5781624F"
+    },
+    {
+      "file": "bunny.svg",
       "bytes": 280,
-      "sha256": "a252cb5e33e8f00e9574c031e785635bc333f02ffd037d896613330b95e682e0"
+      "sha256": "A252CB5E33E8F00E9574C031E785635BC333F02FFD037D896613330B95E682E0"
     },
-    "creator.png": {
-      "bytes": 91737,
-      "sha256": "0ba5bdd444b4e0423fefc4cbd64b5eb10e5d237e8afabd29b859c4ca422ce5ad"
+    {
+      "file": "creator.png",
+      "bytes": 45953,
+      "sha256": "88743CEADA2CF3B632C72891893D7F5907D66137DAF395C2D1CFA1C6E95F1D02"
     },
-    "halloween-cat.png": {
-      "bytes": 110357,
-      "sha256": "d0618f09cf5b4338dc907e3c571ea7f339cabd82e21e0b2587cabe2b8c8166a1"
+    {
+      "file": "halloween-cat.png",
+      "bytes": 85319,
+      "sha256": "C966369BCC4F7F446EFF0EB920C0E84A968111DAB5E8F976E453BDCD576FE0F7"
     },
-    "motion-t0.png": {
-      "bytes": 99064,
-      "sha256": "47953b8507ad3fbe110c48a47a07d88fc158cc73786205ea07bfe324bb8bc057"
+    {
+      "file": "motion-t0.png",
+      "bytes": 207727,
+      "sha256": "7CF3B75C6AA540CBEAC1D5F3A7912A50FB19112A4BC17548D56F8449C5A315E9"
     },
-    "motion-t5.png": {
-      "bytes": 98934,
-      "sha256": "e2347e6c66535071759644d04b9ee8c2f90df281d2289f4ca24ee1cdb660e937"
+    {
+      "file": "motion-t5.png",
+      "bytes": 208364,
+      "sha256": "91A57ABE3B5C0C55921610E82C483E83B2E844BFB66F13B257F0E8577813E612"
     },
-    "motion.mp4": {
-      "bytes": 260712,
-      "sha256": "baca501d8cd99ee01225e808bde82c5df9ac877d71f991f0d0ca43dbd1227cd0"
+    {
+      "file": "motion-t9.png",
+      "bytes": 210111,
+      "sha256": "18B2D19A8C602002C7530CD42F208BCF8519C5B45325A19BF956E8C918870874"
     },
-    "native-cat.png": {
-      "bytes": 131778,
-      "sha256": "e569b904040827903680575a94586f6eda1fd6358d8a7049114c51303a904b32"
+    {
+      "file": "motion.mp4",
+      "bytes": 108581,
+      "sha256": "4F52A17E0A5EF612A79C9557FFB8E85DD812A5988EC334450FAEE71AFA5E7296"
     },
-    "reuse.png": {
-      "bytes": 122088,
-      "sha256": "29c068dc7f8b839d0d8bcb3e4216ddc69e2bb6df98a3c1017d9dcf717b68ece5"
+    {
+      "file": "native-cat.png",
+      "bytes": 79529,
+      "sha256": "67F15A2091E1C80FD6FFBB23AF50DE8718DDE14234C512D51D1D8D914A932226"
+    },
+    {
+      "file": "reload.png",
+      "bytes": 77655,
+      "sha256": "5DFC472BEDCB5CCAA664B10FCB4BCB373B8B0FBF8E1AFDCA4C09BEDA7D9C6272"
+    },
+    {
+      "file": "reset-library.png",
+      "bytes": 77730,
+      "sha256": "7326EB6AC15769003C16A6B1767BE337BD0AC0086001EEFAE846293EAF27CB23"
+    },
+    {
+      "file": "reuse.png",
+      "bytes": 81555,
+      "sha256": "2695976DCA9B8ADC07AAEA041FBDA8665383642DDEC8E24C9413065F008B901D"
+    },
+    {
+      "file": "short-viewport.png",
+      "bytes": 44172,
+      "sha256": "7437C558EC35539BBA788D196D3F07DC4791F59DC63AC9CC3AA0082C47910D63"
+    },
+    {
+      "file": "working-expression.png",
+      "bytes": 78602,
+      "sha256": "7BC6BC639FA85D45823DD60468C3CE5F0078FCDB90939C7668D0C8FE72D148B9"
     }
-  }
+  ]
 }
