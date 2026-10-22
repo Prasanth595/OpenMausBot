@@ -73,8 +73,8 @@ describe("the box's egress gate", () => {
     cleanup.push(() => new Promise<void>((resolve) => upstream.close(() => resolve())));
     const port = (upstream.address() as { port: number }).port;
     const opened = await gate({ resolve: async () => [{ address: "127.0.0.1", family: 4 }], decide: async () => null });
-    expect((await connectVia(opened.socketPath, `localhost:${port}`)).status).toBe("200");
-    expect(await getVia(opened.socketPath, `http://localhost:${port}/page`)).toEqual({ status: 200, body: "served /page" });
+    expect((await connectVia(opened.socketPath, `fixture.invalid:${port}`)).status).toBe("200");
+    expect(await getVia(opened.socketPath, `http://fixture.invalid:${port}/page`)).toEqual({ status: 200, body: "served /page" });
     expect(opened.refused).toBe(0);
   });
 
