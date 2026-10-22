@@ -5,7 +5,7 @@
 // (agent-browser installs nothing where it finds one, as on GitHub's Windows runners).
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, win32 } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { agentBrowserIntegration, browserSessionsDirectory, resolveAgentBrowserBinary } from "../../server/browser-engine.ts";
@@ -59,14 +59,14 @@ describe("browser identity fixture isolation", () => {
 
   it("keeps Windows Chrome discovery on the host app-data path while fixture app-data stays isolated", () => {
     const scratch = join("fixture", "run");
-    const hostLocalAppData = join(scratch, "host-local");
+    const hostLocalAppData = win32.join(scratch, "host-local");
     const hostEnv = {
       LOCALAPPDATA: hostLocalAppData,
-      USERPROFILE: join(scratch, "host-user"),
-      ProgramFiles: join(scratch, "missing-program-files"),
-      "ProgramFiles(x86)": join(scratch, "missing-program-files-x86"),
+      USERPROFILE: win32.join(scratch, "host-user"),
+      ProgramFiles: win32.join(scratch, "missing-program-files"),
+      "ProgramFiles(x86)": win32.join(scratch, "missing-program-files-x86"),
     };
-    const chromePath = join(hostLocalAppData, "Google", "Chrome", "Application", "chrome.exe");
+    const chromePath = win32.join(hostLocalAppData, "Google", "Chrome", "Application", "chrome.exe");
     const host = chromeHost({ dataDir: scratch, env: hostEnv, platform: "win32", arch: "x64" });
     host.exists = (candidate) => candidate === chromePath;
     host.registryValue = () => null;
