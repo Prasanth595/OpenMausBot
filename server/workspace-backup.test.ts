@@ -415,7 +415,7 @@ describe("encrypted full workspace backups", () => {
       const paths: string[] = readJson(join(source, ".backups", staged.id, "staged", "manifest.json")).entries.map((entry: { path: string }) => entry.path);
       expect(paths).toContain("attachments/note.txt");
       expect(paths.filter((path) => path === "box" || path.startsWith("box/"))).toEqual([]);
-    } finally { await new Promise<void>((resolve) => broker.close(() => resolve())); }
+    } finally { if (broker) await new Promise<void>((resolve) => broker.close(() => resolve())); }
   });
 
   it("leaves the Organization library's downloaded catalog and release files out, and keeps what the runtime added", async () => {

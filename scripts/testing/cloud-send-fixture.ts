@@ -240,15 +240,19 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
     return { status: response.status, body: parse(await response.text()) };
   };
   const CAPABILITY_KEY = randomBytes(16).toString("hex");
-  const teamStopPreload = `data:text/javascript,${encodeURIComponent('process.on("message", message => { if (message === "stop") process.emit("SIGTERM"); });')}`;
   let teamFixture: CloudTeamFixture | null = null;
   if (team) {
     const teamPort = await freePortBlock([0, 1]);
     const teamBase = `http://127.0.0.1:${teamPort}`;
+    // Windows' child.kill("SIGTERM") ends a process at once, without Node's signal handlers, so the server never closes
+    // its session registry and its next start drops every member's session, as after a crash. There the team server is
+    // asked to stop over IPC and runs its own SIGTERM shutdown (as server/acp-shutdown.e2e.test.ts does).
+    const stopOverIpc = process.platform === "win32";
+    const stopOnMessage = `data:text/javascript,${encodeURIComponent('process.on("message", (message) => { if (message === "stop") process.emit("SIGTERM"); }); process.channel?.unref();')}`;
     const startTeam = (more: NodeJS.ProcessEnv = {}) => start("team", { OMB_CLOUD_ROLE: "team", OMB_CLOUD_TEAM_ID: team.id, OMB_CLOUD_TEAM_NAME: team.name,
       OMB_CLOUD_MACHINE_ID: "0d9e8f7a-6b5c-4d3e-9f8a-7b6c5d4e3f2a", OMB_CLOUD_ADMIN_URL: "https://cloud.example.test", OMB_CLOUD_BOOTSTRAP_SECRET: secret,
       OMB_PUBLIC_URL: `https://${CLOUD_HOST}`, OMB_TEST_INTERNAL_CAPABILITY_KEY: CAPABILITY_KEY, ...(broker ? { OMB_COMPOSIO_BROKER_URL: broker.url } : {}), ...team.env, ...more },
-      teamPort, ["--import", teamStopPreload], true, onePasswordToken, 0, team.engine ?? "", true);
+      teamPort, stopOverIpc ? ["--import", stopOnMessage] : [], stopOverIpc, onePasswordToken, 0, team.engine ?? "", true);
     let teamServer = await startTeam();
     const as: CloudTeamFixture["as"] = async (token, method, path, body, headers = {}) => {
       const init: RequestInit = { method, headers: { ...EDGE, authorization: `Bearer ${token}`, ...headers,
@@ -289,10 +293,11 @@ await import(${JSON.stringify(pathToFileURL(join(SERVER_DIR, "testing", "fake-cl
         return answer.token as string;
       },
       async relaunch(more = {}) {
-        if (!teamServer.connected) throw new Error("team fixture control channel disconnected before restart");
-        teamServer.send("stop");
-        await waitForExit(teamServer, { graceMs: 10_000 });
-        if (teamServer.exitCode !== 0) throw new Error(`team fixture did not stop cleanly (exitCode=${teamServer.exitCode}, signalCode=${teamServer.signalCode})`);
+        if (teamServer.connected) {
+          teamServer.send("stop");
+          await waitForExit(teamServer, { graceMs: 10_000 });
+        } else await waitForExit(teamServer, { signal: "SIGTERM" });
+        if (stopOverIpc && teamServer.exitCode !== 0) throw new Error(`team fixture did not stop cleanly (exitCode=${teamServer.exitCode}, signalCode=${teamServer.signalCode})`);
         teamServer = await startTeam(more);
       },
     };

@@ -15,7 +15,7 @@ const custom = {
 
 describe("remote MCP servers through the broker", () => {
   let dir: string, credentials: CredentialBroker;
-  afterEach(async () => { await credentials?.close(); rmSync(dir, { recursive: true, force: true }); forgetBrokeredMcp(); });
+  afterEach(async () => { await credentials?.close(); if (dir) rmSync(dir, { recursive: true, force: true }); forgetBrokeredMcp(); });
   const broker = async (): Promise<BoxBroker> => {
     dir = mkdtempSync(join(tmpdir(), "omb-bmcp-"));
     credentials = await openCredentialBroker({ socketPath: testSocketPath(dir, "b.sock") });
