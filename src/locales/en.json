@@ -2189,6 +2189,7 @@
   "task.muteNotifications": "Mute notifications",
   "task.unmuteNotifications": "Unmute notifications",
   "task.muted": "Notifications muted",
+  "task.muteHelp": "A muted thread still notifies you when a bot asks your approval to contact a teammate, when a problem has no Chief of Staff to take it, when it fails and its bot has no Chief of Staff, and for spend alerts.",
   "thread.gone": "That thread is no longer here.",
   "thread.goneShowing": "That thread is no longer here. Showing {name} instead.",
   "thread.botGone": "That bot is no longer here.",
