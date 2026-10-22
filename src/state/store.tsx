@@ -632,6 +632,9 @@ export interface AppState {
   webhookIngress: WebhookIngressStatus | null;
   settingsOpen: boolean;
   pluginsOpen: boolean;
+  /** The workshop panel: the sketch-to-figure surface. Off with everything
+   * else; opening it closes the other overlays like plugins does. */
+  workshopOpen: boolean;
   /** Which tab the Plugins panel opens on; "mcp" when a bot's tools
    * sent the user there to add a server. */
   pluginsSurface: "apps" | "mcp";
@@ -882,6 +885,7 @@ export type Action =
   | { type: "revealThread"; threadId: string }
   | { type: "toggleSettings"; open?: boolean; section?: BotSettingsSection }
   | { type: "togglePlugins"; open?: boolean; surface?: "apps" | "mcp" }
+  | { type: "toggleWorkshop"; open?: boolean }
   | { type: "toggleNewBot"; open?: boolean }
   | { type: "toggleComputer"; open?: boolean }
   | { type: "toggleInspector"; open?: boolean }
@@ -1099,6 +1103,7 @@ export function reducer(state: AppState, action: Action): AppState {
         inspectorOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
+        workshopOpen: false,
       };
     case "showChat":
       return state.activeView === "chat" ? state : { ...state, activeView: "chat" };
@@ -1111,6 +1116,7 @@ export function reducer(state: AppState, action: Action): AppState {
         inspectorOpen: false,
         appSettingsOpen: false,
         pluginsOpen: false,
+        workshopOpen: false,
       };
     case "routinesHydrated":
       return { ...state, routines: action.routines, routineRuns: trimRoutineRuns(action.runs), routinesLoadState: "ready" };
@@ -1494,13 +1500,21 @@ export function reducer(state: AppState, action: Action): AppState {
         appSettingsOpen: open ? false : state.appSettingsOpen,
       };
     }
+    case "toggleWorkshop": {
+      const open = action.open ?? !state.workshopOpen;
+      return {
+        ...state,
+        workshopOpen: open,
+        ...(open ? { settingsOpen: false, appSettingsOpen: false, pluginsOpen: false, newBotOpen: false, shortcutsOpen: false } : {}),
+      };
+    }
     case "togglePlugins": {
       const open = action.open ?? !state.pluginsOpen;
       return {
         ...state,
         pluginsOpen: open,
         pluginsSurface: action.surface ?? state.pluginsSurface,
-        ...(open ? { settingsOpen: false, appSettingsOpen: false, newBotOpen: false, shortcutsOpen: false } : {}),
+        ...(open ? { settingsOpen: false, appSettingsOpen: false, newBotOpen: false, shortcutsOpen: false, workshopOpen: false } : {}),
       };
     }
     case "botCreationPending":
@@ -1509,7 +1523,7 @@ export function reducer(state: AppState, action: Action): AppState {
       const open = action.open ?? !state.newBotOpen;
       return {
         ...state, newBotOpen: open,
-        ...(open ? { settingsOpen: false, appSettingsOpen: false, pluginsOpen: false, shortcutsOpen: false } : {}),
+        ...(open ? { settingsOpen: false, appSettingsOpen: false, pluginsOpen: false, shortcutsOpen: false, workshopOpen: false } : {}),
       };
     }
     case "notice":
@@ -1823,6 +1837,7 @@ export const initialState: AppState = {
   webhookIngress: null,
   settingsOpen: false,
   pluginsOpen: false,
+  workshopOpen: false,
   pluginsSurface: "apps",
   newBotOpen: false,
   botCreationPending: false,

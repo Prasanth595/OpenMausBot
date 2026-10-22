@@ -28,6 +28,7 @@ import {
   Trash2,
   Users,
   X,
+  PenTool,
 } from "lucide-react";
 import { api, useStore, formatTime, visibleMessages, currentTaskBot, type AppState, type Bot, type Group } from "@/state/store";
 
@@ -1969,6 +1970,15 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
             )}
           </button>
           <button
+            onClick={() => dispatch({ type: "toggleWorkshop", open: true })}
+            className={cn("flex min-h-10 w-full items-center rounded-xl py-2 text-left hover:bg-raised/50", density === "icons" ? "justify-center px-2" : "gap-3 px-3")}
+            aria-label={density === "icons" ? t("sidebar.nav.workshop") : undefined}
+            title={density === "icons" ? t("sidebar.nav.workshop") : undefined}
+          >
+            <PenTool size={20} className="text-ink-secondary" />
+            <span className={cn("text-[14px] text-ink", density === "icons" && "hidden")}>{t("sidebar.nav.workshop")}</span>
+          </button>
+          <button
             onClick={() => dispatch({ type: "togglePlugins", open: true })}
             className={cn("flex min-h-10 w-full items-center rounded-xl py-2 text-left hover:bg-raised/50", density === "icons" ? "justify-center px-2" : "gap-3 px-3")}
             aria-label={density === "icons" ? t("sidebar.nav.connectedApps") : undefined}
@@ -2006,6 +2016,12 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
                   (run) => ["failed", "missed"].includes(run.status) && !run.seenAt,
                 ),
                 onSelect: () => dispatch({ type: "showRoutines" }),
+              },
+              {
+                key: "workshop",
+                label: t("sidebar.nav.workshop"),
+                icon: <PenTool size={18} />,
+                onSelect: () => dispatch({ type: "toggleWorkshop", open: true }),
               },
               {
                 key: "plugins",
