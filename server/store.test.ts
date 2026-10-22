@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -1751,6 +1751,102 @@ describe("custom mascot profile persistence", () => {
     const migrated = JSON.parse(readFileSync(join(DATA_DIR, "bots.json"), "utf8")) as Array<Record<string, unknown>>;
     expect(migrated[0]).toHaveProperty("mascotBody", "circle");
     expect(migrated[0]).toHaveProperty("mascotProfile");
+    expect(existsSync(join(DATA_DIR, "mascot-profile-recovery"))).toBe(false);
+  });
+
+  it.each([
+    ["malformed", { version: 1, shapes: [{ id: "broken", name: "Secret profile marker" }], selected: { kind: "custom", shapeId: "broken" } }],
+    ["future-version", { version: 2, shapes: [], selected: { kind: "builtin", bodyId: "future-body" }, privateMarker: "Secret profile marker" }],
+  ] as const)("preserves the original registry before normalizing a %s stored mascot profile", (_kind, invalidProfile) => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Invalid mascot profile" });
+    const file = join(DATA_DIR, "bots.json");
+    const bots = JSON.parse(readFileSync(file, "utf8")) as Array<Record<string, unknown>>;
+    bots.find((record) => record.id === bot.id)!.mascotProfile = invalidProfile;
+    const original = Buffer.from(JSON.stringify(bots));
+    writeFileSync(file, original);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const restored = new Store(selection).bot(bot.id)!;
+
+    expect(restored.mascotProfile).toMatchObject({ version: 1, shapes: [], selected: { kind: "builtin", bodyId: "cursor" } });
+    const persisted = JSON.parse(readFileSync(file, "utf8")) as Array<Record<string, unknown>>;
+    expect(persisted.find((record) => record.id === bot.id)?.mascotProfile).toEqual(restored.mascotProfile);
+    const recoveryDirectory = join(DATA_DIR, "mascot-profile-recovery");
+    const [recoveryName] = readdirSync(recoveryDirectory);
+    const recoveryFile = join(recoveryDirectory, recoveryName!);
+    expect(recoveryName).toMatch(/^bots-mascot-profile-[a-f0-9]{64}\.json$/);
+    expect(readFileSync(recoveryFile)).toEqual(original);
+    if (process.platform !== "win32") {
+      expect(lstatSync(recoveryDirectory).mode & 0o777).toBe(0o700);
+      expect(lstatSync(recoveryFile).mode & 0o777).toBe(0o600);
+    }
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining(`bot ${bot.id}`));
+    expect(warning.mock.calls.flat().join(" ")).toContain(recoveryFile);
+    expect(warning.mock.calls.flat().join(" ")).not.toContain("Secret profile marker");
+    warning.mockRestore();
+  });
+
+  it("reuses the identical recovery copy on repeated startup", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Invalid mascot profile" });
+    const file = join(DATA_DIR, "bots.json");
+    const bots = JSON.parse(readFileSync(file, "utf8")) as Array<Record<string, unknown>>;
+    bots.find((record) => record.id === bot.id)!.mascotProfile = { version: 2, shapes: [], selected: { kind: "builtin", bodyId: "cursor" } };
+    const original = Buffer.from(JSON.stringify(bots));
+    writeFileSync(file, original);
+
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    new Store(selection);
+    const recoveryDirectory = join(DATA_DIR, "mascot-profile-recovery");
+    const [recoveryName] = readdirSync(recoveryDirectory);
+    const recoveryFile = join(recoveryDirectory, recoveryName!);
+    expect(readFileSync(recoveryFile)).toEqual(original);
+    writeFileSync(file, original);
+    new Store(selection);
+    expect(readdirSync(recoveryDirectory)).toEqual([recoveryName]);
+    expect(readFileSync(recoveryFile)).toEqual(original);
+    expect(warning).toHaveBeenCalledTimes(2);
+    warning.mockRestore();
+  });
+
+  it("does not overwrite a conflicting content-addressed recovery file", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Invalid mascot profile" });
+    const file = join(DATA_DIR, "bots.json");
+    const bots = JSON.parse(readFileSync(file, "utf8")) as Array<Record<string, unknown>>;
+    bots.find((record) => record.id === bot.id)!.mascotProfile = { version: 2, shapes: [], selected: { kind: "builtin", bodyId: "cursor" } };
+    const original = Buffer.from(JSON.stringify(bots));
+    writeFileSync(file, original);
+    const recoveryDirectory = join(DATA_DIR, "mascot-profile-recovery");
+    mkdirSync(recoveryDirectory, { recursive: true });
+    const digest = createHash("sha256").update(original).digest("hex");
+    const recoveryFile = join(recoveryDirectory, `bots-mascot-profile-${digest}.json`);
+    const existing = Buffer.from("keep the pre-existing recovery file");
+    writeFileSync(recoveryFile, existing);
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(() => new Store(selection)).toThrow(/recovery file does not match/i);
+    expect(readFileSync(file)).toEqual(original);
+    expect(readFileSync(recoveryFile)).toEqual(existing);
+    expect(warning).not.toHaveBeenCalled();
+    warning.mockRestore();
+  });
+
+  it("does not rewrite bots.json or continue startup if recovery fails", () => {
+    const store = new Store(selection);
+    const bot = store.createBot({ name: "Invalid mascot profile" });
+    const file = join(DATA_DIR, "bots.json");
+    const bots = JSON.parse(readFileSync(file, "utf8")) as Array<Record<string, unknown>>;
+    bots.find((record) => record.id === bot.id)!.mascotProfile = { version: 2, shapes: [], selected: { kind: "builtin", bodyId: "cursor" } };
+    const original = Buffer.from(JSON.stringify(bots));
+    writeFileSync(file, original);
+    writeFileSync(join(DATA_DIR, "mascot-profile-recovery"), "cannot create recovery directory");
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(() => new Store(selection)).toThrow();
+    expect(readFileSync(file)).toEqual(original);
+    expect(warning).not.toHaveBeenCalled();
+    warning.mockRestore();
   });
 
   it("keeps absent and explicit cursor bodies distinct through Store reload and team export", () => {

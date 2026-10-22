@@ -20,7 +20,7 @@ import { pickBotName } from "./names.ts";
 import { redactSecretsInText } from "./redact.ts";
 import { scrubbedSkillRequest } from "./skill-request-card.ts";
 import { AVATAR_FOCUS_CENTER, AVATAR_ZOOM_MIN, botAvatarProfile, clampAvatarFocus, clampAvatarZoom } from "../shared/bot-avatar.ts";
-import { mascotStateForCreation, mascotStateWithCustomShape, normalizeStoredBotMascotState, type CustomMascotShape } from "./mascot-profile-store.ts";
+import { mascotStateForCreation, mascotStateWithCustomShape, normalizeStoredBotMascotState, preserveInvalidMascotProfileRegistry, type CustomMascotShape } from "./mascot-profile-store.ts";
 import { applyBotProfilePatch, BotAppearanceRevisionTracker, normalizeBotPatch } from "./store-bot-patches.ts";
 import { approvalModeFor, isApprovalMode, modelSwitchNeedsAsk, threadApproval, type ApprovalMode } from "../shared/approval-mode.ts";
 import { lastChangeRequestUrl } from "../shared/thread-link.ts";
@@ -668,7 +668,7 @@ export class Store {
     const clearModelCopies = !existsSync(THREAD_MODEL_COPIES_CLEARED) && (botsLoaded || !existsSync(BOTS_FILE));
     const fillAskedAts = !existsSync(ASKED_AT_FILLED) && (botsLoaded || !existsSync(BOTS_FILE));
     for (const b of this.bots) {
-      if (normalizeStoredBotMascotState(b)) botsMigrated = true;
+      if (normalizeStoredBotMascotState(b, () => preserveInvalidMascotProfileRegistry(BOTS_FILE, b.id))) botsMigrated = true;
       if (b.projects?.some((project) => "modelSelection" in project)) {
         b.projects = b.projects.map(({ id, name, emoji }) => ({ id, name, ...(isProjectEmoji(emoji) ? { emoji } : {}) }));
         botsMigrated = true;
