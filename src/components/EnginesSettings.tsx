@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
+import { Bot, Check, Cpu, Loader2, RefreshCw, TriangleAlert } from "lucide-react";
 
 import { api, useStore, type InstanceInfo } from "@/state/store";
 import { EngineCard, EngineSections, RefreshEngines, engineReady } from "./EngineLibrary";
@@ -407,20 +407,26 @@ export function EnginesSettings() {
         </div>
         <RefreshEngines />
       </div>
-      <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,340px),1fr))] items-start gap-6">
-        <section data-connection-kind="agent" aria-labelledby="agent-connections-title" className="min-w-0 space-y-4">
-          <div className="rounded-2xl border border-hairline/40 bg-inset/50 px-5 py-4">
-            <h2 id="agent-connections-title" className="text-[17px] font-semibold text-ink">{t("model.connection.agentTitle")}</h2>
-            <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-ink-secondary">{t("model.connection.agentDescription")}</p>
+      <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(100%,340px),1fr))] items-stretch gap-4">
+        <section data-connection-kind="agent" aria-labelledby="agent-connections-title" className="min-w-0 rounded-2xl border border-accent/30 bg-accent/[0.045] p-3">
+          <div className="border-b border-accent/20 px-2 pb-4 pt-2">
+            <div className="flex items-center gap-2.5">
+              <span aria-hidden="true" className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent-text"><Bot size={18} /></span>
+              <h2 id="agent-connections-title" className="text-[17px] font-semibold text-ink">{t("model.connection.agentTitle")}</h2>
+            </div>
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">{t("model.connection.agentDescription")}</p>
           </div>
-          <EngineSections instances={agentApps} isReady={isReady} renderEngine={renderEngine} />
+          <div className="pt-4"><EngineSections instances={agentApps} isReady={isReady} renderEngine={renderEngine} /></div>
         </section>
-        <section data-connection-kind="direct" aria-labelledby="direct-connections-title" className="min-w-0 space-y-4">
-          <div className="rounded-2xl border border-hairline/40 bg-inset/50 px-5 py-4">
-            <h2 id="direct-connections-title" className="text-[17px] font-semibold text-ink">{t("model.connection.directTitle")}</h2>
-            <p className="mt-1 max-w-3xl text-[13px] leading-relaxed text-ink-secondary">{t("model.connection.directDescription")}</p>
+        <section data-connection-kind="direct" aria-labelledby="direct-connections-title" className="min-w-0 rounded-2xl border border-hairline/80 bg-inset/65 p-3">
+          <div className="border-b border-hairline/70 px-2 pb-4 pt-2">
+            <div className="flex items-center gap-2.5">
+              <span aria-hidden="true" className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-raised text-ink"><Cpu size={18} /></span>
+              <h2 id="direct-connections-title" className="text-[17px] font-semibold text-ink">{t("model.connection.directTitle")}</h2>
+            </div>
+            <p className="mt-2 text-[13px] leading-relaxed text-ink-secondary">{t("model.connection.directDescription")}</p>
           </div>
-          <EngineSections instances={directModels} isReady={isReady} renderEngine={renderEngine} />
+          <div className="pt-4"><EngineSections instances={directModels} isReady={isReady} renderEngine={renderEngine} /></div>
         </section>
       </div>
       <CacheKeepWarmSettings />

@@ -39,7 +39,7 @@ export function EngineCard({ instance, children, summary }: { instance: Instance
   // Some CLIs return their executable name rather than a version.
   const version = instance.snapshot.version?.match(/\d+\.\d+(?:\.\d+)?(?:[-+][\w.-]+)?/)?.[0];
   return (
-    <details data-engine-card={instance.instanceId} className="group/engine min-w-0 rounded-2xl border border-hairline/40 bg-card transition-colors open:col-span-full open:border-hairline/70 hover:border-hairline/70">
+    <details data-engine-card={instance.instanceId} className={cn("group/engine min-w-0 rounded-2xl border border-hairline/40 border-l-[3px] bg-card transition-colors open:col-span-full open:border-hairline/70 hover:border-hairline/70", ready ? "border-l-success/55" : "border-l-warning/65")}>
       <summary className="cursor-pointer list-none rounded-2xl p-4 outline-none focus-visible:ring-2 focus-visible:ring-accent [&::-webkit-details-marker]:hidden">
         <div className="flex min-w-0 items-center gap-3">
           <span aria-hidden="true" className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-hairline/30 bg-panel">
@@ -89,8 +89,11 @@ export function EngineSections({ instances, renderEngine, isReady = engineReady 
       if (!rows.length) return [];
       const label = t(ready ? "onboarding.engines.ready" : "onboarding.engines.needsSetup");
       return [
-        <div key={`heading-${ready}`} className={cn("col-span-full flex items-center justify-between gap-3 px-4", !ready && instances.some(isReady) && "mt-4")}>
-          <h2 className="text-[12px] font-semibold text-ink-secondary">{label}</h2>
+        <div key={`heading-${ready}`} data-connection-status={ready ? "ready" : "needs-setup"} className={cn("col-span-full flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5", ready ? "border-success/25 bg-success/[0.08]" : "border-warning/30 bg-warning/[0.09]", !ready && instances.some(isReady) && "mt-4")}>
+          <h3 className={cn("flex items-center gap-2 text-[13px] font-semibold", ready ? "text-success" : "text-warning")}>
+            {ready ? <Check size={15} aria-hidden="true" /> : <span aria-hidden="true" className="size-2 rounded-full bg-warning" />}
+            {label}
+          </h3>
           <span className="text-[11px] tabular-nums text-ink-secondary">{t(rows.length === 1 ? "engines.library.countOne" : "engines.library.count", { count: rows.length })}</span>
         </div>,
         ...rows.map((instance) => <div key={instance.instanceId} className="contents">{renderEngine(instance)}</div>),
