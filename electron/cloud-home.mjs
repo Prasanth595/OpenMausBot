@@ -181,10 +181,30 @@ export function cloudPlanDisk(state) {
   return { volumeBytes: disk.gb * GB, maxBytes: disk.maxGb * GB, ...(state.entitlement.tier === LARGEST_TIER ? { largest: true } : {}) };
 }
 
+/** My Cloud's address once the Admin says it is ready, and never before: a name looked up while it is set up does not
+ * exist yet, and resolvers keep that "no such name" for minutes (RFC 2308 negative caching). */
+export function readyCloudOrigin(state) {
+  const machine = state?.status === "connected" ? state.machine : null;
+  return machine?.origin && CLOUD_MACHINE_CONNECTABLE.includes(machine.status) ? machine.origin : null;
+}
+
+/** A machine the Admin is setting up: the step it reports, and whether it is slow. */
+export function machineSetup(machine) {
+  if (machine?.status !== "provisioning") return null;
+  return machine.setup ? { step: machine.setup.step, ...(machine.setup.slow ? { slow: true } : {}) } : {};
+}
+
+/** My Cloud is being set up: the Admin says so, or a payment it is still confirming has no machine yet. */
+export function cloudSetupOf(state) {
+  if (state?.status !== "connected") return null;
+  if (state.machine) return machineSetup(state.machine);
+  return state.purchase?.state === "confirming" ? {} : null;
+}
+
 export function rememberedCloudHome(previous, state) {
   const accountId = state?.account?.id ?? null;
   if (!accountId) return null;
-  if (state.status === "connected" && !state.machine) return null;
+  if (state.status === "connected" && (!state.machine || state.machine.status === "provisioning")) return null;
   const origin = state.status === "connected" ? state.machine.origin ?? null : null;
   if (origin) return { accountId, origin };
   return previous?.accountId === accountId ? previous : null;
@@ -285,4 +305,11 @@ export function cloudPageSenderAllowed(event, { contents, homeOrigin, activeOrig
   if (!contents || !homeOrigin || activeOrigin !== homeOrigin) return false;
   if (event?.sender !== contents || !event.senderFrame || event.senderFrame !== contents.mainFrame) return false;
   try { return new URL(event.senderFrame.url).origin === homeOrigin; } catch { return false; }
+}
+
+/** The renderer names a team; only the verified connected session supplies its identity and Cloud target. */
+export async function openTeamHome(state, teamId, showHome) {
+  const team = state.status === "connected" ? state.teams?.find(entry => entry.id === teamId) ?? null : null;
+  if (!team) throw new Error("You're not in that team.");
+  await showHome({ place: { team: team.id, name: team.name } });
 }
