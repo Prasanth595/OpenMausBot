@@ -14,6 +14,7 @@ const fixture = vi.hoisted(() => {
     index: 0,
     own: 0,
     instances: [] as InstanceInfo[],
+    config: undefined as { openaiCompat: { url: string } } | undefined,
     dispatch: (() => {}) as (...args: unknown[]) => void,
     refreshInstances: (() => Promise.resolve()) as () => Promise<void>,
     refreshModels: ((_id: string) => Promise.resolve()) as (instanceId: string) => Promise<void>,
@@ -35,7 +36,7 @@ vi.mock("./MenuMotion", () => ({ useMenuMotion: (open: boolean) => ({ shown: ope
 vi.mock("@/state/store", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/state/store")>()),
   useStore: () => ({
-    state: { instances: fixture.instances, bots: [], modelVariantSessions: {} },
+    state: { instances: fixture.instances, bots: [], modelVariantSessions: {}, config: fixture.config },
     dispatch: fixture.dispatch,
     refreshInstances: fixture.refreshInstances,
     refreshModels: fixture.refreshModels,
@@ -113,6 +114,7 @@ const menu = (html: string) => html.slice(html.indexOf("data-model-picker-conten
 const flush = async () => { for (let index = 0; index < 20; index++) await Promise.resolve(); };
 
 beforeEach(() => {
+  fixture.config = undefined;
   fixture.values = [];
   fixture.index = 0;
   fixture.own = 0;
@@ -286,4 +288,23 @@ describe("the way into local models", () => {
     expect(settled).toBe(true);
     await expect(probeLocalModels("claude", () => Promise.reject(new Error("offline")))).resolves.toBeUndefined();
   });
+});
+
+
+it.each([
+  [undefined, "http://127.0.0.1:8118/v1", "local"],
+  [undefined, "https://api.openai.com/v1", "hosted"],
+  ["https://api.openai.com/v1", "http://127.0.0.1:8118/v1", "hosted"],
+] as const)("keeps endpoint billing text consistent with the arrangement (instance=%s, fallback=%s)", (url, fallback, location) => {
+  fixture.config = { openaiCompat: { url: fallback } };
+  fixture.instances = [{ instanceId: "openaiCompat", driverKind: "openai-compat", displayName: "Fixture", access: "api",
+    snapshot: { state: "available", authenticated: true }, models: { default: "qwen", options: [{ id: "qwen", label: "Qwen" }] },
+    ...(url ? { url } : {}),
+  }];
+  const html = open(bot("openaiCompat", "qwen")).html;
+  expect(html).toContain(`data-inference-location="${location}"`);
+  const localHint = "Connects to the local model endpoint you added in API keys.";
+  const apiHint = "Runs on your API key, billed per token by the provider.";
+  expect(html).toContain(location === "local" ? localHint : apiHint);
+  expect(html).not.toContain(location === "local" ? apiHint : localHint);
 });

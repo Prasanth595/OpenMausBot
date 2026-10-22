@@ -144,8 +144,7 @@ import {
   type Runtime,
 } from "./container-computer.ts";
 import { attachForTurn, saveBotAttachment } from "./bot-attachment.ts";
-import { endpointDisplayUrl } from "./openai-compat-endpoints.ts";
-import { isDirectModelDriver } from "../shared/model-arrangement.ts";
+import { createModelName, directModelUrl } from "./instance-description.ts";
 import {
   cacheUntilConfigChanges,
   ensureDirs,
@@ -3006,11 +3005,7 @@ function turnSelection(botId: string, threadId: string): ModelSelection | undefi
   return threadModelGivingWay(botId, threadId) ? store.bot(botId)?.modelSelection : store.projectBotForTask(botId, threadId)?.modelSelection;
 }
 
-function modelName(selection: ModelSelection): string {
-  const instance = registry.get(selection.instanceId);
-  const label = instance?.models.options.find((option) => option.id === selection.model)?.label ?? selection.model;
-  return instance ? `${instance.displayName || instance.driverKind} · ${label}` : label;
-}
+const modelName = createModelName(registry);
 
 function healThreadModel(botId: string, threadId: string): void {
   const bot = store.bot(botId);
@@ -12923,8 +12918,7 @@ async function describeInstances() {
   const ownReady = cloudCredit !== null && engines.some(instance => !selectionContext.company(instance.instanceId) && readyToRun(instance, selectionContext));
   return engines.map((instance) => {
     const entry = configs[instance.instanceId];
-    const directUrl = isDirectModelDriver(instance.driverKind)
-      ? endpointDisplayUrl(entry?.config) : undefined;
+    const directUrl = directModelUrl(instance.driverKind, entry?.config);
     const described = {
       ...instance,
       ...(directUrl ? { url: directUrl } : {}),

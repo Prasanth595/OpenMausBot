@@ -1,3 +1,5 @@
+import { modelLabel, modelProvider, probeLocalModels } from "./model-picker-options";
+export { probeLocalModels, LOCAL_PROBE_TIMEOUT_MS } from "./model-picker-options";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { Check, ChevronDown, ChevronLeft, ChevronRight, KeyRound, Loader2, Plus, RefreshCw, Search, X } from "lucide-react";
 import { useStore, currentTaskBot, type Bot, type InstanceInfo, type ModelSelection } from "@/state/store";
@@ -29,37 +31,10 @@ import { isDirectModelDriver } from "../../shared/model-arrangement";
 type ModelOption = InstanceInfo["models"]["options"][number];
 const COMPACT_MODEL_COUNT = 5;
 
-function modelLabel(instance: InstanceInfo | undefined, model: string): string {
-  if (model === "agent-default") return t("model.arrangement.unknownModel");
-  return instance?.models.options.find((option) => option.id === model)?.label ?? model;
-}
-
-function modelProvider(instance: InstanceInfo | undefined, model: string): string | undefined {
-  return instance?.models.options.find((option) => option.id === model)?.provider;
-}
-
 export function engineStatus(instance: InstanceInfo): string {
   if (needsCli(instance)) return t("model.setupRequired");
   if (needsSignIn(instance)) return t("model.signInRequired");
   return instance.snapshot.version ?? t("model.ready");
-}
-
-export const LOCAL_PROBE_TIMEOUT_MS = 5_000;
-
-export function probeLocalModels(
-  instanceId: string,
-  refreshModels: (instanceId: string) => Promise<void>,
-  timeoutMs = LOCAL_PROBE_TIMEOUT_MS,
-): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, timeoutMs);
-    void refreshModels(instanceId)
-      .catch(() => {})
-      .finally(() => {
-        clearTimeout(timer);
-        resolve();
-      });
-  });
 }
 
 export function offersLocalModels(instance: InstanceInfo | undefined, localCount: number): boolean {
@@ -771,8 +746,9 @@ export function ModelPicker({
   const activeSummary = <ModelArrangementCard instance={active} selection={selection} endpointUrl={activeEndpoint} />;
   const browsingSelection = railInstance?.instanceId === selection.instanceId ? selection
     : { instanceId: railInstance?.instanceId ?? selection.instanceId, model: railInstance?.models.default ?? "" };
+  const railEndpoint = railInstance?.instanceId === "openaiCompat" ? state.config?.openaiCompat?.url : undefined;
   const arrangementCard = <ModelArrangementCard instance={railInstance} selection={browsingSelection}
-    endpointUrl={railInstance?.instanceId === "openaiCompat" ? state.config?.openaiCompat?.url : undefined}
+    endpointUrl={railEndpoint}
     changing={Boolean(railInstance && railInstance.instanceId !== selection.instanceId)} />;
   const followLine = follows === true ? `\n${t("model.followsBot", { name: profile.name })}` : follows === false ? `\n${t("model.ownModel")}` : "";
 
@@ -996,7 +972,7 @@ export function ModelPicker({
                     <ChatGptPlanStatus key={railInstance.instanceId} instanceId={railInstance.instanceId} />
                   )}
                   {railInstance.access === "api"
-                    ? <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t(modelArrangement(railInstance, { instanceId: railInstance.instanceId, model: "agent-default" }).location === "local" ? "model.localEndpointHint" : "model.apiKeyHint")}</div>
+                    ? <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t(modelArrangement(railInstance, { instanceId: railInstance.instanceId, model: "agent-default" }, railEndpoint).location === "local" ? "model.localEndpointHint" : "model.apiKeyHint")}</div>
                     : pane === "custom" && <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t("model.localHint")}</div>}
                 </div>
 
