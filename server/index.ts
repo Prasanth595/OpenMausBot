@@ -198,7 +198,7 @@ import { assertWithinBudget, noteSpend, spendAlertText, spendState, takeSpendAle
 import { fleetAvailable, fleetSocketPath } from "./fleet-client.ts";
 import { HOSTED_CONTRACT_HEADER, HOSTED_CONTRACT_METADATA, HOSTED_CONTRACT_VERSION } from "./hosted-contract.ts";
 import { describeSpawnFailure, execCli } from "./procs.ts";
-import { buildMentionNotification, buildNotification, buildSpendNotification, muteBotOpenedThreads, SILENCED_BY_THREAD_MUTE, threadNotificationsMuted, type Notification, type ThreadMuteDefault } from "./notify.ts";
+import { buildMentionNotification, buildNotification, buildSpendNotification, muteBotOpenedThreads, mutedThreadNotifies, threadNotificationsMuted, type Notification, type ThreadMuteDefault, type ThreadMuteNotice } from "./notify.ts";
 import {
   isModelVariant,
   TurnNotStartedError, TurnAuthenticationRefusedError, TurnUsageLimitRefusedError,
@@ -242,7 +242,7 @@ import { parseSince, parseUntil, recentWork, recentWorkPrompt, turnOutcomeLine }
 import { chiefEscalationsEnabled, NEEDS_INPUT_GATE, peerApprovalGate, RAISED_GATE } from "./escalations.ts";
 import { createChiefNotices } from "./host/chief-notices.ts";
 import { needsInputQuestion } from "./runtime-coordinator.ts";
-import { RETRY_BLOCKED } from "./incidents.ts";
+import { chiefForBot, RETRY_BLOCKED } from "./incidents.ts";
 
 const SESSION_READ_MAX_CHARS = 8_000;
 import { promptWithReply, replyTargetIn, transcriptText, type ReplyTarget } from "./replies.ts";
@@ -5454,10 +5454,14 @@ const providerLabel = (provider: string): string => {
 const quietTurnThreads = new Set<string>();
 const QUIET_TURN_NEWS: ReadonlySet<Notification["kind"]> = new Set(["done", "turn-failed", "incident"]);
 
-function notify(notification: Notification | null) {
+/** `notice` names a notification whose kind alone does not say what it is to a muted thread (a peer approval is an "approval"). */
+function notify(notification: Notification | null, notice?: ThreadMuteNotice) {
   if (!notification) return;
   if (QUIET_TURN_NEWS.has(notification.kind) && quietTurnThreads.has(notification.threadId)) return;
-  if (SILENCED_BY_THREAD_MUTE[notification.kind] && threadMuted(notification.botId, notification.threadId)) return;
+  if (threadMuted(notification.botId, notification.threadId) && !mutedThreadNotifies(notice ?? notification.kind, () => {
+    const bot = store.bot(notification.botId);
+    return bot ? chiefForBot(store.bots, bot) !== null : false;
+  })) return;
   broadcast({ kind: "notify", notification: logNotification(notification) });
 }
 
@@ -10196,10 +10200,10 @@ function roomRoutingInput(
 const roomPostBudgets = new Map<string, RoomPostBudget>();
 const ROOM_POST_MAX_CHARS = 4_000;
 
-const approvalBus: ApprovalBus = { store, broadcast, notify, autoApply: fullAccessForSource,
+// The bus notifies only for peer approval cards: a gate the person alone lifts, so it reaches them even from a muted thread.
+const approvalBus: ApprovalBus = { store, broadcast, notify: (notification) => notify(notification, "peer-approval"), autoApply: fullAccessForSource,
   onPeerApprovalPending: (from, target, action, sourceThreadId, message) => void reportEscalation({
-    kind: "peer-approval", bot: from, threadId: sourceThreadId, gate: peerApprovalGate(action, target.name), reason: message,
-    alreadyNotified: !threadMuted(from.id, sourceThreadId) }) };
+    kind: "peer-approval", bot: from, threadId: sourceThreadId, gate: peerApprovalGate(action, target.name), reason: message, alreadyNotified: true }) };
 
 const { quotaSwitch, harnessCardOutcome } = createQuotaSwitchHost({ store, coordinator, registry, turnStops, approvalBus, hostedModels, providerConfigs, policyModelRefusal, checkedTaskModelSwitch, threadBusy, directRequestOwners, startOrQueueDirectMessage });
 

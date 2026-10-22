@@ -102,9 +102,11 @@ it("delivers a pending peer-comm approval card to the Chief's escalations thread
   }
 }, 150_000);
 
-it("escalates a peer approval waiting in a muted thread to the person, since its approval notification stayed quiet", async () => {
-  const { url, api, control, messages, plan, useCli, close } = await launch();
+it("still notifies the person of a peer approval waiting in a muted thread, even when a Chief receives the escalation", async () => {
+  const { url, api, control, messages, plan, useCli, escalationsThread, close } = await launch();
   try {
+    const chief = (await control(["new-bot", "--name", "Clive", "--section", "Ops"])).bot;
+    await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true });
     const ada = (await control(["new-bot", "--name", "Ada", "--section", "Ops"])).bot;
     await api("PATCH", `/api/bots/${ada.id}`, { approvePeerComms: true, approvalMode: "ask", notifications: true });
     const hedge = (await control(["new-bot", "--name", "Hedge", "--section", "Ops"])).bot;
@@ -114,14 +116,19 @@ it("escalates a peer approval waiting in a muted thread to the person, since its
       tools: [{ name: "coordinate_bots", server: "agents", input: { bot_ids: [hedge.id], message: "Hedge, a quick one.", consult: true } }],
       replies: ["I asked Hedge and will wait for the person's say-so."],
     });
+    plan(chief.activeTaskId, { replies: ["Standing by."] });
     const stream = await openSse(`${url}/api/events`, { origin: url });
     try {
       await control(["send", "--bot", ada.id, "--text", "Check with Hedge."]);
       await expect.poll(async () => (await messages(ada.activeTaskId)).some((m) => m.kind === "options" && m.card?.requestId), { timeout: 20_000 }).toBe(true);
-      const escalated = await stream.until((frame) => frame.kind === "notify" && frame.notification?.kind === "incident"
+      const asked = await stream.until((frame) => frame.kind === "notify" && frame.notification?.kind === "approval"
         && frame.notification.threadId === ada.activeTaskId, 20_000);
-      expect(escalated.notification.body).toMatch(/approval card to contact @Hedge is waiting on the person/);
-      expect(stream.frames.some((frame) => frame.kind === "notify" && frame.notification?.kind === "approval")).toBe(false);
+      expect(asked.notification.botId).toBe(ada.id);
+      const escalations = await escalationsThread(chief.id);
+      await expect.poll(async () => (await messages(escalations.threadId)).some((m) => m.role === "user" && /Escalation notice/.test(m.text ?? "")), { timeout: 10_000 }).toBe(true);
+      expect((await messages(escalations.threadId)).find((m) => m.role === "user" && /Escalation notice/.test(m.text ?? ""))?.peerAsk?.incident)
+        .toEqual({ threadId: ada.activeTaskId, notified: true });
+      expect(stream.frames.some((frame) => frame.kind === "notify" && frame.notification?.kind === "incident")).toBe(false);
     } finally {
       stream.close();
     }

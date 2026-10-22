@@ -320,7 +320,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "mute_thread",
     description:
-      "Chief of Staff only: mute or unmute the person's phone and desktop notifications for one thread a bot opened — yours, or one opened in your reachable team (list_threads shows which are muted). A muted thread notifies only when it fails or escalates; its approvals and questions still wait in the person's sidebar, and its messages and unread state are unchanged. A thread the person started, and each bot's main chat, are the person's to mute. Use it when the person asks for quieter threads; if it is refused, do not retry it.",
+      "Chief of Staff only: mute or unmute the person's phone and desktop notifications for one thread a bot opened — yours, or one opened in your reachable team (list_threads shows which are muted). A muted thread still notifies the person of a peer approval, a problem no Chief received, a failure when its bot has no Chief, and spend; you receive its other failures as incidents, its approvals and questions still wait in the person's sidebar, and its messages and unread state are unchanged. A thread the person started, each bot's main chat, and any mute or unmute the person chose are the person's to change. Use it when the person asks for quieter threads; if it is refused, do not retry it.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

@@ -15,20 +15,35 @@ export interface NotifyBot {
   notifications?: boolean;
 }
 
-// A muted thread keeps its failure and incident alerts: an escalation or incident must reach the person even from a thread they silenced.
-export const SILENCED_BY_THREAD_MUTE: Record<NotifyKind, boolean> = {
-  done: true,
-  "delegation-settled": true,
-  mention: true,
-  "routine-deferred": true,
-  approval: true,
-  question: true,
-  "sign-in": true,
-  incident: false,
-  "turn-failed": false,
-  "routine-failed": false,
-  spend: false,
+/** What muting a bot conversation thread does to one notice:
+ * - "silenced": never reaches the person's devices from a muted thread;
+ * - "kept-without-chief": silenced only when the thread's bot has a Chief of Staff, who receives the incident report instead;
+ * - "kept": always reaches the person — a gate only they can lift, or account-level spend.
+ * "peer-approval" is the approval a bot asks of the person before it acts on a teammate; every other notice is its NotifyKind. */
+export type ThreadMuteNotice = NotifyKind | "peer-approval";
+export type ThreadMuteRule = "silenced" | "kept-without-chief" | "kept";
+export const THREAD_MUTE_POLICY: Record<ThreadMuteNotice, ThreadMuteRule> = {
+  done: "silenced",
+  "delegation-settled": "silenced",
+  mention: "silenced",
+  "routine-deferred": "silenced",
+  approval: "silenced",
+  question: "silenced",
+  "sign-in": "silenced",
+  "turn-failed": "kept-without-chief",
+  "routine-failed": "kept-without-chief",
+  // Sent only when no Chief received the incident or escalation (none, out of reach, or it could not start).
+  incident: "kept",
+  "peer-approval": "kept",
+  // Account-level: dispatched outside any thread (index.ts spend alerts), listed so the table is whole.
+  spend: "kept",
 };
+
+/** Whether a muted thread still sends `notice`; `hasChief` is asked only when the rule depends on it. */
+export function mutedThreadNotifies(notice: ThreadMuteNotice, hasChief: () => boolean): boolean {
+  const rule = THREAD_MUTE_POLICY[notice];
+  return rule === "kept" || (rule === "kept-without-chief" && !hasChief());
+}
 
 export interface ThreadMuteDefault {
   botOpened: boolean;

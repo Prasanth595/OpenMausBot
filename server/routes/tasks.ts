@@ -318,9 +318,12 @@ export function createTaskRoutes(deps: TaskRouteDeps): RouteHandler {
         else return json(res, 400, { error: "snoozedUntil must be a timestamp, 0 to snooze until activity, or null to wake now" });
       }
       if (body.notificationsMuted !== undefined) {
-        if (body.notificationsMuted === null) patch.notificationsMuted = undefined;
-        else if (typeof body.notificationsMuted === "boolean") patch.notificationsMuted = body.notificationsMuted;
-        else return json(res, 400, { error: "notificationsMuted must be a boolean, or null to follow the default" });
+        // The person's own choice: a Chief's mute_thread never overrides it.
+        if (body.notificationsMuted !== null && typeof body.notificationsMuted !== "boolean") {
+          return json(res, 400, { error: "notificationsMuted must be a boolean, or null to follow the default" });
+        }
+        patch.notificationsMuted = body.notificationsMuted ?? undefined;
+        patch.notificationsMutedBy = body.notificationsMuted === null ? undefined : "person";
       }
       if (body.link !== undefined) {
         const link = body.link === null ? undefined : threadLinkUrl(body.link);

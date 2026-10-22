@@ -6,7 +6,8 @@ import { DATA_DIR } from "./config.ts";
 import type { ModelSelection } from "./contracts.ts";
 import { callTool, type ToolCallContext } from "./drivers/agents-call.ts";
 import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
-import { SILENCED_BY_THREAD_MUTE, threadNotificationsMuted, type ThreadMuteDefault } from "./notify.ts";
+import { mutedThreadNotifies, THREAD_MUTE_POLICY, threadNotificationsMuted, type ThreadMuteDefault, type ThreadMuteNotice } from "./notify.ts";
+import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { Store } from "./store.ts";
 
 const opener = { botId: "chief", name: "Chief", at: 1 };
@@ -14,9 +15,29 @@ const off: ThreadMuteDefault = { botOpened: false, mainThreadId: "main" };
 const on: ThreadMuteDefault = { botOpened: true, mainThreadId: "main" };
 
 describe("which notifications a muted thread still sends", () => {
-  it("silences finished news and waits on the person, and never a failure, incident or escalation", () => {
-    for (const kind of ["done", "delegation-settled", "approval", "question", "sign-in"] as const) expect(SILENCED_BY_THREAD_MUTE[kind]).toBe(true);
-    for (const kind of ["incident", "turn-failed", "routine-failed"] as const) expect(SILENCED_BY_THREAD_MUTE[kind]).toBe(false);
+  // [bot has a Chief of Staff, bot has none]: true means the person is still notified.
+  const expected: Record<ThreadMuteNotice, [boolean, boolean]> = {
+    done: [false, false],
+    "delegation-settled": [false, false],
+    mention: [false, false],
+    "routine-deferred": [false, false],
+    approval: [false, false],
+    question: [false, false],
+    "sign-in": [false, false],
+    "turn-failed": [false, true],
+    "routine-failed": [false, true],
+    incident: [true, true],
+    "peer-approval": [true, true],
+    spend: [true, true],
+  };
+
+  it("covers every notification kind", () => {
+    expect(Object.keys(THREAD_MUTE_POLICY).sort()).toEqual(Object.keys(expected).sort());
+  });
+
+  it.each(Object.entries(expected) as Array<[ThreadMuteNotice, [boolean, boolean]]>)("%s, muted, with and without a Chief of Staff", (notice, [withChief, withoutChief]) => {
+    expect(mutedThreadNotifies(notice, () => true)).toBe(withChief);
+    expect(mutedThreadNotifies(notice, () => false)).toBe(withoutChief);
   });
 });
 
@@ -69,6 +90,62 @@ describe("a thread's stored mute", () => {
     expect(new Store(selection).taskByThread(bot.id, work.threadId)?.notificationsMuted).toBe(true);
     store.patchTask(bot.id, work.threadId, { notificationsMuted: undefined });
     expect(storedTask(bot.id, work.threadId)).not.toHaveProperty("notificationsMuted");
+  });
+});
+
+describe("mute_thread's route", () => {
+  const selection = (): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" });
+  /** A Chief that reaches Quinn, and a thread the Chief opened on Quinn. */
+  const team = () => {
+    const store = new Store(selection);
+    const chief = store.createBot({ name: "Charlie" });
+    const qa = store.createBot({ name: "Quinn" });
+    store.patchBot(chief.id, { chiefOfStaff: true, peers: [qa.id] });
+    const work = store.createTask(qa.id, "Hidden title", false, undefined, { botId: chief.id, name: "Charlie", at: 1 })!;
+    const mute = async (muted: boolean, shown: (threadId: string) => boolean = () => true) => {
+      const out: { status?: number; body?: unknown } = {};
+      const route = createInternalThreadRoutes({
+        store, from: store.bot(chief.id)!, fromThreadId: chief.threadId,
+        coordinator: { awaitingAnswer: () => false, parkedDirect: () => false, activeDirect: () => false } as never,
+        ownsThread: () => true, shown, threadBusy: () => false, queuedThreadPosition: () => null,
+        muteDefault: (botId) => ({ botOpened: false, mainThreadId: store.bot(botId)?.threadId }),
+        readBody: async () => ({ muted }), requireActive: () => undefined,
+      });
+      await route({ res: {}, path: `/api/internal/threads/${work.threadId}/mute`, method: "POST",
+        json: (_res: unknown, status: number, body: unknown) => { out.status = status; out.body = body; } } as never);
+      return out;
+    };
+    const stored = () => store.taskByThread(qa.id, work.threadId)!;
+    return { store, qa, work, mute, stored };
+  };
+
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("answers a thread the Chief may not see as missing: no title, nothing written", async () => {
+    const { work, mute, stored } = team();
+    const hidden = await mute(true, (threadId) => threadId !== work.threadId);
+    expect(hidden.status).toBe(404);
+    expect(JSON.stringify(hidden.body)).not.toContain("Hidden title");
+    expect(stored()).not.toHaveProperty("notificationsMuted");
+    expect((await mute(true)).status).toBe(200);
+  });
+
+  it("never changes the person's choice, and records its own as the Chief's", async () => {
+    const { qa, work, store, mute, stored } = team();
+    store.patchTask(qa.id, work.threadId, { notificationsMuted: true, notificationsMutedBy: "person" });
+    const refused = await mute(false);
+    expect(refused.status).toBe(403);
+    expect(refused.body).toMatchObject({ error: expect.stringContaining("only they can change it") });
+    expect((await mute(true)).status, "agreeing with the person is no change").toBe(200);
+    expect(stored()).toMatchObject({ notificationsMuted: true, notificationsMutedBy: "person" });
+
+    store.patchTask(qa.id, work.threadId, { notificationsMuted: undefined, notificationsMutedBy: undefined });
+    expect((await mute(true)).status).toBe(200);
+    expect(stored()).toMatchObject({ notificationsMuted: true, notificationsMutedBy: "chief" });
+    expect((await mute(false)).status).toBe(200);
+    expect(stored()).toMatchObject({ notificationsMuted: false, notificationsMutedBy: "chief" });
   });
 });
 

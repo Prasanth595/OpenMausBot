@@ -200,7 +200,7 @@ describe("mute_thread for a Chief of Staff", () => {
       const theirs = await personThread(qa.id, "Quinn's own audit");
       const away = await botOpenedThread(outsider.id, outsider.threadId, "Elsewhere");
       const mute = async (threadId: string, headers: Record<string, string>, muted: unknown = true) =>
-        api<{ threadId: string; botName: string; muted: boolean }>("POST", `/api/internal/threads/${threadId}/mute`, { muted }, headers);
+        api<{ threadId: string; botName: string; muted: boolean; error?: string }>("POST", `/api/internal/threads/${threadId}/mute`, { muted }, headers);
 
       expect((await mute(work, await token(qa.id, qa.threadId))).status).toBe(403);
       const asChief = await token(chief.id, chief.threadId);
@@ -214,12 +214,22 @@ describe("mute_thread for a Chief of Staff", () => {
       const muted = await mute(work, asChief);
       expect(muted.status, JSON.stringify(muted.body)).toBe(200);
       expect(muted.body).toMatchObject({ threadId: work, botName: "Quinn", muted: true });
-      expect(await taskOf(qa.id, work)).toMatchObject({ notificationsMuted: true, followsMuteDefault: false });
+      expect(await taskOf(qa.id, work)).toMatchObject({ notificationsMuted: true, notificationsMutedBy: "chief", followsMuteDefault: false });
       const rows = (await api<{ threads: ThreadRow[] }>("GET", "/api/internal/threads", undefined, asChief)).body.threads;
       expect(rows.find((row) => row.threadId === work)).toMatchObject({ muted: true, own: false });
 
+      expect((await mute(work, asChief, false)).status, "the Chief may change its own choice").toBe(200);
+      expect(await taskOf(qa.id, work)).toMatchObject({ notificationsMuted: false, notificationsMutedBy: "chief" });
+
+      expect((await mute(work, asChief)).status).toBe(200);
+      expect((await setMute(qa.id, work, false)).body.task, "the person may undo the Chief's").toMatchObject({ notificationsMuted: false, notificationsMutedBy: "person" });
+      expect((await setMute(qa.id, work, true)).body.task).toMatchObject({ notificationsMuted: true, notificationsMutedBy: "person" });
+      const kept = await mute(work, asChief, false);
+      expect(kept.status, "the Chief may not undo the person's").toBe(403);
+      expect(kept.body.error).toMatch(/only they can change it/);
+      expect(await taskOf(qa.id, work)).toMatchObject({ notificationsMuted: true, notificationsMutedBy: "person" });
+      expect((await setMute(qa.id, work, null)).body.task, "back to the default, nobody's choice").not.toHaveProperty("notificationsMutedBy");
       expect((await mute(work, asChief, false)).status).toBe(200);
-      expect((await taskOf(qa.id, work))?.notificationsMuted).toBe(false);
     } finally {
       await cleanup([chief.id, qa.id, outsider.id]);
     }

@@ -73,7 +73,8 @@ export function createInternalThreadRoutes(deps: {
       rows.sort((a, b) => b.openedAt - a.openedAt);
       return json(res, 200, { threads: rows.slice(0, 100) });
     }
-    // mute_thread: a Chief of Staff quiets a thread a bot opened; a person's own threads, and each bot's main conversation, stay theirs.
+    // mute_thread: a Chief of Staff quiets a thread a bot opened; a person's own threads, each bot's main conversation, and any
+    // mute or unmute the person chose stay theirs.
     const muteMatch = method === "POST" ? path.match(/^\/api\/internal\/threads\/([\w-]+)\/mute$/) : null;
     if (muteMatch) {
       if (!deps.ownsThread(from.id, fromThreadId)) {
@@ -86,7 +87,8 @@ export function createInternalThreadRoutes(deps: {
       const threadId = muteMatch[1]!;
       const owner = [from, ...reachablePeers(store.bots, from)].find((bot) => store.taskByThread(bot.id, threadId));
       const task = owner ? store.taskByThread(owner.id, threadId) : undefined;
-      if (!owner || !task) return json(res, 404, { error: "no such thread — call list_threads for the ones you can see" });
+      // A thread list_threads would not show is answered as one that does not exist: no title, no write.
+      if (!owner || !task || !deps.shown(threadId)) return json(res, 404, { error: "no such thread — call list_threads for the ones you can see" });
       const opener = task.openedBy;
       if (!opener || threadId === deps.muteDefault(owner.id).mainThreadId) {
         return json(res, 403, { error: "the person started that conversation, or it is the bot's main chat: only the person can mute it" });
@@ -95,7 +97,12 @@ export function createInternalThreadRoutes(deps: {
         return json(res, 403, { error: "that thread is not yours to mute — a Chief of Staff mutes its own threads and threads opened in its reachable team" });
       }
       deps.requireActive();
-      store.patchTask(owner.id, threadId, { notificationsMuted: muted });
+      if (task.notificationsMuted !== undefined && task.notificationsMutedBy !== "chief") {
+        // Agreeing with the person writes nothing, so the choice stays theirs.
+        if (task.notificationsMuted === muted) return json(res, 200, { threadId, title: task.title, botName: owner.name, muted });
+        return json(res, 403, { error: `the person ${task.notificationsMuted ? "muted" : "unmuted"} #${task.title} themselves: only they can change it` });
+      }
+      store.patchTask(owner.id, threadId, { notificationsMuted: muted, notificationsMutedBy: "chief" });
       return json(res, 200, { threadId, title: task.title, botName: owner.name, muted });
     }
     // close_thread folds a thread, never deletes it (a person's confirmed action), and never while it runs.
