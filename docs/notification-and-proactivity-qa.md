@@ -50,6 +50,7 @@ reaches the person's devices follows one table, `THREAD_MUTE_POLICY` in
 | Incident or escalation no Chief received (none in reach, or its turn could not start) | notifies | notifies |
 | Peer approval (a bot asks before contacting a teammate) | notifies | notifies |
 | Spend alert (account-level, not tied to the thread) | notifies | notifies |
+| The brief has something new for the person (sent in the main agent's chat) | notifies | notifies |
 
 Nothing that waits on the person disappears: every gate only they can lift
 notifies, Chief or not, since a Chief's own threads may be muted too. A turn
@@ -80,7 +81,7 @@ the choice and who made it.
 | Contract | Test |
 |---|---|
 | Per-agent off means quiet; empty completions stay quiet; summaries are bounded | `server/notify.test.ts` |
-| Every notification kind, muted; a failure reaches the person once unless the Chief took its report (refused, no Chief, assigned work, rate limit); a turn ending on `NEEDS INPUT:` tells the person once with escalations off or on, Chief or not; the opt-in default never mutes the person's threads or a main chat; mute persists; `mute_thread` refuses hidden threads and the person's choice | `server/thread-mute.test.ts` |
+| Every notification kind, muted; a failure reaches the person once unless the Chief took its report (refused, no Chief, assigned work, rate limit); a turn ending on `NEEDS INPUT:` tells the person once with escalations off or on, Chief or not; the brief still notifies from a muted main chat; the opt-in default never mutes the person's threads or a main chat; mute persists; `mute_thread` refuses hidden threads and the person's choice | `server/thread-mute.test.ts` |
 | Muted threads stay quiet while the main chat notifies; a muted thread still asks for a tool approval, an answer and a sign-in, Chief or not, and tells the person once that a turn ended needing them; assigned work that ends needing input stays quiet while its assigner is woken and tells the person once when the assignment wanted no reply or the assigner is gone; the per-bot switch wins; the HTTP API and `mute_thread` refuse what they must; the person's choice outranks the Chief's | `server/thread-mute.e2e.test.ts` |
 | A peer approval in a muted thread still notifies the person while its Chief receives the escalation | `server/escalations.e2e.test.ts` |
 | A move to My Cloud keeps the mute and who chose it | `server/cloud-send-settings.test.ts`, `server/cloud-chat-merge.test.ts` |

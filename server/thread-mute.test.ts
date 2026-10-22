@@ -34,6 +34,7 @@ describe("which notifications a muted thread still sends", () => {
     incident: true,
     "peer-approval": true,
     spend: true,
+    brief: true,
   };
 
   it("covers every notification kind", () => {
@@ -47,6 +48,30 @@ describe("which notifications a muted thread still sends", () => {
   it("keeps every gate only the person can lift", () => {
     for (const gate of ["approval", "question", "sign-in", "peer-approval"] as const) expect(THREAD_MUTE_POLICY[gate]).toBe("kept");
     for (const failure of ["turn-failed", "routine-failed"] as const) expect(THREAD_MUTE_POLICY[failure]).toBe("kept-unless-chief-took-it");
+  });
+});
+
+describe("the brief in a muted thread", () => {
+  beforeEach(() => {
+    rmSync(DATA_DIR, { recursive: true, force: true });
+  });
+
+  it("still reaches the person when the person muted the main agent's chat, while the chat's other notices stop", () => {
+    const store = new Store((): ModelSelection => ({ instanceId: "claude", model: "claude-sonnet-5" }));
+    const chief = store.createBot({ name: "Charlie" });
+    const main = store.createTask(chief.id, "Charlie", false)!;
+    store.patchTask(chief.id, main.threadId, { notificationsMuted: true, notificationsMutedBy: "person" });
+    const sent: Notification[] = [];
+    const mute = createThreadMute({
+      store, config: {}, mainThread: () => main.threadId, notify: () => {}, chief: () => { throw new Error("no report here"); }, assignerOf: () => undefined,
+    });
+    const bot = store.bot(chief.id)!;
+    // host/proactive.ts briefNotification: the brief notifies in the bot's main chat.
+    for (const kind of ["done", "brief"] as const) {
+      const notification = buildNotification(kind, bot, main.threadId, "Your 3pm with Acme moved to 4pm");
+      if (notification && mute.lets(notification)) sent.push(notification);
+    }
+    expect(sent).toEqual([expect.objectContaining({ kind: "brief", botId: chief.id, threadId: main.threadId })]);
   });
 });
 

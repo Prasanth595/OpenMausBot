@@ -11,7 +11,7 @@ import type { BotRecord, Store } from "./store.ts";
  * - "silenced": never reaches the person's devices from a muted thread;
  * - "kept-unless-chief-took-it": silenced only when the Chief of Staff accepted this very report (its incident turn
  *   started or queued); a missing, refusing, rate-limited or busy-elsewhere Chief leaves it to the person;
- * - "kept": always reaches the person — a gate only they can lift, or account-level spend.
+ * - "kept": always reaches the person — a gate only they can lift, news the brief has for them, or account-level spend.
  * "peer-approval" is the approval a bot asks of the person before it acts on a teammate; every other notice is its NotifyKind. */
 export type ThreadMuteNotice = NotifyKind | "peer-approval";
 export type ThreadMuteRule = "silenced" | "kept-unless-chief-took-it" | "kept";
@@ -32,6 +32,8 @@ export const THREAD_MUTE_POLICY: Record<ThreadMuteNotice, ThreadMuteRule> = {
   "peer-approval": "kept",
   // Account-level: dispatched outside any thread (index.ts spend alerts), listed so the table is whole.
   spend: "kept",
+  // The main agent's brief has something new for the person (host/brief.ts, sent to its main chat).
+  brief: "kept",
 };
 
 /** Whether a muted thread still sends `notice`. A "kept-unless-chief-took-it" notice is sent: its caller

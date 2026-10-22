@@ -55,7 +55,8 @@ export interface WireThreadMute {
    * the ones `THREAD_MUTE_POLICY` (server/thread-mute.ts) keeps: everything
    * waiting on the person (approvals, questions, sign-ins, a turn that ended
    * needing input), escalations and incidents no Chief of Staff received, a
-   * failure unless the Chief took its report, and spend alerts. Its messages
+   * failure unless the Chief took its report, the brief's news for the
+   * person, and spend alerts. Its messages
    * and unread state are unchanged. Stored only once a person or a Chief of
    * Staff chose it; always the effective value on the wire. */
   notificationsMuted?: boolean;
