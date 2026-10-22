@@ -2153,6 +2153,7 @@
   "model.localModels": "Local models",
   "model.localHint": "Run this agent with a model already on your machine.",
   "model.apiKeyHint": "Runs on your API key, billed per token by the provider.",
+  "model.localEndpointHint": "Connects to the local model endpoint you added in API keys.",
   "model.chooseHint": "Choose a model for this bot.",
   "model.chooseThreadHint": "Choose a model for this thread.",
   "model.localSoon": "Local models will appear as soon as the agent is installed.",

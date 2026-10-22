@@ -809,9 +809,9 @@ export function ModelPicker({
       {!contained && active && showActiveAccount && (
         <span data-model-account-compact className="hidden max-w-20 truncate @max-4xl/chathead:inline">{active.displayName}</span>
       )}
-      <span className={cn("flex min-w-0 items-center gap-1", !contained && active && "@max-4xl/chathead:hidden")}>
-        <span data-model-agent className="max-w-[100px] truncate text-ink-secondary">{activeArrangement.agent} ·</span>
-        <span className="max-w-[160px] truncate">
+      <span className={cn("flex min-w-0 items-center gap-1", contained && "flex-1", !contained && active && "@max-4xl/chathead:hidden")}>
+        <span data-model-agent className={cn("truncate text-ink-secondary", contained ? "max-w-[40%] shrink-0" : "max-w-[100px]")}>{activeArrangement.agent} ·</span>
+        <span className={cn("truncate", contained ? "min-w-0 flex-1" : "max-w-[160px]")}>
           {active && showActiveAccount && (
             <span data-model-account className="text-ink-secondary">{active.displayName} · </span>
           )}
@@ -996,7 +996,7 @@ export function ModelPicker({
                     <ChatGptPlanStatus key={railInstance.instanceId} instanceId={railInstance.instanceId} />
                   )}
                   {railInstance.access === "api"
-                    ? <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t("model.apiKeyHint")}</div>
+                    ? <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t(modelArrangement(railInstance, { instanceId: railInstance.instanceId, model: "agent-default" }).location === "local" ? "model.localEndpointHint" : "model.apiKeyHint")}</div>
                     : pane === "custom" && <div className="mt-0.5 text-[11.5px] text-ink-secondary">{t("model.localHint")}</div>}
                 </div>
 

@@ -275,6 +275,7 @@ describe("Settings → Engines → setup cards", () => {
     expect(saved).toContain("OpenAI uses your API key");
     expect(saved).toContain("Change key");
     expect(saved).not.toContain("OpenAI needs an API key");
+    expect(saved).not.toContain("CLI path and updates");
 
     vi.stubGlobal("window", { ogb: { remoteClient: { active: true } } });
     const remote = renderToStaticMarkup(createElement(EnginesSettings));

@@ -366,7 +366,7 @@ function EngineRow({ instance }: { instance: InstanceInfo }) {
           {instance.instanceId.startsWith("antigravity-") && <RemoveAntigravityAccount instance={instance} />}
         </div>
       )}
-      <EngineAdvanced instance={instance} />
+      {!isDirectModelDriver(instance.driverKind) && <EngineAdvanced instance={instance} />}
     </EngineCard>
   );
 }
