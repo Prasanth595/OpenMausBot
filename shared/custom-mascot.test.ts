@@ -5,6 +5,8 @@ import { buildClouds, report } from "./mascot-geometry/solve.ts";
 import {
   addOrSelectCustomMascot,
   createMascotProfile,
+  MascotProfileValidationError,
+  MAX_CUSTOM_MASCOT_SHAPES,
   isSimpleClosedOutline,
   selectBuiltinMascot,
   type CustomMascotPoint,
@@ -79,6 +81,18 @@ describe("bot-owned mascot profile transitions", () => {
       ...copied,
       selected: { kind: "builtin", bodyId: "star" },
     });
-    expect(() => addOrSelectCustomMascot(copied, { ...first, anchor: { ...first.anchor, x: 100 } })).toThrow(/different content/);
+    expect(() => addOrSelectCustomMascot(copied, { ...first, anchor: { ...first.anchor, x: 100 } }))
+      .toThrow(MascotProfileValidationError);
+  });
+
+  it("classifies custom mascot capacity as a caller-correctable profile error", () => {
+    const fullProfile = {
+      ...createMascotProfile(),
+      shapes: Array.from({ length: MAX_CUSTOM_MASCOT_SHAPES }, (_, index) =>
+        shape(index.toString(16).padStart(64, "0"), "Saved " + index)),
+    };
+
+    expect(() => addOrSelectCustomMascot(fullProfile, shape("f".repeat(64), "One too many")))
+      .toThrow(MascotProfileValidationError);
   });
 });

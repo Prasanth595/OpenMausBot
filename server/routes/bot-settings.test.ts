@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createCustomMascotFitContext, suggestCustomMascotAnchor } from "../../shared/custom-mascot-fitting.ts";
@@ -114,6 +115,77 @@ describe("Store bot appearance revisions", () => {
     expect(restored).not.toBeNull();
     if (!restored) throw new Error("restored bot is missing");
     expect(restoredStore.appearanceRevisions.get(restored)).toBe(0);
+  });
+});
+
+describe("POST /api/bots/:id/mascot-shapes persistence errors", () => {
+  it("returns a fixed 500 message and leaves the bot unchanged when the registry cannot be written", async () => {
+    const store = new Store(() => selection);
+    const bot = store.createBot({ name: "Mascot persistence fixture" });
+    const route = createBotSettingsRoutes({
+      store,
+      cfg: {} as AppConfig,
+      broadcast: () => {},
+      wireBot,
+    } as unknown as BotSettingsRouteDeps);
+    const app = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      try {
+        const handled = await dispatchRoutes([route], {
+          req,
+          res,
+          url,
+          path: url.pathname,
+          method: req.method ?? "GET",
+          auth: { kind: "loopback", scopes: ["admin", "client"] } satisfies RequestAuth,
+          json,
+          readBody,
+        });
+        if (!handled) json(res, 404, { error: "not found" });
+      } catch (error) {
+        const status = error instanceof Error && "status" in error && typeof error.status === "number" ? error.status : 500;
+        json(res, status, { error: error instanceof Error ? error.message : String(error) });
+      }
+    });
+    servers.push(app);
+    const port = await listen(app);
+    const base = "http://127.0.0.1:" + port;
+    const botsPath = join(DATA_DIR, "bots.json");
+    const backupPath = join(DATA_DIR, "bots.json.mascot-storage-test-backup");
+    const originalBytes = readFileSync(botsPath);
+    const validatedShape = bunnyDefinition();
+    const body = {
+      shape: {
+        name: "Storage failure Bunny",
+        outline: validatedShape.outline,
+        anchor: validatedShape.anchor,
+      },
+    };
+    const before = structuredClone(bot);
+
+    let moved = false;
+    try {
+      renameSync(botsPath, backupPath);
+      moved = true;
+      mkdirSync(botsPath);
+      const response = await fetch(base + "/api/bots/" + bot.id + "/mascot-shapes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json() as { error?: string };
+      expect(response.status).toBe(500);
+      expect(result.error).toBe("custom mascot could not be saved");
+      expect(result.error).not.toContain(DATA_DIR);
+    } finally {
+      if (moved) {
+        rmSync(botsPath, { recursive: true, force: true });
+        if (existsSync(backupPath)) renameSync(backupPath, botsPath);
+      }
+    }
+
+    expect(readFileSync(botsPath)).toEqual(originalBytes);
+    expect(store.bot(bot.id)).toEqual(before);
   });
 });
 

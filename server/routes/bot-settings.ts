@@ -6,6 +6,7 @@ import { deleteAttachment, saveImage } from "../attachments.ts";
 import { avatarGenerationRequestSchema, avatarGenerationStateMatches, generateAvatarImage, snapshotAvatarGenerationState } from "../avatar-image.ts";
 import { parseBotProfilePatch } from "../bot-profile.ts";
 import { validateCustomMascotDefinition } from "../custom-mascot-validation.ts";
+import { MascotProfileValidationError } from "../../shared/mascot-profile.ts";
 import { commandAllowlistCandidate, type CommandAllowlistStore } from "../command-allowlist.ts";
 import type { AppConfig } from "../config.ts";
 import type { ModelSelection } from "../contracts.ts";
@@ -75,7 +76,11 @@ export function createBotSettingsRoutes(deps: BotSettingsRouteDeps): RouteHandle
       try {
         bot = store.addOrSelectMascotShape(m[1], shape);
       } catch (error) {
-        return json(res, 400, { error: error instanceof Error ? error.message : "custom mascot could not be saved" });
+        if (error instanceof MascotProfileValidationError) {
+          return json(res, 400, { error: error.message });
+        }
+        console.error("[mascot] could not save selected shape", error);
+        throw new Error("custom mascot could not be saved");
       }
       if (!bot) return json(res, 404, { error: "no such bot" });
       const visible = wireBot(bot);

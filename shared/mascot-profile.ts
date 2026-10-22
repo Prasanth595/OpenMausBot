@@ -10,6 +10,7 @@ export const MAX_CUSTOM_MASCOT_PROFILE_BYTES = 256 * 1024;
 export const MAX_NATIVE_MASCOT_SCALE = 0.791;
 export const MIN_CUSTOM_MASCOT_SCALE = 0.02;
 export const MAX_CUSTOM_MASCOT_NAME = 80;
+const PROFILE_SIZE_LIMIT_ERROR = "mascot profile exceeds the size limit";
 
 export type CustomMascotPoint = readonly [x: number, y: number];
 
@@ -41,6 +42,13 @@ export interface MascotProfile {
   /** Immutable local snapshots, including shapes copied from another bot. */
   shapes: CustomMascotShape[];
   selected: MascotSelection;
+}
+
+export class MascotProfileValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MascotProfileValidationError";
+  }
 }
 
 const coordinate = z.number().finite().min(0).max(FACE_BOX);
@@ -90,7 +98,7 @@ export const mascotProfileSchema = z.object({
     context.addIssue({ code: "custom", path: ["selected"], message: "selected custom shape must exist in this profile" });
   }
   if (new TextEncoder().encode(JSON.stringify(profile)).byteLength > MAX_CUSTOM_MASCOT_PROFILE_BYTES) {
-    context.addIssue({ code: "custom", message: "mascot profile exceeds the size limit" });
+    context.addIssue({ code: "custom", message: PROFILE_SIZE_LIMIT_ERROR });
   }
 });
 
@@ -180,14 +188,21 @@ export function addOrSelectCustomMascot(profile: MascotProfile | undefined, shap
   const current = profile ?? createMascotProfile();
   const existing = current.shapes.find((candidate) => candidate.id === shape.id);
   if (existing && !sameCustomMascotDefinition(customMascotDefinitionOf(existing), customMascotDefinitionOf(shape))) {
-    throw new Error("custom mascot ID already exists with different content");
+    throw new MascotProfileValidationError("custom mascot ID already exists with different content");
   }
   if (!existing && current.shapes.length >= MAX_CUSTOM_MASCOT_SHAPES) {
-    throw new Error(`a bot can save up to ${MAX_CUSTOM_MASCOT_SHAPES} custom mascots`);
+    throw new MascotProfileValidationError(`a bot can save up to ${MAX_CUSTOM_MASCOT_SHAPES} custom mascots`);
   }
   const shapes = existing ? current.shapes : [...current.shapes, shape];
   const next = { ...current, shapes, selected: { kind: "custom" as const, shapeId: shape.id } };
-  mascotProfileSchema.parse(next);
+  const validated = mascotProfileSchema.safeParse(next);
+  if (!validated.success) {
+    const issue = validated.error.issues.length === 1 ? validated.error.issues[0] : undefined;
+    if (issue?.code === "custom" && issue.path.length === 0 && issue.message === PROFILE_SIZE_LIMIT_ERROR) {
+      throw new MascotProfileValidationError(PROFILE_SIZE_LIMIT_ERROR);
+    }
+    throw validated.error;
+  }
   return next;
 }
 
