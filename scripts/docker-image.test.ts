@@ -66,8 +66,14 @@ describe("container images", () => {
       const steps = chain(target);
       const heavy = steps.flatMap((step, i) => (npmInstall(step) ? [i] : []));
       const app = steps.flatMap((step, i) => (step.op === "COPY" && !step.args.includes("--from=edge") ? [i] : []));
-      // agent-browser + Chrome, then the engines, then the app files (and the Cloud home's Caddyfile)
-      expect(heavy, target).toHaveLength(2);
+      // agent-browser + Chrome, then engine CLIs; Cloud home adds its shell's pnpm helper.
+      expect(heavy, target).toHaveLength(target === "cloud-home" ? 3 : 2);
+      if (target === "cloud-home") {
+        const installs = heavy.map(i => steps[i].args);
+        expect(installs.some(args => args.includes("agent-browser@"))).toBe(true);
+        expect(installs.some(args => args.includes("pnpm@"))).toBe(true);
+        expect(installs.some(args => args.includes("$CLOUD_HOME_ENGINES"))).toBe(true);
+      }
       const fromBuild = steps.flatMap((step, i) => (step.op === "COPY" && step.args.includes("--from=build") ? [i] : []));
       expect(fromBuild, target).toHaveLength(3);
       expect(Math.max(...heavy), target).toBeLessThan(Math.min(...app));
@@ -85,7 +91,7 @@ describe("container images", () => {
     for (const { args } of installs) {
       const cache = /--cache (\S+)/.exec(args)?.[1] ?? /\bHOME=(\S+) npm install\b/.exec(args)?.[1];
       expect(cache, args).toMatch(/^\/tmp\//);
-      const removed = /\brm -rf ([^;&|]+)/.exec(args)?.[1].split(/\s+/) ?? [];
+      const removed = [...args.matchAll(/\brm -rf ([^;&|]+)/g)].flatMap(([, paths]) => paths.trim().split(/\s+/));
       expect(removed, args).toEqual(expect.arrayContaining([cache, "/tmp/node-compile-cache"]));
     }
   });
@@ -235,7 +241,8 @@ describe("container images", () => {
     expect(browserRun().args).toContain("${CHROME_CACHE_TAG");
     const home = all.find(s => s.name === "cloud-home")!.steps;
     expect(home).toContainEqual({ op: "ARG", args: 'CLOUD_HOME_ENGINES="@anthropic-ai/claude-code @openai/codex"' });
-    expect(home.find(npmInstall)!.args).toContain("${ENGINES_CACHE_TAG");
+    const engineInstall = home.find(step => npmInstall(step) && step.args.includes("$CLOUD_HOME_ENGINES"));
+    expect(engineInstall?.args).toContain("${ENGINES_CACHE_TAG");
     const keys = (workflow.jobs.publish.steps as { id?: string; env?: Record<string, string> }[]).find(step => step.id === "keys")!;
     expect(keys.env!.CLOUD_HOME_ENGINES).toBe("@anthropic-ai/claude-code @openai/codex");
   });
