@@ -95,7 +95,7 @@ export function AvatarEditorCard({ bot, activeState, onPatch, onClose }: {
     onPatch(crop === "mascot" ? patch : { ...patch, avatarCrop: "mascot" });
   };
   const costume = wornBody(body, bot.color, useHalloweenDressed());
-  const dressedAs = costume !== body && isHalloweenBody(costume) ? HALLOWEEN_BODIES[costume].name : null;
+  const dressedAs = !showsImage && !selectedCustom && costume !== body && isHalloweenBody(costume) ? HALLOWEEN_BODIES[costume].name : null;
   const bodyButton = (id: BotBodyId, name: string) => (
     <button
       key={id}
