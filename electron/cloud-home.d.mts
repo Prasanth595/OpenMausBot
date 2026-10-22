@@ -119,6 +119,9 @@ export declare function parseCloudOffer(input: unknown): CloudOffer | null;
 export declare function parsePublicOffer(config: unknown): CloudOffer | null;
 export declare function withoutTrial(offer: CloudOffer | null): CloudOffer | null;
 export declare function cloudPlanDisk(state: unknown): CloudPlanDisk | null;
+export declare function readyCloudOrigin(state: unknown): string | null;
+export declare function machineSetup(machine: CloudMachine | null | undefined): { step?: CloudSetupStep; slow?: true } | null;
+export declare function cloudSetupOf(state: unknown): { step?: CloudSetupStep; slow?: true } | null;
 export declare function rememberedCloudHome(previous: RememberedCloudHome | null, state: unknown): RememberedCloudHome | null;
 export declare function signInCloudSession(input: {
   origin: string | null; mine: string | null; pair: () => Promise<{ origin: string; code: string }>;
@@ -134,3 +137,4 @@ export declare function parsePairingGrant(input: unknown, origin: string, now: n
 export declare function withCloudHome<T extends { environments: Array<{ id: string; name: string; origin: string; color?: string; home?: true }>; activeId: string }>(state: T, machine: CloudMachine | null | undefined, makeId: () => string, look?: { name?: string | null; color?: string | null } | null): T;
 export declare function cloudHomeConnectUrl(target: CloudHomeTarget, now: number, open?: "phone" | null, route?: string | null): string;
 export declare function cloudPageSenderAllowed(event: unknown, context: { contents: unknown; homeOrigin: string | null; activeOrigin: string | null | undefined }): boolean;
+export declare function openTeamHome(state: import("./cloud-account.mjs").CloudAccountState, teamId: unknown, showHome: (options: { place: { team: string; name: string } }) => void | Promise<unknown>): Promise<void>;
