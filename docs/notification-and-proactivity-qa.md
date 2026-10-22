@@ -43,14 +43,21 @@ reaches the person's devices follows one table, `THREAD_MUTE_POLICY` in
 | Notification | Muted, bot has a Chief of Staff | Muted, no Chief of Staff |
 |---|---|---|
 | Finished, resumed with results, mention, routine waiting | silent | silent |
-| Waiting on a tool approval, a question or a sign-in | silent | silent |
-| **Couldn't start**, **routine failed** | silent (the Chief receives the incident) | notifies |
+| Waiting on a tool approval, a question or a sign-in | notifies | notifies |
+| A turn that ended on `NEEDS INPUT:` (work a teammate assigned asks its assigner instead) | notifies once, as a question, whatever `features.chiefEscalations` says | notifies once, as a question |
+| **Couldn't start**, **routine failed** | silent once the Chief took the report (its turn started or queued); otherwise notifies once | notifies |
 | Incident or escalation no Chief received (none in reach, or its turn could not start) | notifies | notifies |
 | Peer approval (a bot asks before contacting a teammate) | notifies | notifies |
 | Spend alert (account-level, not tied to the thread) | notifies | notifies |
 
-The exceptions are the gates only the person can lift and the alerts nobody
-else would receive. The menu item's tooltip lists them.
+Nothing that waits on the person disappears: every gate only they can lift
+notifies, Chief or not, since a Chief's own threads may be muted too. A turn
+that ends needing input tells the person directly; with escalations on, the
+Chief's copy counts as already told, so the person hears once. A failure is
+left to the Chief only once it accepted that report; when there is no Chief,
+it refuses the report turn, the report is rate-limited, or it folds into work
+a teammate assigned, the person hears of it once. The menu item's tooltip
+says the same.
 
 Nothing is muted until someone chooses it. With `features.muteBotOpenedThreads`
 set to `true` in `config.json`, threads a bot opened (a teammate's handoff
@@ -70,8 +77,8 @@ the choice and who made it.
 | Contract | Test |
 |---|---|
 | Per-agent off means quiet; empty completions stay quiet; summaries are bounded | `server/notify.test.ts` |
-| Every notification kind, muted with and without a Chief of Staff; the opt-in default never mutes the person's threads or a main chat; mute persists; `mute_thread` refuses hidden threads and the person's choice | `server/thread-mute.test.ts` |
-| Muted threads stay quiet while the main chat notifies; the per-bot switch wins; the HTTP API and `mute_thread` refuse what they must; the person's choice outranks the Chief's | `server/thread-mute.e2e.test.ts` |
+| Every notification kind, muted; a failure reaches the person once unless the Chief took its report (refused, no Chief, assigned work, rate limit); a turn ending on `NEEDS INPUT:` tells the person once with escalations off or on, Chief or not; the opt-in default never mutes the person's threads or a main chat; mute persists; `mute_thread` refuses hidden threads and the person's choice | `server/thread-mute.test.ts` |
+| Muted threads stay quiet while the main chat notifies; a muted thread still asks for a tool approval, an answer and a sign-in, Chief or not, and tells the person once that a turn ended needing them; the per-bot switch wins; the HTTP API and `mute_thread` refuse what they must; the person's choice outranks the Chief's | `server/thread-mute.e2e.test.ts` |
 | A peer approval in a muted thread still notifies the person while its Chief receives the escalation | `server/escalations.e2e.test.ts` |
 | A move to My Cloud keeps the mute and who chose it | `server/cloud-send-settings.test.ts`, `server/cloud-chat-merge.test.ts` |
 | The row menu mutes, unmutes, rolls back a refused change and shows the refreshed state | `src/components/Sidebar.thread-mute.test.ts` |

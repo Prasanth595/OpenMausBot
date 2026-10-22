@@ -157,9 +157,10 @@ export interface WireTask {
    * an expired value reads as absent. Absent = not snoozed. */
   snoozedUntil?: number;
   /** Muted: the thread's notifications stay off the person's devices, except
-   * the ones `THREAD_MUTE_POLICY` (server/notify.ts) keeps: approvals a teammate
-   * request needs, escalations and incidents no Chief of Staff received,
-   * failures when the bot has no Chief, and spend alerts. Its messages and
+   * the ones `THREAD_MUTE_POLICY` (server/notify.ts) keeps: everything waiting
+   * on the person (approvals, questions, sign-ins, a turn that ended needing
+   * input), escalations and incidents no Chief of Staff received, a failure
+   * unless the Chief took its report, and spend alerts. Its messages and
    * unread state are unchanged. Stored only once a person or a Chief of Staff
    * chose it; always the effective value on the wire. */
   notificationsMuted?: boolean;

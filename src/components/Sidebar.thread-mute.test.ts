@@ -90,7 +90,7 @@ afterAll(() => {
 describe("Mute notifications in a thread's menu", () => {
   it("mutes, then unmutes, the thread on the server and shows it on the row", async () => {
     const mute = await muteItem("Mute notifications");
-    expect(mute.title).toMatch(/still notifies you when a bot asks your approval to contact a teammate/);
+    expect(mute.title).toMatch(/still notifies you of anything waiting on you/);
     mute.click();
     await vi.waitFor(() => expect(row()!.title).toContain("Notifications muted"));
     expect(patches.at(-1)).toEqual({ notificationsMuted: true });
