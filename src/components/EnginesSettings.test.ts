@@ -71,7 +71,7 @@ describe("Settings → Engines → connection choices", () => {
     });
     fixture.instances = [
       connection("opencode", "opencodeGo", "subscription"),
-      connection("claude-api", "claudeAgent", "api"),
+      connection("claudeApi", "claudeAgent", "api"),
       connection("openrouter", "openai-compat", "api"),
     ];
     fixture.bots = [];
@@ -79,7 +79,8 @@ describe("Settings → Engines → connection choices", () => {
     const agent = html.split('data-connection-kind="agent"')[1]!.split('data-connection-kind="direct"')[0]!;
     const direct = html.split('data-connection-kind="direct"')[1]!;
     expect(agent).toContain('data-engine-card="opencode"');
-    expect(agent).toContain('data-engine-card="claude-api"');
+    expect(agent).toContain('data-engine-card="claudeApi"');
+    expect(agent).toContain("Claude Code agent · Anthropic API billing");
     expect(agent).not.toContain('data-engine-card="openrouter"');
     expect(direct).toContain('data-engine-card="openrouter"');
   });

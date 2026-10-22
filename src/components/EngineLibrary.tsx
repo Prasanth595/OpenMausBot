@@ -33,9 +33,9 @@ export function EngineCard({ instance, children, summary }: { instance: Instance
   const ready = summary?.ready ?? engineReady(instance);
   const email = instance.snapshot.authenticated === true ? instance.snapshot.account?.email : undefined;
   const title = summary?.title ?? instance.displayName;
-  const subtitle = summary?.subtitle ?? email ?? (instance.access === "custom"
-    ? t("engines.library.custom")
-    : providerName(instance));
+  const subtitle = summary?.subtitle ?? (instance.instanceId === "claudeApi" && instance.driverKind === "claudeAgent"
+    ? t("model.connection.claudeApiSubtitle")
+    : email ?? (instance.access === "custom" ? t("engines.library.custom") : providerName(instance)));
   // Some CLIs return their executable name rather than a version.
   const version = instance.snapshot.version?.match(/\d+\.\d+(?:\.\d+)?(?:[-+][\w.-]+)?/)?.[0];
   return (
