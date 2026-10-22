@@ -1,0 +1,20 @@
+{
+  "id": "anatomy",
+  "name": "Anatomy — build figures in the Workshop",
+  "version": "0.1.0",
+  "description": "Turn a sketch or an idea into a detailed isometric SVG figure — a '3D-looking' technical drawing with four-tone shading, exploded parts, labels and a framed card — and file it in the workshop crate so the user's Workshop panel previews it.",
+  "defaultEnabled": true,
+  "triggerTerms": [
+    "sketch",
+    "isometric",
+    "workshop",
+    "figure",
+    "3d model",
+    "3d",
+    "draw it",
+    "build a model",
+    "show my idea",
+    "exploded"
+  ],
+  "requiredCapabilities": []
+}

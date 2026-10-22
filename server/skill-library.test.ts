@@ -149,3 +149,43 @@ describe("bundled reverse-engineering skill", () => {
     expect(rea!.instructions).toContain("binary_session");
   });
 });
+
+describe("bundled anatomy skill", () => {
+  const skills = loadBundledSkills(join(process.cwd(), "skills"));
+  const anatomy = skills.find((skill) => skill.manifest.id === "anatomy");
+
+  it("ships with the manifest the loader can read and needs no extra capability", () => {
+    expect(anatomy).toBeDefined();
+    expect(anatomy!.manifest.defaultEnabled).toBe(true);
+    expect(anatomy!.manifest.requiredCapabilities).toEqual([]);
+  });
+
+  it("mounts for the workshop's sketch requests on any agent driver", () => {
+    for (const text of [
+      "Here is my sketch — build it as an isometric workshop figure.",
+      "sketch this idea as a 3d-looking drawing of a pump rig",
+      "show my idea as an exploded figure with labels",
+    ]) {
+      expect(selectBundledSkills(text, [], skills).map((skill) => skill.manifest.id)).toEqual(["anatomy"]);
+    }
+  });
+
+  it("stays off for requests that are not asking for a figure", () => {
+    for (const text of [
+      "write a poem about the sea",
+      "what is the weather like today",
+      "clean the crate and list your skills",
+    ]) {
+      expect(selectBundledSkills(text, [], skills)).toEqual([]);
+    }
+  });
+
+  it("teaches the crate conventions the workshop door enforces", () => {
+    // The instructions have to carry the naming, the extension, the size cap
+    // and the no-scripts rule, or a bot's first figure write misfires.
+    expect(anatomy!.instructions).toContain("figure-");
+    expect(anatomy!.instructions).toContain(".svg");
+    expect(anatomy!.instructions).toContain("64 KiB");
+    expect(anatomy!.instructions).toContain("<script>");
+  });
+});

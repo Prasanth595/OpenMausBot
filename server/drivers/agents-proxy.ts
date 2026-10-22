@@ -745,7 +745,7 @@ const TOOLS = [
   {
     name: "workshop",
     description:
-      "Create and manage reusable text resources in the workshop — a small sandbox the user has opted into, where drafts, runbooks, prompt fragments, and skill notes can live between turns. Files are .md, .txt, or .json, at most 24, each at most 64 KiB. Use action=\"list\" first to avoid overwriting something you did not read; a write replaces the whole file. Nothing here is shared with other bots until you point them at it.",
+      "Create and manage reusable text resources in the workshop — a small sandbox the user has opted into, where drafts, runbooks, prompt fragments, skill notes, and figures (the user's workshop panel previews them) can live between turns. Files are .md, .txt, .json, or .svg, at most 24, each at most 64 KiB. Use action=\"list\" first to avoid overwriting something you did not read; a write replaces the whole file. Nothing here is shared with other bots until you point them at it.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -757,7 +757,7 @@ const TOOLS = [
         },
         name: {
           type: "string",
-          description: "Resource file name, 1-64 chars [A-Za-z0-9._-], no leading dot, ending in .md, .txt, or .json — for example expense-runbook.md. Required for read, write, and delete.",
+          description: "Resource file name, 1-64 chars [A-Za-z0-9._-], no leading dot, ending in .md, .txt, .json, or .svg — for example figure-pump-engine.svg. Required for read, write, and delete.",
         },
         content: {
           type: "string",
