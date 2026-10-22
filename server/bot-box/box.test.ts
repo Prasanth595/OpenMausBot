@@ -112,7 +112,7 @@ describe("BotBox", () => {
       writeFileSync(sockets.egress, "stale socket");
     }
     const options = {
-      dataDir, home: temp(), port: 8799, denyEnv: new Set(), env: {}, log: (line: string) => lines.push(line),
+      dataDir, home: temp(), port: 8799, denyEnv: new Set<string>(), env: {}, log: (line: string) => lines.push(line),
       detect: () => ({ box: "bwrap" as const, reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: null } }),
     };
     const detection = await box.start(process.platform === "win32" ? { ...options, socketPathFor: (_directory, name) => sockets[name] } : options);
