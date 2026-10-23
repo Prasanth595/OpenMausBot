@@ -306,3 +306,10 @@ export function cloudPageSenderAllowed(event, { contents, homeOrigin, activeOrig
   if (event?.sender !== contents || !event.senderFrame || event.senderFrame !== contents.mainFrame) return false;
   try { return new URL(event.senderFrame.url).origin === homeOrigin; } catch { return false; }
 }
+
+/** The renderer names a team; only the verified connected session supplies its identity and Cloud target. */
+export async function openTeamHome(state, teamId, showHome) {
+  const team = state.status === "connected" ? state.teams?.find(entry => entry.id === teamId) ?? null : null;
+  if (!team) throw new Error("You're not in that team.");
+  await showHome({ place: { team: team.id, name: team.name } });
+}
