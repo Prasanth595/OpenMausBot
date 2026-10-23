@@ -259,7 +259,8 @@ describe("control-omb ui drives the real renderer", () => {
     const nextModel = options.find((option: any) => option.id !== originalModel);
     await ui("click", info.ui, "--name", `Claude Code · ${originalLabel}`);
     const arrangement = await ui("eval", info.ui, "--js", "document.querySelector('[data-model-arrangement]')?.innerText");
-    expect(arrangement.result).toContain("Agent");
+    expect(arrangement.result).toContain("Claude Code runs this bot");
+    expect(await ui("eval", info.ui, "--js", "document.querySelector('[data-model-arrangement]')?.getAttribute('data-agent-kind')")).toMatchObject({ result: "connected" });
     expect(arrangement.result).toContain("Claude Code");
     expect(arrangement.result).toContain(originalLabel);
     expect(await ui("eval", info.ui, "--js", "[...document.querySelectorAll('[aria-label=\"Apply model changes to\"] button')].find(b => b.textContent === 'Only this thread').getAttribute('aria-pressed')"))
