@@ -1,4 +1,7 @@
 // The agents catalog's tools for the threads a bot opened: listing them, closing them, and a Chief of Staff's mute.
+export const MUTED_THREAD_STILL_NOTIFIES =
+  "of everything waiting on them: approvals, questions, sign-ins and a turn that ended needing their input; of a problem no Chief received; of spend; of anything new on their brief; and once of a failure, unless you took its incident report";
+
 export const THREAD_TOOL_DEFINITIONS = [
   {
     name: "list_threads",
@@ -20,7 +23,7 @@ export const THREAD_TOOL_DEFINITIONS = [
   {
     name: "mute_thread",
     description:
-      "Chief of Staff only: mute or unmute the person's phone and desktop notifications for one thread a bot opened — yours, or one opened in your reachable team (list_threads shows which are muted). A muted thread still notifies the person of everything waiting on them: approvals, questions, sign-ins and a turn that ended needing their input; of a problem no Chief received; of spend; of anything new on their brief; and once of a failure, unless you took its incident report. Its other notices stop; its messages and unread state are unchanged. A thread the person started, each bot's main chat, and any mute or unmute the person chose are the person's to change. Use it when the person asks for quieter threads; if it is refused, do not retry it.",
+      `Chief of Staff only: mute or unmute the person's phone and desktop notifications for one thread a bot opened — yours, or one opened in your reachable team (list_threads shows which are muted). A muted thread still notifies the person ${MUTED_THREAD_STILL_NOTIFIES}. Its other notices stop; its messages and unread state are unchanged. A thread the person started, each bot's main chat, and any mute or unmute the person chose are the person's to change. Use it when the person asks for quieter threads; if it is refused, do not retry it.`,
     inputSchema: {
       type: "object",
       additionalProperties: false,

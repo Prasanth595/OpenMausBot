@@ -12,6 +12,7 @@ import { memorySearchText } from "./memory-search-text.ts";
 import { boundedAgentResult } from "./agents-result.ts";
 import { callResearchTool, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import { callPageTool, PAGE_TOOL_NAMES } from "./agents-pages-tools.ts";
+import { MUTED_THREAD_STILL_NOTIFIES } from "./agents-thread-tools.ts";
 
 export interface ToolCallContext {
   botId: string;
@@ -360,7 +361,7 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     if (r.error) return { text: `Couldn't change that thread's notifications: ${String(r.error)}`, isError: true };
     const where = `#${String(r.title)}${r.botName ? ` on @${String(r.botName)}` : ""}`;
     return { text: r.muted === true
-      ? `Muted ${where}: it no longer notifies the person, except when it fails or escalates; what it waits on still shows in their sidebar.`
+      ? `Muted ${where}: its other notices stop, but it still notifies the person ${MUTED_THREAD_STILL_NOTIFIES}. What it waits on still shows in their sidebar.`
       : `Unmuted ${where}: it notifies the person again.` };
   }
   if (name === "start_thread") {
