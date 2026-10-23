@@ -10,6 +10,7 @@ import { callTool, type ToolCallContext } from "./drivers/agents-call.ts";
 import { availableTools, catalogProfileFromEnv } from "./drivers/agents-catalog.ts";
 import { createChiefNotices } from "./host/chief-notices.ts";
 import { INCIDENT_HARD_LIMIT } from "./incidents.ts";
+import { closeMessageDb } from "./message-db.ts";
 import { buildNotification, type Notification } from "./notify.ts";
 import { createInternalThreadRoutes } from "./routes/internal-threads.ts";
 import { Store } from "./store.ts";
@@ -80,8 +81,11 @@ describe("what a muted thread reports through the Chief", () => {
   // The Chief's report turns of the latest team(); a refusal's handler runs before this settles, being registered first.
   let turns: Array<Promise<unknown>> = [];
   const flush = () => Promise.allSettled(turns);
-  /** Quinn's muted thread; a Chief of Staff in reach when `chief`, whose report turns start, or are refused. */
+  /** Quinn's muted thread in a fresh home; a Chief of Staff in reach when `chief`, whose report turns start, or are refused. */
   const team = (opts: { chief: boolean; refuses?: boolean; escalations?: boolean; assigned?: boolean }) => {
+    // Windows will not remove a directory holding an open SQLite database: the previous team's Store opened one.
+    closeMessageDb();
+    rmSync(DATA_DIR, { recursive: true, force: true });
     const store = new Store(selection);
     const qa = store.createBot({ name: "Quinn" });
     if (opts.chief) {
@@ -115,10 +119,6 @@ describe("what a muted thread reports through the Chief", () => {
   const failures = ["could-not-start", "routine-failed"] as const;
   const direct = { "could-not-start": "turn-failed", "routine-failed": "routine-failed" } as const;
 
-  beforeEach(() => {
-    rmSync(DATA_DIR, { recursive: true, force: true });
-  });
-
   it.each(failures)("%s: tells the person once when the Chief's report turn is refused", async (kind) => {
     const { bot, work, sent, started, fail } = team({ chief: true, refuses: true });
     fail(kind);
@@ -137,14 +137,12 @@ describe("what a muted thread reports through the Chief", () => {
 
   it.each(failures)("%s: tells the person once when there is no Chief, the report folds into assigned work, or is rate-limited", async (kind) => {
     for (const opts of [{ chief: false }, { chief: true, assigned: true }]) {
-      rmSync(DATA_DIR, { recursive: true, force: true });
       const { sent, started, fail } = team(opts);
       fail(kind);
       await flush();
       expect(started, JSON.stringify(opts)).toEqual([]);
       expect(sent, JSON.stringify(opts)).toEqual([expect.objectContaining({ kind: direct[kind] })]);
     }
-    rmSync(DATA_DIR, { recursive: true, force: true });
     const { sent, fail } = team({ chief: true });
     for (let i = 0; i < INCIDENT_HARD_LIMIT; i++) fail(kind);
     await flush();
@@ -155,7 +153,6 @@ describe("what a muted thread reports through the Chief", () => {
 
   it.each([false, true])("a turn that ends needing input, with escalations on: %s, tells the person once, Chief or not", async (escalations) => {
     for (const chief of [false, true]) {
-      rmSync(DATA_DIR, { recursive: true, force: true });
       const { bot, work, sent, started, mute } = team({ chief, escalations, refuses: true });
       mute.reportNeedsInput({ bot, threadId: work.threadId, question: "which repository should I tag?" });
       await flush();
