@@ -242,6 +242,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
   const finishing = useRef(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
+  const muteHelpId = `thread-mute-help-${task.threadId}`;
   const status = task.activity === "waiting-on-you" ? t("task.waiting") : isWaitingOnTeammate(task) ? t("task.waitingOnTeammate") : isWorking(task) ? activityLabel ?? t("chat.activity.working") : task.queued ? t("task.queued") : null;
   const byline = threadByline(task);
   const updatedAt = threadRecency(task);
@@ -322,6 +323,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
       {!renaming && <span className="flex shrink-0 items-center gap-2 px-1" onClick={choose} onContextMenu={contextMenu}>
         {updatedLabel && <time dateTime={new Date(updatedAt).toISOString()} className="shrink-0 tabular-nums text-[10px] text-ink-secondary">{updatedLabel}</time>}
         {task.pinned === true && <Pin size={11} className="shrink-0 text-ink-secondary" aria-label={t("sidebar.bot.pin")} />}
+        {task.notificationsMuted === true && <BellOff size={11} className="shrink-0 text-ink-secondary" aria-label={t("task.muted")} />}
         {task.activity === "waiting-on-you" ? <span className="shrink-0 text-[10px] font-medium text-warning">{t("task.waiting")}</span> : isWaitingOnTeammate(task) ? <Clock3 size={11} className="shrink-0 text-ink-secondary" aria-label={t("task.waitingOnTeammate")} /> : isWorking(task) ? <Loader2 size={11} className="shrink-0 animate-spin text-success" aria-label={activityLabel ?? t("chat.activity.working")} /> : task.queued ? <span className="shrink-0 text-[10px] text-ink-secondary">{t("task.queued")}</span> : null}
         {task.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unread")} />}
       </span>}
@@ -344,7 +346,10 @@ export const SidebarThreadRow = memo(function SidebarThreadRow({ task, ownerId, 
         </Select>
       </label>}
       {onPin && <button type="button" onClick={() => { setMenu(null); onPin(task, task.pinned !== true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised">{task.pinned === true ? <PinOff size={12} /> : <Pin size={12} />}{task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin")}</button>}
-      {onMute && <button type="button" title={t("task.muteHelp")} onClick={() => { setMenu(null); onMute(task, task.notificationsMuted !== true); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised">{task.notificationsMuted ? <Bell size={12} /> : <BellOff size={12} />}{task.notificationsMuted ? t("task.unmuteNotifications") : t("task.muteNotifications")}</button>}
+      {onMute && <>
+        <button type="button" aria-describedby={muteHelpId} onClick={() => { setMenu(null); onMute(task, task.notificationsMuted !== true); }} className="flex w-full items-center gap-2 rounded px-2.5 pt-2 pb-0.5 text-left text-[12px] text-ink hover:bg-raised">{task.notificationsMuted ? <Bell size={12} /> : <BellOff size={12} />}{task.notificationsMuted ? t("task.unmuteNotifications") : t("task.muteNotifications")}</button>
+        <p id={muteHelpId} className="pb-2 pl-[30px] pr-2.5 text-[11px] leading-snug text-ink-tertiary">{t("task.muteHelp")}</p>
+      </>}
       {onLink && task.link && <button type="button" onClick={() => { setMenu(null); onLink(task, null); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised"><Link2Off size={12} />{t("task.removeLink")}</button>}
       {onArchive && <button type="button" disabled={isWorking(task)} onClick={() => { setMenu(null); onArchive(task, isArchived(task) ? null : Date.now()); }} className="flex w-full items-center gap-2 rounded px-2.5 py-2 text-left text-[12px] text-ink hover:bg-raised disabled:opacity-40">{archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}{archived ? t("task.unarchive") : t("task.archive")}</button>}
       {onSnooze && <div className="px-2.5 pt-1">

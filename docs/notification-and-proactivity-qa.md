@@ -61,7 +61,8 @@ hears of it once only when no assigner was woken: the assignment wanted no
 reply, or the assigner's thread is gone. A failure is left to the Chief only
 once it accepted that report; when there is no Chief, it refuses the report
 turn, the report is rate-limited, or it folds into work a teammate assigned,
-the person hears of it once. The menu item's tooltip says the same.
+the person hears of it once. The menu item's help line, shown under it, says the
+same, and a muted thread's row carries a muted bell beside its title.
 
 Nothing is muted until someone chooses it. With `features.muteBotOpenedThreads`
 set to `true` in `config.json`, threads a bot opened (a teammate's handoff
@@ -85,7 +86,7 @@ the choice and who made it.
 | Muted threads stay quiet while the main chat notifies; a muted thread still asks for a tool approval, an answer and a sign-in, Chief or not, and tells the person once that a turn ended needing them; assigned work that ends needing input stays quiet while its assigner is woken and tells the person once when the assignment wanted no reply or the assigner is gone; the per-bot switch wins; the HTTP API and `mute_thread` refuse what they must; the person's choice outranks the Chief's | `server/thread-mute.e2e.test.ts` |
 | A peer approval in a muted thread still notifies the person while its Chief receives the escalation | `server/escalations.e2e.test.ts` |
 | A move to My Cloud keeps the mute and who chose it | `server/cloud-send-settings.test.ts`, `server/cloud-chat-merge.test.ts` |
-| The row menu mutes, unmutes, rolls back a refused change and shows the refreshed state | `src/components/Sidebar.thread-mute.test.ts` |
+| The row menu mutes, unmutes, rolls back a refused change and shows the refreshed state; the muted bell and the menu's help line show without hover | `src/components/Sidebar.thread-mute.test.ts` |
 | Browser click returns the exact bot/task target | `src/lib/notify.test.ts` |
 | Store navigation selects the bot and switches the task | `src/state/store.test.ts` |
 | Routine failure receipt and callback occur once | `server/routines.test.ts` |

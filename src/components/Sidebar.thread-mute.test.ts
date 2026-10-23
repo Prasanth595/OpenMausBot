@@ -45,6 +45,7 @@ function Harness() {
 let root: Root;
 const row = () => document.querySelector<HTMLButtonElement>('[data-sidebar-thread-row="release"]');
 const storedMute = () => seen.bots.find((bot) => bot.id === "pepper")?.tasks?.find((task) => task.threadId === "release")?.notificationsMuted;
+const mutedMark = () => row()!.parentElement!.querySelector('[aria-label="Notifications muted"]');
 /** Opens the row's menu and returns its mute item once the menu shows it. */
 const muteItem = async (label: "Mute notifications" | "Unmute notifications") => {
   const more = await vi.waitFor(() => row()!.parentElement!.querySelector<HTMLButtonElement>("button[aria-expanded]")!);
@@ -90,14 +91,18 @@ afterAll(() => {
 describe("Mute notifications in a thread's menu", () => {
   it("mutes, then unmutes, the thread on the server and shows it on the row", async () => {
     const mute = await muteItem("Mute notifications");
-    expect(mute.title).toMatch(/still notifies you of anything waiting on you/);
+    const help = document.getElementById(mute.getAttribute("aria-describedby") ?? "");
+    expect(mute.title).toBe("");
+    expect(help?.closest("[data-thread-overlay]")).not.toBeNull();
+    expect(help?.textContent).toMatch(/still notifies you of anything waiting on you/);
+    expect(mutedMark()).toBeNull();
     mute.click();
-    await vi.waitFor(() => expect(row()!.title).toContain("Notifications muted"));
+    await vi.waitFor(() => expect(mutedMark()).not.toBeNull());
     expect(patches.at(-1)).toEqual({ notificationsMuted: true });
     expect(storedMute()).toBe(true);
 
     (await muteItem("Unmute notifications")).click();
-    await vi.waitFor(() => expect(row()!.title).not.toContain("Notifications muted"));
+    await vi.waitFor(() => expect(mutedMark()).toBeNull());
     expect(patches.at(-1)).toEqual({ notificationsMuted: false });
     expect(storedMute()).toBe(false);
   });
@@ -110,7 +115,7 @@ describe("Mute notifications in a thread's menu", () => {
       await vi.waitFor(() => expect(seen.error).toBe("That thread is no longer yours to change"));
       expect(patches.slice(sent)).toEqual([{ notificationsMuted: true }]);
       await vi.waitFor(() => expect(storedMute()).toBe(false));
-      expect(row()!.title).not.toContain("Notifications muted");
+      expect(mutedMark()).toBeNull();
       await muteItem("Mute notifications");
     } finally {
       server.refuse = false;
@@ -120,7 +125,7 @@ describe("Mute notifications in a thread's menu", () => {
   it("shows a mute someone else set once the refreshed thread arrives", async () => {
     server.muted = true;
     FixtureEventSource.opened[0]!.send({ kind: "bot", bot: serverBot() }, "run:1");
-    await vi.waitFor(() => expect(row()!.title).toContain("Notifications muted"));
+    await vi.waitFor(() => expect(mutedMark()).not.toBeNull());
     expect(storedMute()).toBe(true);
     await muteItem("Unmute notifications");
   });
