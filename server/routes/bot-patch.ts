@@ -423,8 +423,14 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
         requestedApprovalMode = approvalModeFor(existingBot ?? {});
       }
       const currentApprovalMode = approvalModeFor(existingBot ?? {});
-      if (requestedApprovalMode === "auto" && currentApprovalMode !== "auto" &&
-          auth.kind === "loopback" && !DESKTOP_MANAGED && !req.headers.origin && store.bots.some(bot => bot.busy)) {
+      const autoElevationNeedsApp = () => {
+        const tasks = body.applyToAllThreads === true ? store.tasks(m[1]) : [];
+        return requestedApprovalMode === "auto" &&
+          (approvalModeFor(store.bot(m[1]) ?? {}) !== "auto" || tasks.some(task =>
+            approvalModeFor(store.projectBotForTask(m[1], task.threadId) ?? {}) !== "auto")) &&
+          (store.bots.some(bot => bot.busy) || tasks.some(task => task.busy));
+      };
+      if (auth.kind === "loopback" && !DESKTOP_MANAGED && !req.headers.origin && autoElevationNeedsApp()) {
         return json(res, 409, { error: "Change approval mode from the app or a paired device while bots are working." });
       }
       if (body.approvalMode !== undefined || body.autoApprove !== undefined) {
@@ -649,8 +655,7 @@ export function createBotPatchRoutes(deps: BotPatchRouteDeps): RouteHandler {
           (freshBrowserBot.busy || browserRuntime.heldBy(currentBrowserSession(freshBrowserBot.id, freshBrowserBot.browserProfile)))) {
         return json(res, 409, { error: "Stop the bot and release browser control before changing its profile." });
       }
-      if (requestedApprovalMode === "auto" && currentApprovalMode !== "auto" &&
-          auth.kind === "loopback" && !DESKTOP_MANAGED && !req.headers.origin && store.bots.some(bot => bot.busy)) {
+      if (auth.kind === "loopback" && !DESKTOP_MANAGED && !req.headers.origin && autoElevationNeedsApp()) {
         return json(res, 409, { error: "Change approval mode from the app or a paired device while bots are working." });
       }
       if (profile.patch.soul !== undefined) {
