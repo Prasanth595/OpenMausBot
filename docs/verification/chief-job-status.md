@@ -106,3 +106,12 @@ The shared `shared/job-state.ts` terminal contract also ends MCP waits and headl
 `events --until-settled` on blocked/cancelled. A previously observed version still
 waits for a change. Events exits 3 for blocked (action/input needed), 130 for
 cancelled, and retains its existing failed/completed exit codes.
+
+
+## Full conversation status and unrecorded tools
+
+The current-job footer is visible in every authorized bot conversation, including delegated non-Chief threads and read-only viewers. Cancellation buttons still require a Chief, write permission, and an exact current source-job identity. The existing native API owns the current job; older cancellation receipts remain historical warnings.
+
+Tool calls without a terminal receipt are running only while they belong to the displayed thread's recorded live turn start. A tool from an earlier turn displays “Result/status unrecorded and unverified.” This presentation does not change its raw messages or claim completion, cancellation, or an OS process stop. Inspector uses the selected task's runtime state, matching ChatView, rather than the profile's aggregate busy state.
+
+Run `server/full-thread-status.test.ts` through the existing native verification harness with cached agent-browser and Chrome. It serves the production `dist` bundle from the disposable fake-engine server, opens the normal application, follows a real delegated thread link, and retains screenshots, DOM, API receipts and console output. Its synthetic provider emits an unfinished tool call before a gate; cancellation leaves that call without a terminal result. A newer gated turn proves the old call stays unverified while the new call remains live. The read-only browser case substitutes a synthetic cloud-guest session response solely in the fixture browser; backend authorization remains covered separately by the existing runtime/API checks.

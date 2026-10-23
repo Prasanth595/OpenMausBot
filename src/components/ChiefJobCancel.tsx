@@ -46,13 +46,13 @@ function currentJobMessage(current: NonNullable<NativeJobView["current"]>): stri
   return "Job running.";
 }
 
-export function ChiefJobCancel({ botId, threadId, activeLeafId, busy, waiting, connected = true, receipts = [] }: {
+export function ChiefJobCancel({ botId, threadId, activeLeafId, busy, waiting, connected = true, receipts = [], chief = false, canWrite = false }: {
   botId: string; threadId: string; activeLeafId?: string | null; busy: boolean; waiting: boolean;
-  connected?: boolean;
+  connected?: boolean; chief?: boolean; canWrite?: boolean;
   receipts?: JobCancellationResult[];
 }) {
   const receiptKey = JSON.stringify(receipts.map(receipt => [receipt.rootId, receipt.state, receipt.activeIds, receipt.stoppedIds, receipt.errors]));
-  const key = JSON.stringify([botId, threadId, activeLeafId, busy, waiting, connected, receiptKey]);
+  const key = JSON.stringify([botId, threadId, activeLeafId, busy, waiting, connected, chief, canWrite, receiptKey]);
   const [snapshot, setSnapshot] = useState<{ key: string; job?: NativeJobView; failed?: boolean } | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [pending, setPending] = useState<{ rootId: string } | null>(null);
@@ -90,7 +90,7 @@ export function ChiefJobCancel({ botId, threadId, activeLeafId, busy, waiting, c
   }, []);
 
   const cancel = async (rootId: string) => {
-    if (cancellation.current) return;
+    if (!chief || !canWrite || cancellation.current) return;
     const current = revision.current;
     const operation = { rootId };
     cancellation.current = operation; setPending(operation); setError(null);
@@ -124,7 +124,7 @@ export function ChiefJobCancel({ botId, threadId, activeLeafId, busy, waiting, c
   const status = !connected || shown?.failed ? "Job status unavailable." : job?.current ? currentJobMessage(job.current)
     : job ? "No current job." : "Checking job status…";
   return <div className="pointer-events-auto px-5 pb-2">
-    <ChiefJobCancelActions chief canWrite roots={roots} sourceRequests={sourceRequests} pending={pending?.rootId ?? null} onCancel={rootId => { void cancel(rootId); }} />
+    <ChiefJobCancelActions chief={chief} canWrite={canWrite} roots={roots} sourceRequests={sourceRequests} pending={pending?.rootId ?? null} onCancel={rootId => { void cancel(rootId); }} />
     <p role="status" data-current-job-id={job?.current?.rootId} title={job?.current?.reason}
       className="mt-1 text-right text-[12px] text-ink-secondary">{status}</p>
     {job?.current?.legacyTaskOutcome && <p data-legacy-task-outcome className="mt-1 text-right text-[12px] text-ink-secondary">The engine turn finished; the requested-task disposition was not recorded.</p>}

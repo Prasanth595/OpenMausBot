@@ -15,7 +15,7 @@ const current = { id: "new", rootId: "new", botId: "chief", threadId: "main", st
 const job = (status = "completed") => ({ roots: ["old", "new"], nodes: [old, { ...current, status }], unconfirmedStops: [],
   current: { rootId: "new", status, state: status === "completed" ? "completed" : "running", reason: `Native ${status}`, sourceRequest: "The current request" } });
 type Props = ComponentProps<typeof ChiefJobCancel> & { connected?: boolean };
-const props: Props = { botId: "chief", threadId: "main", activeLeafId: "new-answer", busy: false, waiting: false, receipts: [cancelled] };
+const props: Props = { botId: "chief", threadId: "main", activeLeafId: "new-answer", busy: false, waiting: false, receipts: [cancelled], chief: true, canWrite: true };
 let host: HTMLDivElement;
 let root: Root;
 const render = (patch: Partial<Props> = {}) => flushSync(() => root.render(createElement(ChiefJobCancel, { ...props, ...patch })));
@@ -172,4 +172,39 @@ it("discloses an untyped historical task outcome separately from completed lifec
  render(); await vi.waitFor(() => expect(text()).toContain("requested-task disposition was not recorded"));
  expect(text()).not.toContain("Job completed.");
  expect(host.querySelector("[data-current-job-id]")?.textContent).toBe("Engine turn finished. Task outcome unrecorded and unverified.");
+});
+
+for (const access of [{ chief: false, canWrite: true }, { chief: false, canWrite: false }, { chief: true, canWrite: false }]) {
+ it(`reads status without cancellation controls for ${JSON.stringify(access)}`, async () => {
+  fixture.api.mockResolvedValue(job("running")); render(access);
+  await vi.waitFor(() => expect(text()).toContain("Job running."));
+  expect(cancelButton()).toBeUndefined();
+ });
+}
+it("restores a delegated cancelled current job for a read-only non-Chief on remount", async () => {
+ fixture.api.mockResolvedValue({ roots: ["old"], nodes: [old], current: { rootId: "old", status: "cancelled", state: "failed", reason: "Stopped" } });
+ render({ chief: false, canWrite: false });
+ await vi.waitFor(() => expect(text()).toContain("Job cancelled."));
+ flushSync(() => root.unmount()); root = createRoot(host); render({ chief: false, canWrite: false });
+ await vi.waitFor(() => expect(text()).toContain("Job cancelled."));
+ expect(cancelButton()).toBeUndefined();
+});
+it("shows delegated blocked then newer completed status without Chief actions", async () => {
+ fixture.api.mockResolvedValue({ ...job(), current: { rootId: "old", status: "completed", state: "blocked", reason: "Missing tool" } });
+ render({ chief: false, canWrite: true });
+ await vi.waitFor(() => expect(text()).toContain("Job blocked: Missing tool"));
+ fixture.api.mockResolvedValue(job()); render({ chief: false, canWrite: true, activeLeafId: "newer-result" });
+ await vi.waitFor(() => expect(text()).toContain("Job completed."));
+ expect(cancelButton()).toBeUndefined();
+});
+
+it("does not post a preflight cancellation after write permission is removed", async () => {
+ fixture.api.mockResolvedValue(job("running")); render({ busy: true });
+ await vi.waitFor(() => expect(cancelButton()).toBeTruthy());
+ let snapshot!: (value: unknown) => void;
+ fixture.api.mockImplementationOnce(() => new Promise(resolve => { snapshot = resolve; }));
+ flushSync(() => cancelButton()!.click()); render({ canWrite: false, busy: true });
+ snapshot({ rootId: "new" }); await Promise.resolve(); await Promise.resolve();
+ expect(fixture.api.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+ expect(cancelButton()).toBeUndefined();
 });

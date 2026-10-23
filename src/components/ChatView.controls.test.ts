@@ -53,7 +53,7 @@ vi.mock("./ApprovalModeSelector", () => ({ ApprovalModeSelector: (props: Compone
   fixture.approval = props;
   return createElement("span", { "data-test-approval-control": true });
 } }));
-vi.mock("./ChiefJobCancel", () => ({ ChiefJobCancel: () => createElement("div", { "data-chief-job-cancel": true }, "Cancel job") }));
+vi.mock("./ChiefJobCancel", () => ({ ChiefJobCancel: ({ chief, canWrite }: { chief: boolean; canWrite: boolean }) => createElement("div", { "data-current-job-status": true, "data-chief-job-cancel": chief && canWrite ? true : undefined }, "Checking job status…") }));
 
 const { ChatView, ErrorRow, FailedTurnRow, NewConversationInstead, claudeUpdateTarget } = await import("./ChatView");
 const { activityPreview } = await import("@/lib/failed-turn");
@@ -68,6 +68,15 @@ const bot: Bot = {
 };
 
 describe("the header's right side", () => {
+  it("hides Stop for read-only viewers while preserving current-job status", () => {
+    fixture.canWrite = false;
+    try {
+      const markup = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, busy: true, waitingForTeammates: true } }));
+      expect(markup).not.toContain('title="Stop this turn"');
+      expect(markup).toContain("data-current-job-status");
+    } finally { fixture.canWrite = null; }
+  });
+
   const header = (of: Bot = bot) => {
     fixture.menus = [];
     fixture.model = null;
@@ -653,4 +662,15 @@ describe("the way back to the bot's own conversation", () => {
     expect(header(false, { ...visiting, threadId: "main" })).not.toContain("data-chathead-back");
     expect(header(false, { ...visiting, mainThreadId: "unknown" })).not.toContain("data-chathead-back");
   });
+});
+
+it("mounts current-job status in real non-Chief and read-only ChatView", () => {
+ const bot: Bot = { id: "worker", threadId: "delegated", name: "Worker", title: "", description: "", color: "green", notifications: true, unread: false, messages: [], modelSelection: { instanceId: "test", model: "test" } };
+ fixture.canWrite = true;
+ expect(renderToStaticMarkup(createElement(ChatView, { bot }))).toContain("Checking job status");
+ fixture.canWrite = false;
+ const html = renderToStaticMarkup(createElement(ChatView, { bot }));
+ expect(html).toContain("Checking job status");
+ expect(html).not.toContain("Cancel job");
+ fixture.canWrite = null;
 });
