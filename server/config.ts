@@ -90,6 +90,7 @@ const mcpConfigSchema = z.object({
 }).strict();
 /** Bot desktop isolation, default "shared"; `maxInstances` caps per-bot desktops or pool seats. Switching modes cold-starts every desktop. */
 const localVmConfigSchema = z.object({
+  source: z.enum(["managed", "existing"]).optional(),
   mode: z.enum(["shared", "per-bot", "pool"]).optional(),
   maxInstances: z
     .number()
@@ -97,6 +98,9 @@ const localVmConfigSchema = z.object({
     .min(MIN_LOCAL_VM_MAX_INSTANCES)
     .max(MAX_LOCAL_VM_MAX_INSTANCES)
     .optional(),
+  sshAlias: z.string().refine((value) => value === "" || isValidSshAlias(value), {
+    message: "must be a simple SSH config alias",
+  }).optional(),
   idleTimeoutMinutes: z
     .number()
     .int()
@@ -512,7 +516,15 @@ export interface AppConfig extends HelperConfig {
   threads?: { maxConcurrentPerBot: number; eventLogMaxBytes?: number; eventLogRetentionDays?: number };
   context?: { rebuildBytes?: number; compactAt?: number; autoCompact?: boolean; roomCompactAt?: number; roomSessions?: boolean; replayToolHistory?: boolean };
   memory?: { captureQuietMs?: number; tidyHour?: number };
-  localVm?: { mode?: "shared" | "per-bot" | "pool"; maxInstances?: number; idleTimeoutMinutes?: number };
+  /** Managed preserves the historical container-backed Local VM. Existing is
+   * one user-owned Linux VM reached through a validated SSH alias. */
+  localVm?: {
+    source?: "managed" | "existing";
+    mode?: "shared" | "per-bot" | "pool";
+    maxInstances?: number;
+    idleTimeoutMinutes?: number;
+    sshAlias?: string;
+  };
   features?: { skillAuthoring?: boolean; skillReview?: boolean; skillReviewSteps?: number; showToolCalls?: boolean; browser?: boolean; sharedComputers?: boolean; claudeUserMcp?: boolean; claudeUserSkills?: boolean; llmThreadTitles?: boolean; autoRecall?: boolean; skillsLibrary?: boolean; shareLearnedSkills?: "off" | "ask" | "auto"; roomMemoryCapture?: boolean; parallelRoomJobs?: boolean; chiefEscalations?: boolean; acpPlanLines?: boolean; agentsToolBridge?: boolean };
   onboarding?: { completedAt?: string; version?: number; reelSeen?: boolean; hintsSeen?: string[]; firstTurnAt?: string };
   browserProfiles?: BrowserProfile[];
@@ -652,6 +664,14 @@ export function localVmMode(cfg: AppConfig): "shared" | "per-bot" | "pool" {
 
 export function localVmMaxInstances(cfg: AppConfig): number {
   return cfg.localVm?.maxInstances ?? DEFAULT_LOCAL_VM_MAX_INSTANCES;
+}
+
+export function localVmSource(cfg: AppConfig): "managed" | "existing" {
+  return cfg.localVm?.source === "existing" ? "existing" : "managed";
+}
+
+export function localVmSshAlias(cfg: AppConfig): string | null {
+  return isValidSshAlias(cfg.localVm?.sshAlias) ? cfg.localVm.sshAlias : null;
 }
 
 export function localVmIdleTimeoutMinutes(cfg: AppConfig): number {
