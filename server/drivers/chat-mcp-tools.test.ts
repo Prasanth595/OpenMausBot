@@ -978,7 +978,12 @@ it("reports executed original arguments for deferred MCP Apps calls", async () =
     const session = await f.mount();
     const tool = tools.find(tool => tool.name.endsWith("_list"))!;
     const input = { name: tool.name, arguments: { company_id: "fixture", first: 2 } };
+    await session.execute("audit_search_tools", { query: "payments" }, f.controller.signal);
+    await session.execute("audit_describe_tool", { name: tool.name }, f.controller.signal);
+    await session.execute("audit_call_tool", { name: tool.name, arguments: { company_id: "fixture", first: "invalid" } }, f.controller.signal);
+    expect(returned).not.toHaveBeenCalled();
     await session.execute("audit_call_tool", input, f.controller.signal);
+    expect(returned).toHaveBeenCalledOnce();
     expect(f.read().calls.at(-1)).toMatchObject({ method: "tools/call", params: { name: tool.name, arguments: input.arguments } });
     expect(returned).toHaveBeenCalledWith({ name: tool.name, arguments: input.arguments }, expect.anything());
   } finally { mount.mockRestore(); returned.mockRestore(); }
