@@ -12559,6 +12559,7 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
   if (admin) return status;
   return {
     ...status,
+    openaiCompat: { configured: status.openaiCompat.configured, url: status.openaiCompat.url },
     edition: { edition: status.edition.edition, features: status.edition.features },
     signIn: { admins: [], members: [] },
     vps: { configured: status.vps.configured, sshAlias: "" },
@@ -12567,7 +12568,6 @@ function configForAccess(status: ReturnType<typeof configStatus>, admin: boolean
     browserProfiles: status.browserProfiles.map((profile) => Object.fromEntries(Object.entries(profile).filter(([key]) => key !== "partitionId"))),
   };
 }
-
 function mcpServerResponse() {
   const policy = managedPolicy.current();
   const servers = listMcpServers(cfg.mcpServers).map((server) => {
