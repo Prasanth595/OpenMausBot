@@ -10033,7 +10033,7 @@ async function runClaimedGroupMemberTurn(
   }
   try {
     if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
-      Object.assign(integrations, await teamConnections.appsIntegrations(bot, threadId, internalGeneration));
+      Object.assign(integrations, await teamConnections.appsIntegrations(bot, threadId, internalGeneration, orchestration?.roomHandoffId));
     }
   } catch (error) {
     const message = `connected apps are unavailable — ${error instanceof Error ? error.message : String(error)}`;
