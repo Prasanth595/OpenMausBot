@@ -1,3 +1,4 @@
+import { chiefLevel } from "../chief-level.ts";
 import { delegationOriginKind } from "./delegation-origin.ts";
 import { delegatedApprovalMode } from "../auto-approve.ts";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode.ts";
@@ -17,7 +18,7 @@ export function createDelegatedApprovals(deps: {
 function delegatedLevel(from: BotRecord, fromThreadId: string, target: BotRecord, recipientMode: ApprovalMode, origin: "person" | "routine" | "outside" = "person"): ApprovalMode | null {
   if (origin === "outside" || approvalModeFor(target) === "custom") return null;
   return delegatedApprovalMode({
-    senderIsChief: Boolean(from.chiefOfStaff),
+    senderIsChief: chiefLevel(from),
     senderMode: deps.sourceApprovalMode(from.id, fromThreadId),
     sameBot: from.id === target.id,
     recipientMode,
