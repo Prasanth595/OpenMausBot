@@ -6697,7 +6697,7 @@ bus.subscribe((event: RuntimeEvent) => {
           role: "bot",
           kind: "activity",
           tool: {
-            name: `Approve for me: ${providerLabel(event.provider)}'s automatic reviewer is not available${model ? ` for ${model}` : ""}, OpenMausBot uses the configured review model when available and asks when automatic review cannot approve.`,
+            name: `Approve for me: ${providerLabel(event.provider)}'s automatic reviewer is not available${model ? ` for ${model}` : ""}. OpenMausBot uses the configured review model when available and asks when automatic review cannot approve.`,
             ok: true,
           },
         });

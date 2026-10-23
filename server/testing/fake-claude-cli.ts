@@ -407,6 +407,7 @@ if (argv[0] === "auth" && argv[1] === "status") {
 // Isolated reviews read plain stdin while ordinary turns remain line-driven.
 if (argAfter("--output-format") === "stream-json" && !argAfter("--input-format") && argv.includes("--no-session-persistence")) {
   let prompt = "";
+  process.stdin.setEncoding("utf8");
   for await (const chunk of process.stdin) prompt += chunk;
   const dump = process.env.FAKE_CLAUDE_DUMP;
   if (dump) writeDumpAtomic(dump, JSON.stringify({
