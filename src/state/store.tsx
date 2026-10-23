@@ -13,9 +13,10 @@ import {
 import { flushSync } from "react-dom";
 import type { BotMovedTo, BotVisibility, CardAnswerer, CloudBackend, ConnectorToolGrant, EffortLevel, InstalledPackageMetadata, LiveCallState, ServerFrame, GroupThreadUsage, SteerQueueReason, WireGroup, WireTask, OptionCardData as WireOptionCard } from "../../shared/wire";
 import { movesThreadToTop } from "../../shared/wire";
+import { reorderStable } from "../../shared/bot-order";
 import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-surface";
 import type { NotificationLogEntry } from "../../shared/notification";
-import { reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
+import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
 import { muteChoice, patchGroupTask } from "./thread-edits";
@@ -182,6 +183,7 @@ export interface Group extends Pick<WireGroup, "memberContext" | "queue"> {
   memberIds: string[];
   defaultResponder: GroupDefaultResponder;
   bulletin: string;
+  description?: string;
   unread: boolean;
   lastReadMessageId?: string;
   createdAt: number;
@@ -433,7 +435,7 @@ export type { BrowserEngineSummary, BrowserProfile, ConfigStatus, ManagedPolicyS
 // A section left out here is wiped from state.config whenever a config frame lands.
 export type ConfigStatusFrame = Pick<
   ConfigStatus,
-  "xai" | "mistral" | "cerebras" | "groq" | "meta" | "xResearch" | "treg" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "threads" | "automaticRecovery" | "cacheKeepWarm" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "live" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome"
+  "xai" | "mistral" | "cerebras" | "groq" | "meta" | "deepseek" | "xResearch" | "treg" | "anthropic" | "openai" | "openrouter" | "openaiCompat" | "fleet" | "composio" | "box" | "vps" | "rooms" | "mcp" | "threads" | "automaticRecovery" | "cacheKeepWarm" | "localVm" | "opencodeGo" | "tts" | "decider" | "imageGen" | "live" | "profile" | "language" | "features" | "onboarding" | "browserEngine" | "browserProfiles" | "edition" | "budgets" | "billing" | "managedPolicy" | "cloudHome"
 >;
 
 export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
@@ -441,7 +443,7 @@ export function configStatusFromFrame(frame: ConfigStatusFrame): ConfigStatus {
     xai: frame.xai,
     mistral: frame.mistral,
     cerebras: frame.cerebras,
-    groq: frame.groq,
+    groq: frame.groq, deepseek: frame.deepseek,
     meta: frame.meta, xResearch: frame.xResearch, treg: frame.treg,
     anthropic: frame.anthropic,
     openai: frame.openai,
@@ -739,6 +741,7 @@ export type Action =
     }
   | { type: "botQueues"; queues: AppState["pendingQueued"] }
   | { type: "sections"; sections: string[] }
+  | { type: "botsOrdered"; botIds: string[] }
   | { type: "sectionDeleted"; section: string; sections: string[] }
   | { type: "showRoutines"; section?: "schedule" | "logs"; view?: "calendar" | "list"; botId?: string; routineId?: string; runStatus?: RoutineRunStatusFilter }
   | { type: "showTeamMap" }
@@ -779,7 +782,7 @@ export type Action =
   | {
       type: "patchGroup";
       groupId: string;
-      patch: Partial<Pick<Group, "name" | "bulletin" | "memberIds" | "defaultResponder" | "pinnedMessageId" | "section">>;
+      patch: Partial<Pick<Group, "name" | "bulletin" | "description" | "memberIds" | "defaultResponder" | "pinnedMessageId" | "section">>;
     }
   | { type: "deleteGroup"; groupId: string }
   | { type: "newGroupTask"; groupId: string }
@@ -1008,6 +1011,7 @@ export function reducer(state: AppState, action: Action): AppState {
         : action.type === "messageAdded" ? bumpThreadUpdatedAt(buffered, action.threadId, action.message.at) : buffered;
     }
   }
+  if (isNotificationFeedAction(action)) return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
   switch (action.type) {
     case "hydrate": {
       const known = (id: string) => action.bots.some((b) => b.id === id) || action.groups.some((g) => g.id === id);
@@ -1023,7 +1027,10 @@ export function reducer(state: AppState, action: Action): AppState {
         }),
         groups: action.groups.map((group) => {
           const previous = state.groups.find((candidate) => candidate.id === group.id);
-          return previous ? { ...group, tasks: mergeTaskStamps(previous.tasks, group.tasks) } : group;
+          const merged = previous ? { ...group, tasks: mergeTaskStamps(previous.tasks, group.tasks) } : group;
+          // The wire carries an explicitly-cleared description as null; client state keeps it absent.
+          if (merged.description === null) merged.description = undefined;
+          return merged;
         }),
         sections: action.sections ?? [],
         computerControl: action.computerControl,
@@ -1072,6 +1079,11 @@ export function reducer(state: AppState, action: Action): AppState {
       };
     case "sections":
       return { ...state, sections: action.sections };
+    case "botsOrdered": {
+      // The server's fleet order (PUT /api/bots/order): a stable partial reorder, so the sidebar shows what a phone just did.
+      const bots = reorderStable(state.bots, action.botIds);
+      return bots.every((bot, index) => bot === state.bots[index]) ? state : { ...state, bots };
+    }
     case "botQueues":
       return reconcileSnapshotQueues(replaceBotQueues(state, action.queues), [...state.bots, ...state.groups]);
     case "showRoutines":
@@ -1154,6 +1166,9 @@ export function reducer(state: AppState, action: Action): AppState {
         ? fenced.groups.map((g) => (g.id === action.group.id ? {
             ...g, ...action.group,
             section: typeof action.group.threadId === "string" || Object.hasOwn(action.group, "section") ? action.group.section : g.section,
+            description: Object.hasOwn(action.group, "description")
+              ? (action.group.description ?? undefined)
+              : g.description,
             tasks: action.group.tasks ? mergeTaskStamps(g.tasks, action.group.tasks) : g.tasks,
             turnTimeoutMinutes: Object.hasOwn(action.group, "turnTimeoutMinutes")
               ? (action.group.turnTimeoutMinutes ?? undefined)
@@ -1161,7 +1176,7 @@ export function reducer(state: AppState, action: Action): AppState {
             messages: action.group.messages ?? g.messages,
             hasMore: action.group.messages ? Boolean(action.group.hasMore) : g.hasMore,
           } : g))
-        : [{ ...(action.group as Group), messages: action.group.messages ?? [] }, ...fenced.groups];
+        : [{ ...(action.group.description === null ? { ...action.group, description: undefined } : action.group) as Group, messages: action.group.messages ?? [] }, ...fenced.groups];
       return { ...fenced, groups };
     }
     case "groupDeleted": {
@@ -1640,11 +1655,6 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case "toggleNotificationsPinned":
       return { ...state, notificationsPinned: action.pinned ?? !state.notificationsPinned };
-    case "notificationsHydrated":
-    case "notificationReceived":
-    case "notificationRead":
-    case "notificationsMarkAllRead":
-      return { ...state, notifications: reduceNotificationFeed(state.notifications, action) };
     case "toggleAppSettings": {
       const open = action.open ?? !state.appSettingsOpen;
       return {
@@ -3289,6 +3299,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         case "sections":
           rawDispatch({ type: "sections", sections: frame.sections });
           break;
+        case "bots.order":
+          rawDispatch({ type: "botsOrdered", botIds: frame.botIds });
+          break;
         case "bot.queued":
           rawDispatch({ type: "botQueues", queues: frame.queues });
           break;
@@ -3356,6 +3369,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             visibleNotificationThread(stateRef.current),
           );
           rawDispatch({ type: "notificationReceived", entry: frame.notification });
+          break;
+        case "notifications.read":
+          bumpPeripheralVersion("notifications");
+          rawDispatch({ type: "notificationsRead", ids: frame.ids });
           break;
         case "group.deleted":
           rawDispatch({ type: "groupDeleted", groupId: frame.groupId });

@@ -12,6 +12,7 @@ import { writeFileAtomic, writeFileAtomicIfChanged } from "../atomic.ts";
 import { augmentedPath } from "../env-path.ts";
 import { brokerSocketPath, describeSpawnFailure, execCli, killCliTree, spawnCli } from "../procs.ts";
 import { claudeAuthStatus } from "./claude-auth-status.ts";
+import { projectMcpServers } from "./claude-project-mcp.ts";
 import { claudeBilling, claudeCallUsage } from "./claude-billing.ts";
 import { claudeAuthFailure, claudeAuthRecovery } from "./claude-auth-recovery.ts";
 import { claudeModelExtras } from "./claude-model-extras.ts";
@@ -30,7 +31,7 @@ import type {
   SteerOutcome,
   TextGenerationOptions,
 } from "../contracts.ts";
-import { appMountFor, customServerGate, gateServer } from "../mcp-gate-config.ts";
+import { appMountFor, customServerGate, gateQueryTools, gateServer } from "../mcp-gate-config.ts";
 import { canUseMcpServer } from "../../shared/tool-scope.ts";
 import { assertToolScopeSupported } from "../../shared/tool-scope-support.ts";
 import { newEventId, newId } from "../contracts.ts";
@@ -52,7 +53,7 @@ import { appendNative } from "./native.ts";
 import { runKeepWarmPing, type KeepWarmContract } from "./claude-keepwarm.ts";
 import { BACKGROUND_CALL_TIMEOUT_MS, backgroundCallArgs, spawnBackgroundCall } from "./claude-background.ts";
 import { permissionLaunchCwd, shellRequest } from "./permission-command.ts";
-import { SPAWNED_PROXIES } from "../proxy-paths.ts";
+import { SPAWNED_PROXIES } from "../proxy-paths.ts"; import { OWN_APPS_SERVER } from "../../shared/own-apps.ts";
 import { extractMcpImages } from "../mcp-tool-images.ts";
 import {
   ASK_USER_QUESTION_TOOL,
@@ -180,24 +181,6 @@ export function readClaudeAuthSettings(
   } catch {
     return {};
   }
-}
-
-/** `<cwd>/.mcp.json`, forwarded verbatim because --strict-mcp-config stops the CLI reading it.
- * A malformed file is ignored. */
-function projectMcpServers(cwd: string): Record<string, unknown> {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(join(cwd, ".mcp.json"), "utf8"));
-  } catch {
-    return {};
-  }
-  const servers = (parsed as { mcpServers?: unknown } | null)?.mcpServers;
-  if (!servers || typeof servers !== "object" || Array.isArray(servers)) return {};
-  const out: Record<string, unknown> = {};
-  for (const [name, server] of Object.entries(servers as Record<string, unknown>)) {
-    if (server && typeof server === "object" && !Array.isArray(server)) out[name] = server;
-  }
-  return out;
 }
 
 /** OMB_CLAUDE_AUTOCOMPACT: a token count, "auto" (the CLI's own window) or "off". The CLI rejects
@@ -1122,9 +1105,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       // Pre-allowed: a headless acceptEdits run silently denies anything unlisted.
       const mcpServers: Record<string, unknown> = {};
       const allowed: string[] = [];
-      if (turn.integrations?.composio) {
-        mcpServers.composio = { ...turn.integrations.composio };
-        allowed.push("mcp__composio");
+      for (const [name, bridge] of [["composio", turn.integrations?.composio], [OWN_APPS_SERVER, turn.integrations?.composioOwn]] as const) {
+        if (bridge) { mcpServers[name] = { ...bridge }; allowed.push(`mcp__${name}`); }
       }
       if (turn.integrations?.localComputer) {
         const local = turn.integrations.localComputer;
@@ -1199,7 +1181,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
       }
       const permissionEnv = { ...NODE_ENV_FLAG, ...(turn.toolScope !== undefined ? { OMB_PERMISSION_TOOL_SCOPE: JSON.stringify(turn.toolScope) } : {}) };
       mcpServers.ogb = { command: process.execPath, args: [PERM_PROXY_PATH, socketPath], env: permissionEnv, alwaysLoad: true };
-      allowed.push("mcp__ogb");
+      allowed.push("mcp__ogb", ...gateQueryTools(mcpServers));
       // A guest pre-allows only harness tools; anything else (the browser can open file:) asks.
       if (turn.guestConfined) allowed.splice(0, allowed.length, ...allowed.filter((name) => name === "mcp__ogb" || name === "mcp__agents"));
       // The MCP config carries credentials and argv is readable via `ps`: a 0600 file, removed at settle.
@@ -1636,6 +1618,10 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           }
           case "rate_limit_event":
             if (session.turn) session.turn.limit = claudeLimitRefusal(o.rate_limit_info);
+            break;
+          case "tool_progress":
+            // Claude Code 2.1.306 sends one every 30 s while a tool runs: proof the turn is alive.
+            emit({ ...base(threadId, currentTurnId()), type: "item.updated", itemType: "tool" });
             break;
           case "result": {
             // A synthetic task-notification completion is not the submitted user turn's result.

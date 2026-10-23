@@ -19,6 +19,8 @@ notifications disabled remains quiet. Otherwise it may emit:
 Every notification carries both the bot ID and the exact task thread ID. A
 click must select that bot **and switch to that task**, including a routine's
 detached task; opening whichever task happens to be active is a failure.
+Opening a conversation reads its notifications in the feed, a pending question
+or approval included, and every open app's badge drops them at once.
 
 Desktop notifications are suppressed while the window already has focus. The
 iOS app can present live or replayed notifications while it is running and uses
@@ -89,6 +91,7 @@ the choice and who made it.
 | The row menu mutes, unmutes, rolls back a refused change and shows the refreshed state; the muted bell and the menu's help line show without hover | `src/components/Sidebar.thread-mute.test.ts` |
 | Browser click returns the exact bot/task target | `src/lib/notify.test.ts` |
 | Store navigation selects the bot and switches the task | `src/state/store.test.ts` |
+| Opening a conversation reads only its own feed entries, live in every open app | `server/notification-read.e2e.test.ts` |
 | Routine failure receipt and callback occur once | `server/routines.test.ts` |
 | Real failed routine emits one `routine-failed` notification and no duplicate `done` | `server/notification-wiring.test.ts` |
 | iOS target parsing and detached-task decision | `ios/Tests/CompanionCoreTests/DecodingTests.swift` |

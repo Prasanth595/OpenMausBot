@@ -21,9 +21,11 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
   person's chat; what a group chat decides never reaches your private chat. "About you" is yours alone: `GET`/`PUT /api/me`
   (the app's Profile on a team), read into your own conversations only.
 - **Connected apps.** The team's connections (Composio, HighLevel, MCP sign-ins, an AI key an Admin saved) belong to the
-  Team Cloud and serve every member's turn through the broker. A person's own connections have no way in: a share code,
-  a moved MCP sign-in or a HighLevel connection is refused with *"Personal connections never enter Acme. Ask an admin to
-  connect it for Acme."* A login from a sign-in card is saved by an Admin only, for the whole team.
+  Team Cloud and serve every member's turn through the broker. An Admin can instead make an app or an MCP server *each
+  person's own* (below): then every member connects their own, and only their own private chats use it. A person's
+  connections from elsewhere have no way in: a share code, a moved MCP sign-in or a HighLevel connection is refused with
+  *"Personal connections never enter Acme. Ask an admin to connect it for Acme."* A login from a sign-in card is saved by
+  an Admin only, for the whole team.
 - **Browsers.** Each private chat with a bot drives that person's own browser of the bot, each group chat the group
   chat's, and the bot's main chat the team's: separate Chrome profiles, saved sign-ins and live views, so a site one
   member signed in to in their chat never opens signed in for another member. The live view shows the browser of the
@@ -33,7 +35,10 @@ keeps people apart on it. The bot box ([bot-box.md](bot-box.md)) is what makes t
 - **Phones.** Settings → *Open on your phone* (and *Connect your phone* in the account menu) shows a code made for the
   person signed in. The phone app scans it as any `/pair#code=` link and gets that person's session: their address,
   their role, their chats, never another member's. The phone stays signed in while the person's app keeps checking in
-  with the Admin (it does so while the team is open in it) and ends within the hour after the last check.
+  with the Admin (it does so while the team is open in it) and ends within the hour after the last check. Under the code,
+  *Paired devices* lists the phones those codes opened as *device · member* (`GET /api/team/phones`): a member sees their
+  own, the Super admin and Admins every member's. **Remove** (`DELETE /api/team/phones/<id>`, the same rule) signs that
+  phone out at once and closes its open streams; the app windows the Admin signs in are not listed there.
 - **Never asleep, kept across restarts.** A Team Cloud refuses the Admin's sleep request (`busy: ["team"]`) and keeps
   every member's session across a restart; a My Cloud revokes every session that is not its owner's at each boot.
 
@@ -48,6 +53,68 @@ What the role turns off: the personal settlement (`cloud-owner.ts`: no session i
 earlier-owner adoption), lending a Mac (nobody's Mac serves a team), the guest confinement of a My Cloud (a member's turn
 runs at the bot's own level inside the box; only what came in from outside, a webhook, runs confined), and the "only the
 owner" card rule (whoever started a conversation, or an Admin, answers its cards, as on a hosted workspace).
+
+`OMB_CLOUD_TEAM_LANGUAGE` (optional, one of the app's locales: `de`, `pt-br`…) is the team's default language, set on
+the Admin's Team admin → Settings. It is this server's language while its own settings set none (the app's words and the
+language new bots start in); a value that isn't a locale is ignored, never refused.
+
+## Team admin: the Admin's signed read
+
+The Admin's Team admin pages (openmaus-cloud docs/team-cloud.md "Team admin") show a team's Super admin and Admins what
+this server shares with every bot. It exists only on a Team Cloud.
+
+- `GET /api/cloud/team/admin`, signed like `/api/cloud/health` → `{ v: 1, apps: { available, services: [{ slug, status,
+  accounts: [{ id, alias, status }] }] }, mcp: [{ name, transport, host, enabled, signedIn, secrets }], keys: [{ id:
+  "treg" | "voice", configured, included? }], ai: { keys: [{ id: "anthropic" | "openai" | "openrouter", configured }],
+  engines: [{ id, name, authenticated, account: { email, organization, method } | null }] } }` (`cloud-team-admin.ts`).
+  Names, states and the identities the providers report: never a key, a token, a header or environment value (`secrets`
+  are their names), nor any part of an MCP address but its host.
+- Changes are never signed calls of their own. The Admin pairs as the admin making the change (the usual signed pairing
+  with their `member` claim: an `owner` or `admin` gets the admin scope) and uses that session with the routes the app
+  uses: `PATCH /api/config` for a key, `/api/mcp/servers` to add, test, sign in to and remove a server,
+  `/api/connectors/:slug/authorize` and `DELETE /api/connectors/:slug/accounts/:id` for apps. Every check, side effect
+  and record is the app's own, and each change is that member's. A User's session is refused there as anywhere.
+- A Team Cloud always keeps its admin activity (`/api/admin-activity`), even with no User signed in: it is shared by
+  definition. The Admin's Team admin → Activity reads it with the same session, beside the team's own record there; Usage
+  reads `/api/usage` (by person, bot and model) and `/api/usage/traces` (the runs) the same way.
+- For a business sign-in (Claude or ChatGPT on this server), the Admin opens this server's own pages signed in as that
+  admin (a browser sign-in with the member's claim) at `/?connect=ai` (or `apps`, `mcp`, `keys`).
+
+## Connections: the team's or each person's
+
+Every app (a Composio toolkit) and MCP server has a scope. `team`, the default and what every connection made before this
+is, is one connection an Admin makes and every turn uses. `person` is one connection per member, made by that member on
+their team page in MausBot Cloud (the Admin's Cloud page calls the routes below as them).
+
+- **Who gets a member's own connection.** Only a turn in that member's private chat (`member:<person>`) that their own
+  message started (the request proven for that turn, as lent computers use). Never a group chat, the bot's main chat,
+  another member's chat, an Admin writing in theirs, a routine, a webhook, or work handed on from another conversation.
+- **Apps.** A member's own apps are their own installation on the connected-apps service (their own Composio user),
+  registered the first time they press Connect. Their turn gets a second bridge, `own_apps`, beside the team's
+  `composio`; the relay checks every frame again: the team's bridge refuses a `person` app (and code that calls apps
+  while the team's own installation still holds one), a member's bridge refuses a team app and anything outside their
+  own turn. A connection card for a `person` app is never shown: the bot gets one plain line to say, *"Connect your
+  Gmail here: <their team page>"*, or that it works only in each person's private chat.
+- **MCP servers.** Only a server reached by its address can be `person`. A `person` server's team credential is never
+  attached to any turn; a member's own turn gets the server with their own key (in the header the Admin's key used, else
+  `Authorization: Bearer`) or their own sign-in. Both are pinned to the server's address: re-pointed, they aren't sent.
+  Removing the server forgets every member's key and sign-in for it.
+- **Storage.** `team-connection-scopes.json` (no secret, carried by backups) and `people-connections/` (0700; each
+  member's installation token, keys and sign-ins, 0600), which no backup carries and no bot box binds. Nothing a route
+  answers carries a key, a token or more of an address than its host.
+
+| Route | Who | |
+|---|---|---|
+| `PUT /api/team/connection-scopes { kind: "app" \| "mcp", id, scope: "team" \| "person" }` | admin | `{ scopes: { apps, mcp } }`; recorded in admin activity |
+| `GET /api/team/my-connections` | the member | `{ team, link, email, apps: [{ slug, name, connected, accounts }], mcp: [{ name, host, connected, how, offers }] }` |
+| `POST /api/team/my-connections/apps/:slug/connect` | the member | `{ url }`, the app's own sign-in (a new tab) |
+| `DELETE /api/team/my-connections/apps/:slug` | the member | |
+| `POST /api/team/my-connections/mcp/:name/sign-in` | the member | `{ auth }`; it comes back to this server's `/mcp-oauth/callback` |
+| `PUT /api/team/my-connections/mcp/:name/key { value }` | the member | write-only |
+| `DELETE /api/team/my-connections/mcp/:name` | the member | |
+
+The signed read (`GET /api/cloud/team/admin`) adds `scopes: { apps, mcp }` and `people: { apps: { <slug>: [address] },
+mcp: { <name>: [address] } }`: who has connected each, never with what.
 
 ## The pairing claim (contract v1)
 
@@ -140,3 +207,8 @@ every browser keeps its old name and Chrome its old launcher, and nothing here c
 - **Per-member engine state.** A Team Cloud's engines use the team's key through the broker, so the engine's config dir
   (`~/.claude`, `~/.codex`) holds no member's login; it is the team's, by design.
 - **A roster read from the Admin.** Removal takes effect within the hour (above), not at once.
+- **A removed member's own connections.** They stay on the Team Cloud, unused (nobody can start a turn as them), until
+  the server they were for is removed. Nothing drops them when the Admin removes the person yet.
+- **Own apps with the team's own Composio project.** A member's own apps always use OpenMausBot's connected-apps
+  service, even when the team connected a Composio project key of its own; an app that needs the project's own auth
+  config can't be connected by each person.

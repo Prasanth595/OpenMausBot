@@ -29,6 +29,7 @@
 //   FAKE_CLAUDE_REPLIES  JSON array of replies (string, or string[] for several items) used in order
 //   FAKE_CLAUDE_REPLY_STATE  counter file keeping FAKE_CLAUDE_REPLIES in order across processes
 //   FAKE_CLAUDE_TOOL_CALLS  JSON [{name, input?, ok?}] each turn calls before its reply (unset: one Bash call)
+//   FAKE_CLAUDE_TOOL_CALLS_FILE  path of the same JSON, read again each turn (a warm process's turns differ); missing: none
 //   FAKE_CLAUDE_STREAM_CADENCE  "chars:ms" (happy mode): stream each scripted reply as
 //     text_delta chunks of `chars` chars every `ms` ms before its assistant message
 //   FAKE_CLAUDE_USES_CLOUD_COMPUTER  1: first take one screenshot through the `computer` MCP server
@@ -124,8 +125,7 @@ const scriptedReplies = (() => {
   }
 })();
 type ScriptedToolCall = { name: string; id?: string; input: Record<string, unknown>; ok: boolean; output?: unknown; server?: string };
-const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
-  const raw = process.env.FAKE_CLAUDE_TOOL_CALLS;
+const parseToolCalls = (raw: string | undefined): ScriptedToolCall[] | null => {
   if (raw === undefined) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -143,7 +143,13 @@ const scriptedToolCalls: ScriptedToolCall[] | null = (() => {
   } catch {
     return null;
   }
-})();
+};
+const scriptedToolCallsAtStart = parseToolCalls(process.env.FAKE_CLAUDE_TOOL_CALLS);
+const turnToolCalls = (): ScriptedToolCall[] | null => {
+  const file = process.env.FAKE_CLAUDE_TOOL_CALLS_FILE;
+  if (!file) return scriptedToolCallsAtStart;
+  try { return parseToolCalls(readFileSync(file, "utf8")) ?? []; } catch { return []; }
+};
 let toolUseCount = 0;
 let scriptedReplyIndex = 0;
 const nextScriptedReply = (): string[] => {
@@ -863,6 +869,7 @@ const playTurn = (prompt: JsonValue, late = false) => {
     emitPart(0);
     return;
   }
+  const scriptedToolCalls = turnToolCalls();
   if (scriptedToolCalls) {
     const failureContext: string[] = [];
     for (const call of scriptedToolCalls) {
@@ -892,6 +899,11 @@ const playTurn = (prompt: JsonValue, late = false) => {
       if (index === replyParts.length - 1) content.push({ type: "tool_use", id: defaultToolId, name: "Bash", input: { command: "echo hi" } });
       out({ type: "assistant", message: { content, usage } });
     });
+    if (mode === "tool-heartbeat") {
+      // Claude Code 2.1.306 sends this every 30 s while a tool runs.
+      out({ type: "tool_progress", tool_use_id: `${defaultToolId}-heartbeat-0`, tool_name: "Bash",
+        parent_tool_use_id: defaultToolId, elapsed_time_seconds: 30, heartbeat: true });
+    }
     out({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: defaultToolId, is_error: false, content: [{ type: "text", text: "hi" }] }] } });
     runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command: "echo hi" }, tool_response: "hi", tool_use_id: defaultToolId });
   }
