@@ -2740,7 +2740,7 @@
   "engines.account.signInHint": "Bu komutu aynen OpenMausBot'u çalıştıran bilgisayardaki terminalde çalıştırın, Claude CLI girişini tamamlayın ve ardından Hesabı kontrol et'e tıklayın. OpenMausBot'u uzaktan görüntülüyorsanız bu cihazda değil orada çalıştırın.",
   "engines.account.powershell": "Bu komut için PowerShell kullanın.",
   "accounts.claude": "Claude Code",
-  "accounts.chatgpt": "Codex (ChatGPT account)",
+  "accounts.chatgpt": "Codex (ChatGPT hesabı)",
   "accounts.count": "{count} hesap · {signedIn} oturum açık",
   "accounts.signedIn": "Oturum açıldı",
   "accounts.notSignedIn": "Oturum açılmadı",
