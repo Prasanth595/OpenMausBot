@@ -3,6 +3,8 @@ import { crc32 } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as gateConfig from "../mcp-gate-config.ts";
+import { AppObserver } from "../mcp-app-observer.ts";
 import { augmentedPath } from "../env-path.ts";
 import { CHAT_DISCOVERED_TOOL_COUNT, CHAT_LISTED_CATALOG_BYTES, ChatToolSessionError, mountChatTools, type ChatToolSession } from "./chat-mcp-tools.ts";
 import { availableTools, catalogProfileFromEnv } from "./agents-catalog.ts";
@@ -964,4 +966,20 @@ describe("Chat MCP schema validation", () => {
     sessions.push(long);
     await expect(long.execute("audit_write", { value: "y" }, f.controller.signal)).resolves.toMatchObject({ ok: true, text: "recorded:y" });
   });
+});
+
+
+it("reports executed original arguments for deferred MCP Apps calls", async () => {
+  const mount = vi.spyOn(gateConfig, "appMountFor").mockReturnValue({ server: "audit", harnessUrl: "http://127.0.0.1:1", token: "fixture", extension: true });
+  const returned = vi.spyOn(AppObserver.prototype, "returned").mockImplementation(() => {});
+  const tools = whopLikeCatalog(300);
+  const f = fixture(`if (message.method === "tools/list") { reply(message, {tools:${JSON.stringify(tools)}}); continue; }`);
+  try {
+    const session = await f.mount();
+    const tool = tools.find(tool => tool.name.endsWith("_list"))!;
+    const input = { name: tool.name, arguments: { company_id: "fixture", first: 2 } };
+    await session.execute("audit_call_tool", input, f.controller.signal);
+    expect(f.read().calls.at(-1)).toMatchObject({ method: "tools/call", params: { name: tool.name, arguments: input.arguments } });
+    expect(returned).toHaveBeenCalledWith({ name: tool.name, arguments: input.arguments }, expect.anything());
+  } finally { mount.mockRestore(); returned.mockRestore(); }
 });

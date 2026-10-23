@@ -474,7 +474,7 @@ export async function mountChatTools(integrations: SendTurnInput["integrations"]
         const result = await tool.client.call("tools/call", { name: tool.name, arguments: originalArgs }, AbortSignal.any([signal, callSignal]), callTimeoutMs);
         if (signal.aborted || callSignal.aborted) throw aborted();
         if (!object(result) || !Array.isArray(result.content) || (result.isError !== undefined && typeof result.isError !== "boolean")) throw new Error("MCP tool returned an invalid result; execution outcome may be uncertain");
-        observers.get(tool.server)?.returned({ name: tool.name, arguments: args }, result);
+        observers.get(tool.server)?.returned({ name: tool.name, arguments: originalArgs }, result);
         const parts: string[] = [];
         const images: ChatImagePart[] = [];
         let unsupported = 0;
