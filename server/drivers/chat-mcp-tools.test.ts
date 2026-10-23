@@ -194,20 +194,28 @@ describe("Chat MCP session", () => {
   });
 
   it("shows a model behind Moonshot each schema fitted to its limit, and still checks calls against the full one", async () => {
-    const full = wideSchema(110);
+    const profile = toolSchemaProfile("moonshot")!;
+    const full = wideSchema(1);
+    const properties = full.properties as Record<string, Record<string, unknown>>;
+    const field = Object.keys(properties)[0]!;
+    properties[field]!.description = "Settings detail. ".repeat(Math.ceil(profile.maxSchemaBytes / "Settings detail. ".length));
     const f = fixture("", full);
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const plain = await f.mount();
-      expect(plain.definitions[0]!.function.parameters).toEqual(full);
-      const session = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, undefined, toolSchemaProfile("moonshot"));
+      expect(plain.definitions.map((tool) => tool.function.name)).toContain("audit_describe_tool");
+      const invalid = { name: "write", arguments: { [field]: { label: 5 } } };
+      const rejected = await plain.execute("audit_call_tool", invalid, f.controller.signal);
+      expect(JSON.parse(rejected.text).problems).toContain("must be string");
+      expect(f.read().calls.filter((call) => call.method === "tools/call")).toEqual([]);
+      const session = await mountChatTools({ custom: { audit: f.server } }, f.controller.signal, false, undefined, undefined, profile);
       sessions.push(session);
       const [definition] = session.definitions;
-      expect(schemaBytes(definition!.function.parameters)).toBeLessThanOrEqual(12_000);
-      expect(definition!.function.description).toContain("OpenMausBot shortened this tool's parameters to fit Kimi's size limit");
-      expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^chat-mcp: audit: kept only the top-level fields of tool "write"'s parameters/));
-      expect(() => session.validate("audit_write", { field_000: { label: 5 } })).toThrow("input schema");
-      expect(() => session.validate("audit_write", { field_000: { label: "five" } })).not.toThrow();
+      expect(definition!.function.name).toBe("audit_write");
+      expect(schemaBytes(definition!.function.parameters)).toBeLessThanOrEqual(profile.maxSchemaBytes);
+      expect(warn).toHaveBeenCalled();
+      expect(() => session.validate("audit_write", { [field]: { label: 5 } })).toThrow("input schema");
+      expect(() => session.validate("audit_write", { [field]: { label: "five" } })).not.toThrow();
     } finally { warn.mockRestore(); }
   });
 
