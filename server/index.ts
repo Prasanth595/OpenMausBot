@@ -11,7 +11,7 @@ import { ToolResults, TOOL_RESULT_MAX_CHARS } from "./tool-results.ts";
 import { join } from "node:path";
 import { authorizeExternalRuntime, externalRuntimeIsActive, type ExternalRuntimeGrant } from "./external-runtime.ts";
 import { z } from "zod";
-import { selectReplay, replayToolCalls } from "./context-rebuild.ts";
+import { replayOptionsForCheckpointSupport, selectReplay, replayToolCalls } from "./context-rebuild.ts";
 import { compactionReading } from "./context-budget.ts";
 import { RoomContextTracker, roomResetNote } from "./room-context.ts";
 import { createRoomTranscript, GROUP_CONTEXT_MESSAGES } from "./host/room-transcript.ts";
@@ -8043,7 +8043,10 @@ function threadTitleGate(bot: Pick<BotRecord, "modelSelection">): { ok: true; in
       const contextOrder = context.map(m => m.id);
       const replayable = context.filter(m => !skipTranscript.has(m.id));
       const record = latestCompaction(activeMessages);
-      const selection = selectReplay(context, { excludedIds: skipTranscript, compaction: record, tools: replayToolCalls(activeMessages, cfg.context) });
+      const selection = selectReplay(context, {
+        ...replayOptionsForCheckpointSupport(instance.generateCheckpoint !== undefined, cfg.context?.rebuildBytes),
+        excludedIds: skipTranscript, compaction: record, tools: replayToolCalls(activeMessages, cfg.context),
+      });
       const transcript = selection.transcript.map(({ role, text }) => ({ role, text }));
       const contextReset = selection.compacted > 0 && record?.id !== task.appliedCompactionId;
       if (contextReset) store.patchTask(bot.id, threadId, { resumeCursors: {} });

@@ -156,8 +156,19 @@ export interface CompactionRecord {
 }
 
 export const DEFAULT_REBUILD_BYTES = 24_000;
+export const DEFAULT_REBUILD_MESSAGES = 40;
 export const MAX_SUMMARY_BYTES = 128_000;
 const OMITTED_TEXT = "\n[Text shortened for context; the original remains in this conversation.]";
+
+export function replayOptionsForCheckpointSupport(
+  canGenerateCheckpoint: boolean,
+  configuredBudget?: number,
+): { budgetBytes?: number; maxMessages?: number } {
+  return canGenerateCheckpoint ? {} : {
+    budgetBytes: configuredBudget ?? DEFAULT_REBUILD_BYTES,
+    maxMessages: DEFAULT_REBUILD_MESSAGES,
+  };
+}
 
 /** UTF-8 prefixes must not end inside a code point. */
 export function prefixBytes(text: string, limit: number): string {
@@ -194,7 +205,7 @@ export function selectReplay(
   // Keep the prefix stable between explicit checkpoints. Bounds are opt-in.
   const bounded = options.budgetBytes !== undefined || options.maxMessages !== undefined;
   const budget = bounded ? options.budgetBytes ?? DEFAULT_REBUILD_BYTES : Infinity;
-  const maxMessages = bounded ? options.maxMessages ?? 40 : Infinity;
+  const maxMessages = bounded ? options.maxMessages ?? DEFAULT_REBUILD_MESSAGES : Infinity;
   if (bounded && (!Number.isSafeInteger(budget) || budget < 1_024 || !Number.isSafeInteger(maxMessages) || maxMessages < 1)) {
     throw new Error("invalid context replay budget");
   }

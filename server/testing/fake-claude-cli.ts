@@ -403,10 +403,10 @@ if (argAfter("--output-format") === "stream-json" && !argAfter("--input-format")
   let prompt = "";
   process.stdin.setEncoding("utf8");
   for await (const chunk of process.stdin) prompt += chunk;
-  const dump = process.env.FAKE_CLAUDE_CHECKPOINT_DUMP ?? process.env.FAKE_CLAUDE_DUMP;
+  const dump = process.env.FAKE_CLAUDE_CHECKPOINT_DUMP;
   const capture = { pid: process.pid, argv, env: process.env, prompt, mcpConfig: null };
   if (dump) writeDumpAtomic(dump, JSON.stringify(capture, null, 2));
-  const checkpointEvidence = process.env.FAKE_CLAUDE_CHECKPOINT_EVIDENCE ?? (dump ? `${dump}.checkpoints.jsonl` : undefined);
+  const checkpointEvidence = process.env.FAKE_CLAUDE_CHECKPOINT_EVIDENCE ?? (dump ? dump + ".checkpoints.jsonl" : undefined);
   if (checkpointEvidence) appendFileSync(checkpointEvidence, JSON.stringify(capture) + "\n");
   if (!prompt.startsWith("Produce a checkpoint for continuing the same task.")) {
     process.stderr.write("Unexpected tool-free checkpoint prompt\n");
@@ -419,10 +419,13 @@ if (argAfter("--output-format") === "stream-json" && !argAfter("--input-format")
   const text = checkpointMode === "malformed" ? "{incomplete checkpoint"
     : JSON.stringify(fixtureCheckpoint(prompt));
   const stop = checkpointMode === "length" ? "max_tokens" : "end_turn";
-  out({ type: "system", subtype: "init", tools: [] });
-  out({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text } } });
-  out({ type: "assistant", message: { content: [{ type: "text", text }], stop_reason: stop } });
-  out({ type: "result", is_error: false, result: text, stop_reason: stop,
+  const writeCheckpointFrame = (value: unknown) => new Promise<void>((resolve, reject) => {
+    process.stdout.write(JSON.stringify(value) + "\n", (error?: Error | null) => error ? reject(error) : resolve());
+  });
+  await writeCheckpointFrame({ type: "system", subtype: "init", tools: [] });
+  await writeCheckpointFrame({ type: "stream_event", event: { type: "content_block_delta", delta: { type: "text_delta", text } } });
+  await writeCheckpointFrame({ type: "assistant", message: { content: [{ type: "text", text }], stop_reason: stop } });
+  await writeCheckpointFrame({ type: "result", is_error: false, result: text, stop_reason: stop,
     usage: { input_tokens: 10, output_tokens: 5 }, total_cost_usd: 0.01 });
   process.exit(0);
 }

@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   boundedContextText,
+  replayOptionsForCheckpointSupport,
   replayToolCalls,
   selectReplay,
   toolReplayLine,
   REPLAY_TOOL_LINE_CAP,
   TOOL_LINE_MAX_CHARS,
+  DEFAULT_REBUILD_BYTES,
+  DEFAULT_REBUILD_MESSAGES,
   type ReplayEntry,
   type ReplayToolCall,
 } from "./context-rebuild.ts";
@@ -34,6 +37,26 @@ describe("context replay", () => {
     expect(new Set(result.representedIds)).toEqual(new Set(result.transcript.filter(entry => entry.id).map(entry => entry.id)));
     expect(result.representedIds).not.toContain("0");
     expect(result.representedIds).toContain("79");
+  });
+
+  it("bounds replay when an engine cannot generate a checkpoint", () => {
+    const options = replayOptionsForCheckpointSupport(false);
+    const manyMessages = entries(Array.from({ length: DEFAULT_REBUILD_MESSAGES + 10 }, (_, i) => String(i)));
+    const replay = selectReplay(manyMessages, options);
+    expect(replay.dropped).toBe(10);
+    expect(replay.transcript.filter(entry => entry.id)).toHaveLength(DEFAULT_REBUILD_MESSAGES);
+    expect(selectReplay(manyMessages, replayOptionsForCheckpointSupport(true)).transcript).toEqual(manyMessages);
+
+    const large = entries(Array.from({ length: 80 }, (_, i) => String(i) + " " + "long 🐭 text ".repeat(50)));
+    expect(size(selectReplay(large, options))).toBeLessThanOrEqual(DEFAULT_REBUILD_BYTES);
+  });
+
+  it("keeps a protected checkpoint complete in bounded fallback replay", () => {
+    const history = entries(["old", "old reply", "retained", "reply", ""]);
+    const compaction = { id: "4", firstKeptId: "2", foldedThroughId: "1", summary: "protected ".repeat(200), by: "harness" as const, tokensBefore: 100 };
+    expect(() => selectReplay(history, {
+      ...replayOptionsForCheckpointSupport(false, 1_024), compaction,
+    })).toThrow("complete checkpoint");
   });
 
   it("preserves complete large checkpoints and refuses bounds that cannot fit them", () => {
