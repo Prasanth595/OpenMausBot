@@ -516,9 +516,12 @@ export function createConfigRoutes(deps: ConfigRouteDeps): RouteHandler {
       const enginesBefore = engineLaunches(providerConfigs());
       const externalSecretStorage = url.searchParams.get("secretStorage") === "external";
       try {
-        if (patch.approvalReview && approvalReviewSettingsBusy()) return json(res, 409, {
-          error: "Finish active Approve for me turns before changing approval review settings.",
-        });
+        if (patch.approvalReview && approvalReviewSettingsBusy()) {
+          for (const request of browserCleanupRequests) browserCleanup.abort(request);
+          return json(res, 409, {
+            error: "Finish active Approve for me turns before changing approval review settings.",
+          });
+        }
         if (changingVoiceProvider) store.clearVoiceSelections();
         if (externalSecretStorage) {
           const persisted = structuredClone(patch);

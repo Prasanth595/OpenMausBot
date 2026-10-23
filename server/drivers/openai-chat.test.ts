@@ -325,6 +325,53 @@ describe("createOpenAIChatRuntime tool approvals", () => {
     expect(await cardRaisedFor("full")).toBe(false);
   }, 20_000);
 
+  it("honors an existing session grant without rerunning review or recording a new card approval", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-existing-grant-")); mcpDir.push(dir);
+    const receipt = join(dir, "calls.txt");
+    const toolResponse = (id: string) => "data: " + JSON.stringify({ choices: [{ index: 0, delta: { tool_calls: [
+      { index: 0, id, type: "function", function: { name: "fx_write", arguments: "{}" } },
+    ] } }] }) + "\n\n" +
+      "data: " + JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] }) + "\n\n";
+    const finalResponse = "data: " + JSON.stringify({ choices: [{ index: 0, delta: { content: "Done." } }] }) + "\n\n" +
+      "data: " + JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }) + "\n\n";
+    let providerCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: unknown) => {
+      if (!String(input).endsWith("/chat/completions")) return new Response(JSON.stringify({ data: [] }));
+      const index = providerCalls++;
+      return sse(index % 2 === 0 ? toolResponse("grant-call-" + index) : finalResponse);
+    }));
+    const instance = await OpenAICompatDriver.create({
+      instanceId: "compat-grant", displayName: "Compat", enabled: true,
+      config: OpenAICompatDriver.decodeConfig({ url: "https://api.example.com/v1", apiKeyEnv: "K", model: "m" }),
+      environment: { K: "secret" },
+    });
+    const events: RuntimeEvent[] = [];
+    instance.adapter.onEvent(event => events.push(event));
+    const toolApproved = vi.fn(async () => {});
+    const reviewTool = vi.fn(async () => ({ decision: "deny" as const, reason: "Must be skipped for a covered grant." }));
+    const threadId = "covered-session-grant";
+    const integrations = { custom: { fx: toolServer(receipt) } };
+    try {
+      await instance.adapter.sendTurn({ threadId, botId: "fixture-bot", text: "Run once.", approvalMode: "ask", toolApproved, integrations });
+      const card = await vi.waitFor(() => {
+        const found = events.find(event => event.type === "request.opened");
+        if (!found || found.type !== "request.opened" || !found.requestId) throw new Error("Waiting for the permission card");
+        return found;
+      }, { timeout: 10_000 });
+      expect(card.allowSession).toBe(true);
+      await instance.adapter.respondToRequest(threadId, card.requestId!, { behavior: "allow", always: true });
+      await vi.waitFor(() => expect(events.filter(event => event.type === "turn.completed")).toHaveLength(1), { timeout: 10_000 });
+      expect(toolApproved).toHaveBeenCalledTimes(1);
+
+      await instance.adapter.sendTurn({ threadId, botId: "fixture-bot", text: "Run again.", approvalMode: "auto", reviewTool, toolApproved, integrations });
+      await vi.waitFor(() => expect(events.filter(event => event.type === "turn.completed")).toHaveLength(2), { timeout: 10_000 });
+      expect(events.filter(event => event.type === "request.opened")).toHaveLength(1);
+      expect(reviewTool).not.toHaveBeenCalled();
+      expect(toolApproved).toHaveBeenCalledTimes(1);
+      expect(readFileSync(receipt, "utf8")).toBe("write\nwrite\n");
+    } finally { await instance.dispose(); }
+  }, 20_000);
+
   it("still holds an ask_user card for a person under Full access and returns the reply verbatim", async () => {
     const askBody = 'data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"ask1","type":"function","function":{"name":"ask_user","arguments":'
       + JSON.stringify(JSON.stringify({ questions: [{ question: "Ship the fixture?", options: [{ label: "Yes" }, { label: "No" }] }] }))

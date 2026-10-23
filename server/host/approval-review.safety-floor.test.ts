@@ -25,7 +25,7 @@ function fixture() {
     providerRefusal: () => null, assertBudget: vi.fn(), bookUsage: vi.fn(), dataDir: "/fixture",
     sourceApprovalMode: () => "auto", roomApprovalMode: () => "auto" });
   const controller = new AbortController();
-  return { run: (call: ReviewAction = action) => service.reviewToolForTurn("bot", "thread", { instanceId: "fixture", model: "fixture" }, () => current)(call, controller.signal), controller };
+  return { run: (call: ReviewAction = action) => service.reviewToolForTurn("bot", "thread", { instanceId: "fixture", model: "fixture" }, () => current)(call, controller.signal), controller, appendMessage };
 }
 
 beforeEach(() => {
@@ -58,6 +58,14 @@ describe("app-owned automatic review and the optional safety floor", () => {
   it.each(["unreadable", "throws"] as const)("asks without calling the reviewer when parsing is %s", async (value) => {
     cfg.safetyFloor = { enabled: true }; reading = value;
     expect(await fixture().run()).toMatchObject({ decision: "ask", reason: expect.stringContaining("could not read") });
+    expect(mocks.review).not.toHaveBeenCalled();
+  });
+  it.each(["decision log", "activity write"] as const)("asks when the safety-floor %s fails", async failure => {
+    cfg.safetyFloor = { enabled: true }; reading = "blocked";
+    const f = fixture();
+    if (failure === "decision log") mocks.log.mockImplementationOnce(() => { throw new Error("fixture log failure"); });
+    else f.appendMessage.mockImplementationOnce(() => { throw new Error("fixture activity failure"); });
+    expect(await f.run()).toMatchObject({ decision: "ask", reason: "Automatic review is unavailable; your approval is required." });
     expect(mocks.review).not.toHaveBeenCalled();
   });
   it.each(["allow", "deny", "ask"] as const)("preserves a clear command's reviewer %s", async (decision) => {

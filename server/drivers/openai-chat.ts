@@ -410,11 +410,12 @@ const TEXT_ONLY_SCREENSHOT_NOTE = "[Screenshot not shown: this model cannot see 
                 tools.validate(call.function.name, args);
                 const shown = tools.view(call.function.name, args as Record<string, unknown>);
                 const shownPreview = shown.input === args ? inputPreview : preview(shown.input);
+                const covered = approval.covered(shown.grant);
                 const floored = approval.floored({ full: turn.approvalMode === "full", threadId: turn.threadId, botId: turn.botId, shown, summary: shownPreview });
                 let reviewDenial: string | undefined;
                 let reviewAskReason: string | undefined;
                 let cardAllowed = false;
-                let allowed = !floored && (turn.approvalMode === "full" || !shown.ask);
+                let allowed = !floored && (covered || turn.approvalMode === "full" || !shown.ask);
                 if (!allowed && !floored && turn.approvalMode === "auto" && turn.reviewTool) {
                   const review = await turn.reviewTool({ tool: shown.title, arguments: shown.input }, abort.signal);
                   abort.signal.throwIfAborted();

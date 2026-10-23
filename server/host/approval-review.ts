@@ -84,7 +84,9 @@ function reviewToolForTurn(botId: string, threadId: string, session: ModelSelect
   };
   return async (action: ReviewAction, signal: AbortSignal): Promise<ReviewVerdict> => {
     if (signal.aborted || !isCurrent()) return { decision: "ask", reason: "The execution changed before review." };
-    const beforeReview = floorVerdict(action);
+    let beforeReview: ReviewVerdict | null;
+    try { beforeReview = floorVerdict(action); }
+    catch { return { decision: "ask", reason: "Automatic review is unavailable; your approval is required." }; }
     if (beforeReview) return beforeReview;
     const settings = deps.config().approvalReview ?? {};
     let context: ReturnType<typeof authority>;
