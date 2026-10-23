@@ -66,7 +66,7 @@ function approvedToolForTurn(botId: string, threadId: string, isCurrent: () => b
     signal.throwIfAborted();
     if (!isCurrent()) throw new Error("The execution changed before approval could be used.");
     const tool = /^(?:mcp__composio__|composio_)(.+)$/i.exec(action.tool)?.[1];
-    if (tool && connectorReviewGrants.has(reviewGrantKey(threadId, tool, action.arguments))) return;
+    if (!tool || connectorReviewGrants.has(reviewGrantKey(threadId, tool, action.arguments))) return;
     carryConnectorApproval(threadId, action, authorizationCurrent(botId, threadId, isCurrent));
   };
 }

@@ -47,3 +47,17 @@ it.each(["user", "soul", "turn"])("invalidates a pending connector approval afte
   f.service.approvedToolForTurn("member", "destination", () => true)(action, new AbortController().signal);
   expect(f.service.takeConnectorGrant("destination", "GMAIL_FETCH_MESSAGE", action.arguments)).toBeUndefined();
 });
+
+
+it("allows explicit native-tool approval without reading unavailable checkpoint authority", async () => {
+  const f = fixture();
+  f.paths.destination = [{ id: "checkpoint", role: "bot", kind: "compaction", at: 1, compaction: {
+    summary: "Prior work", firstKeptId: "", foldedThroughId: "missing", tokensBefore: 10, by: "harness",
+    requirements: [{ id: "rule", text: "Read only", sourceIds: ["missing"] }],
+  } }];
+  expect(await f.run({ tool: "native_read", arguments: {} }, new AbortController().signal)).toMatchObject({ decision: "ask" });
+  const approve = f.service.approvedToolForTurn("member", "destination", () => true);
+  expect(() => approve({ tool: "native_read", arguments: {} }, new AbortController().signal)).not.toThrow();
+  expect(() => approve({ tool: "composio_GMAIL_FETCH_MESSAGE", arguments: {} }, new AbortController().signal)).toThrow("Checkpoint user authority");
+  expect(() => f.service.approvedToolForTurn("member", "destination", () => false)({ tool: "native_read", arguments: {} }, new AbortController().signal)).toThrow("execution changed");
+});
