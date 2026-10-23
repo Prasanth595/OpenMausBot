@@ -1,5 +1,6 @@
 import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./managed-desktop.mjs";
 import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudTrial, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
+import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 
 export const CLOUD_ORIGIN = "https://cloud.openmausbot.com";
@@ -211,8 +212,9 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
       publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(teams.length ? { teams } : {}), ...(purchase ? { purchase } : {}),
         ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), verifiedAt: now(), verifiedUntil });
-      const settingUp = machine?.status === "provisioning" || (access.status === "active" && !machine) || Boolean(purchase);
-      const delay = watching() && machine?.status !== "ready" ? WATCH_REFRESH_MS : settingUp ? SETUP_REFRESH_MS : awaitingWake() ? ASLEEP_REFRESH_MS : REFRESH_MS;
+      const planCloud = teamPlan(value) ? planTeam(value)?.machine ?? null : machine;
+      const settingUp = planCloud?.status === "provisioning" || (access.status === "active" && !planCloud) || Boolean(purchase);
+      const delay = watching() && planCloud?.status !== "ready" ? WATCH_REFRESH_MS : settingUp ? SETUP_REFRESH_MS : awaitingWake() ? ASLEEP_REFRESH_MS : REFRESH_MS;
       schedule(refresh, Math.min(delay, verifiedUntil - now()));
     } catch (error) {
       if (!current(stamp)) return state();
@@ -509,12 +511,13 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       return pairing;
     },
     /** A Cloud that ended and that the Admin still holds, started for its owner's export only: a one-time code for it
-     * (main only, not kept), `starting` while it starts, `notHeld` when it is not held (yet), `deleted` once it is gone. */
-    async exportHome() {
+     * (main only, not kept), `starting` while it starts, `notHeld` when it is not held (yet), `deleted` once it is gone.
+     * `installation`: this computer, which the Admin lets take it only if it is the one the Cloud's things come home to. */
+    async exportHome({ installation } = {}) {
       const current = grant;
       if (!current) throw new Error("Sign in to MausBot Cloud first.");
       let result;
-      try { result = await request("export", { method: "POST", body: {}, token: current.token }); } catch (error) {
+      try { result = await request("export", { method: "POST", body: installation ? { installation } : {}, token: current.token }); } catch (error) {
         if (error?.status === 409) return { notHeld: true };
         if (error?.status === 410) return { deleted: true };
         throw error;
@@ -523,6 +526,23 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const pairing = typeof result?.origin === "string" && result.origin.startsWith("https://") ? parsePairingGrant(result, result.origin, now()) : null;
       if (!pairing) throw new Error("Invalid Cloud export response.");
       return { grant: pairing };
+    },
+    /** Tells the Admin that this computer's move to My Cloud is done, as `installation` (POST /api/cloud/desktop/moved):
+     * only such a computer can be the one an ended Cloud's things come home to. False when the Admin can't take it yet. */
+    async reportMove({ installation }) {
+      const current = grant;
+      if (!current) return false;
+      try { await request("moved", { method: "POST", body: { installation }, token: current.token }); return true; }
+      catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
+    },
+    /** Tells the Admin that this computer, as `installation`, keeps its bots on itself again (POST
+     * /api/cloud/desktop/kept): it no longer counts as moved, so an ended Cloud's things never come home to it. False when
+     * the Admin can't take it yet. */
+    async reportKept({ installation }) {
+      const current = grant;
+      if (!current) return false;
+      try { await request("kept", { method: "POST", body: { installation }, token: current.token }); return true; }
+      catch (error) { if (error?.status === 404 && !error.opaque) return false; throw error; }
     },
     /** This sign-in's own X research relay access while its plan is paid:
      * `{ url, token }` for the local server (electron/included-x.mjs), or null
@@ -557,6 +577,28 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
         throw new Error("Invalid Cloud pages response.");
       }
       return { url: result.url, token: result.token };
+    },
+    /** The account's answer to the product-updates question (GET /api/cloud/desktop/updates-consent), as the Admin sends it. */
+    async updatesConsent() {
+      const current = grant;
+      if (!current || state().status !== "connected") throw new Error("Sign in to MausBot Cloud first.");
+      return request("updates-consent", { token: current.token, signal: AbortSignal.timeout(10_000) });
+    },
+    async recordUpdatesConsent(status, textVersion) {
+      const current = grant;
+      if (!current || state().status !== "connected") throw new Error("Sign in to MausBot Cloud first.");
+      const result = await request("updates-consent", { method: "POST", body: { status, textVersion }, token: current.token, signal: AbortSignal.timeout(10_000) });
+      if (result?.cloudContractVersion !== 1 || result.consent?.status !== status) throw new Error("Invalid Cloud consent response.");
+    },
+    /** No sign-in: an email typed in the app (POST /api/updates-consent). Returns the receipt that can withdraw it. */
+    async updatesConsentByEmail({ email, installId, textVersion }) {
+      const result = await request(null, { method: "POST", path: "/api/updates-consent", body: { status: "opted_in", email, installId, textVersion }, signal: AbortSignal.timeout(10_000) });
+      if (typeof result?.receipt !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(result.receipt)) throw new Error("Invalid Cloud consent response.");
+      return result.receipt;
+    },
+    async withdrawUpdatesConsent({ status, receipt }) {
+      const result = await request(null, { method: "POST", path: "/api/updates-consent", body: { status, receipt }, signal: AbortSignal.timeout(10_000) });
+      if (result?.ok !== true) throw new Error("Invalid Cloud consent response.");
     },
     close() { closed = true; reset(); },
   };

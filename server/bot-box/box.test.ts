@@ -155,11 +155,13 @@ describe("the box a bot's Chrome runs in", () => {
   });
   const temp = () => { const dir = mkdtempSync(join(tmpdir(), "omb-box-")); dirs.push(dir); return dir; };
 
+  it("is no box off a Cloud home, which is what Windows gets", () => {
+    expect(new BotBox().browserBox(9, []), "no box off a Cloud home").toBeNull();
+  });
+
   it("has the host's network and the read-only paths asked for, and none of HOME or the data folder", async () => {
     const box = new BotBox();
     boxes.push(box);
-    const off = new BotBox();
-    expect(off.browserBox(9, []), "no box off a Cloud home").toBeNull();
     const root = temp(), dataDir = join(root, "home", ".openmausbot"), home = dirname(dataDir);
     mkdirSync(dataDir, { recursive: true });
     await box.start({

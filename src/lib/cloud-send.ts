@@ -53,7 +53,9 @@ export function moveQuietUntil(move: OneHomeView | null | undefined): number {
 }
 
 /** The one-time move's line on either page: on its way (with progress, or who it waits for), almost done, failing for a
- * day (with Try again), what arrived (on My Cloud's page, once), or coming home. `page`: which page shows it. */
+ * day (with Try again), what arrived (on My Cloud's page, once), coming home, where the bots came home instead, or this
+ * computer's bots on their way home and home because the person keeps them here.
+ * `page`: which page shows it. */
 export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "sending" | "failed" | "done"; text: string; extra: string[]; phone?: true; retry?: true } | null {
   if (move.phase === "done") {
     if (page !== "cloud") return null;
@@ -61,8 +63,16 @@ export function moveLine(move: OneHomeView, page: "local" | "cloud"): { kind: "s
     return { kind: "done", text: list.length ? t("cloudSend.move.done", { list: listOf(list) }) : t("cloudSend.move.doneAll"),
       extra: move.held.map((key) => t("cloudSend.result.held", { key })), ...(move.phone ? { phone: true as const } : {}) };
   }
+  if (move.phase === "keeping") return { kind: "sending", text: t(move.updating ? "cloudSend.move.keepingUpdating" : "cloudSend.move.keeping"), extra: [] };
   if (move.phase === "home-again" || move.phase === "back") {
     if (page !== "local") return null;
+    if (move.phase === "back" && move.kept) return { kind: "done", text: t("cloudSend.move.kept"), extra: [] };
+    const elsewhere = move.phase === "back" ? move.elsewhere : undefined;
+    if (elsewhere) {
+      return { kind: "done", extra: [], text: elsewhere.since
+        ? t("cloudSend.move.elsewhere", { name: elsewhere.name, date: new Intl.DateTimeFormat(activeLocale(), { dateStyle: "long" }).format(elsewhere.since) })
+        : t("cloudSend.move.elsewhereEmpty", { name: elsewhere.name }) };
+    }
     return { kind: "done", text: t(move.phase === "home-again" ? "cloudSend.move.homeAgain" : move.lost ? "cloudSend.move.backLost" : "cloudSend.move.back"), extra: [] };
   }
   if (move.phase === "copy" && move.updating) return { kind: "sending", text: t("cloudSend.move.updating"), extra: [] };

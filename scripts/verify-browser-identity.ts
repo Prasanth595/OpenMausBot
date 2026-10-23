@@ -5,7 +5,7 @@
 import { randomBytes } from "node:crypto";
 import { createConnection } from "node:net";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
@@ -99,6 +99,17 @@ function refused(result: unknown): string | null {
   return answer?.content?.filter((part) => part.type === "text").map((part) => part.text).join(" ") || JSON.stringify(result).slice(0, 300);
 }
 
+/**
+ * Opens a page of the check's own in the bot's just-started browser. Chrome for Testing 155-156 on Windows now and then
+ * cancels a fresh profile's first network navigation (net::ERR_ABORTED, 35 of 150 starts on GitHub's runner), and a
+ * second request goes through: the page has no side effects, so it is opened once more after that one cancel. Answers
+ * what the bot was told when it failed.
+ */
+export async function openOwnPageAsBot(call: BotCall, url: string, log: (line: string) => void): Promise<string | null> {
+  const navigation = await openIdentityProbePage(call, url, log);
+  return navigation.kind === "failed" ? navigation.detail : null;
+}
+
 /** The runtime keeps file paths away from the engine, so a screenshot comes back as image content. */
 function savedImage(result: unknown, base: string): string | null {
   const image = (result as { content?: Array<{ type?: string; data?: string; mimeType?: string }> } | null)?.content?.find((part) => part.type === "image" && part.data);
@@ -185,11 +196,12 @@ export type IdentityProbeNavigation =
   | { kind: "opened"; attempts: number; result: unknown }
   | { kind: "failed"; attempts: number; result: unknown; detail: string };
 
-export async function openIdentityProbePage(call: BotCall, url: string): Promise<IdentityProbeNavigation> {
+export async function openIdentityProbePage(call: BotCall, url: string, log: (line: string) => void = () => {}): Promise<IdentityProbeNavigation> {
   let attempts = 1;
   let result = await call("agent_browser_open", { url });
   let detail = refused(result);
   if (detail && /\bnet::ERR_ABORTED\b/u.test(detail)) {
+    log(`the bot's browser: Chrome cancelled its first navigation (${detail}); opening ${url} once more`);
     attempts++;
     result = await call("agent_browser_open", { url });
     detail = refused(result);
@@ -209,6 +221,12 @@ export async function withBotBrowser<T>(options: BotBrowserOptions, work: (call:
   // agent-browser's socket path must stay under 104 bytes; temporary folders on macOS are long.
   const sockets = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "omb-id-"));
   const fixtureEnv = browserFixtureEnvironment(scratch, process.platform);
+  // Chrome on macOS needs the real home directory to find its keychain; other platforms keep fixture homes.
+  if (process.platform === "darwin") {
+    const home = userInfo().homedir;
+    fixtureEnv.HOME = home;
+    fixtureEnv.USERPROFILE = home;
+  }
   const home = fixtureEnv.HOME!;
   mkdirSync(home, { recursive: true });
   for (const path of Object.values(fixtureEnv)) if (path && path !== home) mkdirSync(path, { recursive: true, mode: 0o700 });
@@ -308,7 +326,7 @@ export async function verifyBrowserIdentity(options: BotBrowserOptions & { publi
   const probe = await startIdentityProbe();
   try {
     return await withBotBrowser(options, async (call, decided, launcher) => {
-      const navigation = await openIdentityProbePage(call, probe.url);
+      const navigation = await openIdentityProbePage(call, probe.url, log);
       if (navigation.kind === "failed") {
         const probePort = Number(new URL(probe.url).port);
         writeFileSync(join(options.out, "browser-navigation-failure.json"), `${JSON.stringify({ url: probe.url, attempts: navigation.attempts, error: navigation.detail, result: navigation.result, probePort, gatedPorts: [...decided], gateSawProbe: decided.has(probePort) }, null, 2)}\n`);

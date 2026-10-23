@@ -7,13 +7,14 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
-import { CursorAvatar, customMascotSilhouette, type CursorAvatarHandle, type CursorSilhouette } from "./CursorAvatar";
+import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
+import { CursorAvatar, customMascotSilhouette, isCustomCursorSilhouette, type CursorAvatarHandle, type CursorSilhouette } from "./CursorAvatar";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
 import { CarvedAvatar } from "./CarvedAvatar";
+import { steelBodyImage } from "@/lib/steel-body";
 import { selectedCustomMascot, type MascotProfile } from "../../shared/mascot-profile";
 
 export const EYE_SCALE = 1.12;
@@ -57,6 +58,7 @@ function mix(hex: string, toward: string, t: number): string {
 }
 
 const gradientFor = (color: MausColor): [string, string, string] => {
+  if (color === "chrome") return CHROME_GRADIENT;
   const fill = MAUS_COLORS[color] ?? MAUS_COLORS.green;
   return [mix(fill, "#ffffff", 0.55), fill, mix(fill, "#000000", 0.42)];
 };
@@ -143,6 +145,10 @@ function GradientAvatarComponent(
   ref: React.Ref<MausAvatarHandle>,
 ) {
   const silhouette = requestedSilhouette ?? MASCOT_BODIES[botMascotBody(bodyId)];
+  const chrome = color === "chrome";
+  const picture = chrome && !isCustomCursorSilhouette(silhouette)
+    ? steelBodyImage(botMascotBody(bodyId), size, globalThis.devicePixelRatio ?? 1)
+    : null;
   const inner = useRef<CursorAvatarHandle>(null);
   useImperativeHandle(ref, () => ({
     blink: () => inner.current?.blink(),
@@ -188,6 +194,8 @@ function GradientAvatarComponent(
         size={size}
         silhouette={silhouette}
         gradient={gradient ?? gradientFor(color)}
+        picture={picture}
+        eyeColor={chrome ? CHROME_EYES : undefined}
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
         gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
