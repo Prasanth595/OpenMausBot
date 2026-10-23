@@ -11,7 +11,11 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
   const { mountPreview } = await import(pathToFileURL(join(root, "scripts/testing/preview-fixture.ts")).href);
   const bot = (await api("/api/bots", "POST", { name: "Model switch fixture", modelSelection: { instanceId: "codex", model: "gpt-fake-default" } })).body.bot;
   await grant(bot.id, "custom");
-  const sibling = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Unrelated custom conversation" })).body.task;
+  const initialInstances = (await api("/api/instances")).body.instances;
+  const siblingModel = initialInstances.find(instance => instance.instanceId === "codex").models.options.find(option => option.custom && option.id.includes("fixture-local"));
+  assert.ok(siblingModel);
+  const sibling = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Unrelated custom conversation", modelSelection: { instanceId: "codex", model: siblingModel.id } })).body.task;
+  const following = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Follows bot default" })).body.task;
   const selected = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Research brief" })).body.task;
   const read = async () => (await api("/api/bots?messages=0")).body.bots.find(candidate => candidate.id === bot.id);
   const selection = { instanceId: "claude", model: "claude-sonnet-5" };
@@ -123,6 +127,9 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
     const after = await read();
     assert.equal(after.approvalMode, "ask");
     assert.equal(after.tasks.find(task => task.threadId === sibling.threadId).approvalMode, "custom");
+    assert.equal(after.tasks.find(task => task.threadId === sibling.threadId).modelSelection.model, siblingModel.id);
+    assert.equal(after.tasks.find(task => task.threadId === following.threadId).approvalMode, "ask");
+    assert.equal(after.tasks.find(task => task.threadId === following.threadId).modelSelection.instanceId, "claude");
     assert.equal(calls[1].updateBotDefault, true);
     const newThread = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Uses the new default" })).body.task;
     assert.equal(newThread.modelSelection.instanceId, "claude");
