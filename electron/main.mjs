@@ -93,7 +93,7 @@ import { cloudLinkOpensSheet, colorDotIcons, createCloudLook, createCloudReadyNo
 import { createTrialNotices } from "./cloud-trial-notice.mjs";
 import { DESKTOP_PORTS, jsonFile, registerDesktopPrefs } from "./desktop-prefs.mjs";
 import { createDesktopIncludedX } from "./included-x.mjs"; import { createDesktopIncludedPages } from "./included-pages.mjs";
-import { cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
+import { openTeamHome, cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
 import { createLendingTarget, installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs"; import { createOpenAtLogin } from "./open-at-login.mjs";
@@ -1914,8 +1914,7 @@ function rememberCloudHome(state) {
 /** My Cloud through the home window, which never looks it up before the Admin says it is ready. */
 async function connectCloudHome(open = null) {
   const client = ensureCloudAccount();
-  await homeWindow.openCloud(open);
-  return client.state();
+  await homeWindow.openCloud(open); return client.state();
 }
 
 /** My Cloud listed under Servers once, and the server this window shows: the purchase that made it is over. */
@@ -2607,13 +2606,7 @@ ipcMain.handle("cloud-account:checkout", localWorkspaceOnly("cloud-account:check
 // The machine and its code come from the verified session in main, never from the renderer.
 ipcMain.handle("cloud-account:connectHome", localWorkspaceOnly("cloud-account:connectHome", () => connectCloudHome()));
 ipcMain.handle("cloud-account:connectHomeForPhone", localWorkspaceOnly("cloud-account:connectHomeForPhone", () => connectCloudHome("phone")));
-// The page names a team only; the team and its Cloud come from the verified session, opened as the switcher opens it.
-ipcMain.handle("cloud-account:openTeam", localWorkspaceOnly("cloud-account:openTeam", async (_event, teamId) => {
-  const current = ensureCloudAccount().state();
-  const team = current.status === "connected" ? current.teams?.find(entry => entry.id === teamId) ?? null : null;
-  if (!team) throw new Error("You're not in that team.");
-  await showHome({ place: { team: team.id, name: team.name } });
-}));
+ipcMain.handle("cloud-account:openTeam", localWorkspaceOnly("cloud-account:openTeam", (_event, teamId) => openTeamHome(ensureCloudAccount().state(), teamId, showHome)));
 ipcMain.handle("organization:settings-opened", localWorkspaceOnly("organization:settings-opened", () => organizationEntry.settingsOpened()));
 ipcMain.handle("organization:state", localWorkspaceOnly("organization:state", () => ensureManagedDesktop().state()));
 ipcMain.handle("organization:begin", localWorkspaceOnly("organization:begin", (_event, input) => ensureManagedDesktop().begin(input)));
