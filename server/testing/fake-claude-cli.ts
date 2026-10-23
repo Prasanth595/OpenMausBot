@@ -401,6 +401,7 @@ if (argv[0] === "auth" && argv[1] === "status") {
 // --input-format stream-json and must retain their existing fixture behavior.
 if (argAfter("--output-format") === "stream-json" && !argAfter("--input-format") && argv.includes("--no-session-persistence")) {
   let prompt = "";
+  process.stdin.setEncoding("utf8");
   for await (const chunk of process.stdin) prompt += chunk;
   const dump = process.env.FAKE_CLAUDE_CHECKPOINT_DUMP ?? process.env.FAKE_CLAUDE_DUMP;
   const capture = { pid: process.pid, argv, env: process.env, prompt, mcpConfig: null };
