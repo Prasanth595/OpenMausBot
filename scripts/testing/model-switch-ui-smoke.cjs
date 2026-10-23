@@ -14,7 +14,10 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
   const initialInstances = (await api("/api/instances")).body.instances;
   const siblingModel = initialInstances.find(instance => instance.instanceId === "codex").models.options.find(option => option.custom && option.id.includes("fixture-local"));
   assert.ok(siblingModel);
-  const sibling = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Unrelated custom conversation", modelSelection: { instanceId: "codex", model: siblingModel.id } })).body.task;
+  const sibling = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Unrelated custom conversation" })).body.task;
+  const siblingChanged = await api(`/api/bots/${bot.id}/tasks/${sibling.threadId}`, "PATCH", { modelSelection: { instanceId: "codex", model: siblingModel.id } });
+  assert.equal(siblingChanged.status, 200);
+  assert.equal(siblingChanged.body.task.modelSelection.model, siblingModel.id);
   const following = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Follows bot default" })).body.task;
   const selected = (await api(`/api/bots/${bot.id}/tasks`, "POST", { title: "Research brief" })).body.task;
   const read = async () => (await api("/api/bots?messages=0")).body.bots.find(candidate => candidate.id === bot.id);
