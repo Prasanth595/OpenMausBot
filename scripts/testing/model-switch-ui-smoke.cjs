@@ -116,7 +116,7 @@ module.exports = async function verifyModelSwitch({ root, url, api, until, grant
     await openPicker();
     await click("Thread + bot default");
     await selectClaude();
-    assert.ok((await text()).includes("Groups and new threads use this default"));
+    assert.ok((await text()).includes(en["model.providerSwitch.botBody"].replace("{model}", "Claude Sonnet 5")));
     writeFileSync(join(evidence, "default-confirmation.png"), (await window.webContents.capturePage()).toPNG());
     await click("Switch with Ask");
     await until(async () => (await read()).modelSelection.instanceId === "claude");
