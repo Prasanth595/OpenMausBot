@@ -85,3 +85,36 @@ it("discards retained wire history when a corrective round fails after an earlie
     expect(bodies.at(-1).messages.some((row: any) => row.role === "user" && /Re-run the failed/.test(row.content))).toBe(false);
   } finally { await instance.dispose(); }
 });
+
+
+it("discards a nudged announcement when the following provider request fails", async () => {
+  vi.spyOn(chatTools, "mountChatTools").mockResolvedValue({
+    definitions: [{ type: "function", function: { name: "fixture_tool", description: "Fixture", parameters: { type: "object" } } }],
+    catalogFingerprint: "fixture", skipped: [], validate: () => {}, view: (name, input) => ({ title: name, input, ask: false }),
+    execute: async () => ({ text: "receipt", ok: true }), close: async () => {},
+  });
+  const bodies: any[] = [];
+  vi.stubGlobal("fetch", vi.fn(async (_url: unknown, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    if (bodies.length === 2) return new Response("synthetic provider failure", { status: 400 });
+    const content = bodies.length === 1 ? "I will read the selected file now." : "Follow-up";
+    return new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }), { headers: { "content-type": "application/json" } });
+  }));
+  const instance = await OpenAICompatDriver.create({ instanceId: "nudge-history", displayName: "Fixture", enabled: true,
+    config: { url: "http://127.0.0.1:1/v1", apiKeyEnv: "K", model: "fixture" }, environment: { K: "fixture" } });
+  const finished: RuntimeEvent[] = [];
+  instance.adapter.onEvent(event => { if (event.type === "turn.completed") finished.push(event); });
+  try {
+    await instance.adapter.sendTurn({ threadId: "t", text: "Read", sourceMessage: { id: "u1", role: "user", text: "Read" }, systemStable: "Stable", systemVolatile: "Context", approvalMode: "full" });
+    await vi.waitFor(() => expect(finished).toHaveLength(1));
+    expect(finished[0]).toMatchObject({ ok: false });
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1].messages.at(-2)).toMatchObject({ role: "assistant", content: "I will read the selected file now." });
+    await instance.adapter.sendTurn({ threadId: "t", text: "Continue", sourceMessage: { id: "u2", role: "user", text: "Continue" },
+      systemStable: "Stable", systemVolatile: "Context", approvalMode: "full", transcript: [{ id: "u1", role: "user", text: "Read" }, { id: "a1", role: "assistant", text: "I will read the selected file now." }] });
+    await vi.waitFor(() => expect(finished).toHaveLength(2));
+    expect(bodies[2].messages.filter((m: any) => m.content === "I will read the selected file now.")).toHaveLength(1);
+    expect(bodies[2].messages.some((m: any) => m.role === "user" && String(m.content).includes("operation receipts"))).toBe(false);
+    expect(bodies[2].messages).not.toContainEqual(bodies[1].messages.at(-1));
+  } finally { await instance.dispose(); }
+});
