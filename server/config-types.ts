@@ -33,6 +33,8 @@ export interface AppConfig extends HelperConfig {
   cerebras?: { key?: string }; treg?: { key?: string };
   groq?: { key?: string; url?: string };
   meta?: { key?: string; url?: string };
+  /** DeepSeek API key for the DeepSeek Harness engine (`dsh`). */
+  deepseek?: { key?: string };
   /** `everyClaudeBot`: the key runs every Claude bot instead of its login; unset means true. */
   anthropic?: { key?: string; url?: string; everyClaudeBot?: boolean };
   openai?: { key?: string };

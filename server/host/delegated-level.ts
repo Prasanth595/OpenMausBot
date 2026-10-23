@@ -1,3 +1,4 @@
+import { chiefLevel } from "../chief-level.ts";
 import { approvalModeFor, type ApprovalMode } from "../../shared/approval-mode.ts";
 import { delegatedApprovalMode } from "../auto-approve.ts";
 import type { BotRecord } from "../store.ts";
@@ -13,7 +14,7 @@ export function createDelegatedLevel(deps: {
     // Custom is the recipient's own provider policy; external work grants no inherited authority.
     if (origin === "outside" || from.id === target.id || approvalModeFor(target) === "custom") return null;
     return delegatedApprovalMode({
-      senderIsChief: Boolean(from.chiefOfStaff),
+      senderIsChief: chiefLevel(from),
       senderMode: deps.sourceApprovalMode(from.id, sourceThreadId),
       sameBot: from.id === target.id,
       recipientMode: own,

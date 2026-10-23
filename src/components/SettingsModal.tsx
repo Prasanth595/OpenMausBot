@@ -18,6 +18,8 @@ import { withTourReset } from "@/lib/guided-tour";
 import { completionPatch } from "@/lib/onboarding";
 import { AnthropicEveryClaudeBot, ApiKeyRow, OpenCodeProviderKeys, VpsConnection } from "./ApiKeys";
 import { AnalyticsRow } from "./AnalyticsRow";
+import { UpdatesConsentRow } from "./UpdatesConsent";
+import { DefaultBotSidebarRow } from "./DefaultBotControls";
 import { DiagnosticsRow } from "./DiagnosticsRow";
 import { OtherOpenAiCompatServers } from "./OpenAiCompatServers";
 import { DecisionModelSettings } from "./DecisionModelSettings";
@@ -582,6 +584,7 @@ export function SettingsModal() {
         return (
           <>
             <AdvancedModeRow />
+            <DefaultBotSidebarRow />
 
             <ProSettingsCard />
             <Card title={t("settings.profile.title")} subtitle={t("settings.profile.sharedSubtitle")}>
@@ -591,6 +594,7 @@ export function SettingsModal() {
             <LanguageRow />
             <NewBotEffortRow />
             <AnalyticsRow />
+            <UpdatesConsentRow />
             <DefaultBotSettings />
 
             <Card title={t("settings.roomTurns.title")} subtitle={t("settings.roomTurns.subtitle")}>
@@ -658,6 +662,7 @@ export function SettingsModal() {
               <ApiKeyRow section="cerebras" testProvider="cerebras" />
               <ApiKeyRow section="groq" testProvider="groq" />
               <ApiKeyRow section="meta" testProvider="meta" />
+              <ApiKeyRow section="deepseek" />
               <OtherOpenAiCompatServers />
               <div className="pt-2 text-[11.5px] font-medium uppercase tracking-wide text-ink-secondary">{t("keys.integrations.title")}</div>
               <ApiKeyRow section="treg" testProvider="treg" /><ApiKeyRow section="box" />

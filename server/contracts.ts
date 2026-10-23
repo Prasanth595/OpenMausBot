@@ -129,6 +129,9 @@ export type InstanceConfigMap = Record<InstanceId, InstanceConfig>;
   /** Per-bot integrations the driver may hand to the agent as tools. */
   integrations?: {
     composio?: { command: string; args: string[]; env: Record<string, string> };
+    /** The same bridge to a Team Cloud member's own apps, only in that member's own turns. */
+    composioOwn?: { command: string; args: string[]; env: Record<string, string> };
+    /** Stdio connection to a computer MCP server. `scope` is set only for the host desktop, so host-only approval rules never apply elsewhere. */
     localComputer?: {
       command: string;
       args: string[];
