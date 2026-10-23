@@ -300,9 +300,6 @@ describe("a muted thread a teammate assigned, ending on NEEDS INPUT", () => {
     expect(told).toEqual([question(work)]);
   }, 60_000);
 
-  // The assigner's thread being gone is in server/thread-mute.test.ts: deleting it, or its bot, cancels the assignment
-  // before it can park, so only the park handler itself can be given a parent without a thread.
-
   it("is unchanged when the thread is not muted", async () => {
     const { told, work } = await assign({ muted: false, reply: "resume" });
     expect(told).toEqual([expect.objectContaining({ kind: "delegation-settled", threadId: work, body: "which repository should I tag?" })]);

@@ -259,7 +259,7 @@ const featureConfigSchema = z.object({
   /** A teammate parked on a gate only the person can lift is reported to its Chief of Staff. Off unless true. */
   chiefEscalations: z.boolean().optional(),
   acpPlanLines: z.boolean().optional(), // An ACP agent's plan as activity lines. Off unless true.
-}).extend({ agentsToolBridge: z.boolean().optional(), muteBotOpenedThreads: z.boolean().optional() }); // the find_tool / use_tool bridge; bot-opened threads start muted (thread-mute.ts); off unless true
+}).extend({ agentsToolBridge: z.boolean().optional(), muteBotOpenedThreads: z.boolean().optional() }); // agentsToolBridge: the find_tool / use_tool bridge; muteBotOpenedThreads: threads a bot opened start muted; each off unless true
 const onboardingConfigSchema = z.object({
   completedAt: z.string().trim().max(40).optional(),
   version: z.number().int().min(0).max(1000).optional(),

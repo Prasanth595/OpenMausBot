@@ -1,5 +1,3 @@
-// One bot conversation thread's notification mute: who chose it, what it silences (THREAD_MUTE_POLICY), and the
-// notices a muted thread still owes the person. index.ts applies it in front of every notification it sends.
 import type { HandoffView } from "./coordinator.ts";
 import { NEEDS_INPUT_GATE, type EscalationKind } from "./escalations.ts";
 import type { IncidentOutcome } from "./host/chief-notices.ts";

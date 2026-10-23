@@ -66,7 +66,7 @@ describe("the brief in a muted thread", () => {
       store, config: {}, mainThread: () => main.threadId, notify: () => {}, chief: () => { throw new Error("no report here"); }, assignerOf: () => undefined,
     });
     const bot = store.bot(chief.id)!;
-    // host/proactive.ts briefNotification: the brief notifies in the bot's main chat.
+    // The brief notifies in the bot's main chat.
     for (const kind of ["done", "brief"] as const) {
       const notification = buildNotification(kind, bot, main.threadId, "Your 3pm with Acme moved to 4pm");
       if (notification && mute.lets(notification)) sent.push(notification);
@@ -166,8 +166,8 @@ describe("what a muted thread reports through the Chief", () => {
   });
 });
 
-// The coordinator's park handler from index.ts, run without a server: a parent whose thread is gone cannot be reached
-// live, since deleting the thread or its bot cancels the assignment first (thread-mute.e2e.test.ts covers the rest).
+// The coordinator's park handler, run without a server: a parent whose thread is gone cannot be reached live, since
+// deleting the thread or its bot cancels the assignment first.
 describe("the park handler for a muted thread a teammate assigned", () => {
   const park = (muted: boolean) => {
     const source = readFileSync(new URL("./index.ts", import.meta.url), "utf8");
@@ -176,7 +176,7 @@ describe("the park handler for a muted thread a teammate assigned", () => {
     const handler = source.slice(from, to).trim().replace(/^park:/, "globalThis.park =").replace(/,$/, ";");
     const sent: Notification[] = [];
     const nell = { id: "nell", name: "Nell", threadId: "nell-main" };
-    // index.ts's notify, gated by its thread mute; the work thread is the only thread the mute knows.
+    // The server's notify, gated by its thread mute; the work thread is the only thread the mute knows.
     const notify = (notification: Notification | null) => { if (notification && threadMute.lets(notification)) sent.push(notification); };
     const threadMute = createThreadMute({
       store: { taskByThread: (_botId: string, threadId: string) => (threadId === "work-thread" ? { threadId, notificationsMuted: muted } : undefined), groupByThread: () => undefined } as never,
