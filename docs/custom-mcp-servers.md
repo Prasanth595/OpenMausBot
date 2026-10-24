@@ -37,6 +37,37 @@ manage, and its own consequential-action confirmations still apply. See the
 [official Whop MCP documentation](https://github.com/whopio/whop-mcp-server).
 This is an optional connected tool, not a change to OMB's subscription billing.
 
+### Local apps
+
+Some apps in Plugins can run on your own computer instead of through a
+connected-apps service: GitHub, Stripe, Notion, Trello, Airtable, Linear,
+Jira, Slack and Figma. On the app's card, click **Run on this
+computer**. The card shows the exact program OpenMausBot will start and a link
+to its source code. Enter the app's own token (each token field links to the
+page where you create it) and click **Test and start**. OpenMausBot saves an
+ordinary MCP server named after the app, tests it, and turns it on. The
+app's calls go from your computer straight to the app; no connected-apps
+service sees the request or the token.
+
+A local app reaches **no bot** until you turn it on in that bot's
+**Access → MCP servers** settings. A bot that uses every enabled MCP server
+does not get local apps; **Use every enabled server** means every enabled
+server except local apps. A new bot gets none unless your **New bot** defaults
+name it.
+
+The server then appears under **Your MCP servers** with Test, Edit, on/off and
+Remove; change a token there. Its entry in `config.json` carries
+`"localApp": "<app>"`, which only Plugins sets and an edit keeps. Tokens are
+stored like every MCP server's: in `config.json`, readable only by your user,
+never shown again in the app. When you move to My Cloud, a local app's entry
+goes with your other servers and keys, token included, marked as running on
+this computer; My Cloud never starts it.
+
+GitHub needs Docker, Jira needs [uv](https://docs.astral.sh/uv/), and the
+others need Node.js (`npx`). Stripe, Notion and GitHub publish their
+own servers; the other six are community servers, each pinned to one
+release.
+
 ### Servers that ask you to sign in
 
 Some URL servers take no token; they want you to sign in with your browser
