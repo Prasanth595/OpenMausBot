@@ -36,6 +36,8 @@ import {
 import { MentionMenu, type MentionChoice } from "./MentionMenu";
 import { MentionTextarea } from "./MentionTextarea";
 import { ComposerAttachments, pathForFile } from "./ComposerAttachments";
+import { PointedChips } from "./app/PointedChips";
+import { takePointedChips } from "@/lib/pointed-chips";
 import { splitTranscriptCitations, type CitationAttachment } from "@/lib/citations";
 import { LocalComputerAutoWarning } from "./LocalComputerAutoWarning";
 import { PlaceChip } from "./PlaceChip";
@@ -578,16 +580,11 @@ export function Composer({
       });
       roomMessageSent(effectiveChannelMode, busy);
     } else if (bot) {
+      const points = takePointedChips(threadId);
       dispatch({
-        type: "send",
-        botId: bot.id,
-        text: body,
-        sendId: sentDraft.sendId,
-        replyToId: replyTo?.id,
-        threadId,
-        dataContext,
-        delivery,
-        onError: () => restoreDraft(sentDraft),
+        type: "send", botId: bot.id, text: body, sendId: sentDraft.sendId, replyToId: replyTo?.id, threadId, dataContext, delivery,
+        ...(points ? { pointed: points.pointed } : {}),
+        onError: () => { points?.restore(); restoreDraft(sentDraft); },
       });
       directMessageSent(state.instances, bot.modelSelection?.instanceId, busy && delivery.mode === "queue");
     }
@@ -788,6 +785,7 @@ export function Composer({
             />
           </div>
         )}
+        {!group && <PointedChips threadId={threadId} />}
         <ComposerAttachments
           items={attachments}
           onAdd={addAttachments}

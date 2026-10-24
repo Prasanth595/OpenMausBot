@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { PagePublisher } from "../pages/publisher.ts";
 import { createPagesInternalRoutes, createPublishedPageRoutes, type PagesInternalContext } from "./published-pages.ts";
@@ -7,6 +8,7 @@ function fakePublisher() {
   return {
     publish: vi.fn(async () => ({ status: 200, text: "Published “Bake sale” at https://abcdefghijklmnopqrstuvwxyz.mausbot.page/" })),
     unpublish: vi.fn(async () => ({ status: 200, text: "Unpublished.", card: { state: "unpublished" as const, title: "Bake sale" } })),
+    publishFiles: vi.fn(async () => ({ status: 200, text: "Published." })),
   } satisfies PagePublisher;
 }
 
@@ -42,7 +44,8 @@ describe("the page tools' internal routes", () => {
   it("reads a path inside the bot's private desktop as the same file on this computer", async () => {
     const publisher = fakePublisher(), handler = createPagesInternalRoutes(publisher);
     await internal(handler, { body: { path: "/home/cua/workspace/site", title: "Site" }, vmWorkspace: "/vm/bot-1" });
-    expect(publisher.publish).toHaveBeenCalledWith(expect.objectContaining({ path: "/vm/bot-1/site", roots: ["/vm/bot-1", "/work/bot-1"] }));
+    // The guest path becomes this computer's own path under the private desktop's folder (Windows joins with "\\").
+    expect(publisher.publish).toHaveBeenCalledWith(expect.objectContaining({ path: join("/vm/bot-1", "site"), roots: ["/vm/bot-1", "/work/bot-1"] }));
   });
 
   it("refuses a body that isn't the tool's, and passes on a publisher's refusal as an error", async () => {

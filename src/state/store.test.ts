@@ -2899,13 +2899,15 @@ describe("restoring the open conversation", () => {
       const { stream } = await boot();
       stream.send(hello()); await settle();
       const delivery = { mode: "steer" as const, runId: "original-run" };
+      const pointed = [{ appId: "picked-page", rev: 1, tag: "button", role: "button", text: "Choose", selector: "button", html: "<button>Choose</button>" }];
       const message = { id: "unknown-message", at: 1, role: "user", kind: "text", text: "maybe delivered", sendId: "unknown-send-id", steered: true, steerUncertain: true, composerDelivery: delivery };
       const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: false, uncertain: true, threadId: "bot-1-thread", message })));
       vi.stubGlobal("fetch", request);
       const restore = vi.fn();
-      flushSync(() => dispatch({ type: "send", botId: "bot-1", threadId: "bot-1-thread", text: message.text, sendId: message.sendId, delivery, onError: restore }));
+      flushSync(() => dispatch({ type: "send", botId: "bot-1", threadId: "bot-1-thread", text: message.text, sendId: message.sendId, delivery, pointed, onError: restore }));
       await settle();
       expect(request).toHaveBeenCalledWith("/api/bots/bot-1/messages/explicit", expect.objectContaining({ method: "POST", body: expect.stringContaining('"runId":"original-run"') }));
+      expect(JSON.parse(request.mock.calls.find(([path]) => path === "/api/bots/bot-1/messages/explicit")![1].body)).toMatchObject({ delivery, pointed });
       expect(restore).toHaveBeenCalledTimes(1);
       expect(seen.error).toContain("Check the response");
       expect(seen.bots.find(bot => bot.id === "bot-1")!.messages.filter(row => row.sendId === message.sendId)).toHaveLength(1);
@@ -3034,6 +3036,15 @@ describe("notifications feed", () => {
     expect(state.notifications.every((n) => n.read)).toBe(true);
   });
 
+  it("marks the entries a conversation read elsewhere, and only those", () => {
+    let state = reducer(initialState, {
+      type: "notificationsHydrated",
+      notifications: [entry("n1", 1), entry("n2", 2), entry("n3", 3)],
+    });
+    state = reducer(state, { type: "notificationsRead", ids: ["n1", "n3", "gone"] });
+    expect(state.notifications.filter((n) => n.read).map((n) => n.id)).toEqual(["n3", "n1"]);
+  });
+
   it("toggleNotifications closes the other docked panels, and vice versa", () => {
     let state = reducer(initialState, { type: "toggleComputer", open: true });
     expect(state.computerOpen).toBe(true);
@@ -3091,5 +3102,35 @@ describe("a routine's answer and its broadcast", () => {
     state = reducer(state, { type: "routinePatched", routine: paused });
     expect(state.routines).toEqual([resumed]);
     expect(reducer(state, { type: "routinePatched", routine: { ...resumed, failureStreak: 1 } }).routines[0]).toMatchObject({ failureStreak: 1 });
+  });
+});
+
+describe("fleet order from the server", () => {
+  const bot = (id: string): Bot => ({
+    id,
+    threadId: `${id}-thread`,
+    name: id,
+    title: "",
+    description: "",
+    notifications: false,
+    color: "green",
+    unread: false,
+    modelSelection: { instanceId: "acp", model: "fake" },
+    messages: [],
+  });
+  const hydrated = reducer(initialState, { type: "hydrate", bots: [bot("a"), bot("b"), bot("c"), bot("d")], groups: [], computerControl: {} });
+  const ids = (state: AppState) => state.bots.map((candidate) => candidate.id);
+
+  it("applies a bots.order frame as a stable partial reorder", () => {
+    expect(ids(reducer(hydrated, { type: "botsOrdered", botIds: ["d", "c", "b", "a"] }))).toEqual(["d", "c", "b", "a"]);
+    // Only c and a move, into the positions they already share; b and d stay put.
+    const partial = reducer(hydrated, { type: "botsOrdered", botIds: ["c", "a"] });
+    expect(ids(partial)).toEqual(["c", "b", "a", "d"]);
+    expect(partial.bots[0]).toBe(hydrated.bots[2]);
+  });
+
+  it("ignores ids it does not know and leaves an unchanged order alone", () => {
+    expect(ids(reducer(hydrated, { type: "botsOrdered", botIds: ["ghost", "b", "a"] }))).toEqual(["b", "a", "c", "d"]);
+    expect(reducer(hydrated, { type: "botsOrdered", botIds: ["a", "b", "c", "d"] })).toBe(hydrated);
   });
 });

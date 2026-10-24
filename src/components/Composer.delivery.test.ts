@@ -8,6 +8,7 @@ import { directMessageSent } from "@/lib/product-events";
 import { setSendKey } from "@/lib/send-key";
 import { setNewlineKey } from "@/lib/newline-key";
 import { setSteerKey } from "@/lib/steer-key";
+import { addPointedChip, forgetPointedChips, takePointedChips } from "@/lib/pointed-chips";
 import type { Bot } from "@/state/store";
 
 const fixture = vi.hoisted(() => ({ dispatch: vi.fn(), canSteer: true }));
@@ -23,13 +24,14 @@ import { Composer } from "./Composer";
 const bot: Bot = { id: "delivery-bot", threadId: "delivery-thread", activeRunId: "run-pinned", name: "Fixture", title: "", description: "", color: "blue", notifications: false, unread: false, busy: true, messages: [], modelSelection: { instanceId: "fake", model: "fake" } };
 const draftId = `bot:${bot.id}:${bot.threadId}`;
 beforeEach(() => {
+  forgetPointedChips();
   setNewlineKey("auto"); setSendKey("enter"); setSteerKey("off"); markDraftEdited(draftId);
   fixture.canSteer = true; bot.busy = true;
   vi.stubGlobal("fetch", vi.fn(async () => new Response("{}")));
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   vi.spyOn(HTMLElement.prototype, "scrollIntoView").mockImplementation(() => {});
 });
-afterEach(() => { vi.clearAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { forgetPointedChips(); vi.clearAllMocks(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 const mount = () => {
   const host = document.createElement("div"); document.body.append(host); const root = createRoot(host);
   flushSync(() => root.render(createElement(Composer, { bot })));
@@ -68,6 +70,23 @@ it("uses the opted-in modifier key only for the pinned current run, without chan
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ delivery: { mode: "steer", runId: "run-pinned" } }));
     expect(page.host.textContent).toContain("keep this");
     expect(page.host.textContent).not.toContain("Add to current run");
+  } finally { page.cleanup(); }
+});
+
+it.each(["queue", "steer"] as const)("keeps pointed chips alongside %s delivery and restores them with a failed draft", mode => {
+  if (mode === "steer") setSteerKey("mod");
+  const page = mount();
+  const pointed = { appId: "page-fixture", rev: 1, tag: "button", role: "button", text: "Choose", selector: "button", html: "<button>Choose</button>" };
+  try {
+    page.fill("この箇所を変更");
+    flushSync(() => addPointedChip(bot.threadId, { ...pointed, title: "Fixture page" }));
+    page.press(mode === "steer" ? { metaKey: true } : {});
+    const sent = fixture.dispatch.mock.calls.map(([action]) => action).find(action => action.type === "send");
+    expect(sent).toMatchObject({ delivery: mode === "steer" ? { mode, runId: "run-pinned" } : { mode }, pointed: [pointed] });
+    expect(takePointedChips(bot.threadId)).toBeNull();
+    flushSync(() => sent.onError());
+    expect(takePointedChips(bot.threadId)?.pointed).toEqual([pointed]);
+    expect(page.host.querySelector("textarea")!.value).toBe("この箇所を変更");
   } finally { page.cleanup(); }
 });
 it.each([false, true])("refuses an unavailable explicit key without falling back (idle=%s)", idle => {

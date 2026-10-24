@@ -89,6 +89,16 @@ it.each(["", "/explicit"])("shows a page and carries app context through the mes
     writeFileSync(gate, "finish");
     await settledTurn();
 
+    const pointed = [{ appId: shown.messageId, rev: 1, tag: "button", role: "button", text: "Change cups", selector: "button", html: "<button>Change cups</button>" }];
+    const picked = await api("POST", `/api/bots/${bot.id}/messages${suffix}`, {
+      ...delivery, threadId: bot.threadId, sendId: "apps-e2e-send-000000004", text: "Change this counter", pointed,
+    }, 202);
+    expect(picked.message).toMatchObject({ pointed: [{ appId: shown.messageId, label: "“Change cups”" }], ...(suffix ? { composerDelivery: { mode: "queue" } } : {}) });
+    await expect.poll(turnPrompt, { timeout: 15_000 }).toContain("Change this counter");
+    expect(turnPrompt()).toContain("the person pointed at parts of your page");
+    expect(turnPrompt()).toContain("Change cups");
+    await settledTurn();
+
     const after = await transcript();
     expect(after.find((message) => message.id === shown.messageId).app.context).toMatchObject({ text: "The counter shows 3 cups.", delivered: true });
     const exported = await (await fetch(`${fixture.info.url}/api/threads/${bot.threadId}/export`, { headers: { origin: fixture.info.url } })).text();
