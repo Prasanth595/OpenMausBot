@@ -25,7 +25,7 @@ import {
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
 import { useNotificationFeed, useUnreadIndicators } from "@/lib/notification-preferences";
-import { unreadCountShown } from "@/lib/unread-indicators";
+import { dockBadgeCount } from "@/lib/unread-indicators";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
 import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
@@ -50,7 +50,6 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { setLocale, t } from "@/lib/i18n";
 import { shouldOpenKeyboardShortcuts } from "@/lib/keyboard-shortcuts";
 import { effectiveLanguage, useLanguageChoice } from "@/lib/language-preference";
-import { botShowsUnread } from "@/lib/bot-unread";
 import { phonePairingSettingsAction, takePhonePairingRequest } from "@/lib/phone-pairing"; import { takeConnectRequest } from "@/lib/connect-link";
 import { useExternalChatLinks } from "@/hooks/use-external-chat-links";
 import { useUsageSnapshot } from "@/hooks/use-usage-snapshot";
@@ -65,10 +64,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const showThreads = useShowThreads();
   const { capabilities } = useDesktopCapabilities();
   const captionChrome = useCaptionChrome();
-  const unreadCount = unreadCountShown(
-    useUnreadIndicators(),
-    state.bots.filter((bot) => !bot.hidden && botShowsUnread(bot)).length + state.groups.filter((group) => group.unread).length,
-  );
+  const unreadCount = dockBadgeCount(useUnreadIndicators(), state.bots, state.groups);
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
   const sidebarAndPanelFit = useMediaQuery(SIDEBAR_AND_PANEL_FIT, true);
