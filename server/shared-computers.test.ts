@@ -147,7 +147,7 @@ describe("a dropped channel recovers by itself", () => {
     broker.complete(computer.id, alice.session, secret, job!.id, "back");
     await expect(waiting).resolves.toBe("back");
     await vi.advanceTimersByTimeAsync(45_000);
-    const offline = expect(broker.request({ computer_id: computer.id, action: "computer_tools" }, alice.person, () => true)).rejects.toThrow(/^Desktop is lent but has been offline for 1 min: OpenMausBot on it is closed/);
+    const offline = expect(broker.request({ computer_id: computer.id, action: "computer_tools" }, alice.person, () => true)).rejects.toThrow(/^Desktop is lent but has been offline for 1 min: the OpenMausBot app on that computer isn't running or isn't connected/);
     await vi.advanceTimersByTimeAsync(15_000);
     await offline;
     broker.close();

@@ -46,7 +46,7 @@ describe("what a server remembers about computers lent to it", () => {
     const record = { id: randomUUID(), person: "cloud-home", name: "ASH-PC", platform: "win32" as const, folders: 1, terminal: false, screen: true, lastSeenAt: at, lastUsedAt: null, stoppedAt: null };
     expect(awayNotice([record], new Set())).toEqual({
       offline: [{ name: "ASH-PC", device: "PC", lastOnline: "2026-10-07 14:02 UTC", lent: true }],
-      say: "Their PC ASH-PC is shared with the Cloud but offline (last online 2026-10-07 14:02 UTC): OpenMausBot on it is closed, or the PC is asleep or off. Ask them to open OpenMausBot on that PC; it reconnects by itself.",
+      say: "Their PC ASH-PC is shared with the Cloud but offline (last online 2026-10-07 14:02 UTC): the OpenMausBot app on that PC isn't running or isn't connected. Ask them to open OpenMausBot on that PC; it reconnects by itself.",
     });
     expect(awayNotice([{ ...record, stoppedAt: at }], new Set()).say).toBe("Their PC ASH-PC is no longer shared with the Cloud: sharing was turned off on it. To share it again, they press [Use my PC](openmausbot://use-my-computer) in OpenMausBot on that PC.");
     expect(awayNotice([{ ...record, platform: "darwin" }], new Set()).say).toMatch(/^Their Mac ASH-PC is shared with the Cloud/u);
@@ -80,7 +80,7 @@ describe("the shared-computer registry with that memory", () => {
     live = false;
     expect(broker.away("cloud-home").say).toMatch(/^Their PC ASH-PC is shared with the Cloud but offline \(last online \d{4}-\d\d-\d\d \d\d:\d\d UTC\)/u);
     const offline = expect(broker.request({ computer_id: pc.id, action: "computer_tools" }, "cloud-home", () => true))
-      .rejects.toThrow("ASH-PC is offline: OpenMausBot on that PC is closed, or the PC is asleep or off. Ask them to open it; it reconnects by itself.");
+      .rejects.toThrow("ASH-PC is offline: the OpenMausBot app on that PC isn't running or isn't connected. Ask them to open it on that PC; it reconnects by itself.");
     await vi.advanceTimersByTimeAsync(15_250);
     await offline;
     // A restarted server has no registrations, and still knows.

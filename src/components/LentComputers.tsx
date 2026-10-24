@@ -37,7 +37,8 @@ export function lentComputerLines(computer: KnownLentComputer, now = Date.now())
     ...(computer.scopes.terminal ? [t("lending.cloudSide.terminal")] : []),
   ];
   const away = computer.lent && !computer.online && computer.scopes.internet === true;
-  return [state, ...(computer.lent && what.length ? [t("lending.cloudSide.lends", { what: what.join(", ") })] : []),
+  const reason = computer.lent && !computer.online ? [t("lending.cloudSide.offlineReason")] : [];
+  return [state, ...reason, ...(computer.lent && what.length ? [t("lending.cloudSide.lends", { what: what.join(", ") })] : []),
     ...(away ? [t("lending.cloudSide.internetAway")] : []),
     computer.lastUsedAt ? t("lending.cloudSide.lastUsed", { when: localizedRelativeTime(computer.lastUsedAt, activeLocale(), now) }) : t("lending.cloudSide.neverUsed")];
 }

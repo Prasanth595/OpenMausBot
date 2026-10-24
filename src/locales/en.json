@@ -861,6 +861,7 @@
   "lending.cloudSide.online": "Online now",
   "lending.cloudSide.busy": "Cloud bots are using it now",
   "lending.cloudSide.offline": "Offline, last online {when}. It reconnects by itself once OpenMausBot is open on it.",
+  "lending.cloudSide.offlineReason": "This computer's OpenMausBot app isn't running or isn't connected. Open it on that computer.",
   "lending.cloudSide.stopped": "No longer shared: sharing was turned off on it {when}.",
   "lending.cloudSide.lends": "Shares: {what}",
   "lending.cloudSide.folders": "{count} folders",
