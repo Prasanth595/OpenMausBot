@@ -779,7 +779,7 @@
   "settings.notificationFeed.subtitle": "Hiển thị biểu tượng chuông ở cạnh phải cửa sổ, lưu giữ 500 thông báo gần nhất từ mọi bot, dù đã đọc hay chưa.",
   "settings.notificationFeed.show": "Hiển thị bảng tin thông báo",
   "settings.unreadIndicators.title": "Chỉ báo chưa đọc",
-  "settings.unreadIndicators.subtitle": "Hiển thị huy hiệu, chấm, bộ đếm và cảnh báo tin nhắn mới chưa đọc trên máy này. Tắt để im lặng chúng; các phê duyệt và câu hỏi đang chờ bạn vẫn hiển thị và không có gì bị đánh dấu là đã đọc.",
+  "settings.unreadIndicators.subtitle": "Hiển thị huy hiệu, chấm, bộ đếm và cảnh báo tin nhắn mới chưa đọc trên máy này. Tắt để im lặng chúng; các phê duyệt, câu hỏi, yêu cầu đăng nhập, quy trình đang chờ và lỗi vẫn hiển thị và không có gì bị đánh dấu là đã đọc.",
   "settings.unreadIndicators.show": "Hiển thị chỉ báo chưa đọc",
   "notifications.title": "Thông báo",
   "notifications.railUnread": "Thông báo, {count} chưa đọc",

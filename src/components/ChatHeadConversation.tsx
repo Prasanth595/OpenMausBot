@@ -4,14 +4,16 @@ import { t } from "@/lib/i18n";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { useStore, type Bot } from "@/state/store";
 import { openBotSettings } from "./bot-panel/panel-link";
+import { useUnreadIndicators } from "@/lib/notification-preferences";
 import { sidebarBotActivityTasks } from "./SidebarBotActivity";
 
 /** Simple mode's "Bot / Conversation ▾": the open conversation's title, which opens the bot panel at its conversations. */
 export function ChatHeadConversation({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
+  const unreadOn = useUnreadIndicators();
   const task = bot.tasks?.find((candidate) => candidate.threadId === bot.threadId);
   if (!task) return null;
-  const elsewhere = sidebarBotActivityTasks(bot, state.pendingQueued).filter((other) => other.threadId !== bot.threadId).length;
+  const elsewhere = sidebarBotActivityTasks(bot, state.pendingQueued, false, unreadOn).filter((other) => other.threadId !== bot.threadId).length;
   return (
     <>
       <span aria-hidden="true" className="shrink-0 text-[14px] text-ink-tertiary">/</span>

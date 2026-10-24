@@ -1,5 +1,6 @@
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type Dispatch } from "react";
 import { useAdvancedMode } from "@/lib/interface-mode";
+import { useUnreadIndicators } from "@/lib/notification-preferences";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { AlertTriangle, ChevronLeft, ChevronRight, Crown, Monitor, RefreshCw, Square, Webhook } from "lucide-react";
@@ -150,7 +151,6 @@ interface ChatRows {
   conversational: boolean; simple?: boolean; canReact: boolean;
   openedAt: number;
 }
-
 const ChatRowsContext = createContext<ChatRows | null>(null);
 
 function useChatRows(): ChatRows {
@@ -900,7 +900,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
   const composerDockRef = useRef<HTMLDivElement>(null);
   const composerDock = useComposerDockPad(composerDockRef);
-  const advanced = useAdvancedMode();
+  const advanced = useAdvancedMode(), unreadOn = useUnreadIndicators();
   const canWrite = useCanWriteIn(bot.threadId);
 
   const computerStarting = computerStartLine(state.computerStarts[bot.id], bot.name);
@@ -1099,7 +1099,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               >
                 <BotAvatar
                   bot={bot}
-                  state={stateForBot({ ...bot, messages })}
+                  state={stateForBot({ ...bot, messages }, unreadOn)}
                   size={24}
                   motion={mascotMotion?.kind ?? "none"}
                   motionKey={mascotMotion?.nonce ?? 0}
@@ -1134,7 +1134,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               aria-label={t("chat.openProfileAria", { name: bot.name })}
               className={cn(CHATHEAD_PILL, "group h-9 gap-2.5 pl-2 pr-3.5 hover:bg-raised-hover")}
             >
-              <BotAvatar bot={bot} state={stateForBot({ ...bot, messages })} size={24}
+              <BotAvatar bot={bot} state={stateForBot({ ...bot, messages }, unreadOn)} size={24}
                 motion={mascotMotion?.kind ?? "none"} motionKey={mascotMotion?.nonce ?? 0} animated={headerAnimated} />
               <span className="min-w-0 truncate text-[14px] font-medium text-ink">{bot.name}</span>
               {chiefOfStaffBadge(bot)}

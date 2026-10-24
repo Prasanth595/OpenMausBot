@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { roomThreadsWorkingElsewhere } from "@/lib/room-threads";
 import { useMenuMotion } from "./MenuMotion";
 import { t } from "@/lib/i18n";
+import { useUnreadIndicators } from "@/lib/notification-preferences";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { COMPACT_BUBBLE } from "@/lib/compact-chip";
 import { formatTaskTokens, headlineTokens, usageDetail } from "@/lib/usage";
@@ -419,8 +420,9 @@ function ConversationTaskPicker({
 export function BotActivityPicker({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
+  const unreadOn = useUnreadIndicators();
   if (showThreads) return null;
-  const activity = threadsWhenTreeHidden(bot, state.pendingQueued).filter((task) => task.threadId !== bot.threadId);
+  const activity = threadsWhenTreeHidden(bot, state.pendingQueued, unreadOn).filter((task) => task.threadId !== bot.threadId);
   if (!activity.length) return null;
   return (
     <div className="flex shrink-0 items-center gap-2 px-5 py-2" data-background-activity>
@@ -442,14 +444,15 @@ export function BotActivityPicker({ bot }: { bot: Bot }) {
 export function TaskPicker({ bot }: { bot: Bot }) {
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
+  const unreadOn = useUnreadIndicators();
   if (!showThreads) return null;
   return (
     <ConversationTaskPicker
       threadId={bot.threadId}
-      tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId))}
+      tasks={orderedThreadList((bot.tasks ?? []).filter((task) => !task.routineRunId)).map((task) => ({ ...task, unread: unreadOn && task.unread }))}
       busy={false}
       bot={bot}
-      attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id, state.groups)}
+      attention={crossBotAttentionThreads(state.bots, state.pendingQueued, bot.id, state.groups, unreadOn)}
       onNew={() => dispatch({ type: "newTask", botId: bot.id })}
       onSwitch={(threadId) => dispatch({ type: "switchTask", botId: bot.id, threadId })}
       onRename={(threadId, title) => dispatch({ type: "renameTask", botId: bot.id, threadId, title })}

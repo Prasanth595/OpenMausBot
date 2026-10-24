@@ -1131,7 +1131,7 @@
   "settings.notificationFeed.subtitle": "Pokazuj dzwonek na prawej krawędzi okna, który przechowuje ostatnie 500 powiadomień od każdego bota, przeczytanych lub nie.",
   "settings.notificationFeed.show": "Pokaż kanał powiadomień",
   "settings.unreadIndicators.title": "Wskaźniki nieprzeczytanych",
-  "settings.unreadIndicators.subtitle": "Pokazuj na tym komputerze plakietki, kropki, liczniki i alerty o nowych wiadomościach. Wyłącz, aby je wyciszyć; zatwierdzenia i pytania czekające na Ciebie nadal się pokazują, a nic nie jest oznaczane jako przeczytane.",
+  "settings.unreadIndicators.subtitle": "Pokazuj na tym komputerze plakietki, kropki, liczniki i alerty o nowych wiadomościach. Wyłącz, aby je wyciszyć; zatwierdzenia, pytania, logowania, oczekujące rutyny i błędy nadal się pokazują, a nic nie jest oznaczane jako przeczytane.",
   "settings.unreadIndicators.show": "Pokaż wskaźniki nieprzeczytanych",
   "notifications.title": "Powiadomienia",
   "notifications.railUnread": "Powiadomienia, nieprzeczytane: {count}",

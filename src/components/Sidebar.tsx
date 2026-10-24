@@ -1497,7 +1497,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
     resetSectionDrag();
   };
   const archivedBots = state.bots.filter((bot) => bot.hidden && !bot.movedTo);
-  const attention = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups);
+  const attention = crossBotAttentionThreads(state.bots, state.pendingQueued, undefined, state.groups, unreadIndicators);
   const pinnedThreads = crossBotPinnedThreads(state.bots, state.groups, state.pendingQueued);
   const pendingBotUndo = teamFeedback?.restoreBot;
   const botRow = (bot: Bot) => botRowProps(state, dispatch, bot, { density, quiet: quietRows, query: q, onMenu: setMenu });

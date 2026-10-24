@@ -7,21 +7,22 @@ import { t } from "@/lib/i18n";
 import { isArchived, orderedSidebarThreads, orderedThreadList, threadRecency, threadUpdatedLabel } from "./SidebarThreadRow";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
 import { localizedTaskTitle } from "@/lib/task-title";
+import { useUnreadIndicators } from "@/lib/notification-preferences";
 
-export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false): Array<Task & { queued: boolean }> {
+export function sidebarBotActivityTasks(bot: Bot, queued: Record<string, unknown[]>, archivedApprovals = false, showUnread = true): Array<Task & { queued: boolean }> {
   const tasks = bot.tasks ?? [{
     threadId: bot.threadId, title: t("task.newShort"), createdAt: 0,
     busy: bot.busy, activity: bot.activity, unread: bot.unread,
     waitingForTeammates: bot.waitingForTeammates,
   }];
-  return tasks.map((task) => ({ ...task, queued: Boolean(queued[task.threadId]?.length) }))
+  return tasks.map((task) => ({ ...task, unread: showUnread && task.unread, queued: Boolean(queued[task.threadId]?.length) }))
     .filter((task) => !task.routineRunId)
     .filter((task) => !isArchived(task) || (archivedApprovals && task.activity === "waiting-on-you"))
     .filter((task) => task.activity === "waiting-on-you" || task.activity === "working" || task.busy || task.waitingForTeammates === true || task.queued || task.unread);
 }
 
-export function threadsWhenTreeHidden(bot: Bot, queued: Record<string, unknown[]>) {
-  const attention = sidebarBotActivityTasks(bot, queued);
+export function threadsWhenTreeHidden(bot: Bot, queued: Record<string, unknown[]>, showUnread = true) {
+  const attention = sidebarBotActivityTasks(bot, queued, false, showUnread);
   const seen = new Set(attention.map((task) => task.threadId));
   const pinned = (bot.tasks ?? [])
     .filter((task) => task.pinned === true && !task.routineRunId && !seen.has(task.threadId))
@@ -30,13 +31,13 @@ export function threadsWhenTreeHidden(bot: Bot, queued: Record<string, unknown[]
 }
 
 /** Must derive each thread's state exactly as GroupThreadList's sidebar rows do. */
-export function sidebarGroupActivityTasks(group: Group, bots: Bot[], queued: Record<string, unknown[]>): Array<Task & { queued: boolean }> {
+export function sidebarGroupActivityTasks(group: Group, bots: Bot[], queued: Record<string, unknown[]>, showUnread = true): Array<Task & { queued: boolean }> {
   if (group.dm) return [];
   const tasks = (group.tasks ?? [{ threadId: group.threadId, title: group.name, createdAt: group.createdAt }]).map((task) => {
     const speakerId = roomThreadSpeakerId(group, task.threadId);
     const waiting = Boolean(speakerId) && bots.find((bot) => bot.id === speakerId)?.activity === "waiting-on-you";
     return {
-      ...task, busy: roomThreadWorking(group, task.threadId), unread: task.threadId === group.threadId && Boolean(group.unread),
+      ...task, busy: roomThreadWorking(group, task.threadId), unread: showUnread && task.threadId === group.threadId && Boolean(group.unread),
       activity: waiting ? "waiting-on-you" as const : undefined,
     };
   });
@@ -94,15 +95,15 @@ type FlatAttentionEntry = Task & {
 };
 
 export function crossBotAttentionThreads(
-  bots: Bot[], queued: Record<string, unknown[]>, exceptBotId?: string, groups: Group[] = [],
+  bots: Bot[], queued: Record<string, unknown[]>, exceptBotId?: string, groups: Group[] = [], showUnread = true,
 ): AttentionThread[] {
   const flat: FlatAttentionEntry[] = [
     ...bots
       .filter((bot) => bot.id !== exceptBotId && !bot.hidden)
-      .flatMap((bot): FlatAttentionEntry[] => sidebarBotActivityTasks(bot, queued, true)
+      .flatMap((bot): FlatAttentionEntry[] => sidebarBotActivityTasks(bot, queued, true, showUnread)
         .map((task) => ({ ...task, botId: bot.id, botName: bot.name }))),
     ...groups
-      .flatMap((group): FlatAttentionEntry[] => sidebarGroupActivityTasks(group, bots, queued)
+      .flatMap((group): FlatAttentionEntry[] => sidebarGroupActivityTasks(group, bots, queued, showUnread)
         .map((task) => ({ ...task, groupId: group.id, groupName: group.name, groupThreadId: group.threadId }))),
   ];
   return orderedSidebarThreads(flat, "").map(({ botId, botName, groupId, groupName, groupThreadId, ...task }): AttentionThread =>
@@ -182,7 +183,7 @@ export function PinnedThreadRows({ entries, now, onJump, onUnpin }: { entries: A
 }
 
 export function SidebarBotActivity({ bot, rowThreadId, density, pendingQueued, dispatch }: { bot: Bot; rowThreadId: string; density: SidebarDensity; pendingQueued: AppState["pendingQueued"]; dispatch: Dispatch<Action> }) {
-  const tasks = threadsWhenTreeHidden(bot, pendingQueued).filter((task) => task.threadId !== rowThreadId);
+  const tasks = threadsWhenTreeHidden(bot, pendingQueued, useUnreadIndicators()).filter((task) => task.threadId !== rowThreadId);
   if (!tasks.length) return null;
   const iconOnly = density === "icons";
   return <div data-sidebar-bot-activity={bot.id} className={cn("mb-1 space-y-0.5", !iconOnly && "ml-6")}>

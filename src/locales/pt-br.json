@@ -1040,7 +1040,7 @@
   "settings.notificationFeed.subtitle": "Mostra um sino na borda direita da janela que guarda as últimas 500 notificações de todos os bots, lidas ou não.",
   "settings.notificationFeed.show": "Mostrar o feed de notificações",
   "settings.unreadIndicators.title": "Indicadores de não lidas",
-  "settings.unreadIndicators.subtitle": "Mostra selos, pontos, contadores e alertas de novas mensagens neste computador. Desative para silenciá-los; aprovações e perguntas aguardando você continuam aparecendo e nada é marcado como lido.",
+  "settings.unreadIndicators.subtitle": "Mostra selos, pontos, contadores e alertas de novas mensagens neste computador. Desative para silenciá-los; aprovações, perguntas, logins, rotinas em espera e falhas continuam aparecendo e nada é marcado como lido.",
   "settings.unreadIndicators.show": "Mostrar indicadores de não lidas",
   "notifications.title": "Notificações",
   "notifications.railUnread": "Notificações, {count} não lidas",

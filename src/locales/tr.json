@@ -779,7 +779,7 @@
   "settings.notificationFeed.subtitle": "Pencerenin sağ kenarında, okunmuş olsun olmasın her bottan gelen son 500 bildirimi tutan bir zil göster.",
   "settings.notificationFeed.show": "Bildirim akışını göster",
   "settings.unreadIndicators.title": "Okunmamış göstergeleri",
-  "settings.unreadIndicators.subtitle": "Bu bilgisayarda okunmamış rozetlerini, noktalarını, sayaçlarını ve yeni mesaj uyarılarını gösterir. Kapatırsanız sessize alınır; sizi bekleyen onaylar ve sorular yine görünür, hiçbir şey okundu olarak işaretlenmez.",
+  "settings.unreadIndicators.subtitle": "Bu bilgisayarda okunmamış rozetlerini, noktalarını, sayaçlarını ve yeni mesaj uyarılarını gösterir. Kapatırsanız sessize alınır; onaylar, sorular, oturum açma istekleri, bekleyen rutinler ve hatalar yine görünür, hiçbir şey okundu olarak işaretlenmez.",
   "settings.unreadIndicators.show": "Okunmamış göstergelerini göster",
   "notifications.title": "Bildirimler",
   "notifications.railUnread": "Bildirimler, {count} okunmamış",

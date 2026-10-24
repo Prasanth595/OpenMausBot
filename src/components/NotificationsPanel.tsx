@@ -196,6 +196,7 @@ export function NotificationsPanel() {
 
 function NotificationRow({ entry, now, bot, threadName, onOpen }: { entry: NotificationLogEntry; now: number; bot: BotAvatarProps["bot"] | null; threadName: string | null; onOpen: () => void }) {
   const { Icon, className, status } = KIND_LOOK[entry.kind] ?? KIND_LOOK.done;
+  const unread = useUnreadIndicators() && !entry.read;
   return (
     <button
       type="button"
@@ -203,7 +204,7 @@ function NotificationRow({ entry, now, bot, threadName, onOpen }: { entry: Notif
       title={entry.title}
       className={cn(
         "flex w-full gap-2.5 border-b border-hairline/20 px-3.5 py-2.5 text-left hover:bg-raised/60",
-        !entry.read && "bg-accent/5",
+        unread && "bg-accent/5",
       )}
     >
       {bot ? (
@@ -213,7 +214,7 @@ function NotificationRow({ entry, now, bot, threadName, onOpen }: { entry: Notif
       )}
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-1.5 text-[12.5px] font-medium text-ink">
-          {!entry.read && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}
+          {unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true" />}
           {threadName ? (
             <>
               <span className="shrink-0 max-w-[45%] truncate">{entry.botName}</span>

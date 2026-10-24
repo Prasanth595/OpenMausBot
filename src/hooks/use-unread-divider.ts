@@ -11,7 +11,7 @@ export function useUnreadDivider({ threadId, messages, following }: {
 }): { messageId: string | null; fading: boolean } {
   const { state, dispatch } = useStore();
   const indicators = useUnreadIndicators();
-  const messageId = indicators && state.unreadDivider?.threadId === threadId ? state.unreadDivider.messageId : null;
+  const messageId = state.unreadDivider?.threadId === threadId ? state.unreadDivider.messageId : null;
   const newestOwnId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i]!.role === "user" && !peerLine(messages[i]!)) return messages[i]!.id;
@@ -41,5 +41,5 @@ export function useUnreadDivider({ threadId, messages, following }: {
     };
   }, [messageId, caughtUp, threadId, dispatch]);
 
-  return { messageId, fading: messageId !== null && fadingId === messageId };
+  return indicators ? { messageId, fading: messageId !== null && fadingId === messageId } : { messageId: null, fading: false };
 }

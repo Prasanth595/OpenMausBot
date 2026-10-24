@@ -12,11 +12,11 @@ describe("unread indicator predicates", () => {
     expect(notifyKindSilencedByUnreadSwitch(true, kind)).toBe(false);
   });
 
-  it.each(["done", "mention", "brief", "delegation-settled", "routine-deferred"] as const)("silences %s while off", (kind) => {
+  it.each(["done", "mention", "brief", "delegation-settled"] as const)("silences %s while off", (kind) => {
     expect(notifyKindSilencedByUnreadSwitch(false, kind)).toBe(true);
   });
 
-  it.each(["approval", "question", "sign-in", "incident", "turn-failed", "routine-failed", "spend"] as const)("never silences %s", (kind) => {
+  it.each(["approval", "question", "sign-in", "incident", "turn-failed", "routine-failed", "routine-deferred", "spend"] as const)("never silences %s", (kind) => {
     expect(notifyKindSilencedByUnreadSwitch(false, kind)).toBe(false);
   });
 });

@@ -1,6 +1,7 @@
 import { useDesktopCapabilities } from "../DesktopCapabilities";
 import { browserAvailable, builtInBrowserEnabled } from "@/lib/feature-flags";
 import { stateForBot } from "@/lib/mascot";
+import { useUnreadIndicators } from "@/lib/notification-preferences";
 import { useStore, type Bot } from "@/state/store";
 import { approvalModeFor } from "../../../shared/approval-mode";
 import { connectorGrantsState, type ConnectorGrantsState } from "@/lib/connector-grants";
@@ -56,7 +57,7 @@ export function useBotSettingsDerived(bot: Bot) {
   const { state, dispatch } = useStore();
   const { capabilities } = useDesktopCapabilities();
   const patch = (p: BotPatch) => dispatch({ type: "updateBot", botId: bot.id, patch: p });
-  const activeState = stateForBot(bot);
+  const activeState = stateForBot(bot, useUnreadIndicators());
   const mascotMotion = state.mascotMotion?.botId === bot.id ? state.mascotMotion : null;
   const engine = state.instances.find((instance) => instance.instanceId === bot.modelSelection.instanceId);
   const approvalMode = approvalModeFor(bot);
