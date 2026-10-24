@@ -407,6 +407,10 @@ describe("a local app", () => {
     }
   });
 
+  it("starts Figma with its usage reporting to PostHog turned off", () => {
+    expect(LOCAL_APPS.figma?.args).toContain("--no-telemetry");
+  });
+
   it("keeps its marker through an edit, which can neither add, change nor remove it", () => {
     const stored = parseStoredMcpServer("trello", { ...TRELLO, localApp: "trello" });
     expect(stored).toEqual({ ok: true, server: { ...TRELLO, enabled: true, localApp: "trello" } });

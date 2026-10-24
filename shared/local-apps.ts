@@ -95,7 +95,8 @@ export const LOCAL_APPS: Readonly<Record<string, LocalAppRecipe>> = {
   },
   figma: {
     command: "npx",
-    args: ["-y", "figma-developer-mcp@0.13.2", "--stdio"],
+    /** figma-developer-mcp 0.13.2 reports every tool call to PostHog unless started with --no-telemetry. */
+    args: ["-y", "figma-developer-mcp@0.13.2", "--stdio", "--no-telemetry"],
     env: [{ name: "FIGMA_API_KEY", secret: true, url: "https://help.figma.com/hc/en-us/articles/8085703771159-Manage-personal-access-tokens" }],
     source: "https://github.com/GLips/Figma-Context-MCP",
   },
