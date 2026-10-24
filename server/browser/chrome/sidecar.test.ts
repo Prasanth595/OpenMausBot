@@ -13,23 +13,153 @@ const IDENTITY: ChromeIdentity = {
   },
 };
 
+type FakeSend = (
+  method: string,
+  params: Record<string, unknown> | undefined,
+  sessionId: string | undefined,
+  attach: (sessionId: string, type: string, parent?: string) => void,
+) => Promise<Record<string, unknown>>;
+
 /** A browser connection that records what is sent and lets the test attach targets. */
-function fakeBrowser() {
+function fakeBrowser(onSend: FakeSend = async () => ({})) {
   const sent: Array<{ method: string; params?: Record<string, unknown>; sessionId?: string }> = [];
   let listeners: CdpListeners = {};
-  const cdp: Cdp = {
-    send: async (method, params, sessionId) => { sent.push({ method, params, sessionId }); return {}; },
-    close: () => listeners.closed?.(),
-  };
-  const connect = vi.fn(async (_url: string, _timeoutMs?: number, given: CdpListeners = {}) => { listeners = given; return cdp; });
+  let closed = false;
   const attach = (sessionId: string, type: string, parent?: string) =>
     listeners.event?.({ method: "Target.attachedToTarget", params: { sessionId, targetInfo: { type, url: "" }, waitingForDebugger: true }, ...(parent ? { sessionId: parent } : {}) });
+  const cdp: Cdp = {
+    send: async (method, params, sessionId) => { sent.push({ method, params, sessionId }); return onSend(method, params, sessionId, attach); },
+    close: () => { closed = true; listeners.closed?.(); },
+  };
+  const connect = vi.fn(async (_url: string, _timeoutMs?: number, given: CdpListeners = {}) => { listeners = given; return cdp; });
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
   const on = (sessionId: string) => sent.filter((message) => message.sessionId === sessionId).map((message) => message.method);
-  return { sent, connect, attach, settle, on, drop: () => listeners.closed?.() };
+  return { sent, connect, attach, settle, on, drop: () => listeners.closed?.(), get closed() { return closed; } };
+}
+
+function gate() {
+  let releaseGate = () => {};
+  const promise = new Promise<void>((resolve) => { releaseGate = resolve; });
+  return { promise, release: () => releaseGate() };
 }
 
 describe("the identity sidecar", () => {
+  it("waits for initial page and iframe setup before reporting ready", async () => {
+    const overrideStarted = gate();
+    const overrideAck = gate();
+    const nestedAttachStarted = gate();
+    const nestedAttachAck = gate();
+    const resumeStarted = gate();
+    const resumeAck = gate();
+    const frameOverrideStarted = gate();
+    const frameOverrideAck = gate();
+    const browser = fakeBrowser(async (method, _params, sessionId, attach) => {
+      if (method === "Target.setAutoAttach" && sessionId === undefined) attach("initial-page", "page");
+      if (method === "Emulation.setUserAgentOverride" && sessionId === "initial-page") {
+        overrideStarted.release();
+        await overrideAck.promise;
+      }
+      if (method === "Target.setAutoAttach" && sessionId === "initial-page") {
+        attach("initial-frame", "iframe", "initial-page");
+        nestedAttachStarted.release();
+        await nestedAttachAck.promise;
+      }
+      if (method === "Runtime.runIfWaitingForDebugger" && sessionId === "initial-page") {
+        resumeStarted.release();
+        await resumeAck.promise;
+      }
+      if (method === "Emulation.setUserAgentOverride" && sessionId === "initial-frame") {
+        frameOverrideStarted.release();
+        await frameOverrideAck.promise;
+      }
+      return {};
+    });
+    let ready = false;
+    const starting = startIdentitySidecar("ws://127.0.0.1:9/devtools/browser/x", IDENTITY, browser.connect).then((sidecar) => {
+      ready = true;
+      return sidecar;
+    });
+
+    await overrideStarted.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(ready).toBe(false);
+    overrideAck.release();
+    await nestedAttachStarted.promise;
+    expect(ready).toBe(false);
+    nestedAttachAck.release();
+    await resumeStarted.promise;
+    expect(ready).toBe(false);
+    resumeAck.release();
+    await frameOverrideStarted.promise;
+    expect(ready).toBe(false);
+    frameOverrideAck.release();
+    await starting;
+
+    expect(ready).toBe(true);
+    expect(browser.on("initial-page")).toEqual([
+      "Emulation.setUserAgentOverride",
+      "Target.setAutoAttach",
+      "Runtime.runIfWaitingForDebugger",
+    ]);
+    expect(browser.on("initial-frame")).toEqual([
+      "Emulation.setUserAgentOverride",
+      "Target.setAutoAttach",
+      "Runtime.runIfWaitingForDebugger",
+    ]);
+  });
+
+  it("does not wait for an initial worker's override acknowledgement", async () => {
+    const overrideStarted = gate();
+    const overrideAck = gate();
+    const browser = fakeBrowser(async (method, _params, sessionId, attach) => {
+      if (method === "Target.setAutoAttach" && sessionId === undefined) attach("initial-worker", "service_worker");
+      if (method === "Network.setUserAgentOverride" && sessionId === "initial-worker") {
+        overrideStarted.release();
+        await overrideAck.promise;
+      }
+      return {};
+    });
+    let ready = false;
+    const starting = startIdentitySidecar("ws://127.0.0.1:9/devtools/browser/x", IDENTITY, browser.connect).then((sidecar) => {
+      ready = true;
+      return sidecar;
+    });
+
+    await overrideStarted.promise;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(ready).toBe(true);
+    overrideAck.release();
+    await starting;
+    expect(browser.on("initial-worker")).toEqual([
+      "Emulation.setUserAgentOverride",
+      "Network.setUserAgentOverride",
+      "Runtime.runIfWaitingForDebugger",
+    ]);
+  });
+
+  it("finishes an initial page setup after an override error", async () => {
+    const browser = fakeBrowser(async (method, _params, sessionId, attach) => {
+      if (method === "Target.setAutoAttach" && sessionId === undefined) attach("initial-page", "page");
+      if (method === "Emulation.setUserAgentOverride" && sessionId === "initial-page") throw new Error("override failed");
+      return {};
+    });
+
+    await startIdentitySidecar("ws://127.0.0.1:9/devtools/browser/x", IDENTITY, browser.connect);
+
+    expect(browser.on("initial-page")).toEqual(["Emulation.setUserAgentOverride", "Runtime.runIfWaitingForDebugger"]);
+  });
+
+  it("closes the connection when initial auto-attach fails", async () => {
+    const browser = fakeBrowser(async (method) => {
+      if (method === "Target.setAutoAttach") throw new Error("auto-attach failed");
+      return {};
+    });
+
+    await expect(startIdentitySidecar("ws://127.0.0.1:9/devtools/browser/x", IDENTITY, browser.connect)).rejects.toThrow("auto-attach failed");
+
+    expect(browser.closed).toBe(true);
+  });
+
   it("holds every new page and worker until it has the browser's own identity, then lets it run", async () => {
     const browser = fakeBrowser();
     await startIdentitySidecar("ws://127.0.0.1:9/devtools/browser/x", IDENTITY, browser.connect);

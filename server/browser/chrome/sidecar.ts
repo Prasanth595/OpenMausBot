@@ -31,14 +31,25 @@ export async function startIdentitySidecar(url: string, identity: SidecarIdentit
   let onClosed!: () => void;
   const closed = new Promise<void>((resolve) => { onClosed = resolve; });
   let cdp: Cdp | null = null;
+  let capturingInitialPages = true;
+  const initialPageSetups = new Set<Promise<void>>();
   const configure = (message: CdpEvent) => {
     if (message.method !== "Target.attachedToTarget" || !cdp) return;
     const { sessionId, targetInfo } = (message.params ?? {}) as { sessionId?: string; targetInfo?: { type?: string } };
-    if (typeof sessionId === "string") void applyIdentity(cdp, sessionId, targetInfo?.type ?? "", identity, options);
+    if (typeof sessionId !== "string") return;
+    const type = targetInfo?.type ?? "";
+    const setup = applyIdentity(cdp, sessionId, type, identity, options);
+    if (capturingInitialPages && (type === "page" || type === "iframe")) initialPageSetups.add(setup);
   };
   cdp = await connect(url, 15_000, { event: configure, closed: () => onClosed() });
   try {
     await cdp.send("Target.setAutoAttach", { ...PAUSED_ON_START, filter: BROWSER_TARGETS });
+    while (initialPageSetups.size) {
+      const pending = [...initialPageSetups];
+      await Promise.all(pending);
+      for (const setup of pending) initialPageSetups.delete(setup);
+    }
+    capturingInitialPages = false;
   } catch (error) {
     cdp.close();
     throw error;
