@@ -54,20 +54,47 @@ export interface StepRecord {
   events: Array<{ type: string; data: Record<string, unknown> }>;
 }
 
+export interface V1SessionOptions {
+  settleMs?: number;
+  frameSteps?: ReadonlySet<string>;
+  frameTimeoutMs?: number;
+}
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Runs every step, acking each frame as a phone does, and returns the events each step brought. */
-export async function runV1Session(driver: LiveDriver, origin: string, { settleMs = 1_200 } = {}): Promise<StepRecord[]> {
+export async function runV1Session(driver: LiveDriver, origin: string, {
+  settleMs = 1_200,
+  frameSteps,
+  frameTimeoutMs = 30_000,
+}: V1SessionOptions = {}): Promise<StepRecord[]> {
   const sse = new SseRecorder();
   let viewerId = "";
   sse.on("event", (event: { type: string; data: Record<string, unknown> }) => {
     if (event.type === "ready") viewerId = String(event.data.viewerId);
     if (event.type === "frame" && viewerId) void driver.action(viewerId, { type: "ack", seq: event.data.seq }).catch(() => undefined);
   });
+  const waitForJpeg = (name: string) => new Promise<void>((resolve, reject) => {
+    let timeout: ReturnType<typeof setTimeout>;
+    const onEvent = (event: { type: string; data: Record<string, unknown> }) => {
+      if (event.type !== "frame" || event.data.format !== "jpeg") return;
+      clearTimeout(timeout);
+      sse.off("event", onEvent);
+      resolve();
+    };
+    timeout = setTimeout(() => {
+      sse.off("event", onEvent);
+      reject(new Error(`Timed out waiting for a JPEG frame after v1 step "${name}"`));
+    }, frameTimeoutMs);
+    sse.on("event", onEvent);
+  });
   const records: StepRecord[] = [];
   let mark = 0;
   const step = async (name: string, run: () => Promise<unknown>) => {
+    const frame = frameSteps?.has(name) ? waitForJpeg(name) : null;
+    if (frame) void frame.catch(() => undefined);
     const answer = await run().catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }));
+    if (frame) await frame;
     await sleep(settleMs);
     records.push({ step: name, answer, events: sse.events.slice(mark) });
     mark = sse.events.length;
