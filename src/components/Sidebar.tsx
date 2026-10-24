@@ -126,6 +126,7 @@ import { SIMPLE_RAIL_BUTTON, SIMPLE_TOP_BUTTON, SidebarEdgeToggle, SidebarSearch
 import { SidebarRailSeparator, SimpleRailFooter } from "./SidebarSimpleRail";
 import { useShowThreads } from "@/lib/thread-preferences";
 import { botShowsUnread } from "@/lib/bot-unread";
+import { useUnreadIndicators } from "@/lib/notification-preferences";
 import { attentionHasRunningWork, attentionJumpAction, attentionTriggerLabel, attentionUnpinAction, AttentionThreadRows, crossBotAttentionThreads, crossBotPinnedThreads, SidebarBotActivity, sidebarBotActivityTasks } from "./SidebarBotActivity";
 import { SidebarAttentionPanel } from "./SidebarAttentionPanel";
 import { SidebarPinnedThreadsPanel } from "./SidebarPinnedThreadsPanel";
@@ -203,6 +204,7 @@ export function GroupListItem({
     .map((id) => state.bots.find((b) => b.id === id))
     .filter((b): b is Bot => Boolean(b));
   const last = group.messages.at(-1);
+  const groupUnread = useUnreadIndicators() && Boolean(group.unread);
   return (
     <>
     <div className={cn("group relative", railTile && "mx-auto w-[52px]")}>
@@ -235,16 +237,14 @@ export function GroupListItem({
         <div className="flex items-baseline justify-between gap-2">
           <span className={cn("truncate text-[14px] text-ink", simpleRow ? "font-normal leading-[19px]" : "font-semibold")}>{group.name}</span>
           {selected && last && !expanded && <span className="shrink-0 text-[10px] text-ink-secondary">{formatTime(last.at)}</span>}
-          {(expanded || (quiet && !groupStatus)) && group.unread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
+          {(expanded || (quiet && !groupStatus)) && groupUnread && <span className="size-1.5 shrink-0 rounded-full bg-accent" aria-label={t("task.unreadMany")} />}
         </div>
         {!expanded && (!quiet || groupStatus) && <div className="flex items-center justify-between gap-2">
           <span className={cn("truncate text-ink-secondary", simpleRow ? "text-[13px] leading-[18px]" : "text-[11px]")}>{group.description || groupPreview(group, state.bots, state.instances, advanced)}</span>
-          {group.unread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
+          {groupUnread && <span className="size-2 shrink-0 rounded-full bg-accent" />}
         </div>}
       </div>
-      {density === "icons" && group.unread && (
-        <span className={cn("absolute size-2 rounded-full border border-panel bg-accent", railTile ? "right-1 top-1" : "bottom-1.5 right-1.5")} />
-      )}
+      {density === "icons" && groupUnread && <span className={cn("absolute size-2 rounded-full border border-panel bg-accent", railTile ? "right-1 top-1" : "bottom-1.5 right-1.5")} />}
     </button>
     {!group.dm && density !== "icons" && hasThreadList && <button type="button" aria-label={t(expanded ? "task.collapseNamed" : "task.expandNamed", { name: group.name })} aria-expanded={expanded}
       onClick={() => setThreadsOpen((open) => !open)} className="absolute left-0.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded text-ink-secondary outline-none hover:text-ink focus-visible:ring-1 focus-visible:ring-accent/60">
@@ -262,12 +262,13 @@ export function GroupListItem({
 export function GroupThreadList({ group, selected, density = "comfortable", query = "" }: { group: Group; selected: boolean; density?: SidebarDensity; query?: string }) {
   const { state, dispatch } = useStore();
   const now = useRelativeNow();
+  const unreadOn = useUnreadIndicators();
   const [showAll, setShowAll] = useState(false);
   const tasks = (group.tasks ?? [{ threadId: group.threadId, title: group.name, createdAt: group.createdAt }]).map((task) => {
     const speakerId = roomThreadSpeakerId(group, task.threadId);
     const waiting = Boolean(speakerId) && state.bots.find((bot) => bot.id === speakerId)?.activity === "waiting-on-you";
     return {
-      ...task, busy: roomThreadWorking(group, task.threadId), unread: task.threadId === group.threadId && group.unread,
+      ...task, busy: roomThreadWorking(group, task.threadId), unread: unreadOn && task.threadId === group.threadId && group.unread,
       activity: waiting ? "waiting-on-you" as const : undefined,
     };
   });
@@ -744,9 +745,10 @@ export function BotThreadList({ bot, selected, density, query, pendingQueued, re
   hidden?: boolean;
 }) {
   const now = useRelativeNow();
+  const unreadOn = useUnreadIndicators();
   const tasks = (bot.tasks ?? [{ threadId: bot.threadId, title: t("task.newShort"), createdAt: 0 }])
     .filter((task) => !task.routineRunId)
-    .map((task) => ({ ...task, queued: Boolean(pendingQueued[task.threadId]?.length) }));
+    .map((task) => ({ ...task, unread: unreadOn && task.unread, queued: Boolean(pendingQueued[task.threadId]?.length) }));
   const projects = bot.projects ?? NO_FOLDERS;
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [editingProject, setEditingProject] = useState<string | null>(null);
@@ -1013,7 +1015,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
   const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
   const teammateWait = !waiting && !working && (Boolean(bot.waitingForTeammates) || activityTasks.some((task) => Boolean(task.waitingForTeammates)));
   const queued = activityTasks.some((task) => task.queued);
-  const unread = botShowsUnread(bot);
+  const unreadOn = useUnreadIndicators(), unread = unreadOn && botShowsUnread(bot);
   const onLiveCall = liveBadgeFor(bot.id, liveMedia, liveCall);
   const statusLine = deleting || working || waiting || teammateWait || queued;
   const body = (
@@ -1021,7 +1023,7 @@ export const BotListItem = memo(function BotListItem(props: BotRowProps) {
       <span className="relative flex shrink-0" title={iconOnly ? undefined : [bot.name, ...details].join(" · ")}>
         <BotAvatar
           bot={bot}
-          state={stateForBot({ ...bot, messages: visible })}
+          state={stateForBot({ ...bot, messages: visible }, unreadOn)}
           size={avatarSize}
           motion={mascotMotion?.kind ?? "none"}
           motionKey={mascotMotion?.nonce ?? 0}
@@ -1256,7 +1258,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
   const deletingRoom = deletingRoomId ? state.groups.find((g) => g.id === deletingRoomId) : undefined;
   const [plusOpen, setPlusOpen] = useState(false);
   const plusMotion = useMenuMotion(plusOpen);
-  const advanced = useAdvancedMode();
+  const advanced = useAdvancedMode(), unreadIndicators = useUnreadIndicators();
   const [attentionOpen, setAttentionOpen] = useState(false);
   const attentionMotion = useMenuMotion(attentionOpen);
   const [attentionPinned, setAttentionPinnedState] = useState(() => loadSidebarAttentionPinned());
@@ -1810,10 +1812,7 @@ export function Sidebar({ open, onClose, collapseToIcons = false }: {
             const queued = collapsed ? [...sectionChiefItems, ...sectionBotItems].flatMap((bot) =>
               sidebarBotActivityTasks(bot, state.pendingQueued).filter((task) => task.queued).map((task) => `${bot.name}: ${task.title}`)) : [];
             const attention = collapsed
-              ? sidebarSectionAttention(
-                  [...sectionChiefItems, ...sectionBotItems],
-                  sectionGroupItems,
-                )
+              ? sidebarSectionAttention([...sectionChiefItems, ...sectionBotItems], sectionGroupItems, unreadIndicators)
               : undefined;
             return (
               <div

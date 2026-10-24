@@ -150,7 +150,7 @@ export type MascotBotProfile = {
   messages?: MascotMessage[];
 };
 
-export function stateForBot(bot: MascotBotProfile): MausState {
+export function stateForBot(bot: MascotBotProfile, showUnread = true): MausState {
   const pinned = normalizeState(bot.mascotExpression);
   if (pinned) return pinned;
 
@@ -158,7 +158,7 @@ export function stateForBot(bot: MascotBotProfile): MausState {
 
   if (last?.kind === "activity" && last.tool?.ok === false) return "alerting";
   if (bot.busy) return "working";
-  if (botShowsUnread(bot)) return "notifying";
+  if (showUnread && botShowsUnread(bot)) return "notifying";
   if (last?.kind === "options") return "curious";
 
   const profile = `${bot.name} ${bot.title ?? ""} ${bot.description ?? ""}`.toLowerCase();

@@ -13,6 +13,8 @@ vi.mock("@/lib/notification-preferences", () => ({
   setNotificationFeed: vi.fn(),
   useFinishedNotifications: () => fixture.optedIn,
   setFinishedNotifications: fixture.setFinishedNotifications,
+  useUnreadIndicators: () => true,
+  setUnreadIndicators: vi.fn(),
 }));
 
 let root: Root | undefined;

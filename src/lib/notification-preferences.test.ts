@@ -190,3 +190,24 @@ describe("finished-work notifications preference", () => {
     expect(preference.finishedNotificationsEnabled()).toBe(true);
   });
 });
+
+describe("unread indicators preference", () => {
+  it("defaults on, persists off through a reload and follows cross-window changes", async () => {
+    let preference = await import("./notification-preferences");
+    expect(preference.useUnreadIndicators()).toBe(true);
+    expect(local.setItem).not.toHaveBeenCalled();
+    const listener = vi.fn();
+    const unsubscribe = hook.subscribe!(listener);
+    preference.setUnreadIndicators(false);
+    expect(local.getItem(preference.UNREAD_INDICATORS_KEY)).toBe("0");
+    expect(listener).toHaveBeenCalledOnce();
+
+    vi.resetModules();
+    preference = await import("./notification-preferences");
+    expect(preference.unreadIndicatorsEnabled()).toBe(false);
+    local.setItem(preference.UNREAD_INDICATORS_KEY, "1");
+    storageEvent(preference.UNREAD_INDICATORS_KEY);
+    expect(preference.unreadIndicatorsEnabled()).toBe(true);
+    unsubscribe();
+  });
+});

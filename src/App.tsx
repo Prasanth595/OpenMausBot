@@ -24,7 +24,8 @@ import {
 } from "@/components/lazy-screens";
 import { WorkspaceBackupRecovery } from "@/components/WorkspaceBackupSettings";
 import { NotificationRail, NotificationsPanel } from "@/components/NotificationsPanel";
-import { useNotificationFeed } from "@/lib/notification-preferences";
+import { useNotificationFeed, useUnreadIndicators } from "@/lib/notification-preferences";
+import { unreadCountShown } from "@/lib/unread-indicators";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { AppNotices } from "@/components/AppNotices";
 import { CloudAsleepStrip } from "@/components/CloudAsleepStrip";
@@ -64,9 +65,10 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
   const showThreads = useShowThreads();
   const { capabilities } = useDesktopCapabilities();
   const captionChrome = useCaptionChrome();
-  const unreadCount =
-    state.bots.filter((bot) => !bot.hidden && botShowsUnread(bot)).length +
-    state.groups.filter((group) => group.unread).length;
+  const unreadCount = unreadCountShown(
+    useUnreadIndicators(),
+    state.bots.filter((bot) => !bot.hidden && botShowsUnread(bot)).length + state.groups.filter((group) => group.unread).length,
+  );
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const twoSidePanelsFit = useMediaQuery(TWO_SIDE_PANELS_FIT, true);
   const sidebarAndPanelFit = useMediaQuery(SIDEBAR_AND_PANEL_FIT, true);

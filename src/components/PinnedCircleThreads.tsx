@@ -6,6 +6,7 @@ import { avatarCropRadius, botAvatarProfile } from "../../shared/bot-avatar";
 import { liveActivityLabel } from "@/lib/live-activity";
 import { BotAvatar } from "./Avatar";
 import { stateForBot } from "@/lib/mascot";
+import { useUnreadIndicators } from "@/lib/notification-preferences";
 import { cn } from "@/lib/cn";
 import { searchMatchesThreads, useSearchDisclosure } from "@/lib/search-disclosure";
 import { lastNonReceipt } from "@/lib/receipts";
@@ -115,7 +116,8 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
   const activityTasks = sidebarBotActivityTasks(bot, pendingQueued);
   const waiting = bot.activity === "waiting-on-you" || activityTasks.some((task) => task.activity === "waiting-on-you");
   const working = !waiting && (Boolean(bot.busy) || activityTasks.some((task) => task.busy || task.activity === "working"));
-  const unread = bot.unread || activityTasks.some((task) => task.unread);
+  const unreadOn = useUnreadIndicators();
+  const unread = unreadOn && (bot.unread || activityTasks.some((task) => task.unread));
   const radius = avatarCropRadius(botAvatarProfile(bot).avatarCrop);
   return (
     <div className="flex w-full min-w-0 flex-col items-center">
@@ -179,11 +181,11 @@ export const PinnedBotCircle = memo(function PinnedBotCircle({
           >
             <BotAvatar
               bot={bot}
-              state={stateForBot({ ...bot, messages: visible })}
+              state={stateForBot({ ...bot, messages: visible }, unreadOn)}
               size={64}
               motion={mascotMotion?.kind ?? "none"}
               motionKey={mascotMotion?.nonce ?? 0}
-              animated={working || Boolean(bot.unread) || (mascotMotion?.kind ?? "none") !== "none"}
+              animated={working || (unreadOn && Boolean(bot.unread)) || (mascotMotion?.kind ?? "none") !== "none"}
             />
           </span>
           {unread && (
@@ -261,13 +263,14 @@ export function PinnedCircleThreadSection({
   row: (bot: Bot) => BotRowProps;
 }) {
   const name = t("sidebar.section.pinned");
+  const unreadOn = useUnreadIndicators();
   const ranked = rankPinnedCircles(bots, usePinnedCircleOrder());
   return (
     <div data-sidebar-pinned-circle-threads="" className="flex flex-col gap-0.5 pt-3">
       <SidebarSectionHeader
         name={name}
         collapsed={collapsed}
-        attention={collapsed ? sidebarSectionAttention(bots, []) : undefined}
+        attention={collapsed ? sidebarSectionAttention(bots, [], unreadOn) : undefined}
         onToggle={onToggle}
         reorderable={false}
         dragging={false}

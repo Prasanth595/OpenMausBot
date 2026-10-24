@@ -3,6 +3,12 @@ import { describe, expect, it } from "vitest";
 import { sidebarAttentionLabel, sidebarSectionAttention } from "./sidebar-attention";
 
 describe("collapsed sidebar attention", () => {
+  it("drops the unread count but keeps approval waits when unread indicators are off", () => {
+    const attention = sidebarSectionAttention([{ unread: true, activity: "waiting-on-you" }], [{ unread: true }], false);
+    expect(attention).toEqual({ unread: 0, waiting: 1, working: 0 });
+    expect(sidebarAttentionLabel(attention)).toBe("1 waiting for you");
+  });
+
   it("keeps unread chats and approval waits visible at the section level", () => {
     const attention = sidebarSectionAttention(
       [

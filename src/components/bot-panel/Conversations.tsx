@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp, Plus, Search } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 import { activeLocale, t } from "@/lib/i18n";
+import { useUnreadIndicators } from "@/lib/notification-preferences";
 import { SIDEBAR_INLINE, useMediaQuery } from "@/lib/use-media-query";
 import { api, currentTaskBot, openBotThread, useStore, visibleMessages, type Bot, type Message } from "@/state/store";
 import { lastLine } from "../sidebar-preview";
@@ -60,6 +61,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
   const [searching, setSearching] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const generatedTitles = llmThreadTitlesEnabled(state.config);
+  const unreadOn = useUnreadIndicators();
   const actions = useMemo(() => {
     const { onRename, onRegenerateTitle, onDelete, onMove, onPin } = threadRowActions(bot.id, dispatch, generatedTitles);
     return { onRename, onRegenerateTitle, onDelete, onMove, onPin };
@@ -70,7 +72,7 @@ export function BotConversations({ bot }: { bot: Bot }) {
     .map((task) => {
       const thread = currentTaskBot(bot, task.threadId);
       return {
-        ...task, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates,
+        ...task, unread: unreadOn && task.unread, busy: thread.busy, activity: thread.activity, waitingForTeammates: thread.waitingForTeammates,
         turnStartedAt: thread.turnStartedAt ?? undefined, queued: Boolean(state.pendingQueued[task.threadId]?.length),
       };
     });

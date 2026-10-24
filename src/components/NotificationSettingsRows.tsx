@@ -4,9 +4,11 @@ import {
   setFinishedNotifications,
   setNotificationFeed,
   setNotificationSounds,
+  setUnreadIndicators,
   useFinishedNotifications,
   useNotificationFeed,
   useNotificationSounds,
+  useUnreadIndicators,
 } from "@/lib/notification-preferences";
 import { requestNotificationPermission } from "@/lib/notify";
 import { SettingRow, Switch } from "./SettingsPrimitives";
@@ -17,6 +19,7 @@ export function NotificationRows() {
       <DeviceNotificationsRow />
       <NotificationSoundsRow />
       <NotificationFeedRow />
+      <UnreadIndicatorsRow />
     </>
   );
 }
@@ -85,6 +88,19 @@ export function NotificationFeedRow() {
         checked={enabled}
         aria-label={t("settings.notificationFeed.show")}
         onClick={() => setNotificationFeed(!enabled)}
+      />
+    </SettingRow>
+  );
+}
+
+export function UnreadIndicatorsRow() {
+  const enabled = useUnreadIndicators();
+  return (
+    <SettingRow title={t("settings.unreadIndicators.title")} subtitle={t("settings.unreadIndicators.subtitle")}>
+      <Switch
+        checked={enabled}
+        aria-label={t("settings.unreadIndicators.show")}
+        onClick={() => setUnreadIndicators(!enabled)}
       />
     </SettingRow>
   );

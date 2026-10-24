@@ -3,7 +3,9 @@ import { AlertTriangle, AtSign, Bell, CheckCircle2, CircleHelp, HandHelping, Log
 import { api, useStore, openNotificationTarget, type Action } from "@/state/store";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
+import { useUnreadIndicators } from "@/lib/notification-preferences";
 import { useShowThreads } from "@/lib/thread-preferences";
+import { unreadCountShown } from "@/lib/unread-indicators";
 import type { LocaleKey } from "@/locales";
 import { BotAvatar, type BotAvatarProps } from "./Avatar";
 import { threadUpdatedLabel } from "./SidebarThreadRow";
@@ -63,7 +65,7 @@ export function filterNotifications<T extends { botId: string }>(entries: T[], b
 
 export function NotificationRail() {
   const { state, dispatch } = useStore();
-  const unread = state.notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0);
+  const unread = unreadCountShown(useUnreadIndicators(), state.notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0));
   if (state.notificationsOpen) return null;
   return (
     <aside aria-label={t("notifications.title")} className="absolute right-0 top-1/2 z-20 -translate-y-1/2 rounded-l-lg border border-r-0 border-hairline/40 bg-panel p-1 shadow-sm">
@@ -110,7 +112,7 @@ export function NotificationsPanel() {
   const bots = notificationBots(state.notifications);
   const activeFilter = botFilter === ALL_BOTS || bots.some((bot) => bot.id === botFilter) ? botFilter : ALL_BOTS;
   const visible = filterNotifications(state.notifications, activeFilter);
-  const unreadCount = state.notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0);
+  const unreadCount = unreadCountShown(useUnreadIndicators(), state.notifications.reduce((count, n) => count + (n.read ? 0 : 1), 0));
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);
     return () => clearInterval(timer);

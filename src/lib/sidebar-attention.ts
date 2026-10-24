@@ -19,9 +19,10 @@ export type SidebarSectionAttention = {
 export function sidebarSectionAttention(
   bots: SidebarAttentionBot[],
   groups: SidebarAttentionGroup[],
+  showUnread = true,
 ): SidebarSectionAttention {
   return {
-    unread:
+    unread: !showUnread ? 0 :
       bots.filter((bot) => Boolean(bot.unread)).length +
       groups.filter((group) => Boolean(group.unread)).length,
     waiting: bots.filter((bot) => bot.activity === "waiting-on-you").length,

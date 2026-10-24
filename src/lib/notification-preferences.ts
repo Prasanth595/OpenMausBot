@@ -3,10 +3,12 @@ import { useSyncExternalStore } from "react";
 export const NOTIFICATION_SOUNDS_KEY = "omb-notification-sounds";
 export const NOTIFICATION_FEED_KEY = "omb-notification-feed";
 export const FINISHED_NOTIFICATIONS_KEY = "omb-finished-notifications";
+export const UNREAD_INDICATORS_KEY = "omb-unread-indicators";
 
 let sessionChoice: boolean | undefined;
 let feedSessionChoice: boolean | undefined;
 let finishedSessionChoice: boolean | undefined;
+let unreadSessionChoice: boolean | undefined;
 const listeners = new Set<() => void>();
 
 function storage(): Storage | undefined {
@@ -31,11 +33,12 @@ function notify() {
 }
 
 function onStorage(event: StorageEvent) {
-  if (event.key !== NOTIFICATION_SOUNDS_KEY && event.key !== NOTIFICATION_FEED_KEY && event.key !== FINISHED_NOTIFICATIONS_KEY && event.key !== null) return;
+  if (event.key !== NOTIFICATION_SOUNDS_KEY && event.key !== NOTIFICATION_FEED_KEY && event.key !== FINISHED_NOTIFICATIONS_KEY && event.key !== UNREAD_INDICATORS_KEY && event.key !== null) return;
   if (event.storageArea && event.storageArea !== storage()) return;
   sessionChoice = undefined;
   feedSessionChoice = undefined;
   finishedSessionChoice = undefined;
+  unreadSessionChoice = undefined;
   notify();
 }
 
@@ -117,4 +120,30 @@ export function setFinishedNotifications(enabled: boolean): void {
 
 export function useFinishedNotifications(): boolean {
   return useSyncExternalStore(subscribe, finishedNotificationsEnabled, () => true);
+}
+
+/** Per device: unread badges, dots, counts and the "new messages" alerts; tracking underneath never stops. */
+export function unreadIndicatorsEnabled(): boolean {
+  if (unreadSessionChoice !== undefined) return unreadSessionChoice;
+  try {
+    return storage()?.getItem(UNREAD_INDICATORS_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function setUnreadIndicators(enabled: boolean): void {
+  unreadSessionChoice = enabled;
+  try {
+    const local = storage();
+    const value = enabled ? "1" : "0";
+    local?.setItem(UNREAD_INDICATORS_KEY, value);
+    if (local?.getItem(UNREAD_INDICATORS_KEY) === value) unreadSessionChoice = undefined;
+  } catch {
+  }
+  notify();
+}
+
+export function useUnreadIndicators(): boolean {
+  return useSyncExternalStore(subscribe, unreadIndicatorsEnabled, () => true);
 }

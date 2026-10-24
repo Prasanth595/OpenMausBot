@@ -4,6 +4,13 @@ import { t } from "./i18n";
 import { CHROME_GRADIENT, colorSwatch, MAUS_COLOR_LABEL, MAUS_COLOR_NAMES, MAUS_COLORS, stateForBot } from "./mascot";
 
 describe("stateForBot", () => {
+  it("shows the notifying pose for an unread bot only while unread indicators are on", () => {
+    const unread = { name: "Atlas", unread: true, messages: [{ kind: "text" }] };
+    expect(stateForBot(unread)).toBe("notifying");
+    expect(stateForBot(unread, false)).not.toBe("notifying");
+    expect(stateForBot({ ...unread, busy: true }, false)).toBe("working");
+  });
+
   it("still alerts on a failed tool call when a digest receipt follows it", () => {
     expect(stateForBot({
       name: "Atlas",

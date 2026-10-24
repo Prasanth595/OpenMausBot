@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const sounds = vi.hoisted(() => ({ enabled: true, finished: true }));
+const sounds = vi.hoisted(() => ({ enabled: true, finished: true, unread: true }));
 vi.mock("./notification-preferences", () => ({
   notificationSoundsEnabled: () => sounds.enabled,
   finishedNotificationsEnabled: () => sounds.finished,
+  unreadIndicatorsEnabled: () => sounds.unread,
 }));
 
 import {
@@ -43,6 +44,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   sounds.enabled = true;
   sounds.finished = true;
+  sounds.unread = true;
 });
 
 describe("desktop notifications", () => {
@@ -83,6 +85,16 @@ describe("desktop notifications", () => {
     showNotification({ ...frame, kind: "sign-in" }, vi.fn());
     showNotification({ ...frame, kind: "spend" }, vi.fn());
     expect(notices).toHaveLength(3);
+  });
+
+  it("with unread indicators off, mutes new-message notices but not the ones that wait on the person", () => {
+    const { notices } = installNotification("granted");
+    sounds.unread = false;
+    showNotification(frame, vi.fn());
+    showNotification({ ...frame, kind: "mention" }, vi.fn());
+    expect(notices).toHaveLength(0);
+    for (const kind of ["approval", "question", "sign-in", "incident", "turn-failed"] as const) showNotification({ ...frame, kind }, vi.fn());
+    expect(notices).toHaveLength(5);
   });
 
   it("shows a notification after permission is granted", () => {

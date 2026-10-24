@@ -1,5 +1,6 @@
 import type { Notification } from "../../shared/notification";
-import { finishedNotificationsEnabled, notificationSoundsEnabled } from "./notification-preferences";
+import { finishedNotificationsEnabled, notificationSoundsEnabled, unreadIndicatorsEnabled } from "./notification-preferences";
+import { notifyKindSilencedByUnreadSwitch } from "./unread-indicators";
 
 export type NotifyFrame = Notification;
 
@@ -38,6 +39,7 @@ export function showNotification(
 ) {
   if (typeof Notification === "undefined") return;
   if (frame.kind === "done" && !finishedNotificationsEnabled()) return;
+  if (notifyKindSilencedByUnreadSwitch(unreadIndicatorsEnabled(), frame.kind)) return;
   const spend = frame.kind === "spend";
   if (!spend && document.hasFocus() && visibleThreadId === frame.threadId) return;
 
