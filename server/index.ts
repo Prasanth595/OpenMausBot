@@ -560,7 +560,7 @@ import {
   type Viewer,
 } from "./bot-visibility.ts";
 import { describeBrand, loadBrand } from "./brand.ts";
-import { deliverSseFrame } from "./sse-fanout.ts";
+import { deliverSseFrame, openSseHeartbeat } from "./sse-fanout.ts";
 import {
   PHONE_SECRET_PROTOCOL_VERSION,
   PhoneSecretBridge,
@@ -5003,6 +5003,8 @@ interface SseClient {
   viewer: Viewer;
   seen: StreamSeen;
   ask: AskViewer;
+  /** Stops the heartbeat and leaves `sseClients` before ending the response; every way a stream ends goes through it. */
+  close: () => void;
 }
 const sseClients = new Set<SseClient>();
 
@@ -5011,9 +5013,7 @@ function audienceChanged(): void {
   audienceChangedAt = lastSeq;
   browserLive.recheck();
   for (const client of sseClients) {
-    if (client.viewer.kind !== "member") continue;
-    sseClients.delete(client);
-    try { client.res.end(); } catch {}
+    if (client.viewer.kind === "member") client.close();
   }
 }
 // Before any revocation callback: Cloud boot can revoke sessions before routes are registered.
@@ -5052,11 +5052,7 @@ function closeSessionStreams(sessionId: string): void {
   browserLive.closeForOwner(sessionId);
   desktopViewer.closeForOwner(sessionId);
   for (const client of sseClients) {
-    if (client.sessionId !== sessionId) continue;
-    sseClients.delete(client);
-    try {
-      client.res.end();
-    } catch {}
+    if (client.sessionId === sessionId) client.close();
   }
 }
 sessions.onSessionRevoked((sessionId) => {
@@ -5121,9 +5117,7 @@ function broadcast(payload: Record<string, unknown>, options: { adminOnly?: bool
     const out = CLOUD_TEAM && kind === "config" && clientFrame !== null ? teamConfigFrame(client, seq, payload)
       : memberFrame(client, seq, payload, client.admin ? frame : clientFrame);
     if (out === null) continue;
-    if (deliverSseFrame(client, kind, out) === "disconnected") {
-      sseClients.delete(client);
-    }
+    if (deliverSseFrame(client, kind, out) === "disconnected") client.close();
   }
 }
 
@@ -15808,6 +15802,12 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           bots: new Set(store.bots.filter((bot) => visibleNow.bot(bot.id)).map((bot) => bot.id)),
           groups: new Set(store.groups.filter((group) => visibleNow.group(group.id)).map((group) => group.id)),
         },
+        // A comment frame keeps intermediaries from idling the connection; a data frame resets EventSource's own liveness watchdog. Heartbeats carry no id.
+        close: openSseHeartbeat(res, {
+          everyMs: SSE_HEARTBEAT_MS,
+          live: () => !client.sessionId || sessions.isLive(client.sessionId),
+          onClose: () => sseClients.delete(client),
+        }),
       };
       if (auth.kind === "session") client.sessionId = auth.session.id;
       if (CLOUD_TEAM && auth.kind === "session") client.person = auth.session;
@@ -15853,20 +15853,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
 
       sseClients.add(client);
       req.socket.setTimeout(0);
-      // A comment frame keeps intermediaries from idling the connection; a data frame resets EventSource's own liveness watchdog. Heartbeats carry no id.
-      const keepalive = setInterval(() => {
-        if (client.sessionId && !sessions.isLive(client.sessionId)) {
-          res.end();
-          return;
-        }
-        try {
-          res.write(`: keepalive\n\ndata: ${JSON.stringify({ kind: "ping" })}\n\n`);
-        } catch {}
-      }, SSE_HEARTBEAT_MS);
-      req.on("close", () => {
-        clearInterval(keepalive);
-        sseClients.delete(client);
-      });
+      req.on("close", client.close);
       return;
     }
 
