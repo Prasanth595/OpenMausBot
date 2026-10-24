@@ -549,7 +549,7 @@ export class RuntimeCoordinator implements Coordinator {
     if (result.cap) return { kind: "continue", text: result.text, note: result.cap.note, ...(result.cap.handoffPath ? { handoffPath: result.cap.handoffPath } : {}), ...evidence(result) };
     if (result.cards) return { kind: "needs_input", text: result.text, question: result.cards.question, cards: result.cards.ids, ...evidence(result) };
     if (!result.ok) return { kind: "failed", outcome: result.stalled ? "stalled" : "provider_error", text: result.text, ...evidence(result) };
-    const question = root ? undefined : needsInputQuestion(result.text);
+    const question = needsInputQuestion(result.text);
     if (question !== undefined) return { kind: "needs_input", text: result.text, question, ...evidence(result) };
     const disposition = result.disposition ?? taskDisposition(result.text);
     return { kind: "completed", text: result.text, ...(disposition ? { disposition } : {}), ...evidence(result) };

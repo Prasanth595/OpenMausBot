@@ -28,6 +28,8 @@ it("real production ChatView exposes delegated current status through normal thr
   const chief = (await cli("new-bot", "--name", "Full Thread Chief", "--section", "Leadership")).bot;
   const expert = (await cli("new-bot", "--name", "Full Thread Engineer", "--section", "Engineering")).bot;
   await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true });
+  const defaultBot = (await api("GET", "/api/bots?messages=0")).bots.find((b: { defaultBot?: unknown; id: string }) => Boolean(b.defaultBot));
+  if (defaultBot) await api("PATCH", `/api/bots/${defaultBot.id}`, { welcomed: true });
   const plan: Record<string, unknown> = {
    [chief.id]: { steps: [{ arguments: { bot_ids: [expert.id], message: "Bounded full thread fixture work" } }], reply: "Assigned" },
    [expert.id]: { progress: "FULL_THREAD_PENDING_TOOL", gateFile: join(fixture.info.dataDir, "expert-gate"), reply: "Partial report" },
@@ -38,7 +40,8 @@ it("real production ChatView exposes delegated current status through normal thr
   const child = readHandoffs(fixture.info.dataDir).find(row => row.parentId && row.status === "running")!;
   const root = readHandoffs(fixture.info.dataDir).find(row => row.id === child.rootId)!;
   const tools = await ensureUiBrowser(process.env);
-  browser = { binary: tools.binary, env: sessionEnv({ home: fixture.info.dataDir, session: `full-thread-${process.pid}`, chrome: tools.chrome }) };
+  browser = { binary: tools.binary, env: sessionEnv({ home: fixture.info.dataDir, session: `ft-${process.pid}`, chrome: tools.chrome }) };
+  browser.env.AGENT_BROWSER_SOCKET_DIR = "/tmp";
   browser.env.AGENT_BROWSER_ARGS = `${browser.env.AGENT_BROWSER_ARGS ?? ""}\n--no-sandbox`;
   const command = (...args: string[]) => agentBrowser(browser!.binary, browser!.env, args, 60000);
   const evaluate = async (js: string) => (await command("eval", js)).result;

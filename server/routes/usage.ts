@@ -4,11 +4,9 @@ import type { RequestAuth } from "../request-auth.ts";
 import type { SpendState } from "../spend.ts";
 import type { Assignment } from "../runtime/types.ts";
 import { readJobUsage } from "../job-usage.ts";
-import type { RequestAuth } from "../request-auth.ts";
 import {
   flushUsageLedger,
   parseUsageRange,
-  flushUsageLedger,
   readUsage,
   summarizeUsage,
   usageCsv,

@@ -3809,7 +3809,7 @@ bus.subscribe((event: RuntimeEvent) => {
   jobUsageByProviderTurn.set(jobUsageTurnKey(event.threadId, event.turnId), { binding, row: {
     botId: bot.id, botName: bot.name, threadId: event.threadId, instanceId,
     driverKind: registry.get(instanceId)?.driverKind ?? "unknown",
-    model: routedTurnModels.get(event.threadId) ?? store.taskByThread(bot.id, event.threadId)?.modelSelection?.model ?? bot.modelSelection.model,
+    model: quickFallback.routedModel(event.threadId) ?? store.taskByThread(bot.id, event.threadId)?.modelSelection?.model ?? bot.modelSelection.model,
     trigger: routine ? { kind: "routine", routineId: routine.routineId, label: routine.routineName }
       : turnTriggers.get(event.threadId) ?? (assignment.parentId ? { kind: "bot", botId: assignment.requester.botId } : { kind: "owner" }),
   } });

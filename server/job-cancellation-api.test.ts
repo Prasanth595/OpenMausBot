@@ -35,6 +35,8 @@ it("paired Chief cancellation stops the exact native job after ordinary Stop lef
     const chief = (await cli("new-bot", "--name", "Cancellation Chief", "--section", "Leadership")).bot;
     const expert = (await cli("new-bot", "--name", "Cancellation Expert", "--section", "Engineering")).bot;
     expect((await api("PATCH", `/api/bots/${chief.id}`, { chiefOfStaff: true, managedSections: ["Engineering"], acknowledgePeerScope: true })).status).toBe(200);
+    const defaultBot = (await api("GET", "/api/bots?messages=0")).body.bots.find((b: { defaultBot?: unknown; id: string }) => Boolean(b.defaultBot));
+    if (defaultBot) await api("PATCH", `/api/bots/${defaultBot.id}`, { welcomed: true });
     const plan: Record<string, unknown> = {
       [chief.id]: { steps: [{ arguments: { bot_ids: [expert.id], message: "Hold this exact job for cancellation" } }], reply: "Assigned", resumeReply: "MUST_NOT_RESUME_CANCELLED_JOB" },
       [expert.id]: { gateFile: join(fixture.info.dataDir, "expert-finish-gate"), reply: "Useful partial report" },
@@ -78,7 +80,8 @@ it("paired Chief cancellation stops the exact native job after ordinary Stop lef
       const tools = await ensureUiBrowser(process.env);
       preview = await mountPreview(fixture, { entry: "/scripts/testing/threads-preview.tsx", route: "/__job-cancellation.html",
         title: "Exact Chief job cancellation", logLevel: "silent", proxyHeaders: { authorization: `Bearer ${token}` } });
-      browser = { binary: tools.binary, env: sessionEnv({ home: fixture.info.dataDir, session: `job-cancel-${process.pid}`, chrome: tools.chrome }) };
+      browser = { binary: tools.binary, env: sessionEnv({ home: fixture.info.dataDir, session: `jc-${process.pid}`, chrome: tools.chrome }) };
+      browser.env.AGENT_BROWSER_SOCKET_DIR = "/tmp";
       if (process.env.OMB_UI_NO_SANDBOX === "1") browser.env.AGENT_BROWSER_ARGS = `${browser.env.AGENT_BROWSER_ARGS ?? ""}\n--no-sandbox`;
       const command = (...args: string[]) => agentBrowser(browser!.binary, browser!.env, args, 60_000);
       const evaluate = async (js: string) => (await command("eval", js)).result;

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
@@ -40,8 +40,9 @@ it("binds project memory to current native capabilities, project CWD and revocab
   const path = "/api/internal/project-memory";
   try {
     await start();
-    const roots = [join(dataDir, "project-alpha"), join(dataDir, "project-beta")];
-    for (const root of roots) mkdirSync(root);
+    const uncanonical = [join(dataDir, "project-alpha"), join(dataDir, "project-beta")];
+    for (const root of uncanonical) mkdirSync(root);
+    const roots = uncanonical.map(root => realpathSync(root));
     const alpha = (await api("/api/bots", "POST", { name: "Project Alpha Member", section: "Project Alpha", cwd: roots[0], memoryUpkeep: false }, undefined, 201)).bot;
     const beta = (await api("/api/bots", "POST", { name: "Project Beta Member", section: "Project Beta", cwd: roots[1], memoryUpkeep: false }, undefined, 201)).bot;
     const alphaTask = (await api(`/api/bots/${alpha.id}/tasks`, "POST", { title: "Alpha canary", cwd: roots[0], approvalMode: "ask" }, undefined, 201)).task;

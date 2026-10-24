@@ -1205,6 +1205,7 @@ describe("Runtime: a teammate's question reaches the requester waiting on it", (
     expect(runsOf(w, root.id)).toHaveLength(2);
     invariants(w);
   });
+});
 it("persists an explicit blocked task without changing successful engine lifecycle", () => {
  const w = world();
  const root = w.runtime.begin(beginReq());

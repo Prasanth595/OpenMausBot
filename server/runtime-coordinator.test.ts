@@ -452,6 +452,7 @@ describe("RuntimeCoordinator: the run adapter", () => {
     expect(resumes[0]!.text).toContain(`\n\n[OpenMausBot question from @builder on assignment ${built.id}: waiting on Milind]\nIt asks Milind: "Which region should I deploy to?".`);
     expect(w.coordinator.node("gen-1")?.status).toBe("waiting");
     expect(w.coordinator.node(tested.id)?.status).toBe("running");
+  });
   it.each(["cards", "trailing question"])("returns partial work to the caller after a %s wait survives reload and settles", async (waitKind) => {
     const dir = mkdtempSync(join(tmpdir(), "runtime-coordinator-partial-"));
     const partial = "Read North Star and inspected source. PR checks remain unverified.";

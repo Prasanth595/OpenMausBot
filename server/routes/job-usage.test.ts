@@ -16,7 +16,11 @@ describe("thread-scoped job usage route", () => {
     const json = vi.fn();
     const setHeader = vi.fn();
     const auth = { kind: "loopback", scopes: ["admin", "client"] } as RouteContext["auth"];
-    const out = await createUsageRoutes({ dataDir, prices: () => null, budget: () => null, currency: () => "USD", jobs })({
+    const out = await createUsageRoutes({
+      dataDir, prices: () => null, budget: () => null, currency: () => "USD", jobs,
+      recorder: { append() {}, drain: async () => {} } as unknown as UsageRouteDeps["recorder"],
+      messages: () => [], liveBot: () => null, canSee: () => () => true,
+    })({
       path: path.split("?")[0], url: new URL(path, "http://127.0.0.1"), method: "GET", auth,
       res: { setHeader } as unknown as ServerResponse, json: json as RouteContext["json"],
     } as RouteContext);
