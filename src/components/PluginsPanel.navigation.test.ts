@@ -200,6 +200,16 @@ describe("Apps pop-up", () => {
     expect(tiles()).toEqual(["slack"]);
     expect(render().html).toContain("1 connected");
   });
+  it("shows the one Google server under each Google app it serves", () => {
+    fixture.overrides.set(CARDS, [card("gmail"), card("googlecalendar"), card("googledrive"), card("slack")]);
+    fixture.overrides.set(TAB, "connected");
+    fixture.mcpServers = [{ name: "google", enabled: true, localApp: "google" }];
+    const { html, nodes: tree } = render();
+    expect(tree.flatMap((node) => (node.props["data-app-tile"] === undefined ? [] : [node.props["data-app-tile"]]))).toEqual(["gmail", "googlecalendar", "googledrive", "slack"]);
+    expect(tree.filter((node) => node.props.slug !== undefined && node.props.onChange !== undefined).map((node) => [node.props.slug, (node.props.server as { name?: string } | undefined)?.name]))
+      .toEqual([["gmail", "google"], ["googlecalendar", "google"], ["googledrive", "google"], ["slack", undefined]]);
+    expect(html).toContain("6 connected");
+  });
   it("reloads Your MCP servers once a local app is set up from its tile", () => {
     const embedded = (tree: Node[]) => tree.find((node) => node.props.embedded === true)!;
     const row = render().nodes.find((node) => node.props.slug === "notion")!;

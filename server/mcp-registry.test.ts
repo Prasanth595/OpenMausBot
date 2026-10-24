@@ -387,12 +387,13 @@ describe("a local app", () => {
 
   it("adds every catalog recipe with the person's values, off, and lists only the variable names", () => {
     for (const [slug, recipe] of Object.entries(LOCAL_APPS)) {
-      const env = Object.fromEntries(recipe.env.map(({ name }) => [name, `${name}-value`]));
-      const added = parseMcpServerMutation(slug, mcpServerBody({ name: slug, command: recipe.command, args: recipe.args, env, localApp: slug }));
-      expect(added, slug).toEqual({ ok: true, server: { command: recipe.command, args: recipe.args, env, enabled: false, localApp: slug } });
+      const name = recipe.server ?? slug;
+      const env = Object.fromEntries(recipe.env.map(({ name: variable }) => [variable, `${variable}-value`]));
+      const added = parseMcpServerMutation(name, mcpServerBody({ name, command: recipe.command, args: recipe.args, env, localApp: name }));
+      expect(added, slug).toEqual({ ok: true, server: { command: recipe.command, args: recipe.args, env, enabled: false, localApp: name } });
       if (!added.ok) continue;
-      const listing = listMcpServers({ [slug]: added.server });
-      expect(listing, slug).toEqual([{ name: slug, command: recipe.command, args: recipe.args, envKeys: Object.keys(env).sort(), enabled: false, apps: true, localApp: slug }]);
+      const listing = listMcpServers({ [name]: added.server });
+      expect(listing, slug).toEqual([{ name, command: recipe.command, args: recipe.args, envKeys: Object.keys(env).sort(), enabled: false, apps: true, localApp: name }]);
       for (const value of Object.values(env)) expect(JSON.stringify(listing)).not.toContain(value);
     }
   });

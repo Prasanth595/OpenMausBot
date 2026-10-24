@@ -26,21 +26,33 @@ an MCP server entry, and one row in the catalog tile.
 
 ### Recipes: `shared/local-apps.ts`
 
-`LOCAL_APPS` maps a catalog slug to `{ command, args, env: [{ name, secret, url? }], source }`. Adding an app is one
-entry. The MCP server is named after the slug. An app is listed only when its server:
+`LOCAL_APPS` maps a catalog slug to `{ command, args, env: [{ name, secret, url? }], source, server?, signIn? }`.
+Adding an app is one entry. The MCP server is named after the slug, or `server` when several catalog apps share one
+server. An app is listed only when its server:
 
 1. runs as a stdio command on the person's computer;
 2. takes every secret from an environment variable, never an argument;
 3. calls only the app's own API;
-4. uses a static token the person creates (no browser consent at start);
+4. uses a static token the person creates (no browser consent at start), except Google: an OAuth client the person
+   creates, with a browser sign-in on first use whose token stays on the person's computer (`signIn: "google"`);
 5. is a published release, pinned by version (Docker: by digest);
 6. had a release in the last 12 months.
 
-Nine of the 24 curated apps qualify: GitHub, Stripe and Notion (vendor servers); Trello, Airtable, Linear, Jira, Slack
-and Figma (community servers).
+Fourteen of the 24 curated apps qualify: GitHub, Stripe and Notion (vendor servers); Trello, Airtable, Linear, Jira,
+Slack and Figma (community servers); Gmail, Google Calendar, Drive, Docs and Sheets, all through one community server,
+`workspace-mcp`.
 
 Sentry's server (`@sentry/mcp-server` 0.42.0) fails rule 3: started, like every MCP server, with OpenMausBot's
 environment, it sends search queries to the AI provider whose key it finds there and error reports to any `SENTRY_DSN`.
+
+Google's server keeps one token file per Google account, holding the scopes of the services it was started with, so
+the five Google apps share one entry, `google`: per-app servers would write the same file, each with its own scopes.
+Setting it up from any Google card sets up all five; each Google card shows the same server. The first tool
+call without a sign-in returns Google's authorization link and starts the server's callback listener on
+`127.0.0.1:8000` (or the next free port up to 8004); the bot shows the link, the person signs in, and the warm engine
+process that runs the server
+takes the callback. The token is written by the server to `~/.google_workspace_mcp/credentials/` (mode 0600), never
+into OpenMausBot.
 
 ### Marker: `localApp` on a stdio MCP server entry
 
@@ -83,8 +95,11 @@ and every provider key does today.
 ## Known risks
 
 - Tokens are plaintext in `config.json` (mode 0600, write-only over the API), like every custom MCP server.
-- Six servers are community code that runs with the person's token. The command and source are shown first; versions
-  are pinned. `npx` pins the package, not its dependency tree.
+- Seven servers are community code that runs with the person's token. The command and source are shown first;
+  versions are pinned. `npx` and `uvx` pin the package, not its dependency tree.
+- The Google sign-in token is stored on the computer by the server, in `~/.google_workspace_mcp/credentials/`.
+  Its callback needs one of ports 8000-8004 free and the engine process still running when the person finishes signing in;
+  `workspace-mcp` calls stdio its legacy mode, recommending HTTP for new clients.
 - Under Codex, every mounted stdio server's environment is merged into one app-server process, as for all custom
   servers today.
 - A bot's list keeps a server name after the server is removed, so re-adding the same app re-mounts it for that bot.

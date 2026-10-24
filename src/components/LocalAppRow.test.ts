@@ -43,7 +43,7 @@ beforeEach(() => {
   setLocale("en");
   probe = { ok: true };
   fixture.api.mockImplementation((path: string) => {
-    if (path === "/api/mcp/servers/trello/test") return Promise.resolve(probe);
+    if (path.endsWith("/test")) return Promise.resolve(probe);
     if (path.startsWith("/api/mcp/servers")) return Promise.resolve({ servers: [] });
     return Promise.reject(new Error(`unexpected ${path}`));
   });
@@ -113,8 +113,27 @@ describe("Running a catalog app on this computer", () => {
     expect(host.querySelector("button")).toBeNull();
   });
 
+  it("sets up every Google app as one server that signs in with the person's own Google client, explained in plain words", async () => {
+    await show("googlecalendar");
+    await act(async () => button("Run on this computer")!.click());
+    expect(host.textContent).toContain("Google needs your own sign-in app.");
+    expect(host.textContent).toContain("Your sign-in stays on this computer, in ~/.google_workspace_mcp.");
+    expect([...host.querySelectorAll("input")].map((input) => input.type)).toEqual(["text", "password", "text"]);
+    await type("GOOGLE_OAUTH_CLIENT_ID", "fixture.apps.googleusercontent.com");
+    await type("GOOGLE_OAUTH_CLIENT_SECRET", "fixture-google-secret");
+    await type("USER_GOOGLE_EMAIL", "person@example.com");
+    await act(async () => button("Test and start")!.click());
+    await settle();
+    expect(requests().map(([method, path, body]) => [method, path, body?.name, body?.localApp])).toEqual([
+      ["POST", "/api/mcp/servers", "google", "google"],
+      ["POST", "/api/mcp/servers/google/test", undefined, undefined],
+      ["PATCH", "/api/mcp/servers/google", undefined, undefined],
+    ]);
+    expect(host.innerHTML).not.toContain("fixture-google-secret");
+  });
+
   it("offers nothing for an app with no local recipe", async () => {
-    await show("gmail");
+    await show("salesforce");
     expect(host.innerHTML).toBe("");
   });
 });

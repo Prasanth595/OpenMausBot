@@ -9,10 +9,35 @@ export interface LocalAppRecipe {
   env: ReadonlyArray<{ name: string; secret: boolean; url?: string }>;
   /** The server's source code, shown before it runs. */
   source: string;
+  /** The MCP server's name when several catalog apps share one server and one sign-in; absent: the app's slug. */
+  server?: string;
+  /** The service whose browser sign-in the server starts on first use, with an OAuth client the person creates; the
+   * token it gets stays on this computer. */
+  signIn?: "google";
 }
 
-/** Keyed by the app's catalog slug, which is also the MCP server's name. */
+/** workspace-mcp 2.2.0 keeps one token file per Google account, with the scopes of every service it was started with:
+ * one server for all Google apps. */
+const GOOGLE: LocalAppRecipe = {
+  command: "uvx",
+  args: ["workspace-mcp==2.2.0", "--transport", "stdio", "--tools", "gmail", "calendar", "drive", "docs", "sheets", "--tool-tier", "core"],
+  env: [
+    { name: "GOOGLE_OAUTH_CLIENT_ID", secret: false, url: "https://console.cloud.google.com/auth/clients" },
+    { name: "GOOGLE_OAUTH_CLIENT_SECRET", secret: true, url: "https://console.cloud.google.com/auth/clients" },
+    { name: "USER_GOOGLE_EMAIL", secret: false },
+  ],
+  source: "https://github.com/taylorwilsdon/google_workspace_mcp",
+  server: "google",
+  signIn: "google",
+};
+
+/** Keyed by the app's catalog slug. */
 export const LOCAL_APPS: Readonly<Record<string, LocalAppRecipe>> = {
+  gmail: GOOGLE,
+  googlecalendar: GOOGLE,
+  googledrive: GOOGLE,
+  googledocs: GOOGLE,
+  googlesheets: GOOGLE,
   github: {
     command: "docker",
     args: ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server:v2.0.3@sha256:250bc6ce70788207608ef74cef4397230ff2e8481218da74d6093e4bd9101132"],

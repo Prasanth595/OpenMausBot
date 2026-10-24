@@ -9,7 +9,11 @@ import { openBotSettings } from "./bot-panel/panel-link";
 
 export function useLocalApps(): Map<string, McpServerSummary> {
   const { servers } = useMcpServers();
-  return new Map((servers ?? []).flatMap((server) => (server.localApp ? [[server.localApp, server] as const] : [])));
+  return new Map((servers ?? []).flatMap((server) => {
+    if (!server.localApp) return [];
+    const slugs = Object.entries(LOCAL_APPS).filter(([slug, recipe]) => (recipe.server ?? slug) === server.localApp).map(([slug]) => slug);
+    return (slugs.length ? slugs : [server.localApp]).map((slug) => [slug, server] as const);
+  }));
 }
 
 export function localAppRunning(server: McpServerSummary | undefined): boolean {
@@ -29,11 +33,11 @@ export function LocalAppRow({ slug, label, server, onChange }: { slug: string; l
     setBusy(true);
     setError(null);
     try {
+      const name = server?.name ?? recipe.server ?? slug;
       if (!server) {
-        const added = await api("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name: slug, command: recipe.command, args: recipe.args, env: values, localApp: slug }) });
+        const added = await api("/api/mcp/servers", { method: "POST", body: JSON.stringify({ name, command: recipe.command, args: recipe.args, env: values, localApp: name }) });
         updateMcpServers(added.servers ?? []);
       }
-      const name = server?.name ?? slug;
       const probe: { ok: boolean; error?: string } = await api(`/api/mcp/servers/${name}/test`, { method: "POST" });
       if (!probe.ok) throw new Error(t("localApps.testFailed", { reason: probe.error ?? "" }));
       const enabled = await api(`/api/mcp/servers/${name}`, { method: "PATCH", body: JSON.stringify({ enabled: true }) });
@@ -95,6 +99,7 @@ export function LocalAppRow({ slug, label, server, onChange }: { slug: string; l
       onSubmit={(event) => { event.preventDefault(); void start(); }}
     >
       <p className="leading-relaxed">{t("localApps.intro", { app: label })}</p>
+      {recipe.signIn && <p className="mt-1.5 leading-relaxed">{t(`localApps.signIn.${recipe.signIn}`)}</p>}
       <code className="mt-1.5 block break-all rounded-lg bg-inset px-2.5 py-1.5 font-mono text-[11.5px] text-ink">{[recipe.command, ...recipe.args].join(" ")}</code>
       <a href={recipe.source} target="_blank" rel="noreferrer" className="mt-1 inline-block underline underline-offset-2 hover:text-ink">{t("localApps.source")}</a>
       {recipe.env.map((entry) => (

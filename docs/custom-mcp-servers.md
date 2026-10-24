@@ -40,8 +40,9 @@ This is an optional connected tool, not a change to OMB's subscription billing.
 ### Local apps
 
 Some apps in Plugins can run on your own computer instead of through a
-connected-apps service: GitHub, Stripe, Notion, Trello, Airtable, Linear,
-Jira, Slack and Figma. On the app's card, click **Run on this
+connected-apps service: Gmail, Google Calendar, Google Drive, Google Docs,
+Google Sheets, GitHub, Stripe, Notion, Trello, Airtable, Linear, Jira, Slack
+and Figma. On the app's card, click **Run on this
 computer**. The card shows the exact program OpenMausBot will start and a link
 to its source code. Enter the app's own token (each token field links to the
 page where you create it) and click **Test and start**. OpenMausBot saves an
@@ -63,10 +64,26 @@ never shown again in the app. When you move to My Cloud, a local app's entry
 goes with your other servers and keys, token included, marked as running on
 this computer; My Cloud never starts it.
 
-GitHub needs Docker, Jira needs [uv](https://docs.astral.sh/uv/), and the
-others need Node.js (`npx`). Stripe, Notion and GitHub publish their
-own servers; the other six are community servers, each pinned to one
+GitHub needs Docker, Jira and Google need [uv](https://docs.astral.sh/uv/),
+and the others need Node.js (`npx`). Stripe, Notion and GitHub publish
+their own servers; the others are community servers, each pinned to one
 release.
+
+#### Google
+
+The five Google apps share one server,
+[`workspace-mcp`](https://github.com/taylorwilsdon/google_workspace_mcp), saved
+as `google`; setting it up from any Google card sets up all five, and a bot
+gets all of them by turning on `google`. Google needs a sign-in app of your
+own: in Google Cloud, create a free OAuth client of type **Desktop app**, turn
+on the Gmail, Calendar, Drive, Docs and Sheets APIs in the same project, and
+enter the client's ID and secret with your Google email. The first time a bot
+uses Google, it gives you Google's sign-in link. Open it on the same computer
+and sign in; Google returns to `http://localhost:8000/oauth2callback` (or the
+next free port up to 8004), where
+the running server takes the sign-in. The server keeps it in
+`~/.google_workspace_mcp/credentials/` (readable only by your user), not in
+OpenMausBot, and calls only Google's APIs.
 
 ### Servers that ask you to sign in
 

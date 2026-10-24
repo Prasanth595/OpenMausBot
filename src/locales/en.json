@@ -22,6 +22,7 @@
   "localApps.access": "Bot access",
   "localApps.accessHint": "No bot uses it until you turn on {name} in that bot’s Access settings. Changes apply to its next task.",
   "localApps.botSettings": "Choose for {name}",
+  "localApps.signIn.google": "Google needs your own sign-in app. In Google Cloud, create a free OAuth client of type Desktop app, turn on the Gmail, Calendar, Drive, Docs and Sheets APIs, and paste the client’s ID and secret here with your Google email. The first time a bot uses Google, it gives you Google’s sign-in link: open it on this computer and sign in. Your sign-in stays on this computer, in ~/.google_workspace_mcp.",
   "highlevel.title": "HighLevel",
   "highlevel.description": "Also Growably and other HighLevel-based CRMs.",
   "highlevel.connect": "Connect HighLevel",
