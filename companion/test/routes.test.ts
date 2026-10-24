@@ -30,6 +30,7 @@ describe("what the app may do", () => {
     ["GET", "/api/health"],
     ["GET", "/api/config"],
     ["GET", "/api/events"],
+    ["GET", "/api/plan-usage"],
     ["GET", "/api/instances"],
     ["POST", "/api/instances/claude/claude-update"],
     ["POST", "/api/instances/claude.work/claude-update"],

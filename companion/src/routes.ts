@@ -83,6 +83,8 @@ const ALLOWED: ReadonlyArray<{ method: string; path: RegExp }> = [
   // Configured-or-not booleans, never keys; the write side is refused below.
   { method: "GET", path: /^\/api\/config$/ },
   { method: "GET", path: /^\/api\/events$/ },
+  // Read-only subscription allowance; the harness never returns the account credential.
+  { method: "GET", path: /^\/api\/plan-usage$/ },
   { method: "GET", path: /^\/api\/instances$/ },
   // The harness refuses it while any Claude turn runs. Instance ids may carry
   // dots, so a dots-only segment is refused outright.

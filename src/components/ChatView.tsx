@@ -59,6 +59,7 @@ import { VoiceNoteBubble, type VoiceNoteAttachment } from "./VoiceNoteBubble";
 import { RawMarkdownView, RawToggleAction } from "./RawMarkdownToggle";
 import { ThreadChip } from "./ThreadChip";
 import { VerifyCard } from "./VerifyCard";
+import { ChatPlanAllowance } from "./ChatPlanAllowance";
 import { askText, runSkill, runSteps, runSummary, showRun, skillPrompt } from "@/lib/verify-steps";
 import { useShowRunCard } from "@/lib/run-card-preferences";
 import { sendsMessage, useSendKey } from "@/lib/send-key";
@@ -1332,6 +1333,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       {canWrite === false ? (
         <NewConversationInstead onNew={() => dispatch({ type: "newTask", botId: bot.id })} />
       ) : (
+      <ChatPlanAllowance bot={bot} task={currentTask} />
+      )}
+      {canWrite !== false && (
       <Composer
         key={bot.threadId}
         bot={profile}

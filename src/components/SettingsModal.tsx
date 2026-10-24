@@ -62,6 +62,7 @@ import { setShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { parseSidebarDensity, setPinnedCircles, setSidebarDensity, setUniversalPins, SIDEBAR_DENSITIES, usePinnedCircles, useSidebarDensity, useUniversalPins, type SidebarDensity } from "@/lib/sidebar-preferences";
 import { setShowRunCard, useShowRunCard } from "@/lib/run-card-preferences";
+import { parseSidebarModelIcons, parseUsageDisplay, setSidebarModelIcons, setUsageDisplay, SIDEBAR_MODEL_ICONS, USAGE_DISPLAYS, useSidebarModelIcons, useUsageDisplay } from "@/lib/usage-display-preferences";
 import { parseSendKey, SEND_KEYS, sendKeyLabel, setSendKey, useSendKey } from "@/lib/send-key";
 import { effectiveLanguage, setLanguageChoice, useLanguageChoice } from "@/lib/language-preference";
 import { Select } from "./Select";
@@ -432,6 +433,40 @@ function SidebarDensityRow() {
   );
 }
 
+function SidebarModelIconsRow() {
+  const icons = useSidebarModelIcons();
+  return (
+    <SettingRow title={t("settings.sidebarModelIcons.title")} subtitle={t("settings.sidebarModelIcons.subtitle")}>
+      <Select size="sm" className="w-full max-w-[240px]"
+        value={icons}
+        aria-label={t("settings.sidebarModelIcons.title")}
+        onChange={(event) => setSidebarModelIcons(parseSidebarModelIcons(event.target.value))}
+      >
+        {SIDEBAR_MODEL_ICONS.map((option) => (
+          <option key={option} value={option}>{t(`settings.sidebarModelIcons.${option}`)}</option>
+        ))}
+      </Select>
+    </SettingRow>
+  );
+}
+
+function UsageDisplayRow() {
+  const display = useUsageDisplay();
+  return (
+    <SettingRow title={t("settings.usageDisplay.title")} subtitle={t("settings.usageDisplay.subtitle")}>
+      <Select size="sm" className="w-full max-w-[240px]"
+        value={display}
+        aria-label={t("settings.usageDisplay.title")}
+        onChange={(event) => setUsageDisplay(parseUsageDisplay(event.target.value))}
+      >
+        {USAGE_DISPLAYS.map((option) => (
+          <option key={option} value={option}>{t(`settings.usageDisplay.${option}`)}</option>
+        ))}
+      </Select>
+    </SettingRow>
+  );
+}
+
 function RunCardRow() {
   const enabled = useShowRunCard();
   return (
@@ -712,6 +747,8 @@ export function SettingsModal() {
             <ColorUserBubblesRow />
             <SendKeyRow />
             <SidebarDensityRow />
+            <SidebarModelIconsRow />
+            <UsageDisplayRow />
             {advanced && <SidebarToolsLayoutRow />}
             {advanced && <ShowThreadsRow />}
             <PinnedCirclesRow />

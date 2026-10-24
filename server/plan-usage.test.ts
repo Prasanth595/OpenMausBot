@@ -367,7 +367,7 @@ describe("plan usage fetcher", () => {
     expect(JSON.stringify(report)).not.toContain(stale);
   });
 
-  it("caches a report for 45 seconds unless refresh is set", async () => {
+  it("caches a report for five minutes unless refresh is set", async () => {
     const fetchImpl = vi.fn<PlanFetch>(async () => jsonResponse({
       five_hour: { utilization: 25, resets_at: "2026-09-26T12:00:00.000Z" },
       seven_day: { utilization: 40, resets_at: "2026-10-03T00:00:00.000Z" },
@@ -379,7 +379,7 @@ describe("plan usage fetcher", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     await loadPlanUsage({ accounts, refresh: true, now: NOW + 11_000, fetch: fetchImpl, credentials });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
-    await loadPlanUsage({ accounts, now: NOW + 11_000 + 45_000, fetch: fetchImpl, credentials });
+    await loadPlanUsage({ accounts, now: NOW + 11_000 + 5 * 60_000, fetch: fetchImpl, credentials });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 

@@ -1,5 +1,6 @@
 import type { Bot, InstanceInfo } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { useSidebarModelIcons } from "@/lib/usage-display-preferences";
 import { InstanceProviderMark } from "./ProviderIcons";
 
 export function botModel(bot: Pick<Bot, "modelSelection">, instances: InstanceInfo[]): { instance: InstanceInfo; label: string } | null {
@@ -15,8 +16,9 @@ export function BotModelBadge({ bot, instances, avatarSize }: {
   instances: InstanceInfo[];
   avatarSize: number;
 }) {
+  const icons = useSidebarModelIcons();
   const model = botModel(bot, instances);
-  if (!model) return null;
+  if (!model || icons === "hide") return null;
   const size = Math.max(14, Math.round(avatarSize * 0.4));
   const description = t("sidebar.bot.modelBadge", { model: model.label, engine: model.instance.displayName });
   return (
@@ -30,8 +32,9 @@ export function BotModelBadge({ bot, instances, avatarSize }: {
 
 /** The engine's mark at the right end of a sidebar row's text; hovering it names the model. */
 export function BotModelMark({ bot, instances }: { bot: Pick<Bot, "modelSelection">; instances: InstanceInfo[] }) {
+  const icons = useSidebarModelIcons();
   const model = botModel(bot, instances);
-  if (!model) return null;
+  if (!model || icons === "hide") return null;
   const description = t("sidebar.bot.modelBadge", { model: model.label, engine: model.instance.displayName });
   return (
     <span data-testid="model-badge" role="img" aria-label={description} title={model.label}

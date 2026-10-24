@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initialState, type AppState, type Bot, type InstanceInfo } from "@/state/store";
 import type { SidebarDensity } from "@/lib/sidebar-preferences";
+import { setSidebarModelIcons } from "@/lib/usage-display-preferences";
 
 const fixture = vi.hoisted(() => ({ state: {} as Partial<AppState>, advanced: true }));
 vi.mock("@/lib/thread-preferences", () => ({ useShowThreads: () => false }));
@@ -109,5 +110,19 @@ describe("sidebar bot row", () => {
 
   it("shows no badge while the bot's engine is missing", () => {
     expect(render(bot("gone", "opus"), "comfortable")).not.toContain('data-testid="model-badge"');
+  });
+
+  describe("model icons preference", () => {
+    afterEach(() => setSidebarModelIcons("show"));
+
+    it.each<SidebarDensity>(["comfortable", "compact", "icons"])("Hide removes the model icon from a %s row", (density) => {
+      setSidebarModelIcons("hide");
+      expect(render(bot("claude", "opus"), density)).not.toContain('data-testid="model-badge"');
+    });
+
+    it("Show keeps it", () => {
+      setSidebarModelIcons("show");
+      expect(render(bot("claude", "opus"), "comfortable")).toContain('data-testid="model-badge"');
+    });
   });
 });

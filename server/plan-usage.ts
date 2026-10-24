@@ -99,7 +99,9 @@ export interface CredentialSource {
 }
 
 const PROVIDER_TIMEOUT_MS = 8_000;
-const PLAN_USAGE_CACHE_MS = 45_000;
+// Subscription usage is advisory, not turn-critical. A longer shared cache
+// avoids rate-limiting when several chats show the same allowance indicator.
+const PLAN_USAGE_CACHE_MS = 5 * 60_000;
 const CREDENTIAL_READ_MAX_BYTES = 1_000_000;
 const KEYCHAIN_TIMEOUT_MS = 5_000;
 const KEYCHAIN_MAX_BUFFER = 1_000_000;
