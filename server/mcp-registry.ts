@@ -19,6 +19,9 @@ export interface StoredStdioMcpServer extends StdioMcpSpec {
   runsOn?: McpRunsOn;
   /** "Show its apps in chat": stored only as `false`; on by default. */
   apps?: false;
+  /** The catalog app this server runs, set only when the person added it from Plugins as a local app; an edit keeps
+   * it. A bot gets a local app only when its `mcpServers` list names it. */
+  localApp?: string;
 }
 /** An app pre-registered with the server's authorization server; its secret is a credential, never listed. */
 export interface McpOAuthClientConfig {
@@ -46,6 +49,7 @@ export interface StdioMcpServerListing {
   resultBudget?: number;
   runsOn?: McpRunsOn;
   apps: boolean;
+  localApp?: string;
 }
 export interface RemoteMcpServerListing {
   name: string;
@@ -146,6 +150,7 @@ const stdioEntrySchema = z.object({
   resultBudget: resultBudgetSchema.optional(),
   runsOn: runsOnSchema.optional(),
   apps: z.boolean().optional(),
+  localApp: z.string().regex(MCP_NAME).optional(),
 }).strict();
 
 /** `runsOn: null` says it runs here after all; left out, an edit keeps the computer it runs on. */
@@ -265,12 +270,16 @@ function parseStdio(raw: unknown, mutation: boolean, existing?: StoredMcpServer)
       ...(parsed.data.resultBudget !== undefined ? { resultBudget: parsed.data.resultBudget } : {}),
       ...runsOnFor(parsed.data.runsOn, mutation, existing),
       ...appsFor(parsed.data.apps, mutation, existing),
+      ...localAppFor(parsed.data.localApp, existing),
     },
   };
 }
 
 function parseRemote(raw: unknown, mutation: boolean, existing?: StoredMcpServer): Parsed {
   const parsed = (mutation ? remoteMutationSchema : remoteEntrySchema).safeParse(raw);
+  if (existing && !isRemoteMcpServer(existing) && existing.localApp) {
+    return { ok: false, error: "A local app runs a program on this computer. To use an address instead, remove it and add the server again." };
+  }
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid MCP server." };
   }
@@ -316,6 +325,11 @@ function appsFor(value: boolean | undefined, mutation: boolean, existing?: Store
   return on ? {} : { apps: false };
 }
 
+function localAppFor(value: string | undefined, existing?: StoredMcpServer): { localApp?: string } {
+  const localApp = existing ? (isRemoteMcpServer(existing) ? undefined : existing.localApp) : value;
+  return localApp ? { localApp } : {};
+}
+
 export function parseStoredMcpServer(name: string, raw: unknown): Parsed {
   const nameError = mcpServerNameError(name);
   if (nameError) return { ok: false, error: nameError };
@@ -346,7 +360,7 @@ export function mcpServerBody(body: unknown): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   if (!body || typeof body !== "object") return out;
   const record = body as Record<string, unknown>;
-  for (const key of ["command", "args", "env", "type", "url", "headers", "oauth", "enabled", "resultBudget", "runsOn"]) {
+  for (const key of ["command", "args", "env", "type", "url", "headers", "oauth", "enabled", "resultBudget", "runsOn", "localApp"]) {
     if (record[key] !== undefined) out[key] = record[key];
   }
   return out;
@@ -407,6 +421,7 @@ export function listMcpServers(raw: Record<string, unknown> | undefined): McpSer
       ...(server.resultBudget !== undefined ? { resultBudget: server.resultBudget } : {}),
       ...(server.runsOn ? { runsOn: server.runsOn } : {}),
       apps: server.apps !== false,
+      ...(server.localApp ? { localApp: server.localApp } : {}),
     }];
   });
 }

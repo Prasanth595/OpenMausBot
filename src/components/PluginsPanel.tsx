@@ -18,6 +18,7 @@ import {
   connectedInventoryCopy,
   connectorActionLabel,
   hasActiveConnection,
+  hasUsableConnectedApps,
   needsReconnect,
   requiresAccountAlias,
   type ConnectorAccount,
@@ -29,6 +30,7 @@ import { BotAvatar } from "./Avatar";
 import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 import { appCategoryLabel, CATEGORY_SECTION_SIZE, catalogSections, connectorDescription, inCategory, rankCategories } from "@/lib/app-catalog";
 import { McpServersPanel } from "./McpServersPanel";
+import { LocalAppRow, localAppRunning, useLocalApps } from "./LocalAppRow";
 import { HighLevelCard } from "./HighLevelCard";
 import { X_CARD_SEARCH, XCard } from "./XCard";
 import { mergeCompleteConnectorStatus, mergeCurrentConnectorStatus, onlyLatestConnectorResponses } from "@/lib/connector-status-merge";
@@ -103,10 +105,6 @@ export function botsWithLimitedServiceTools(bots: Bot[], instances: InstanceInfo
     if (grant === undefined) return true;
     return !isConnectorToolGrantShape(grant) || grant.tools !== "*";
   });
-}
-
-export function hasUsableConnectedApps(configured: boolean, phase: ConnectorInventoryPhase, stale: boolean, status: Record<string, ConnectorStatus>): boolean {
-  return configured && phase === "ready" && !stale && Object.values(status).some((service) => service.connected);
 }
 
 export type ConnectorSetup = "ready" | "needs-setup" | "service-unavailable";
@@ -432,9 +430,10 @@ export function PluginsPanel() {
       .finally(() => setBusySlug(null));
   };
 
-  const matching = (cards ?? []).filter((c) => (!managedConnectorUnavailableReason(mode, c.slug) || hasActiveConnection(status[c.slug]))
+  const localApps = useLocalApps();
+  const matching = (cards ?? []).filter((c) => (!managedConnectorUnavailableReason(mode, c.slug) || hasActiveConnection(status[c.slug]) || localAppRunning(localApps.get(c.slug.toLowerCase())))
     && (!search || `${c.label} ${c.slug} ${connectorDescription(c)}`.toLowerCase().includes(search.toLowerCase())));
-  const isConnected = (slug: string) => Boolean(status[slug]?.connected || status[slug]?.accounts?.length);
+  const isConnected = (slug: string) => Boolean(status[slug]?.connected || status[slug]?.accounts?.length || localAppRunning(localApps.get(slug.toLowerCase())));
   const filter: AppsFilter = surface === "mcp" ? "mcp" : tab === "connected" ? "connected" : "all";
   const whopMatches = !search || `whop ${t("whop.description")}`.toLowerCase().includes(search.toLowerCase().trim());
   const showWhop = whopMatches && (filter === "all" || (filter === "connected" && whopConnected !== false));
@@ -445,7 +444,7 @@ export function PluginsPanel() {
     .map((card, index) => ({ card, index }))
     .sort((a, b) => Number(isConnected(b.card.slug)) - Number(isConnected(a.card.slug)) || a.index - b.index)
     .map(({ card }) => card);
-  const connectedCount = Object.values(status).filter(hasActiveConnection).length + Number(whopConnected === true) + Number(highLevelConnected === true) + Number(xConnected === true);
+  const connectedCount = Object.values(status).filter(hasActiveConnection).length + Number(whopConnected === true) + Number(highLevelConnected === true) + Number(xConnected === true) + [...localApps].filter(([slug, server]) => localAppRunning(server) && !hasActiveConnection(status[slug])).length;
   const connectedEmptyCopy = connectedInventoryCopy(inventoryPhase);
   const close = () => dispatch({ type: "togglePlugins", open: false });
   const setupNotice = connectorSetupNotice({ configured, stale, setup, remoteClient });
@@ -775,7 +774,7 @@ export function PluginsPanel() {
 
           {filter !== "connected" && category === null && (
             <div className={cn(filter === "all" && "mt-8 border-t border-hairline/30 pt-6", filter === "mcp" && "pt-1")}>
-              <McpServersPanel embedded hideWhop={filter === "all"} />
+              <McpServersPanel embedded hideWhop={filter === "all"} refreshKey={whopRefresh} />
             </div>
           )}
         </div>
@@ -997,6 +996,7 @@ export function PluginsPanel() {
               </button>
             </form>
           )}
+          <LocalAppRow slug={card.slug.toLowerCase()} label={card.label} server={localApps.get(card.slug.toLowerCase())} onChange={() => setWhopRefresh((value) => value + 1)} />
         </div>
       </div>
     );

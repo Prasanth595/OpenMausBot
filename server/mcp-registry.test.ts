@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
+import { CURATED_CONNECTOR_SLUGS } from "../shared/connector-curated.ts";
+import { LOCAL_APPS } from "../shared/local-apps.ts";
 import {
   addDisabledMcpServer,
   listMcpServers,
   MAX_MCP_SERVERS,
+  mcpServerBody,
   mcpServerNameError,
   parseMcpServerMutation,
   parseMcpServersImport,
@@ -376,5 +379,57 @@ describe("the \"Show its apps in chat\" switch", () => {
       ok: true, server: { type: "http", url: "https://mcp.excalidraw.com/mcp", headers: {}, enabled: true },
     });
     expect(parseStoredMcpServer("draw", { command: "npx", apps: "no" }).ok).toBe(false);
+  });
+});
+
+describe("a local app", () => {
+  const TRELLO = { command: "npx", args: ["-y", "@delorenj/mcp-server-trello@1.8.1"], env: { TRELLO_API_KEY: "key-1", TRELLO_TOKEN: "token-1" } };
+
+  it("adds every catalog recipe with the person's values, off, and lists only the variable names", () => {
+    for (const [slug, recipe] of Object.entries(LOCAL_APPS)) {
+      const env = Object.fromEntries(recipe.env.map(({ name }) => [name, `${name}-value`]));
+      const added = parseMcpServerMutation(slug, mcpServerBody({ name: slug, command: recipe.command, args: recipe.args, env, localApp: slug }));
+      expect(added, slug).toEqual({ ok: true, server: { command: recipe.command, args: recipe.args, env, enabled: false, localApp: slug } });
+      if (!added.ok) continue;
+      const listing = listMcpServers({ [slug]: added.server });
+      expect(listing, slug).toEqual([{ name: slug, command: recipe.command, args: recipe.args, envKeys: Object.keys(env).sort(), enabled: false, apps: true, localApp: slug }]);
+      for (const value of Object.values(env)) expect(JSON.stringify(listing)).not.toContain(value);
+    }
+  });
+
+  it("runs a pinned release of a catalog app and takes every credential from a variable, never an argument", () => {
+    for (const [slug, recipe] of Object.entries(LOCAL_APPS)) {
+      expect(CURATED_CONNECTOR_SLUGS, slug).toContain(slug);
+      expect(recipe.args.some((arg) => /@\d+\.\d+\.\d+$|==\d+\.\d+\.\d+$|@sha256:[0-9a-f]{64}$/.test(arg)), slug).toBe(true);
+      expect(recipe.args.some((arg) => /@latest\b/.test(arg)), slug).toBe(false);
+      expect(recipe.env.filter(({ secret }) => secret).length, slug).toBeGreaterThan(0);
+    }
+  });
+
+  it("keeps its marker through an edit, which can neither add, change nor remove it", () => {
+    const stored = parseStoredMcpServer("trello", { ...TRELLO, localApp: "trello" });
+    expect(stored).toEqual({ ok: true, server: { ...TRELLO, enabled: true, localApp: "trello" } });
+    if (!stored.ok) throw new Error("unreachable");
+    const kept = { command: TRELLO.command, args: TRELLO.args, env: { TRELLO_API_KEY: true, TRELLO_TOKEN: "token-2" } };
+    expect(parseMcpServerMutation("trello", kept, stored.server)).toEqual({ ok: true, server: { ...TRELLO, env: { TRELLO_API_KEY: "key-1", TRELLO_TOKEN: "token-2" }, enabled: true, localApp: "trello" } });
+    expect(parseMcpServerMutation("trello", { ...kept, localApp: "notion" }, stored.server)).toMatchObject({ ok: true, server: { localApp: "trello" } });
+    expect(parseMcpServerMutation("trello", { type: "http", url: "https://mcp.trello.example/mcp" }, stored.server)).toEqual({
+      ok: false, error: "A local app runs a program on this computer. To use an address instead, remove it and add the server again.",
+    });
+    const ordinary = parseStoredMcpServer("notes", { command: "notes-mcp" });
+    if (!ordinary.ok) throw new Error("unreachable");
+    expect(parseMcpServerMutation("notes", { command: "notes-mcp", localApp: "trello" }, ordinary.server)).toEqual({ ok: true, server: { command: "notes-mcp", args: [], env: {}, enabled: true } });
+  });
+
+  it("is never set by a bot or a pasted config block", () => {
+    expect(addDisabledMcpServer({}, { name: "trello", ...TRELLO, localApp: "trello" })).toMatchObject({ ok: true, server: expect.not.objectContaining({ localApp: expect.anything() }) });
+    expect(parseMcpServersImport(JSON.stringify({ mcpServers: { trello: { ...TRELLO, localApp: "trello" } } })))
+      .toMatchObject({ ok: true, servers: { trello: expect.not.objectContaining({ localApp: expect.anything() }) } });
+  });
+
+  it("keeps a saved entry whose app left the catalog, and refuses a marker that is no app name", () => {
+    expect(parseStoredMcpServer("hubspot", { command: "npx", localApp: "hubspot" })).toMatchObject({ ok: true, server: { localApp: "hubspot" } });
+    expect(parseStoredMcpServer("trello", { command: "npx", localApp: "Trello App" }).ok).toBe(false);
+    expect(parseStoredMcpServer("docs", { type: "http", url: "https://docs.example/mcp", localApp: "docs" }).ok).toBe(false);
   });
 });

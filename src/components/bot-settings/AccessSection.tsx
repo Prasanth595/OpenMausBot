@@ -116,8 +116,8 @@ export function WorkingFolder({ bot }: { bot: Bot }) {
 }
 
 /**
- * Absent list = all enabled; the first flip writes an explicit list so servers added later never silently reach this
- * bot.
+ * Absent list = all enabled except local apps; the first flip writes an explicit list so servers added later never
+ * silently reach this bot.
  */
 export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpServers: string[] | null }) => void }) {
   const { dispatch } = useStore();
@@ -127,7 +127,7 @@ export function McpServersCard({ bot, patch }: { bot: Bot; patch: (patch: { mcpS
 
   const toggle = (name: string) => {
     if (!servers || bot.busy || error) return;
-    const current = usesAll ? servers.filter((server) => server.enabled).map((server) => server.name) : [...(bot.mcpServers ?? [])];
+    const current = usesAll ? [...mounted] : [...(bot.mcpServers ?? [])];
     const next = current.includes(name) ? current.filter((item) => item !== name) : [...current, name];
     patch({ mcpServers: next });
   };

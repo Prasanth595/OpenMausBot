@@ -8,7 +8,7 @@ import type { useBotSettingsDerived } from "./useBotSettingsDerived";
 const fixture = vi.hoisted(() => ({
   dispatch: vi.fn(),
   mcpError: false,
-  servers: null as null | Array<{ name: string; enabled: boolean }>,
+  servers: null as null | Array<{ name: string; enabled: boolean; localApp?: string }>,
   config: null as unknown,
   apps: { phase: "loading", apps: [], connectedSlugs: [] } as import("./useBotApps").BotApps,
 }));
@@ -31,7 +31,7 @@ vi.mock("../DesktopCapabilities", () => ({
   useDesktopCapabilities: () => ({ capabilities: { host: { homeDir: undefined } } }),
 }));
 
-const { AccessSection } = await import("./AccessSection");
+const { AccessSection, McpServersCard } = await import("./AccessSection");
 
 // WorkingFolder reads window.ogb?.pickFolder at render time, so window is stubbed per test.
 beforeEach(() => {
@@ -165,6 +165,25 @@ describe("AccessSection always-allowed list", () => {
     expect(markup).toContain("Retry");
     expect(markup).toContain('role="alert"');
     expect(markup).toContain('disabled="" aria-label="Let this bot use notes"');
+  });
+
+  it("leaves a local app off for a bot until it is switched on, and the first switch never pulls it in", () => {
+    fixture.servers = [{ name: "notes", enabled: true }, { name: "trello", enabled: true, localApp: "trello" }];
+    const patch = vi.fn();
+    let tree!: ReturnType<typeof McpServersCard>;
+    function Capture() { tree = McpServersCard({ bot: makeBot(), patch }); return tree; }
+    renderToStaticMarkup(createElement(StoreProvider, null, createElement(Capture)));
+    type Node = ReactElement<{ children?: ReactNode; checked?: boolean; onClick?: () => void; "aria-label"?: string }>;
+    const nodes = (value: ReactNode): Node[] => {
+      if (!isValidElement(value)) return [];
+      const node = value as Node;
+      return [node, ...Children.toArray(node.props.children).flatMap(nodes)];
+    };
+    const toggle = (name: string) => nodes(tree).find((node) => node.props["aria-label"] === `Let this bot use ${name}`)!;
+    expect([toggle("notes").props.checked, toggle("trello").props.checked]).toEqual([true, false]);
+    toggle("notes").props.onClick!();
+    toggle("trello").props.onClick!();
+    expect(patch.mock.calls).toEqual([[{ mcpServers: [] }], [{ mcpServers: ["notes", "trello"] }]]);
   });
 
   it("shows a placeholder when nothing is standing yet", () => {

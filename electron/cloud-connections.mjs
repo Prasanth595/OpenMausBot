@@ -22,7 +22,7 @@ const DIGEST = /^[0-9a-f]{64}$/u;
 const KINDS = new Set(["mcp", "key", "composio", "highlevel"]);
 /** Keys first, so the engines they run are ready before anything that follows them; connected apps last. */
 const ORDER = { key: 0, mcp: 1, highlevel: 2, composio: 3 };
-const MCP_FIELDS = ["command", "args", "env", "type", "url", "headers", "oauth", "resultBudget", "enabled", "runsOn"];
+const MCP_FIELDS = ["command", "args", "env", "type", "url", "headers", "oauth", "resultBudget", "enabled", "runsOn", "localApp"];
 /** How long a move waits for My Cloud to run the engines whose keys just went. */
 const ENGINE_WAIT_MS = 10_000;
 

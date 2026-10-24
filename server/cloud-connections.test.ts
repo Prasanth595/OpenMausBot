@@ -40,6 +40,10 @@ describe("which MCP servers need this computer", () => {
     expect(addressHere("https://172.32.0.1/mcp")).toBe(false);
   });
 
+  it("a local app the person set up here", () => {
+    expect(runsHere({ ...stdio("npx", ["-y", "@delorenj/mcp-server-trello@1.8.1"], { TRELLO_TOKEN: "t" }), localApp: "trello" })).toBe(true);
+  });
+
   it("names the program a command-line server starts", () => {
     expect(["npx", "/opt/homebrew/bin/uvx", "C:\\Program Files\\nodejs\\node.EXE", "npx.cmd"].map(launcherOf)).toEqual(["npx", "uvx", "node", "npx"]);
   });

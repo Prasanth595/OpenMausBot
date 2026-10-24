@@ -39,6 +39,13 @@ describe("what a bot on My Cloud is told about connections that need the person"
     expect(prompt({ mcpServers: ["dodo", "linear", "jira"] })).toBe("");
   });
 
+  it("names a local app that stayed on the person's computer only to a bot that chose it", () => {
+    const trello = { command: "npx", args: [], env: {}, enabled: true, localApp: "trello", runsOn: { environmentId: "env-1", label: "Milind's MacBook" } };
+    const prompt = createConnectionPrompt({ ...sources(), mcpServers: () => ({ trello }) }, ORIGIN);
+    expect(prompt({})).toBe("");
+    expect(prompt({ mcpServers: ["trello"] })).toBe(" Runs only on the person's computer Milind's MacBook, not on My Cloud: trello. If a task needs one, say so in plain words.");
+  });
+
   it("HighLevel and connected apps assigned to the bot but not connected here, read in the background for the next turn", async () => {
     const source = sources({}, { gmail: false, slack: true });
     const prompt = createConnectionPrompt(source, ORIGIN);

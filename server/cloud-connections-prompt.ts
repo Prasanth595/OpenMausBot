@@ -50,7 +50,7 @@ export function createConnectionPrompt(sources: ConnectionPromptSources, origin:
     for (const [name, raw] of Object.entries(sources.mcpServers() ?? {})) {
       if (bot.mcpServers !== undefined && !bot.mcpServers.includes(name)) continue;
       const parsed = parseStoredMcpServer(name, raw);
-      if (!parsed.ok || !parsed.server.enabled) continue;
+      if (!parsed.ok || !parsed.server.enabled || (bot.mcpServers === undefined && !isRemoteMcpServer(parsed.server) && parsed.server.localApp)) continue;
       const server = parsed.server;
       if (server.runsOn) elsewhere.set(server.runsOn.label, [...elsewhere.get(server.runsOn.label) ?? [], name]);
       else if (isRemoteMcpServer(server)) {
