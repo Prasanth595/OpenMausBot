@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, ftruncateSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -22,6 +22,11 @@ function store(options: { free?: number; now?: () => number } = {}) {
 
 function step(evidence: BrowserEvidence, threadId: string, generation = GEN, extra: Partial<StepRecord> = {}): StepRecord {
   return { v: 1, step: evidence.nextStep(), at: 1, threadId, generation, image: null, action: "Clicked the \"Go\" button", ...extra };
+}
+
+function writeSizedFile(path: string, bytes: number): void {
+  const fd = openSync(path, "w");
+  try { ftruncateSync(fd, bytes); } finally { closeSync(fd); }
 }
 
 async function shot(evidence: BrowserEvidence, threadId: string, bytes: Buffer, generation = GEN): Promise<StepRecord> {
@@ -89,7 +94,7 @@ describe("the browser step store", () => {
     const small = store({ free: 1.25 * 1024 ** 3 });
     await small.sweep();
     mkdirSync(join(small.root, "thread-old", GEN), { recursive: true });
-    writeFileSync(join(small.root, "thread-old", GEN, imageFileName(9)), Buffer.alloc(330 * 1024 ** 2));
+    writeSizedFile(join(small.root, "thread-old", GEN, imageFileName(9)), 330 * 1024 ** 2);
     await small.sweep();
     // Over the cap: the oldest other conversation's screenshots go first, its steps stay.
     writeFileSync(join(small.root, "thread-old", GEN, "steps.jsonl"), `${JSON.stringify({ v: 1, step: 9, threadId: "thread-old", generation: GEN, image: imageFileName(9) })}\n`);
@@ -102,7 +107,7 @@ describe("the browser step store", () => {
   it("caps one conversation at 200 MB of screenshots", async () => {
     const evidence = store();
     mkdirSync(join(evidence.root, "thread-1", GEN2), { recursive: true });
-    writeFileSync(join(evidence.root, "thread-1", GEN2, imageFileName(5)), Buffer.alloc(EVIDENCE_LIMITS.threadBytes));
+    writeSizedFile(join(evidence.root, "thread-1", GEN2, imageFileName(5)), EVIDENCE_LIMITS.threadBytes);
     expect((await shot(evidence, "thread-1", Buffer.from("x"))).imageSkipped).toBe("thread-cap");
     expect((await shot(evidence, "thread-2", Buffer.from("x"))).image).not.toBeNull();
   });
@@ -130,9 +135,9 @@ describe("the browser step store", () => {
     const evidence = store({ free: 1.25 * 1024 ** 3, now: () => now });
     await shot(evidence, "thread-busy", Buffer.from("live turn"));
     // The store is over its 320 MB cap, and the busy turn holds most of it.
-    writeFileSync(join(evidence.root, "thread-busy", GEN, imageFileName(500)), Buffer.alloc(300 * 1024 ** 2));
+    writeSizedFile(join(evidence.root, "thread-busy", GEN, imageFileName(500)), 300 * 1024 ** 2);
     mkdirSync(join(evidence.root, "thread-idle", GEN2), { recursive: true });
-    writeFileSync(join(evidence.root, "thread-idle", GEN2, imageFileName(7)), Buffer.alloc(40 * 1024 ** 2));
+    writeSizedFile(join(evidence.root, "thread-idle", GEN2, imageFileName(7)), 40 * 1024 ** 2);
     now += 60_000;
     await evidence.sweep();
     expect(readdirSync(join(evidence.root, "thread-busy", GEN)).filter((name) => name.endsWith(".jpg"))).toHaveLength(2);
