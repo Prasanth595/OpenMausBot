@@ -690,8 +690,19 @@ export async function callTool(name: string, args: Json, context: ToolCallContex
     return { text: `Logged to ${String(r.file)}: ${String(r.line)}` };
   }
   if (name === "project_memory") {
-    const body: Json = { ...args };
-    if ("entry_id" in body) { body.entryId = body.entry_id; delete body.entry_id; }
+    const entryId = typeof (args.entryId ?? args.entry_id) === "string" ? String(args.entryId ?? args.entry_id) : undefined;
+    const body: Json = {
+      operation: args.operation,
+      ...(typeof args.query === "string" ? { query: args.query } : {}),
+      ...(entryId ? { entryId } : {}),
+      ...(typeof args.limit === "number" ? { limit: args.limit } : {}),
+      ...(typeof args.kind === "string" ? { kind: args.kind } : {}),
+      ...(typeof args.key === "string" ? { key: args.key } : {}),
+      ...(typeof args.name === "string" ? { name: args.name } : {}),
+      ...(typeof args.detail === "string" ? { detail: args.detail } : {}),
+      ...(Array.isArray(args.aliases) ? { aliases: args.aliases.filter((alias): alias is string => typeof alias === "string") } : {}),
+      ...(typeof args.revision === "string" ? { revision: args.revision } : {}),
+    };
     const response = await apiResponse("/api/internal/project-memory", { method: "POST", body: JSON.stringify(body) });
     return { text: JSON.stringify(response.body), ...(!response.ok ? { isError: true } : {}) };
   }

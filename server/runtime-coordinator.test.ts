@@ -1376,7 +1376,7 @@ describe("RuntimeCoordinator: outward restart policy, answerNode, continuation o
 describe("explicit terminal task reports through actual finish paths", () => {
  const complete = 'OPENMAUS_TASK_RESULT: {"state":"completed"}';
  const blocked = 'Inspected the requested publication. The required tool is absent.\n\nOPENMAUS_TASK_RESULT: {"state":"blocked","reason":"Missing publication tool"}';
- it.each([[complete, { state: "completed" }], [blocked, { state: "blocked", reason: "Missing publication tool" }]])("persists ordinary source-turn report %s after store restart", (text, disposition) => {
+ it.each([[complete, { state: "completed" }], [blocked, { state: "blocked", reason: "Missing publication tool" }]])("persists ordinary source-turn report %s after store restart", async (text, disposition) => {
   const dir = mkdtempSync(join(tmpdir(), "task-result-source-"));
   const w = world(undefined, {}, dir);
   try {
@@ -1387,7 +1387,7 @@ describe("explicit terminal task reports through actual finish paths", () => {
    const restarted = world(undefined, {}, dir);
    try { expect(restarted.coordinator.node("typed-root")).toMatchObject({ status: "completed", disposition, result: text, requestMessageId: "request-typed" }); }
    finally { restarted.coordinator.close(); }
-  } finally { w.coordinator.close(); removeTempDir(dir); }
+  } finally { w.coordinator.close(); await removeTempDir(dir); }
  });
  it("records delegated and resumed explicit outcomes through their ordinary prompt paths", async () => {
   const w = world(node => ({ ok: true, text: node.botId === "builder" ? blocked : complete }));

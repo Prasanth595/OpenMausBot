@@ -90,9 +90,10 @@ def main():
  directive={k:attempt[k] for k in ['version','attemptId','generation','digest','workerId','profileDigest','cwd','rootDeadline','startBefore','kind']}
  directive.update(decision=decision,controllerHost='orch-hel1',controllerDecisionId=str(uuid.uuid4()),policyVersion=POLICY)
  committed=read(path+'/directive',directive)
- if not committed.get('ok') or decision!='allow' or committed['attempt'].get('controllerDecision',{}).get('controllerDecisionId')!=directive['controllerDecisionId']:refuse()
+ if not committed.get('ok') or committed.get('attempt',{}).get('controllerDecision',{}).get('controllerDecisionId')!=directive['controllerDecisionId']:refuse()
  with (ROOT/'logs/office-decisions.jsonl').open('a') as log:
   log.write(json.dumps({'at':time.time(),'controllerHost':'orch-hel1','attemptId':attempt_id,'assignmentId':attempt['assignmentId'],'rootId':attempt['rootId'],'workerId':WORKER,'decisionId':directive['controllerDecisionId'],'policyVersion':POLICY,'decision':decision})+'\n')
+ if decision!='allow':refuse()
  print(json.dumps({'ok':True,'attemptId':attempt_id,'controllerDecisionId':directive['controllerDecisionId']}),flush=True)
 
 if __name__=='__main__':

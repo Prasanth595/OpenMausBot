@@ -127,7 +127,8 @@ export class Runtime {
         if (n.status !== "running") continue;
         const handedOut = childrenSince(this.store, n).length > 0;
         const lastAttempt = n.office?.attempts.at(-1);
-        if (!handedOut && lastAttempt?.consumedAt !== undefined) {
+        const currentAttempt = lastAttempt && n.startedAt !== undefined && lastAttempt.preparedAt >= n.startedAt ? lastAttempt : undefined;
+        if (!handedOut && currentAttempt?.consumedAt !== undefined) {
           this.settle(n, "failed", "interrupted", "The provider turn ended before its assignment result was committed; its work will not be repeated");
           continue;
         }

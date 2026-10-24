@@ -141,9 +141,10 @@ export class RuntimeCoordinator implements Coordinator {
     const root = this.store.get(rootId);
     if (!root || root.parentId) return undefined;
     const assignments = this.store.all({ rootId }).map(row => {
-      const attempt = row.office?.attempts.findLast(value => value.state === "prepared" || value.state === "issued" || value.state === "uncertain" || (value.state === "consumed" && value.finishedAt === undefined));
+      const attempt = row.office?.attempts.findLast(value => value.state === "prepared" || value.state === "issued" || value.state === "uncertain" || ((value.state === "consumed" || value.consumedAt !== undefined) && value.finishedAt === undefined));
       return { id: row.id, botId: row.assignee.botId, threadId: row.assignee.destination.threadId, status: row.status, executions: row.executions,
         ...(attempt ? { generation: attempt.generation, attemptId: attempt.attemptId, attemptState: attempt.state,
+          ...(attempt.consumedAt !== undefined ? { attemptConsumedAt: attempt.consumedAt } : {}),
           ...(attempt.finishedAt !== undefined ? { attemptFinishedAt: attempt.finishedAt } : {}) } : {}) };
     });
     return { rootId, sourceBotId: root.assignee.botId, sourceThreadId: root.assignee.destination.threadId,
@@ -588,7 +589,7 @@ export interface CoordinatorCancellationSnapshot {
   requestMessageId?: string;
   treeVersion: string;
   assignments: Array<{ id: string; botId: string; threadId: string; status: Assignment["status"]; executions: number;
-    generation?: string; attemptId?: string; attemptState?: string; attemptFinishedAt?: number }>;
+    generation?: string; attemptId?: string; attemptState?: string; attemptConsumedAt?: number; attemptFinishedAt?: number }>;
 }
 
 export function configureCoordinatorOfficeControl(coordinator: Coordinator, options: Omit<OfficeControlOptions, "store" | "cancelAssignment">): OfficeControl {

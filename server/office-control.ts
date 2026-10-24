@@ -158,9 +158,10 @@ export class OfficeControl {
     const live: LiveAttempt = { binding, input, controller, cleanup: () => { clearTimeout(timer); input.signal.removeEventListener("abort", abort); } };
     this.live.set(attempt.attemptId, live);
     const finish = (outcome?: "completed" | "failed" | "cancelled" | "uncertain") => {
+      const assignmentId = attempt.assignmentId;
       if (this.live.get(attempt.attemptId) === live) { live.cleanup(); this.live.delete(attempt.attemptId); }
       this.options.store.transaction(() => {
-        const stored = this.find(attempt.attemptId);
+        const stored = this.find(attempt.attemptId, assignmentId);
         if (!stored) return;
         if (outcome === "uncertain") {
           stored.attempt.state = "uncertain"; delete stored.attempt.finishedAt;
@@ -277,12 +278,12 @@ export class OfficeControl {
     }
   }
 
-  private find(attemptId: string): { node: Assignment; attempt: OfficeAttempt } | undefined {
-    for (const node of this.options.store.all()) {
-      const attempt = node.office?.attempts.find(value => value.attemptId === attemptId);
-      if (attempt) return { node, attempt };
-    }
-    return undefined;
+  private find(attemptId: string, assignmentId?: string): { node: Assignment; attempt: OfficeAttempt } | undefined {
+    const id = assignmentId ?? this.live.get(attemptId)?.binding.assignmentId;
+    if (!id) return undefined;
+    const node = this.options.store.get(id);
+    const attempt = node?.office?.attempts.find(value => value.attemptId === attemptId);
+    return node && attempt ? { node, attempt } : undefined;
   }
 }
 

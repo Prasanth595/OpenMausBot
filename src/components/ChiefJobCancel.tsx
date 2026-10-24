@@ -63,7 +63,7 @@ export function ChiefJobCancel({ botId, threadId, activeLeafId, busy, waiting, c
   useEffect(() => {
     const current = ++revision.current;
     const abort = new AbortController();
-    setSnapshot(null);
+    setSnapshot(previous => previous?.key === key ? previous : null);
     if (connected) void (async () => {
       let version = "";
       try {

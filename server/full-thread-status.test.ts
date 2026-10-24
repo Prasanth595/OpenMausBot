@@ -5,9 +5,9 @@ import { launchVerificationServer, runControlOmb } from "../scripts/control-omb.
 import { readHandoffs } from "./testing/handoff-rows.ts";
 import { agentBrowser, ensureUiBrowser, sessionEnv } from "../scripts/testing/control-omb-ui.ts";
 
-it("real production ChatView exposes delegated current status through normal thread navigation", async () => {
+it.skipIf(process.env.OMB_UI_E2E !== "1")("real production ChatView exposes delegated current status through normal thread navigation", async () => {
  const fixture = await launchVerificationServer(process.env, undefined, undefined, undefined, undefined, { scripted: true }, [], undefined, resolve(process.env.OFFICE_FIXTURE_DIST ?? "dist"));
- const dir = resolve(process.env.OFFICE_EVIDENCE_DIR ?? "../evidence/full-app"); mkdirSync(dir, { recursive: true });
+ const dir = resolve(process.env.OFFICE_EVIDENCE_DIR ?? ".omb-scratch/full-app"); mkdirSync(dir, { recursive: true });
  const evidence: unknown[] = []; let browser: { binary: string; env: NodeJS.ProcessEnv } | undefined;
  const api = async (method: string, path: string, body?: unknown) => {
   const response = await fetch(`${fixture.info.url}${path}`, { method, headers: { "content-type": "application/json", origin: fixture.info.url }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
