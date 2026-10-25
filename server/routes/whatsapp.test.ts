@@ -17,6 +17,7 @@ let server: Server;
 let base: string;
 let tests: number;
 let verifyOk: boolean;
+let verifyCalls: number;
 
 async function serve(webhookBase: string, teamCloud = false) {
   const settings = createWhatsAppSettings(dir);
@@ -25,6 +26,7 @@ async function serve(webhookBase: string, teamCloud = false) {
     channel: {
       sendTest: async () => { tests += 1; return { ok: true as const }; },
       verify: async (candidate: { accountSid?: string; authToken?: string } = {}) => {
+        verifyCalls += 1;
         if (!verifyOk) return { ok: false as const, error: "Twilio didn't accept that Account SID and auth token." };
         settings.update(candidate);
         settings.setAccountName("Azad", Date.now());
@@ -54,6 +56,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "omb-whatsapp-routes-"));
   tests = 0;
   verifyOk = true;
+  verifyCalls = 0;
 });
 afterEach(async () => {
   await new Promise((resolve) => server.close(resolve));
@@ -110,6 +113,14 @@ describe("WhatsApp settings routes", () => {
     const after = await call("/api/whatsapp");
     expect(after.body.code).toBeUndefined();
     expect(JSON.stringify(after.body)).not.toContain(link.body.code);
+  });
+
+  it("refuses credentials that are not text, and unknown fields, without checking anything", async () => {
+    await serve("http://127.0.0.1:8800");
+    for (const body of [{ accountSid: 123 }, { authToken: 456 }, { accountSid: SID, extra: true }]) {
+      expect((await call("/api/whatsapp/verify", "POST", body)).status).toBe(400);
+    }
+    expect(verifyCalls).toBe(0);
   });
 
   it("masks linked numbers", async () => {

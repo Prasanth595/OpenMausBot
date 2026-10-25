@@ -206,14 +206,17 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
     const creds = credentials();
     const since = deps.settings.load().pollSince;
     if (!creds || since === undefined) return POLL_MS;
+    const generation = deps.settings.load().generation;
     const result = await listInbound(creds, since, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase });
     if (!result.ok) {
       deps.settings.recordError(`Couldn't check Twilio for new messages: ${result.error}`, now());
       return POLL_BACKOFF_MS;
     }
+    if (result.truncated) deps.settings.recordError("More new messages arrived than one check reads; the rest are read next time.", now());
     for (const message of result.messages) {
+      if (deps.settings.load().generation !== generation) return POLL_MS;
       await handleInbound(message);
-      deps.settings.setPollSince(message.at);
+      if (!result.truncated) deps.settings.setPollSince(message.at);
     }
     return POLL_MS;
   }

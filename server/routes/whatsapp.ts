@@ -57,11 +57,7 @@ export function createWhatsAppRoutes(deps: WhatsAppRouteDeps): RouteHandler {
       if (deps.teamCloud) return json(res, 409, { error: "WhatsApp isn't available on a team server yet." });
       let candidate: { accountSid?: string; authToken?: string };
       try {
-        const body = await readBody(req) as { accountSid?: unknown; authToken?: unknown };
-        candidate = settingsPatchSchema.pick({ accountSid: true, authToken: true }).parse({
-          ...(typeof body?.accountSid === "string" ? { accountSid: body.accountSid } : {}),
-          ...(typeof body?.authToken === "string" ? { authToken: body.authToken } : {}),
-        });
+        candidate = settingsPatchSchema.pick({ accountSid: true, authToken: true }).strict().parse((await readBody(req)) ?? {});
       } catch (error) {
         return failed(res, json, error);
       }

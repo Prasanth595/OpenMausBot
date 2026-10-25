@@ -38,6 +38,8 @@ const stateSchema = z.object({
   link: z.object({ codeHash: z.string(), expiresAt: z.number() }).optional(),
   /** Messages before this are never read when checking Twilio for new ones. */
   pollSince: z.number().optional(),
+  /** Changes whenever `pollSince` is reset, so a check that started before the reset delivers nothing. */
+  generation: z.number().default(0),
 });
 
 export type WhatsAppState = z.output<typeof stateSchema>;
@@ -156,6 +158,7 @@ export function createWhatsAppSettings(dataDir: string) {
     }
     if (clean.accountSid !== undefined || clean.authToken) delete state.accountName;
     if (clean.enabled === true && !state.enabled) state.pollSince = now;
+    if (clean.enabled !== undefined && clean.enabled !== state.enabled) state.generation += 1;
     if (clean.enabled !== undefined) state.enabled = clean.enabled;
     if (state.enabled && (!state.accountSid || !authToken(state) || !state.allowed.length)) {
       throw Object.assign(new Error("Add the Account SID, the auth token and your WhatsApp number before switching WhatsApp on"), { status: 400 });
@@ -215,7 +218,10 @@ export function createWhatsAppSettings(dataDir: string) {
     const state = load();
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
     state.link = { codeHash: hashCode(code), expiresAt: now + LINK_TTL_MS };
-    if (!state.enabled || state.pollSince === undefined) state.pollSince = now;
+    if (!state.enabled || state.pollSince === undefined) {
+      state.pollSince = now;
+      state.generation += 1;
+    }
     save(state);
     return { code, expiresAt: state.link.expiresAt };
   }

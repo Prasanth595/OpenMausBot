@@ -28,6 +28,7 @@ let teamCloud: boolean;
 let reachable: boolean;
 let inbox: Array<Record<string, string>>;
 let listFails: boolean;
+let listGate: Promise<void> | null;
 let channel: ReturnType<typeof createWhatsAppChannel>;
 
 const msg = (id: string, role: "user" | "bot", text: string, extra: Partial<Message> = {}): Message =>
@@ -58,6 +59,7 @@ function makeChannel() {
         return token === "bad" ? new Response("{}", { status: 401 }) : new Response(JSON.stringify({ friendly_name: "Azad" }), { status: 200 });
       }
       if (!init.method) {
+        if (listGate) await listGate;
         if (listFails) return new Response(JSON.stringify({ message: "Service unavailable" }), { status: 503 });
         return new Response(JSON.stringify({ messages: inbox }), { status: 200 });
       }
@@ -98,6 +100,7 @@ beforeEach(async () => {
   reachable = true;
   inbox = [];
   listFails = false;
+  listGate = null;
   channel = makeChannel();
   server = createServer((req, res) => void channel.handleTwilio(req, res, base));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -326,5 +329,26 @@ describe("review fixes", () => {
     expect(await post(incoming("hi", "SM1"))).toBe(200);
     settings.firstSighting = original;
     expect(delivered).toEqual([]);
+  });
+});
+
+describe("a check that a switch happened during", () => {
+  it("delivers nothing and keeps the cursor when WhatsApp was switched off and on while Twilio answered", async () => {
+    reachable = false;
+    settings.setAccountName("Azad", clock - 60_000);
+    const before = settings.load().pollSince;
+    let release!: () => void;
+    listGate = new Promise((resolve) => { release = resolve; });
+    inbox = [row("SMlate", "old instruction", clock + 1_000)];
+    const checking = channel.poll();
+    settings.update({ enabled: false }, clock);
+    clock += 60_000;
+    settings.update({ enabled: true }, clock);
+    release();
+    await checking;
+    await channel.idle();
+    expect(delivered).toEqual([]);
+    expect(settings.load().pollSince).toBe(clock);
+    expect(settings.load().pollSince).not.toBe(before);
   });
 });

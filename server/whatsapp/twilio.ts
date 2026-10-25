@@ -179,6 +179,9 @@ export async function fetchAccount(
 
 const MAX_POLL_PAGES = 20;
 
+/** Twilio sorts by when a message was sent, which can trail when it arrived; paging stops only this far past `since`. */
+const SENT_ORDER_MARGIN_MS = 5 * 60_000;
+
 export interface PolledMessage extends InboundMessage {
   at: number;
 }
@@ -188,7 +191,7 @@ export async function listInbound(
   credentials: TwilioCredentials,
   since: number,
   options: { fetchImpl?: typeof fetch; apiBase?: string } = {},
-): Promise<{ ok: true; messages: PolledMessage[] } | { ok: false; error: string; status?: number }> {
+): Promise<{ ok: true; messages: PolledMessage[]; truncated: boolean } | { ok: false; error: string; status?: number }> {
   const fetchImpl = options.fetchImpl ?? fetch;
   // Twilio filters by day only; the exact cut happens below.
   const query = new URLSearchParams({ To: credentials.from, "DateSent>": new Date(since).toISOString().slice(0, 10), PageSize: "50" });
@@ -202,12 +205,13 @@ export async function listInbound(
       if (!response.ok) return { ok: false, error: typeof json.message === "string" ? json.message : `Twilio answered ${response.status}`, status: response.status };
       const batch = Array.isArray(json.messages) ? json.messages as Array<Record<string, unknown>> : [];
       rows.push(...batch);
-      // Twilio lists newest first: once a page reaches back past `since`, older pages hold nothing new.
-      const reachedSince = batch.some((row) => Date.parse(String(row.date_created ?? "")) <= since);
+      const sent = batch.map((row) => Date.parse(String(row.date_sent ?? row.date_created ?? ""))).filter(Number.isFinite);
+      const reachedSince = sent.length > 0 && Math.min(...sent) < since - SENT_ORDER_MARGIN_MS;
       pageUrl = !reachedSince && typeof json.next_page_uri === "string" && json.next_page_uri
         ? new URL(json.next_page_uri, options.apiBase ?? TWILIO_API_BASE).toString()
         : undefined;
     }
+    const truncated = Boolean(pageUrl);
     const messages = rows.flatMap((row): PolledMessage[] => {
       if (row.direction !== "inbound") return [];
       const at = Date.parse(String(row.date_created ?? ""));
@@ -215,7 +219,7 @@ export async function listInbound(
       const parsed = parseInbound({ From: String(row.from ?? ""), To: String(row.to ?? ""), Body: String(row.body ?? ""), MessageSid: String(row.sid ?? ""), NumMedia: String(row.num_media ?? "0") });
       return parsed ? [{ ...parsed, at }] : [];
     });
-    return { ok: true, messages: messages.sort((a, b) => a.at - b.at) };
+    return { ok: true, messages: messages.sort((a, b) => a.at - b.at), truncated };
   } catch (error) {
     return { ok: false, error: `Could not reach Twilio: ${(error as Error).message}` };
   }

@@ -157,6 +157,22 @@ describe("setup helpers", () => {
     expect(asked[1]).toBe("https://api.twilio.com/2010-04-01/Accounts/x/Messages.json?Page=1");
   });
 
+  it("pages by Twilio's sent-time order, so a message created earlier but sent later does not hide the next page", async () => {
+    const since = Date.parse("2026-10-25T10:00:00Z");
+    const fetchImpl = (async (url: string) => new Response(JSON.stringify(url.includes("Page=1")
+      ? { messages: [{ sid: "SM2", from: "whatsapp:+14155550100", to: "whatsapp:+14155238886", body: "next page", direction: "inbound", date_created: "Sat, 25 Oct 2026 10:02:00 +0000", date_sent: "Sat, 25 Oct 2026 10:02:00 +0000" }] }
+      : { messages: [{ sid: "SM1", from: "whatsapp:+14155550100", to: "whatsapp:+14155238886", body: "late send", direction: "inbound", date_created: "Sat, 25 Oct 2026 09:59:00 +0000", date_sent: "Sat, 25 Oct 2026 10:04:00 +0000" }], next_page_uri: "/x?Page=1" }), { status: 200 })) as unknown as typeof fetch;
+    const result = await listInbound(creds, since, { fetchImpl });
+    expect(result.ok && result.messages.map((m) => m.body)).toEqual(["next page"]);
+    expect(result.ok && result.truncated).toBe(false);
+  });
+
+  it("says when it stopped at the page limit before reaching `since`", async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({ messages: [{ sid: `SM${Math.random()}`, from: "whatsapp:+14155550100", to: "whatsapp:+14155238886", body: "x", direction: "inbound", date_created: new Date().toUTCString() }], next_page_uri: "/x?Page=n" }), { status: 200 })) as unknown as typeof fetch;
+    const result = await listInbound(creds, Date.now() - 60_000, { fetchImpl });
+    expect(result.ok && result.truncated).toBe(true);
+  });
+
   it("opens WhatsApp with the message already typed", () => {
     expect(whatsappLink("whatsapp:+14155238886", "join brave-tiger")).toBe("https://wa.me/14155238886?text=join%20brave-tiger");
   });
