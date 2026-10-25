@@ -1095,7 +1095,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
               emit({
                 ...base(threadId, current.turnId),
                 type: "runtime.error",
-                message: `${DRIVER_KIND} exited ${code} before the prompt result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`,
+                message: `${remote ? `engine host ${remote.host.alias} lost (ssh exited ${code})` : `${DRIVER_KIND} exited ${code}`} before the prompt result${session.stderr ? `: ${session.stderr.trim().slice(-300)}` : ""}`,
               });
               settle(threadId, session, false, "exit_before_result");
             } else if (sessions.get(threadId) === session) {

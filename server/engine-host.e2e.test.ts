@@ -13,7 +13,7 @@ interface Receipt { method: string; pid: number; sessionCwd?: string; servers?: 
   probes?: Array<{ name: string; status: number | string }>; botsStatus?: number | string }
 
 /** Starts the server with a customAcp instance that runs on `pi-test` (the fake ssh), and returns what the fake agent saw. */
-async function runTurnOnHost(options: { localRoot: (dataDir: string) => string }) {
+async function runTurnOnHost(options: { localRoot: (dataDir: string) => string; dropAfterMs?: number }) {
   const fixture = await launchVerificationServer();
   const { dataDir, url, logPath } = fixture.info;
   const remoteDir = join(dataDir, "remote-fixture");
@@ -44,13 +44,14 @@ async function runTurnOnHost(options: { localRoot: (dataDir: string) => string }
     config.instances[engineId] = { driver: "customAcp", displayName: "Remote fixture",
       config: { cli: `${JSON.stringify(process.execPath)} --experimental-strip-types ${JSON.stringify(testing("fake-remote-acp.ts"))}`,
         host: { alias: "pi-test", workspace: { local: options.localRoot(dataDir), remote: remoteRoot }, remotePortBase: 19600 } },
-      environment: { FAKE_REMOTE_DIR: remoteDir } };
+      environment: { FAKE_REMOTE_DIR: remoteDir, ...(options.dropAfterMs ? { FAKE_REMOTE_HOLD_MS: "30000" } : {}) } };
     writeFileSync(configPath, JSON.stringify(config));
     const log = openSync(logPath, "a", 0o600);
     server = spawn(process.execPath, ["--experimental-strip-types", fileURLToPath(new URL("./index.ts", import.meta.url))], {
       cwd: fileURLToPath(new URL("..", import.meta.url)), stdio: ["ignore", log, log],
       env: { ...verificationServerEnvironment({}, dataDir, Number(new URL(url).port)),
-        PATH: [fakeBin, dirname(process.execPath)].join(":"), OMB_ENGINE_HOST_PORT: String(internalPort), FAKE_SSH_LOG: sshLog },
+        PATH: [fakeBin, dirname(process.execPath)].join(":"), OMB_ENGINE_HOST_PORT: String(internalPort), FAKE_SSH_LOG: sshLog,
+        ...(options.dropAfterMs ? { FAKE_SSH_DIE_AFTER_MS: String(options.dropAfterMs) } : {}) },
     });
     closeSync(log);
     await expect.poll(async () => {
@@ -99,4 +100,9 @@ it("ends the turn with a setup error, and starts no engine, when the folder has 
   expect(run.ssh).toHaveLength(0);
   expect(run.seen).toHaveLength(0);
   expect(run.thread).toContain("is outside");
+});
+
+it("fails the turn with a host-lost reason, and leaves the harness up, when the ssh connection drops mid-turn", async () => {
+  const run = await runTurnOnHost({ localRoot: (dataDir) => join(dataDir, "task-workspaces"), dropAfterMs: 2_000 });
+  expect(run.thread).toContain("engine host pi-test lost (ssh exited 255)");
 });

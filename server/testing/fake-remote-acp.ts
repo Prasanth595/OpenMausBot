@@ -52,6 +52,7 @@ for await (const line of createInterface({ input: process.stdin })) {
     receipt({ method, probes, botsStatus: bots });
     send({ jsonrpc: "2.0", method: "session/update", params: { sessionId: params.sessionId,
       update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "remote-ok" } } } });
+    await new Promise((resolve) => setTimeout(resolve, Number(process.env.FAKE_REMOTE_HOLD_MS ?? 0)));
     respond({ stopReason: "end_turn" });
   } else {
     respond({});

@@ -36,6 +36,7 @@ if (forward) {
 // The host has its own PATH; this process's is whatever the fixture gave the harness.
 const child = spawn("/bin/sh", ["-c", command], { stdio: "inherit", env: { ...process.env, PATH: `${process.env.PATH}:/usr/local/bin:/usr/bin:/bin` } });
 child.on("error", (error) => { console.error(`fake ssh: ${error.message}`); process.exit(255); });
+if (process.env.FAKE_SSH_DIE_AFTER_MS) setTimeout(() => { child.kill("SIGKILL"); server?.close(); process.exit(255); }, Number(process.env.FAKE_SSH_DIE_AFTER_MS));
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) process.on(signal, () => child.kill(signal));
 child.on("exit", (code, signal) => {
   server?.close();
