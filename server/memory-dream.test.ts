@@ -91,8 +91,10 @@ describe("the dream prompt and its answer", () => {
       { text: "Cites a chat that was never given", from: [1, 7], confidence: 0.9 },
       { text: "Repeated numbers are one chat", from: [2, "2"], confidence: 0.9 },
       { text: "Not sure about this", from: [1, 2], confidence: 0.4 },
-      { text: "  - The person works late on Sundays ", from: ["1", "2"], aboutUser: true },
-      ...Array.from({ length: 10 }, (_, i) => ({ text: `Filler ${i}`, from: [1, 2] })),
+      { text: "No confidence given", from: [1, 2] },
+      { text: "Confidence in words", from: [1, 2], confidence: "high" },
+      { text: "  - The person works late on Sundays ", from: ["1", "2"], aboutUser: true, confidence: 0.8 },
+      ...Array.from({ length: 10 }, (_, i) => ({ text: `Filler ${i}`, from: [1, 2], confidence: 0.8 })),
     ];
     const answer = parseDream(`\`\`\`json\n${JSON.stringify({
       learned,
@@ -103,6 +105,8 @@ describe("the dream prompt and its answer", () => {
     expect(answer.learned[1]).toEqual({ text: "The person works late on Sundays", from: [1, 2], aboutUser: true });
     expect(answer.learned).toHaveLength(MAX_LEARNED);
     expect(answer.learned.map((item) => item.text)).not.toContain("Only one chat says this");
+    expect(answer.learned.map((item) => item.text)).not.toContain("No confidence given");
+    expect(answer.learned.map((item) => item.text)).not.toContain("Confidence in words");
     expect(answer.outdated).toEqual([{ line: 0, now: "The person lives in Bangalore", from: [2] }]);
     expect(answer.ideas[0]).toEqual({ text: "Send the Monday numbers each week", from: [1, 2] });
     expect(answer.ideas).toHaveLength(MAX_IDEAS);
@@ -169,8 +173,8 @@ describe("dreaming in the upkeep loop", () => {
     answers.push(JSON.stringify({
       learned: [
         { text: "The person wants drafts under 100 words", from: [1, 2], confidence: 0.9 },
-        { text: "The person reviews drafts with their editor", from: [1, 2], topic: "work", topicAliases: ["editor"] },
-        { text: "The person prefers plain words", from: [1, 2], aboutUser: true },
+        { text: "The person reviews drafts with their editor", from: [1, 2], topic: "work", topicAliases: ["editor"], confidence: 0.8 },
+        { text: "The person prefers plain words", from: [1, 2], aboutUser: true, confidence: 0.8 },
       ],
       outdated: [{ line: 0, now: "The person lives in Bangalore", from: [2] }],
       ideas: [{ text: "Keep a short-draft checklist as a skill", from: [1, 2] }],

@@ -178,7 +178,7 @@ export function parseDream(text: string, conversations: number, notebookLines: n
     const { text: raw, from, aboutUser, topic, topicAliases, confidence } = item as Record<string, unknown>;
     const body = sentence(raw);
     const sources = cited(from, conversations, DREAM_MIN_CONVERSATIONS);
-    if (!body || !sources || (typeof confidence === "number" && confidence < DREAM_MIN_CONFIDENCE)) continue;
+    if (!body || !sources || typeof confidence !== "number" || !(confidence >= DREAM_MIN_CONFIDENCE)) continue;
     const file = topicFileName(topic);
     const aliases = Array.isArray(topicAliases)
       ? topicAliases.filter((a): a is string => typeof a === "string").map((a) => a.replace(/[\r\n,[\]]+/g, " ").trim().slice(0, 40)).filter(Boolean).slice(0, 8)
