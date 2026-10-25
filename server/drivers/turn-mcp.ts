@@ -86,9 +86,9 @@ export type AcpMcpServer = { name: string; command: string; args: string[]; env:
 
 const HARNESS_KINDS = ["browser", "computer", "data", "highlevel", "device"] as const;
 
-/** OpenMausBot's own server behind a stdio proxy, as its HTTP endpoint on this server; null for any other server (the
- * person's, or one wrapped in a tool-selection gate). */
-export function ownMcpOverHttp(server: TurnStdioMcpServer): { url: string; headers: Record<string, string> } | null {
+/** OpenMausBot's own server behind a stdio proxy, as its HTTP endpoint on this server, or on `base` when the agent
+ * reaches this server another way; null for any other server (the person's, or one wrapped in a tool-selection gate). */
+export function ownMcpOverHttp(server: TurnStdioMcpServer, base?: string): { url: string; headers: Record<string, string> } | null {
   const harness = server.env.OMB_HARNESS_URL;
   if (!harness || !/^http:\/\/127\.0\.0\.1:\d+$/.test(harness)) return null;
   const script = server.args.findIndex((arg) => /(?:^|[\\/])(?:harness-mcp-proxy|agents-proxy)\.[jt]s$/.test(arg));
@@ -97,25 +97,28 @@ export function ownMcpOverHttp(server: TurnStdioMcpServer): { url: string; heade
     const token = server.env.OMB_COMMS_TOKEN;
     if (!token) return null;
     const settings = Object.fromEntries(AGENTS_MCP_ENV.flatMap((key) => server.env[key] === undefined ? [] : [[key, server.env[key]]]));
-    return { url: `${harness}${OWN_MCP_HTTP_PATH}agents`, headers: { authorization: `Bearer ${token}`,
+    return { url: `${base ?? harness}${OWN_MCP_HTTP_PATH}agents`, headers: { authorization: `Bearer ${token}`,
       [AGENTS_ENV_HEADER]: Buffer.from(JSON.stringify(settings)).toString("base64url") } };
   }
   const kind = HARNESS_KINDS.find((candidate) => candidate === server.args[script + 1]);
   const token = kind && server.env[harnessMcpTokenEnv(kind)];
   const limit = server.env[TOOL_LIMIT_ENV];
-  return kind && token ? { url: `${harness}${OWN_MCP_HTTP_PATH}${kind}`,
+  return kind && token ? { url: `${base ?? harness}${OWN_MCP_HTTP_PATH}${kind}`,
     headers: { authorization: `Bearer ${token}`, ...(limit === undefined ? {} : { [TOOL_LIMIT_HEADER]: limit }) } } : null;
 }
 
 /** The turn's MCP servers as ACP session/new takes them. stdio is the baseline every ACP agent supports; an agent that
  * reaches servers by URL (`http`) gets OpenMausBot's own as endpoints of this server instead of a proxy process each.
+ * `remoteBase` is the same for an agent on another machine: the endpoints are addressed at that base URL, and every
+ * server that cannot be reached by URL is left out, since its command path means nothing there.
  * `engine` is the driver kind, whose provider may limit each tool's schema; `toolBudget`, how many MCP tools the model's
  * provider takes in all. */
-export function acpMcpServers(turn: SendTurnInput, options: { http?: boolean; engine?: string; toolBudget?: number } = {}): AcpMcpServer[] {
+export function acpMcpServers(turn: SendTurnInput, options: { http?: boolean; remoteBase?: string; engine?: string; toolBudget?: number } = {}): AcpMcpServer[] {
   const schemaProfile = toolSchemaProfileFor({ engine: options.engine })?.id;
-  return turnStdioMcpServers(turn, { schemaProfile, toolBudget: options.toolBudget }).map((server) => {
-    const own = options.http ? ownMcpOverHttp(server) : null;
+  return turnStdioMcpServers(turn, { schemaProfile, toolBudget: options.toolBudget }).flatMap((server): AcpMcpServer[] => {
+    const own = options.http || options.remoteBase ? ownMcpOverHttp(server, options.remoteBase) : null;
+    if (!own && options.remoteBase) return [];
     const pairs = (record: Record<string, string>) => Object.entries(record).map(([name, value]) => ({ name, value: String(value) }));
-    return own ? { type: "http", name: server.name, url: own.url, headers: pairs(own.headers) } : { ...server, env: pairs(server.env) };
+    return [own ? { type: "http", name: server.name, url: own.url, headers: pairs(own.headers) } : { ...server, env: pairs(server.env) }];
   });
 }

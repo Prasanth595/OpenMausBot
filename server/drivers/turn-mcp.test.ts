@@ -48,6 +48,18 @@ describe("OpenMausBot's own MCP servers for an engine that reaches servers by UR
     expect(scoped.every((server) => "command" in server)).toBe(true);
   });
 
+  it("addresses the endpoints at the remote base and leaves out every server that has no URL there", () => {
+    const servers = acpMcpServers(turn(), { remoteBase: "http://127.0.0.1:18901" });
+    expect(servers.map((server) => [server.name, "url" in server ? server.url : server.command])).toEqual([
+      ["agents", "http://127.0.0.1:18901/api/internal/mcp-http/agents"],
+      ["browser", "http://127.0.0.1:18901/api/internal/mcp-http/browser"],
+      ["data", "http://127.0.0.1:18901/api/internal/mcp-http/data"],
+    ]);
+    const [agents] = servers;
+    expect(agents && "headers" in agents ? agents.headers[0] : null).toEqual({ name: "authorization", value: "Bearer agents-capability" });
+    expect(acpMcpServers(turn({ toolScope: { allow: ["mcp:*"] } }), { remoteBase: "http://127.0.0.1:18901" })).toEqual([]);
+  });
+
   it("recognises only a proxy that reaches this server on loopback and carries its capability", () => {
     const browser = { name: "browser", command: "node", args: ["/app/dist-server/harness-mcp-proxy.js", "browser"], env: { OMB_HARNESS_URL: HARNESS } };
     expect(ownMcpOverHttp(browser)).toBeNull();
