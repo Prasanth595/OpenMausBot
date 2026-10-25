@@ -476,7 +476,7 @@ import { createOutboundHold, OUTBOUND_HOLD_MS, type OutboundHoldAnswer } from ".
 import { connectorCallsIn, outboundCallsIn } from "../shared/outbound.ts";
 import { connectorAccessDecision, describeConnectorScopes } from "../shared/connector-scopes.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
-import { listenWebhookIngress, type WebhookIngress } from "./webhook-ingress.ts";
+import { listenWebhookIngress, type WebhookIngress } from "./webhook-ingress.ts"; import { createWhatsAppChannel, WHATSAPP_PATH } from "./whatsapp/channel.ts"; import { createWhatsAppSettings } from "./whatsapp/settings.ts"; import { createWhatsAppRoutes } from "./routes/whatsapp.ts"; import { viewersDefaultBot } from "../shared/default-bot.ts";
 import { addressFor } from "./webhook-address.ts";
 import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -5213,7 +5213,7 @@ bus.subscribe((event: RuntimeEvent) => {
   else if (event.type === "turn.wait_started") watchdog.setWaitingOnComputer(event.threadId, true);
   else if (event.type === "turn.wait_ended") watchdog.setWaitingOnComputer(event.threadId, false);
   else if (event.type === "turn.completed") {
-    watchdog.settle(event.threadId);
+    watchdog.settle(event.threadId); void whatsapp.noteTurnCompleted(event.threadId);
     revokeInternalCapabilityForProviderEvent(event);
     if (event.turnId && store.botByThread(event.threadId)) {
       const reply = event.ok ? store.messagesFor(event.threadId).findLast(message =>
@@ -5264,6 +5264,7 @@ const aboutMeFacts = createAboutMe({ read: () => cfg.profile?.aboutMe ?? "", wri
 const setupSuggestions = setupSuggestionsFor({ store, config: () => cfg, shared: sharedMembership, languageCode: () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale, engine: (bot) => registry.get(bot.modelSelection.instanceId)?.adapter.capabilities, browserOn: () => builtInBrowserEnabled(cfg),
   withinBudget: () => { try { assertWithinBudget(cfg, DATA_DIR); return true; } catch { return false; } }, writer: (botId) => sideJobs.text("setup-suggestions", botId), apps: { configured: () => composio.configured(cfg), mode: () => composio.connectionMode(cfg), connected: () => composio.connectedServices(cfg) }, log: (line) => console.log(line) });
 
+const whatsappSettings = createWhatsAppSettings(DATA_DIR), whatsapp = createWhatsAppChannel({ settings: whatsappSettings, teamCloud: Boolean(CLOUD_TEAM), defaultBot: () => viewersDefaultBot(store.bots), threadExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)), createThread: (botId, title) => store.createTask(botId, title, false)?.threadId ?? null, deliver: async (botId, threadId, text, sendId) => { await acceptDirectSend({ botId, threadId, text, sendId, trigger: { kind: "owner" }, personPresent: true }); }, activePath: (threadId) => store.activePath(threadId), needsInput: requestNeedsInput, apiBase: /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(process.env.OMB_TWILIO_API_BASE ?? "") ? process.env.OMB_TWILIO_API_BASE : undefined, log: (line) => console.log(line) });
 const memoryUpkeep = createMemoryUpkeep({
   bots: () => store.bots,
   bot: (id) => store.bot(teamHost.baseBotId(id)) ?? undefined,
@@ -8611,7 +8612,7 @@ async function startTurn(
         { id: "skills", label: "Skills index", text: privateWorkspace ? skillsHost.skillsIndex(store.bot(bot.id) ?? bot, threadId, instance) : "" },
         { id: "skill-instructions", label: "Skill instructions", text: skillInstructions },
         { id: "playbooks", label: "Playbooks", text: packagePlaybooks },
-        { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" },
+        { id: "webhook", label: "Webhook provenance", text: opts?.automationSource === "webhook" ? WEBHOOK_PROMPT : "" }, { id: "whatsapp", label: "WhatsApp", text: whatsapp.prompt(threadId) },
         { id: "automation-reply", label: "Automation reply", text: opts?.automationSource && automationReports.reportsElsewhere(threadId) ? AUTOMATION_REPLY_PROMPT : "" },
         { id: "mentions", label: "Mentions", text: tagged.length ? `The user named these existing teammates: ${tagged.map(b => `${peerName(b.name)} (${b.id})`).join(", ")}. Use coordinate_bots when their contribution is needed; do not substitute native helper agents for these bots.` : "" },
       ].filter((part) => !confined || READ_AND_DRAFT_PARTS.has(part.id)), integrations.agents, { replyStyle: liveBot?.replyStyle ?? bot.replyStyle });
@@ -9723,8 +9724,7 @@ let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
 try {
   webhookIngress = await listenWebhookIngress(webhooks, {
-    port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL,
-    claimRequest: () => { moveFreeze.assertTurns(); return workspaceMaintenance.request(); },
+    port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL, claimRequest: () => { moveFreeze.assertTurns(); return workspaceMaintenance.request(); }, extra: (base) => async (req, res, url) => url.pathname === WHATSAPP_PATH && (await whatsapp.handleTwilio(req, res, base()), true),
   });
   const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
   console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
@@ -12495,7 +12495,7 @@ let restartRequested = false;
 const cloudMoveRoutes = createCloudMoveRoutes();
 
 // `workspaceAccess` is assigned at boot, after this line: read it per request.
-ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") }));
+ROUTES.push(createHostedSlackRoutes({ bot: (id) => store.bot(id), hostedReady: () => Boolean(workspaceAccess) && entitled("admin") }), createWhatsAppRoutes({ settings: whatsappSettings, channel: whatsapp, webhookBase: () => webhookIngress?.baseUrl ?? `http://127.0.0.1:${WEBHOOK_PORT}`, teamCloud: Boolean(CLOUD_TEAM) }));
 const orgInstallStatuses = () => orgLibrary?.installStatuses() ?? new Map();
 ROUTES.push(createBotPresetRoutes({ presets: presetStore, orgStatuses: orgInstallStatuses }));
 ROUTES.push(createSharedComputerRoutes({ enabled: lendingEnabled, computers: sharedComputers, sessionLive: (id) => sessions.isLive(id), environmentId: ENVIRONMENT_ID,
