@@ -9,7 +9,7 @@ import { lstat, mkdir, readFile, realpath, stat, writeFile } from "node:fs/promi
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 
-import { PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
+import { DATA_DIR, PROVIDER_CREDENTIAL_ENV, stripControlPlaneEnv, WORKSPACE_CREDENTIAL_ENV } from "../../config.ts";
 import { openStartupModelCatalog, readStartupModelCache, writeStartupModelCache } from "../../startup-model-catalog.ts";
 import { decodeInjectId } from "../local-inject.ts";
 import { DeviceAuthController, type DeviceSignIn } from "../device-auth.ts";
@@ -49,7 +49,9 @@ import type {
   TurnImageInput,
 } from "../../contracts.ts";
 import { newEventId, newId, TurnNotStartedError } from "../../contracts.ts";
-import { augmentedPath } from "../../env-path.ts";
+import { augmentedPath, splitCliString } from "../../env-path.ts";
+import { decodeEngineHost, EngineHostError, mapWorkspace, remoteCommand, remotePorts, sshArgs, type EngineHost, type RemoteLaunch } from "./engine-host.ts";
+import { prepareVpsSsh } from "../../vps-ssh.ts";
 import { supportsApprovalMode } from "../../../shared/approval-mode.ts";
 import { MAX_QUESTION_TEXT, parseAskQuestions, parseChoices, questionAnswersByQuestion } from "../../../shared/ask-question.ts";
 
@@ -80,6 +82,8 @@ export interface AcpConfig {
   cli: string;
   fullAuto: boolean;
   workspace?: string;
+  /** Run the engine on another machine over ssh (customAcp only; see engine-host.ts). */
+  host?: EngineHost;
 }
 
 type AcpAskFinish = (
@@ -350,6 +354,7 @@ function decodeAcpConfig(defaultCli: string) {
       cli: typeof o.cli === "string" ? o.cli : defaultCli,
       fullAuto: o.fullAuto === true,
       workspace: typeof o.workspace === "string" ? o.workspace : undefined,
+      host: decodeEngineHost(o.host),
     };
   };
 }
@@ -681,11 +686,49 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         for (const host of hosts) if (host.key === hostKey && host.accepts(SHARED_SESSIONS_MAX, SHARED_SESSIONS_LIFETIME)) return host;
         return null;
       };
+      const remoteLaunches = new Map<string, RemoteLaunch>();
+      const remoteLaunchFor = (host: EngineHost, threadId: string, cwd: string): RemoteLaunch => {
+        const internalPort = Number(process.env.OMB_ENGINE_HOST_PORT);
+        if (!Number.isInteger(internalPort) || internalPort < 1024 || internalPort > 65535) {
+          throw new EngineHostError("no-listener", "Set OMB_ENGINE_HOST_PORT on the harness to use an engine host.");
+        }
+        const remoteCwd = mapWorkspace(host, cwd);
+        const held = remoteLaunches.get(threadId);
+        if (held && !held.spawned) {
+          held.cwd = remoteCwd;
+          return held;
+        }
+        const live = sessions.get(threadId);
+        if (held && live && !live.closing && held.cwd === remoteCwd) return held;
+        const fresh: RemoteLaunch = { host, threadId, port: remotePorts.acquire(host.alias, host.remotePortBase), internalPort,
+          cwd: remoteCwd, sshPath: prepareVpsSsh(DATA_DIR, augmentedPath()).path, spawned: false };
+        remoteLaunches.set(threadId, fresh);
+        return fresh;
+      };
+      // Only the instance's own `environment` crosses to the host, never this process's.
+      const spawnRemote = (remote: RemoteLaunch, cli: string) => {
+        const env = Object.fromEntries(Object.entries(input.environment).filter((entry): entry is [string, string] => entry[1] !== undefined));
+        const child = spawnCli("ssh", sshArgs(remote.host, remote.port, remote.internalPort, remoteCommand(remote.cwd, splitCliString(cli), env)),
+          { cwd: homedir(), env: { ...process.env, PATH: remote.sshPath }, stdio: ["pipe", "pipe", "pipe"], box: false }, "openmausbot");
+        remote.spawned = true;
+        let freed = false;
+        const free = () => {
+          if (freed) return;
+          freed = true;
+          remotePorts.release(remote.host.alias, remote.port);
+          if (remoteLaunches.get(remote.threadId) === remote) remoteLaunches.delete(remote.threadId);
+        };
+        child.once("close", free);
+        child.once("error", free);
+        return child;
+      };
       const hostFor = (launch: { command: string }, argv: string[], env: Record<string, string | undefined>, cwd: string,
-        hostKey: string | null): AcpHost => {
+        hostKey: string | null, remote?: RemoteLaunch): AcpHost => {
         const running = sharedHost(hostKey);
         if (running) return running;
-        const child = spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env) } }, "bot");
+        const child = remote
+          ? spawnRemote(remote, launch.command)
+          : spawnCli(launch.command, argv, { cwd, env, stdio: ["pipe", "pipe", "pipe"], box: { allowEnv: instanceEnvNames(input.environment, env) } }, "bot");
         const host = new AcpHost(child, hostKey, { source: SOURCE, logMessage: nativeLogMessage, keepStderr: !support.redactStderr, unrouted: refuse });
         hosts.add(host);
         child.once("close", () => hosts.delete(host));
@@ -701,9 +744,10 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         cwd: string,
         contractKey: string,
         hostKey: string | null,
+        remote?: RemoteLaunch,
       ): AcpSession => {
         const commandCwd = permissionLaunchCwd(cwd);
-        const host = hostFor(launch, argv, env, cwd, hostKey);
+        const host = hostFor(launch, argv, env, cwd, hostKey, remote);
         const acp = host.link(threadId);
         const send = (obj: unknown) => acp.send(obj);
 
@@ -1098,9 +1142,23 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             return { turnId };
           }
         }
+        let remote: RemoteLaunch | undefined;
+        if (turnConfig.host) {
+          try {
+            remote = remoteLaunchFor(turnConfig.host, threadId, cwd);
+          } catch (error) {
+            if (!(error instanceof EngineHostError)) throw error;
+            emit({ ...base(threadId, turnId), type: "turn.started" });
+            emit({ ...base(threadId, turnId), type: "runtime.error", message: error.message, setup: true });
+            emit({ ...base(threadId, turnId), type: "turn.completed", ok: false, stopReason: "setup_required", cost: null });
+            return { turnId };
+          }
+        }
+        const sessionCwd = remote?.cwd ?? cwd;
         const resolvedModel = support.resolveTurnModel?.(turn.model, env);
         const toolLimitKey = JSON.stringify([instanceId, resolvedModel ?? null]);
         const mcpServers = acpMcpServers(turn, { http: support.ownMcpOverHttp === true, engine: support.driverKind,
+          ...(remote ? { remoteBase: `http://127.0.0.1:${remote.port}` } : {}),
           toolBudget: mcpToolBudget(learnedToolCountLimit(toolLimitKey), support.engineTools ?? 32) });
         support.applyTurnEnv?.(env, {
           model: resolvedModel, requestedModel: turn.model, fullAuto: turnConfig.fullAuto === true, botId: turn.botId, cwd, toolScope: turn.toolScope,
@@ -1148,7 +1206,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         // The folder and the tool selection ride session/new, so threads differing only there can share a process; never two audiences of a Team Cloud, whose engine homes differ.
         const hostKey = support.shareProcess && inheritedScopeFingerprint === null ? JSON.stringify([...processContract, launchModel ?? null, engineHomes.scope()]) : null;
         const launchSession = () => {
-          const opened = openSession(threadId, launch, [...(launch.args ?? []), ...spawnArgs], launchEnv, cwd, contractKey, hostKey);
+          const opened = openSession(threadId, launch, [...(launch.args ?? []), ...spawnArgs], launchEnv, cwd, contractKey, hostKey, remote);
           opened.launchModel = launchModel;
           launchedThisTurn = true;
           return opened;
@@ -1329,7 +1387,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 try {
                   await request(
                     support.resumeMethod === "resume" ? "session/resume" : "session/load",
-                    { sessionId: cursor, cwd, mcpServers, ...selectionParams },
+                    { sessionId: cursor, cwd: sessionCwd, mcpServers, ...selectionParams },
                     LOAD_SESSION_TIMEOUT,
                     (result) => {
                       if (result) {
@@ -1372,7 +1430,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                 promptTurn = { ...turn, text: recovery.text };
                 rebuiltFromReplay = recovery.replayed;
               }
-              await request("session/new", { cwd, mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
+              await request("session/new", { cwd: sessionCwd, mcpServers, ...selectionParams }, NEW_SESSION_TIMEOUT, (result) => {
                 session.sessionId = typeof result?.sessionId === "string" ? result.sessionId : null;
                 session.sessionKey = sessionKey;
                 receiveModelVariants(result, true);
