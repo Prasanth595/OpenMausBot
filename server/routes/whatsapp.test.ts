@@ -18,6 +18,7 @@ let base: string;
 let tests: number;
 let verifyOk: boolean;
 let verifyCalls: number;
+let bought: Array<string | null>;
 
 async function serve(webhookBase: string, teamCloud = false) {
   const settings = createWhatsAppSettings(dir);
@@ -34,6 +35,9 @@ async function serve(webhookBase: string, teamCloud = false) {
       },
       startLink: () => ({ ...settings.startLink(Date.now()), linkUrl: "https://wa.me/14155238886?text=link%20123456" }),
       mode: () => (webhookBase.startsWith("https") ? "instant" as const : "polling" as const),
+      findNumbers: async () => ({ ok: true as const, numbers: [], price: { amount: "2.15", currency: "USD" } }),
+      buyOwnNumber: async (input: { smsUrl: string | null }) => { bought.push(input.smsUrl); return { ok: true as const, number: { sid: "PN1", phoneNumber: "+18445550100" } }; },
+      releaseOwnNumber: async () => ({ ok: true as const }),
     },
     webhookBase: () => webhookBase,
     teamCloud,
@@ -57,6 +61,7 @@ beforeEach(() => {
   tests = 0;
   verifyOk = true;
   verifyCalls = 0;
+  bought = [];
 });
 afterEach(async () => {
   await new Promise((resolve) => server.close(resolve));
@@ -134,6 +139,24 @@ describe("WhatsApp settings routes", () => {
     expect((await call("/api/whatsapp")).body).toMatchObject({ hasToken: true, reachable: false });
   });
 
+  it("buys a number only with confirm and the shown price, pointing texts at a public webhook only", async () => {
+    await serve("https://bots.example.com");
+    expect((await call("/api/whatsapp/numbers?country=FR")).status).toBe(400);
+    expect((await call("/api/whatsapp/numbers?country=US")).body.price).toEqual({ amount: "2.15", currency: "USD" });
+    expect((await call("/api/whatsapp/number", "POST", { phoneNumber: "+18445550100", country: "US", kind: "toll-free", confirmedAmount: "2.15" })).status).toBe(400);
+    expect((await call("/api/whatsapp/number", "POST", { phoneNumber: "+18445550100", country: "US", kind: "toll-free", confirmedAmount: "2.15", confirm: true })).status).toBe(200);
+    expect(bought).toEqual(["https://bots.example.com/whatsapp/twilio"]);
+    expect((await call("/api/whatsapp/number/release", "POST", {})).status).toBe(400);
+    expect((await call("/api/whatsapp/number/release", "POST", { confirm: true })).status).toBe(200);
+  });
+
+  it("never points a bought number at a public address that is not HTTPS", async () => {
+    await serve("http://bots.example.com");
+    await call("/api/whatsapp/verify", "POST", { accountSid: SID, authToken: "good" });
+    expect((await call("/api/whatsapp/number", "POST", { phoneNumber: "+18445550100", country: "US", kind: "toll-free", confirmedAmount: "2.15", confirm: true })).status).toBe(200);
+    expect(bought).toEqual([null]);
+  });
+
   it("masks linked numbers", async () => {
     await serve("https://bots.example.com");
     await call("/api/whatsapp", "PUT", { allowed: ["+14155550100"] });
@@ -141,7 +164,7 @@ describe("WhatsApp settings routes", () => {
   });
 
   it("is admin-only and never reachable by service-trust loopback", () => {
-    for (const [method, path] of [["GET", "/api/whatsapp"], ["PUT", "/api/whatsapp"], ["POST", "/api/whatsapp/test"], ["POST", "/api/whatsapp/verify"], ["POST", "/api/whatsapp/link"]] as const) {
+    for (const [method, path] of [["GET", "/api/whatsapp"], ["PUT", "/api/whatsapp"], ["POST", "/api/whatsapp/test"], ["POST", "/api/whatsapp/verify"], ["POST", "/api/whatsapp/link"], ["GET", "/api/whatsapp/numbers"], ["POST", "/api/whatsapp/number"], ["POST", "/api/whatsapp/number/release"]] as const) {
       expect(requiredScope(method, path)).toBe("admin");
       expect(serviceAllowed(method, path)).toBe(false);
     }

@@ -5,6 +5,7 @@ import { QRCodeSVG } from "qrcode.react";
 import { cn } from "@/lib/cn";
 import { api } from "@/state/store";
 import { t } from "@/lib/i18n";
+import { MausBotNumberSection, type OwnNumber } from "./MausBotNumberSection";
 import { Card, CommandLine, Switch } from "./SettingsPrimitives";
 
 export interface WhatsAppStatus {
@@ -19,6 +20,7 @@ export interface WhatsAppStatus {
   joinPhrase?: string;
   joinUrl?: string;
   linkExpiresAt?: number;
+  number?: OwnNumber;
   sandbox: boolean;
   mode: "instant" | "polling";
   webhookUrl: string;
@@ -67,7 +69,7 @@ export function WhatsAppSettings() {
   const [authToken, setAuthToken] = useState("");
   const [joinPhrase, setJoinPhrase] = useState("");
   const [joined, setJoined] = useState(false);
-  const [link, setLink] = useState<{ code: string; linkUrl: string } | null>(null);
+  const [link, setLink] = useState<{ code: string; linkUrl: string; smsLinkUrl?: string } | null>(null);
   const [from, setFrom] = useState("");
   const [allowed, setAllowed] = useState("");
   const [busy, setBusy] = useState<"loading" | "checking" | "saving" | "linking" | "testing" | null>("loading");
@@ -140,8 +142,8 @@ export function WhatsAppSettings() {
   const verify = () => run("checking", () => api("/api/whatsapp/verify", { method: "POST", body: JSON.stringify({ accountSid: accountSid.trim(), ...(authToken.trim() ? { authToken: authToken.trim() } : {}) }) }));
   const saveJoin = () => run("saving", () => api("/api/whatsapp", { method: "PUT", body: JSON.stringify({ joinPhrase: joinPhrase.trim() }) }));
   const startLink = () => run("linking", async () => {
-    const next: WhatsAppStatus & { code: string; linkUrl: string } = await api("/api/whatsapp/link", { method: "POST" });
-    setLink({ code: next.code, linkUrl: next.linkUrl });
+    const next: WhatsAppStatus & { code: string; linkUrl: string; smsLinkUrl?: string } = await api("/api/whatsapp/link", { method: "POST" });
+    setLink({ code: next.code, linkUrl: next.linkUrl, ...(next.smsLinkUrl ? { smsLinkUrl: next.smsLinkUrl } : {}) });
     return next;
   });
   const saveAdvanced = () => run("saving", () => api("/api/whatsapp", {
@@ -185,6 +187,8 @@ export function WhatsAppSettings() {
           </form>
         </Step>
 
+        {connected && <MausBotNumberSection<WhatsAppStatus> number={status.number} onStatus={setStatus} />}
+
         {status.sandbox && (
           <Step n={2} title={t("whatsapp.setup.join")} done={connected && joinDone} active={connected && !joinDone}>
             <p className="text-[12px] leading-relaxed text-ink-secondary">
@@ -209,6 +213,12 @@ export function WhatsAppSettings() {
           {link && waiting && (
             <>
               <ScanToSend url={link.linkUrl} text={`link ${link.code}`} to={sender} />
+              {link.smsLinkUrl && status.number && (
+                <p className="text-[12px] leading-relaxed text-ink-secondary">
+                  {t("whatsapp.number.orText", { text: `link ${link.code}`, number: status.number.phoneNumber })}{" "}
+                  <a href={link.smsLinkUrl} className="text-accent hover:underline">{t("whatsapp.number.openMessages")}</a>
+                </p>
+              )}
               <p role="status" className="flex items-center gap-2 text-[12px] text-ink-secondary"><Loader2 size={13} className="animate-spin" />{t("whatsapp.setup.waiting")}</p>
             </>
           )}

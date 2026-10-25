@@ -4,6 +4,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 
 import type { Message } from "../store.ts";
+import { buyNumber, monthlyPrice, releaseNumber, searchNumbers, type NumberCountry, type NumberKind } from "./numbers.ts";
 import type { WhatsAppSettings } from "./settings.ts";
 import {
   fetchAccount,
@@ -14,9 +15,11 @@ import {
   SESSION_WINDOW_MS,
   verifyTwilioSignature,
   whatsappChunks,
+  smsLink,
   whatsappLink,
-  whatsappText,
+  formatFor,
   type InboundMessage,
+  type PolledMessage,
   type TwilioCredentials,
 } from "./twilio.ts";
 
@@ -38,7 +41,7 @@ export const POLL_BACKOFF_MS = 30_000;
 const LINK_MESSAGE = /^link\s+(\d{6})$/i;
 
 export const WHATSAPP_PROMPT = [
-  "This conversation is the person's WhatsApp chat with you. Your replies go to their phone as WhatsApp messages: keep them short, in plain sentences, with no tables or headings. They cannot see cards, forms, buttons or files here, so ask questions in text with numbered options.",
+  "This conversation is the person's phone chat with you, over WhatsApp or text messages. Your replies go to their phone: keep them short, in plain sentences, with no tables or headings. They cannot see cards, forms, buttons or files here, so ask questions in text with numbered options.",
   "You are their single point of contact. Answer quick questions and small requests yourself. For real work that belongs to a department, hand it to that department's Chief of Staff (marked [Chief of Staff] in your roster; use list_bots if unsure) with coordinate_bots and a clear, self-contained brief, then say in one short line who has it. When the result comes back, send one short summary of what was done.",
   "You can only reach the departments the person lets you coordinate. If the work belongs to a department that is not in your roster, do what you can yourself and tell them in one line that they can add it in your settings under Access → Additional departments.",
   "Anything that needs the person's approval waits for them in OpenMausBot: say so in one line and tell them what to approve.",
@@ -59,6 +62,7 @@ export interface WhatsAppChannelDeps {
   reachable(): boolean;
   fetchImpl?: typeof fetch;
   apiBase?: string;
+  pricingBase?: string;
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -108,13 +112,16 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
   function credentials(): TwilioCredentials | null {
     const state = deps.settings.load();
     const authToken = deps.settings.authToken(state);
-    return state.accountSid && authToken ? { accountSid: state.accountSid, authToken, from: state.from } : null;
+    return state.accountSid && authToken
+      ? { accountSid: state.accountSid, authToken, from: state.from, ...(state.number ? { smsFrom: state.number.phoneNumber } : {}) }
+      : null;
   }
 
   async function send(number: string, body: string): Promise<boolean> {
     const creds = credentials();
     if (!creds) return false;
-    const result = await sendWhatsApp(creds, number, body, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase });
+    const medium = deps.settings.contact(number).medium ?? "whatsapp";
+    const result = await sendWhatsApp(creds, number, body, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase, medium });
     if (!result.ok) {
       deps.settings.recordError(`Twilio refused a message${result.code ? ` (error ${result.code})` : ""}: ${result.error}`, now());
       log(`send failed: ${result.error}`);
@@ -206,7 +213,7 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
     if (!deps.settings.load().allowed.includes(message.from)) {
       const code = LINK_MESSAGE.exec(message.body)?.[1];
       if (code && deps.settings.claimLink(code, message.from, now())) {
-        deps.settings.patchContact(message.from, { lastInboundAt: now() });
+        deps.settings.patchContact(message.from, { lastInboundAt: now(), medium: message.medium });
         const name = deps.defaultBot()?.name ?? "MausBot";
         await inLane(message.from, async () => {
           await send(message.from, `You're connected. I'm ${name}: message me here any time, and I'll get it done or hand it to the right team.`);
@@ -217,7 +224,7 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
       return;
     }
     if (!active()) return;
-    deps.settings.patchContact(message.from, { lastInboundAt: now() });
+    deps.settings.patchContact(message.from, { lastInboundAt: now(), medium: message.medium });
     await inLane(message.from, () => receive(message.from, message.body, message.numMedia, message.messageSid));
   }
 
@@ -237,15 +244,20 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
     if (!creds || since === undefined) return POLL_MS;
     const generation = deps.settings.load().generation;
     const pausedBefore = pauses;
+    const inboxes = [creds.from, ...(creds.smsFrom ? [creds.smsFrom] : [])];
+    const messages: PolledMessage[] = [];
     checking += 1;
     try {
-      const result = await listInbound(creds, since, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase });
-      if (!result.ok) {
-        deps.settings.recordError(`Couldn't check Twilio for new messages: ${result.error}`, now());
-        return POLL_BACKOFF_MS;
+      for (const to of inboxes) {
+        const result = await listInbound(creds, since, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase, to });
+        if (!result.ok) {
+          deps.settings.recordError(`Couldn't check Twilio for new messages: ${result.error}`, now());
+          return POLL_BACKOFF_MS;
+        }
+        if (result.truncated) deps.settings.recordError("More new messages arrived than one check reads; older ones were skipped.", now());
+        messages.push(...result.messages);
       }
-      if (result.truncated) deps.settings.recordError("More new messages arrived than one check reads; older ones were skipped.", now());
-      for (const message of result.messages) {
+      for (const message of messages.sort((a, b) => a.at - b.at)) {
         if (paused || pauses !== pausedBefore || deps.settings.load().generation !== generation) return POLL_MS;
         await handleInbound(message);
         deps.settings.setPollSince(message.at);
@@ -292,12 +304,13 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
       const waiting = fresh.some((message) => deps.needsInput(message));
       const last = fresh.at(-1);
       if (!last || (!said.length && !waiting)) return;
-      if (now() - (contact.lastInboundAt ?? 0) > SESSION_WINDOW_MS) {
+      const medium = contact.medium ?? "whatsapp";
+      if (medium === "whatsapp" && now() - (contact.lastInboundAt ?? 0) > SESSION_WINDOW_MS) {
         deps.settings.recordError("A reply stayed in OpenMausBot: WhatsApp only allows replies within 24 hours of your last message.", now());
         deps.settings.patchContact(number, { lastSentMessageId: last.id });
         return;
       }
-      let chunks = whatsappChunks(whatsappText(said.map((message) => message.text!.trim()).join("\n\n")));
+      let chunks = whatsappChunks(formatFor(medium, said.map((message) => message.text!.trim()).join("\n\n")));
       if (waiting) chunks.push("MausBot is waiting for your OK in OpenMausBot. Open the app to answer it.");
       if (chunks.length > MAX_MESSAGES_PER_REPLY) {
         chunks = [...chunks.slice(0, MAX_MESSAGES_PER_REPLY - 1), "…the rest is in OpenMausBot."];
@@ -323,9 +336,54 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
     return { ok: true, name: result.name };
   }
 
-  function startLink(): { code: string; expiresAt: number; linkUrl: string } {
+  async function findNumbers(country: NumberCountry, kind: NumberKind) {
+    const creds = credentials();
+    if (!creds) return { ok: false as const, error: "Connect your Twilio account first." };
+    const [found, price] = await Promise.all([
+      searchNumbers(creds, country, kind, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase, pricingBase: deps.pricingBase ?? deps.apiBase }),
+      monthlyPrice(creds, country, kind, { fetchImpl: deps.fetchImpl, pricingBase: deps.pricingBase ?? deps.apiBase }),
+    ]);
+    if (!found.ok) return found;
+    if (!price.ok) return price;
+    return { ok: true as const, numbers: found.numbers, price: { amount: price.amount, currency: price.currency } };
+  }
+
+  /** Buys only at the price the person was shown: if Twilio's price changed since, nothing is bought. */
+  async function buyOwnNumber(input: { phoneNumber: string; country: NumberCountry; kind: NumberKind; confirmedAmount: string; smsUrl: string | null }) {
+    const creds = credentials();
+    if (!creds) return { ok: false as const, error: "Connect your Twilio account first." };
+    if (deps.settings.load().number) return { ok: false as const, error: "MausBot already has a number. Release it first." };
+    const price = await monthlyPrice(creds, input.country, input.kind, { fetchImpl: deps.fetchImpl, pricingBase: deps.pricingBase ?? deps.apiBase });
+    if (!price.ok) return price;
+    if (price.amount !== input.confirmedAmount) {
+      return { ok: false as const, error: `Twilio's price changed to ${price.amount} ${price.currency} a month. Check it and confirm again.` };
+    }
+    const bought = await buyNumber(creds, input.phoneNumber, input.smsUrl, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase });
+    if (!bought.ok) return bought;
+    deps.settings.setNumber({ ...bought.number, country: input.country, kind: input.kind, price: { amount: price.amount, currency: price.currency } });
+    deps.settings.setPollSince(now());
+    return { ok: true as const, number: bought.number };
+  }
+
+  async function releaseOwnNumber() {
+    const creds = credentials();
+    const number = deps.settings.load().number;
+    if (!creds || !number) return { ok: true as const };
+    const released = await releaseNumber(creds, number.sid, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase });
+    if (!released.ok) return released;
+    deps.settings.setNumber(null);
+    return { ok: true as const };
+  }
+
+  function startLink(): { code: string; expiresAt: number; linkUrl: string; smsLinkUrl?: string } {
     const { code, expiresAt } = deps.settings.startLink(now());
-    return { code, expiresAt, linkUrl: whatsappLink(deps.settings.load().from, `link ${code}`) };
+    const state = deps.settings.load();
+    return {
+      code,
+      expiresAt,
+      linkUrl: whatsappLink(state.from, `link ${code}`),
+      ...(state.number ? { smsLinkUrl: smsLink(state.number.phoneNumber, `link ${code}`) } : {}),
+    };
   }
 
   function prompt(threadId: string): string {
@@ -341,7 +399,7 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
   }
 
   return {
-    handleTwilio, handleInbound, noteTurnCompleted, prompt, sendTest, verify, startLink, poll,
+    handleTwilio, handleInbound, noteTurnCompleted, prompt, sendTest, verify, startLink, poll, findNumbers, buyOwnNumber, releaseOwnNumber,
     mode: (): "instant" | "polling" => (deps.reachable() ? "instant" : "polling"),
     /** Workspace maintenance: no new checks, and a check already waiting on Twilio delivers nothing. */
     pause() {

@@ -32,7 +32,13 @@ export function normalizeNumber(raw: string): string {
   return /^\+?[1-9]\d{6,14}$/.test(digits) ? (digits.startsWith("+") ? digits : `+${digits}`) : "";
 }
 
+/** How a message travels: Twilio marks WhatsApp addresses with a "whatsapp:" prefix and leaves SMS numbers bare. */
+export type Medium = "whatsapp" | "sms";
+
+export const mediumOf = (address: string): Medium => (/^whatsapp:/i.test(address.trim()) ? "whatsapp" : "sms");
+
 export interface InboundMessage {
+  medium: Medium;
   from: string;
   to: string;
   body: string;
@@ -48,6 +54,7 @@ export function parseInbound(form: Readonly<Record<string, string>>): InboundMes
   if (!from || !messageSid || form.MessageStatus) return null;
   const numMedia = Number.parseInt(form.NumMedia ?? "0", 10);
   return {
+    medium: mediumOf(form.From ?? ""),
     from,
     to: normalizeNumber(form.To ?? ""),
     body: (form.Body ?? "").trim(),
@@ -87,6 +94,13 @@ export function whatsappText(markdown: string): string {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+/** Markdown as a plain text message: no markers, links as "text (url)", tables as plain lines. */
+export function smsText(markdown: string): string {
+  return whatsappText(markdown).replace(/```/g, "").replace(/(^|\s)[*_~]([^*_~\n]+)[*_~](?=\s|[.,;:!?)]|$)/g, "$1$2").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+export const formatFor = (medium: Medium, markdown: string): string => (medium === "sms" ? smsText(markdown) : whatsappText(markdown));
+
 /** WhatsApp-sized messages: whole paragraphs where they fit, hard cuts only inside one that is longer than a message. */
 export function whatsappChunks(text: string, max = MESSAGE_MAX_CHARS): string[] {
   const chunks: string[] = [];
@@ -120,6 +134,15 @@ export interface TwilioCredentials {
   authToken: string;
   /** The WhatsApp sender, "whatsapp:+14155238886" for the sandbox. */
   from: string;
+  /** MausBot's own number for text messages, when it has one. */
+  smsFrom?: string;
+}
+
+/** The sender and the recipient address Twilio expects for a medium, or null when there is no sender for it. */
+export function addresses(credentials: TwilioCredentials, to: string, medium: Medium): { from: string; to: string } | null {
+  const number = normalizeNumber(to);
+  if (medium === "sms") return credentials.smsFrom ? { from: normalizeNumber(credentials.smsFrom), to: number } : null;
+  return { from: credentials.from, to: `whatsapp:${number}` };
 }
 
 export type SendResult = { ok: true; sid: string } | { ok: false; error: string; code?: number; status?: number };
@@ -128,11 +151,13 @@ export async function sendWhatsApp(
   credentials: TwilioCredentials,
   to: string,
   body: string,
-  options: { fetchImpl?: typeof fetch; apiBase?: string } = {},
+  options: { fetchImpl?: typeof fetch; apiBase?: string; medium?: Medium } = {},
 ): Promise<SendResult> {
   const fetchImpl = options.fetchImpl ?? fetch;
+  const route = addresses(credentials, to, options.medium ?? "whatsapp");
+  if (!route) return { ok: false, error: "MausBot has no number for text messages yet." };
   const url = `${options.apiBase ?? TWILIO_API_BASE}/2010-04-01/Accounts/${encodeURIComponent(credentials.accountSid)}/Messages.json`;
-  const form = new URLSearchParams({ To: `whatsapp:${normalizeNumber(to)}`, From: credentials.from, Body: body.slice(0, MESSAGE_MAX_CHARS) });
+  const form = new URLSearchParams({ To: route.to, From: route.from, Body: body.slice(0, MESSAGE_MAX_CHARS) });
   try {
     const response = await fetchImpl(url, {
       method: "POST",
@@ -190,11 +215,11 @@ export interface PolledMessage extends InboundMessage {
 export async function listInbound(
   credentials: TwilioCredentials,
   since: number,
-  options: { fetchImpl?: typeof fetch; apiBase?: string } = {},
+  options: { fetchImpl?: typeof fetch; apiBase?: string; to?: string } = {},
 ): Promise<{ ok: true; messages: PolledMessage[]; truncated: boolean } | { ok: false; error: string; status?: number }> {
   const fetchImpl = options.fetchImpl ?? fetch;
   // Twilio filters by day only; the exact cut happens below.
-  const query = new URLSearchParams({ To: credentials.from, "DateSent>": new Date(since).toISOString().slice(0, 10), PageSize: "50" });
+  const query = new URLSearchParams({ To: options.to ?? credentials.from, "DateSent>": new Date(since).toISOString().slice(0, 10), PageSize: "50" });
   const url = `${options.apiBase ?? TWILIO_API_BASE}/2010-04-01/Accounts/${encodeURIComponent(credentials.accountSid)}/Messages.json?${query}`;
   try {
     const rows: Array<Record<string, unknown>> = [];
@@ -224,6 +249,11 @@ export async function listInbound(
   } catch (error) {
     return { ok: false, error: `Could not reach Twilio: ${(error as Error).message}` };
   }
+}
+
+/** Opens the phone's Messages app with `text` already typed to `number`. */
+export function smsLink(number: string, text: string): string {
+  return `sms:${normalizeNumber(number)}?&body=${encodeURIComponent(text)}`;
 }
 
 /** Opens WhatsApp on a phone (or WhatsApp Web) with `text` already typed to `sender`. */

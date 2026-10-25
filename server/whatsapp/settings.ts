@@ -23,6 +23,16 @@ const contactSchema = z.object({
   /** The newest bot message already sent to this number; replies resume after it. */
   lastSentMessageId: z.string().optional(),
   lastInboundAt: z.number().optional(),
+  /** How this person last wrote; replies go back the same way. */
+  medium: z.enum(["whatsapp", "sms"]).optional(),
+});
+
+const ownNumberSchema = z.object({
+  sid: z.string(),
+  phoneNumber: z.string(),
+  country: z.string(),
+  kind: z.enum(["local", "toll-free"]),
+  price: z.object({ amount: z.string(), currency: z.string() }).optional(),
 });
 
 const stateSchema = z.object({
@@ -42,7 +52,11 @@ const stateSchema = z.object({
   pollSince: z.number().optional(),
   /** Changes whenever `pollSince` is reset, so a check that started before the reset delivers nothing. */
   generation: z.number().default(0),
+  /** MausBot's own number, bought in the person's Twilio account. */
+  number: ownNumberSchema.optional(),
 });
+
+export type OwnNumber = z.output<typeof ownNumberSchema>;
 
 export type WhatsAppState = z.output<typeof stateSchema>;
 export type WhatsAppContact = z.output<typeof contactSchema>;
@@ -58,6 +72,7 @@ export interface PublicWhatsAppSettings {
   joinPhrase?: string;
   /** Until when a link code waits for the person's message; absent when none does. */
   linkExpiresAt?: number;
+  number?: OwnNumber;
 }
 
 export const settingsPatchSchema = z.object({
@@ -135,6 +150,7 @@ export function createWhatsAppSettings(dataDir: string) {
       ...(state.accountName ? { accountName: state.accountName } : {}),
       ...(state.joinPhrase ? { joinPhrase: state.joinPhrase } : {}),
       ...(state.link && state.link.expiresAt > now ? { linkExpiresAt: state.link.expiresAt } : {}),
+      ...(state.number ? { number: state.number } : {}),
     };
   }
 
@@ -252,6 +268,13 @@ export function createWhatsAppSettings(dataDir: string) {
     return state.enabled;
   }
 
+  function setNumber(number: OwnNumber | null): void {
+    const state = load();
+    if (number) state.number = number;
+    else delete state.number;
+    save(state);
+  }
+
   function setPollSince(at: number): void {
     const state = load();
     if ((state.pollSince ?? 0) >= at) return;
@@ -261,7 +284,7 @@ export function createWhatsAppSettings(dataDir: string) {
 
   return {
     load, publicSettings, update, authToken, firstSighting, contact, patchContact, numberForThread, recordError,
-    setAccountName, startLink, linkPending, claimLink, setPollSince, candidateCredentials,
+    setAccountName, startLink, linkPending, claimLink, setPollSince, candidateCredentials, setNumber,
   };
 }
 

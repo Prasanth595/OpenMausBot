@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  fetchAccount, listInbound, MESSAGE_MAX_CHARS, normalizeNumber, parseInbound, sendWhatsApp, twilioSignature, verifyTwilioSignature,
-  whatsappChunks, whatsappLink, whatsappText,
+  addresses, fetchAccount, listInbound, mediumOf, MESSAGE_MAX_CHARS, normalizeNumber, parseInbound, sendWhatsApp, smsLink, smsText,
+  twilioSignature, verifyTwilioSignature, whatsappChunks, whatsappLink, whatsappText,
 } from "./twilio.ts";
 
 describe("Twilio request signatures", () => {
@@ -36,7 +36,7 @@ describe("incoming messages", () => {
 
   it("reads a person's message and ignores status callbacks", () => {
     expect(parseInbound({ From: "whatsapp:+14155550100", To: "whatsapp:+14155238886", Body: " Plan my week ", MessageSid: "SM1", ProfileName: "Azad", NumMedia: "0" }))
-      .toEqual({ from: "+14155550100", to: "+14155238886", body: "Plan my week", messageSid: "SM1", profileName: "Azad", numMedia: 0 });
+      .toEqual({ medium: "whatsapp", from: "+14155550100", to: "+14155238886", body: "Plan my week", messageSid: "SM1", profileName: "Azad", numMedia: 0 });
     expect(parseInbound({ From: "whatsapp:+14155550100", MessageSid: "SM2", NumMedia: "1", MediaUrl0: "https://x" })).toMatchObject({ body: "", numMedia: 1 });
     expect(parseInbound({ From: "whatsapp:+14155550100", MessageSid: "SM3", MessageStatus: "delivered" })).toBeNull();
     expect(parseInbound({ Body: "no sender", MessageSid: "SM4" })).toBeNull();
@@ -175,5 +175,31 @@ describe("setup helpers", () => {
 
   it("opens WhatsApp with the message already typed", () => {
     expect(whatsappLink("whatsapp:+14155238886", "join brave-tiger")).toBe("https://wa.me/14155238886?text=join%20brave-tiger");
+  });
+});
+
+describe("text messages", () => {
+  const creds = { accountSid: "AC" + "0".repeat(32), authToken: "tok", from: "whatsapp:+14155238886", smsFrom: "+18445550100" };
+
+  it("tells a text message from a WhatsApp one by Twilio's address prefix", () => {
+    expect(mediumOf("whatsapp:+14155550100")).toBe("whatsapp");
+    expect(mediumOf("+14155550100")).toBe("sms");
+    expect(parseInbound({ From: "+14155550100", To: "+18445550100", Body: "hi", MessageSid: "SM1" })).toMatchObject({ medium: "sms", from: "+14155550100" });
+  });
+
+  it("writes plain text with no formatting marks, keeping snake_case words", () => {
+    expect(smsText("## Plan\nThis is **important**, see `file_name_here` and [the doc](https://x.com).")).toBe("Plan\nThis is important, see `file_name_here` and the doc (https://x.com).");
+  });
+
+  it("sends a text from MausBot's own number to the bare number", async () => {
+    let form = new URLSearchParams();
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      form = new URLSearchParams(String(init.body));
+      return new Response(JSON.stringify({ sid: "SM1" }), { status: 201 });
+    }) as unknown as typeof fetch;
+    expect(await sendWhatsApp(creds, "+14155550100", "Hello", { fetchImpl, medium: "sms" })).toEqual({ ok: true, sid: "SM1" });
+    expect(Object.fromEntries(form)).toEqual({ To: "+14155550100", From: "+18445550100", Body: "Hello" });
+    expect(addresses({ ...creds, smsFrom: undefined }, "+14155550100", "sms")).toBeNull();
+    expect(smsLink("+18445550100", "link 123456")).toBe("sms:+18445550100?&body=link%20123456");
   });
 });

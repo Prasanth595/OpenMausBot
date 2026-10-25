@@ -16,19 +16,33 @@ const ME = "+14155550100";
 
 /** A stand-in for Twilio's REST API: it records sends, names the account and lists `inbox` as incoming messages. */
 async function fakeTwilio() {
-  const sent: Array<{ to: string; body: string }> = [];
+  const sent: Array<{ to: string; body: string; from: string }> = [];
   const inbox: Array<Record<string, string>> = [];
   const server = createServer((req, res) => {
     let raw = "";
     req.on("data", (chunk) => { raw += chunk; });
     req.on("end", () => {
+      const url = new URL(req.url ?? "/", "http://twilio.test");
       res.writeHead(req.method === "POST" ? 201 : 200, { "content-type": "application/json" });
+      if (url.pathname.startsWith("/v1/PhoneNumbers/Countries/")) {
+        res.end(JSON.stringify({ price_unit: "USD", phone_number_prices: [{ number_type: "toll free", current_price: "2.15" }] }));
+        return;
+      }
+      if (url.pathname.includes("/AvailablePhoneNumbers/")) {
+        res.end(JSON.stringify({ available_phone_numbers: [{ phone_number: "+18445550100", friendly_name: "(844) 555-0100", capabilities: { SMS: true, voice: true } }] }));
+        return;
+      }
+      if (url.pathname.endsWith("/IncomingPhoneNumbers.json")) {
+        res.end(JSON.stringify({ sid: "PN1", phone_number: "+18445550100" }));
+        return;
+      }
       if (req.method !== "POST") {
-        res.end(JSON.stringify(req.url?.includes("/Messages.json") ? { messages: inbox } : { friendly_name: "Azad's Twilio" }));
+        const to = url.searchParams.get("To");
+        res.end(JSON.stringify(url.pathname.endsWith("/Messages.json") ? { messages: inbox.filter((row) => !to || row.to === to) } : { friendly_name: "Azad's Twilio" }));
         return;
       }
       const form = new URLSearchParams(raw);
-      sent.push({ to: form.get("To") ?? "", body: form.get("Body") ?? "" });
+      sent.push({ to: form.get("To") ?? "", body: form.get("Body") ?? "", from: form.get("From") ?? "" });
       res.end(JSON.stringify({ sid: `SM${sent.length}` }));
     });
   });
@@ -121,6 +135,37 @@ it("sets up with no public address: checks Twilio, links the phone by code, then
     await expect.poll(() => fake.sent.map((entry) => entry.body), { timeout: 30_000, interval: 250 })
       .toEqual([expect.stringContaining("You're connected."), "Here is your week: three meetings and one deadline."]);
     expect(fake.sent.every((entry) => entry.to === `whatsapp:${ME}`)).toBe(true);
+  } finally {
+    await session?.close();
+    await fake.close();
+  }
+}, 120_000);
+
+it("buys MausBot its own number, links a phone by text, and answers texts by text", async () => {
+  const fake = await fakeTwilio();
+  let session: Awaited<ReturnType<typeof launchVerificationServer>> | undefined;
+  const OWN = "+18445550100";
+  const text = (sid: string, body: string) => ({ sid, from: ME, to: OWN, body, direction: "inbound", date_created: new Date(Date.now() + 1_000).toUTCString(), num_media: "0" });
+  try {
+    session = await launchVerificationServer({ ...process.env, OMB_TWILIO_API_BASE: fake.base }, undefined, undefined, undefined, undefined, { scripted: true });
+    const url = session.info.url;
+    const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, url) as Promise<any>;
+    const maus = (await api("/api/bots")).bots.find((bot: any) => bot.defaultBot);
+    writeFileSync(join(session.info.dataDir, "room-plan.json"), JSON.stringify({ [maus.id]: { reply: "Booked: **Friday 3pm** with Asha." } }));
+    await api("/api/whatsapp/verify", { accountSid: SID, authToken: TOKEN });
+    const found = await api("/api/whatsapp/numbers?country=US&kind=toll-free");
+    expect(found).toMatchObject({ numbers: [{ phoneNumber: OWN }], price: { amount: "2.15", currency: "USD" } });
+    const bought = await api("/api/whatsapp/number", { phoneNumber: OWN, country: "US", kind: "toll-free", confirmedAmount: "2.15", confirm: true });
+    expect(bought.number).toMatchObject({ phoneNumber: OWN, price: { amount: "2.15" } });
+
+    const link = await api("/api/whatsapp/link", {});
+    expect(link.smsLinkUrl).toBe(`sms:${OWN}?&body=link%20${link.code}`);
+    fake.inbox.push(text("SMt1", `link ${link.code}`));
+    await expect.poll(() => fake.sent.map((entry) => [entry.from, entry.to]), { timeout: 20_000, interval: 250 }).toEqual([[OWN, ME]]);
+
+    fake.inbox.push(text("SMt2", "Book a call with Asha on Friday"));
+    await expect.poll(() => fake.sent.map((entry) => entry.body).at(-1), { timeout: 30_000, interval: 250 }).toBe("Booked: Friday 3pm with Asha.");
+    expect(fake.sent.at(-1)).toMatchObject({ from: OWN, to: ME });
   } finally {
     await session?.close();
     await fake.close();

@@ -20,7 +20,9 @@ let server: Server;
 let base: string;
 let clock: number;
 let delivered: Array<{ botId: string; threadId: string; text: string; sendId: string }>;
-let sent: Array<{ to: string; body: string }>;
+let sent: Array<{ to: string; body: string; from?: string }>;
+let price: string;
+let numberCalls: string[];
 let paths: Map<string, Message[]>;
 let threads: string[];
 let twilioFails: boolean;
@@ -58,6 +60,16 @@ function makeChannel() {
     needsInput: (message) => Boolean(message.card?.requestId),
     reachable: () => reachable,
     fetchImpl: (async (url: string, init: RequestInit = {}) => {
+      if (url.includes("/v1/PhoneNumbers/Countries/")) {
+        return new Response(JSON.stringify({ price_unit: "USD", phone_number_prices: [{ number_type: "toll free", current_price: price }, { number_type: "local", current_price: "1.15" }] }), { status: 200 });
+      }
+      if (url.includes("/AvailablePhoneNumbers/")) {
+        return new Response(JSON.stringify({ available_phone_numbers: [{ phone_number: "+18445550100", friendly_name: "(844) 555-0100", capabilities: { SMS: true, voice: true } }] }), { status: 200 });
+      }
+      if (url.includes("/IncomingPhoneNumbers")) {
+        numberCalls.push(`${init.method ?? "GET"} ${new URL(url).pathname.split("/").pop()} ${init.body ?? ""}`);
+        return init.method === "DELETE" ? new Response(null, { status: 204 }) : new Response(JSON.stringify({ sid: "PN1", phone_number: "+18445550100" }), { status: 201 });
+      }
       if (url.endsWith(".json") && url.includes("/Accounts/") && !url.includes("/Messages")) {
         const token = Buffer.from(String((init.headers as Record<string, string>).authorization).replace("Basic ", ""), "base64").toString().split(":")[1];
         return token === "bad" ? new Response("{}", { status: 401 }) : new Response(JSON.stringify({ friendly_name: "Azad" }), { status: 200 });
@@ -70,7 +82,7 @@ function makeChannel() {
       }
       const form = new URLSearchParams(String(init.body));
       if (twilioFails) return new Response(JSON.stringify({ code: 21608, message: "Not a sandbox participant" }), { status: 400 });
-      sent.push({ to: form.get("To")!, body: form.get("Body")! });
+      sent.push({ to: form.get("To")!, body: form.get("Body")!, ...(form.get("From")?.startsWith("whatsapp:") ? {} : { from: form.get("From")! }) });
       return new Response(JSON.stringify({ sid: `SM${sent.length}` }), { status: 201 });
     }) as unknown as typeof fetch,
     now: () => clock,
@@ -98,6 +110,8 @@ beforeEach(async () => {
   settings.update({ accountSid: SID, authToken: TOKEN, allowed: [ME], enabled: true }, clock);
   delivered = [];
   sent = [];
+  price = "2.15";
+  numberCalls = [];
   paths = new Map();
   threads = [];
   twilioFails = false;
@@ -476,3 +490,56 @@ describe("third review fixes", () => {
   });
 });
 
+describe("MausBot's own number and text messages", () => {
+  const OWN = "+18445550100";
+
+  it("finds numbers with the price, and buys only at the price the person confirmed", async () => {
+    expect(await channel.findNumbers("US", "toll-free")).toEqual({
+      ok: true, numbers: [{ phoneNumber: OWN, friendlyName: "(844) 555-0100", sms: true, voice: true }], price: { amount: "2.15", currency: "USD" },
+    });
+    price = "2.50";
+    expect(await channel.buyOwnNumber({ phoneNumber: OWN, country: "US", kind: "toll-free", confirmedAmount: "2.15", smsUrl: null }))
+      .toEqual({ ok: false, error: "Twilio's price changed to 2.50 USD a month. Check it and confirm again." });
+    expect(numberCalls).toEqual([]);
+    expect(await channel.buyOwnNumber({ phoneNumber: OWN, country: "US", kind: "toll-free", confirmedAmount: "2.50", smsUrl: "https://bots.example.com/whatsapp/twilio" }))
+      .toMatchObject({ ok: true, number: { sid: "PN1", phoneNumber: OWN } });
+    expect(numberCalls[0]).toContain("SmsUrl=https%3A%2F%2Fbots.example.com%2Fwhatsapp%2Ftwilio");
+    expect(settings.publicSettings().number).toEqual({ sid: "PN1", phoneNumber: OWN, country: "US", kind: "toll-free", price: { amount: "2.50", currency: "USD" } });
+    expect((await channel.buyOwnNumber({ phoneNumber: OWN, country: "US", kind: "toll-free", confirmedAmount: "2.50", smsUrl: null })).ok).toBe(false);
+    expect(await channel.releaseOwnNumber()).toEqual({ ok: true });
+    expect(numberCalls.at(-1)).toBe("DELETE PN1.json ");
+    expect(settings.publicSettings().number).toBeUndefined();
+  });
+
+  it("hears a text, keeps one thread across WhatsApp and SMS, and answers the way the person last wrote", async () => {
+    await channel.buyOwnNumber({ phoneNumber: OWN, country: "US", kind: "toll-free", confirmedAmount: "2.15", smsUrl: null });
+    await post(incoming("From WhatsApp", "SM1"));
+    await post({ From: ME, To: OWN, Body: "From a text", MessageSid: "SM2", NumMedia: "0" });
+    expect(delivered.map((entry) => [entry.threadId, entry.text])).toEqual([["t1", "From WhatsApp"], ["t1", "From a text"]]);
+    paths.get("t1")!.push(msg("b1", "bot", "Done: **booked** the room."));
+    await channel.noteTurnCompleted("t1");
+    expect(sent.at(-1)).toEqual({ to: ME, from: OWN, body: "Done: booked the room." });
+  });
+
+  it("does not hold texts to WhatsApp's 24-hour window", async () => {
+    await channel.buyOwnNumber({ phoneNumber: OWN, country: "US", kind: "toll-free", confirmedAmount: "2.15", smsUrl: null });
+    await post({ From: ME, To: OWN, Body: "Remind me tomorrow", MessageSid: "SM1", NumMedia: "0" });
+    clock += SESSION_WINDOW_MS + 60_000;
+    paths.get("t1")!.push(msg("b1", "bot", "Your reminder."));
+    await channel.noteTurnCompleted("t1");
+    expect(sent.at(-1)).toEqual({ to: ME, from: OWN, body: "Your reminder." });
+  });
+
+  it("links a phone by text and reads texts by polling MausBot's number", async () => {
+    reachable = false;
+    await channel.buyOwnNumber({ phoneNumber: OWN, country: "US", kind: "toll-free", confirmedAmount: "2.15", smsUrl: null });
+    settings.update({ enabled: false, allowed: [] }, clock);
+    const { code, smsLinkUrl } = channel.startLink();
+    expect(smsLinkUrl).toBe(`sms:${OWN}?&body=link%20${code}`);
+    inbox = [{ sid: "SMs1", from: NEW, to: OWN, body: `link ${code}`, direction: "inbound", date_created: new Date(clock + 1_000).toUTCString(), num_media: "0" }];
+    await channel.poll();
+    await channel.idle();
+    expect(settings.publicSettings()).toMatchObject({ enabled: true, allowed: [NEW] });
+    expect(sent.at(-1)).toMatchObject({ to: NEW, from: OWN });
+  });
+});
