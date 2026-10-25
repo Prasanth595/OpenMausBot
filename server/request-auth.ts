@@ -5,6 +5,7 @@ import { timingSafeEqual } from "node:crypto";
 import { isIP } from "node:net";
 
 import type { Scope, SessionRecord, SessionRegistry } from "./sessions.ts";
+import { internalListenerRequests } from "./internal-listener.ts";
 import { denyReason as companionDenial, isCompanionNotice } from "../companion/src/routes.ts";
 
 /** `owner`: the machine's owner. `service`: a shared server where every bot's shell is a loopback caller too,
@@ -508,6 +509,12 @@ export function resolveRequestAuth(req: IncomingMessage, options: ResolveOptions
   // A removed member's invalid credential must not fall back to loopback owner.
   if (via) {
     return deny(401, "unauthorized: this session has expired or was revoked; pair this device again");
+  }
+
+  if (internalListenerRequests.has(req)) {
+    return path.startsWith("/api/internal/") && serviceAllowed(method, path)
+      ? { auth: { kind: "loopback", scopes: SERVICE_SCOPES, trust: "service" }, status: 401, error: "" }
+      : deny(403, "forbidden: this listener serves internal routes only");
   }
 
   const proxied = isProxied(req);
