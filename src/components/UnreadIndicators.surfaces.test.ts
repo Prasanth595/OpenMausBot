@@ -6,7 +6,8 @@ import { BotEditorStore, initialState, type AppState, type Bot, type Group } fro
 import { setUnreadIndicators } from "@/lib/notification-preferences";
 import type { NotificationLogEntry } from "../../shared/notification";
 import { NotificationsPanel } from "./NotificationsPanel";
-import { BotThreadList, GroupListItem, GroupThreadList, botRowProps } from "./Sidebar";
+import { BotThreadList, GroupListItem, botRowProps } from "./Sidebar";
+import { GroupThreadList } from "./SidebarGroupThreadList";
 import { BotConversations } from "./bot-panel/Conversations";
 import { PinnedCircleThreadSection } from "./PinnedCircleThreads";
 import { crossBotAttentionThreads } from "./SidebarBotActivity";
