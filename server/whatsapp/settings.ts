@@ -134,7 +134,7 @@ export function createWhatsAppSettings(dataDir: string) {
     };
   }
 
-  function update(patch: WhatsAppSettingsPatch): PublicWhatsAppSettings {
+  function update(patch: WhatsAppSettingsPatch, now = Date.now()): PublicWhatsAppSettings {
     const clean = settingsPatchSchema.parse(patch);
     const state = load();
     if (clean.accountSid !== undefined) state.accountSid = clean.accountSid;
@@ -155,6 +155,7 @@ export function createWhatsAppSettings(dataDir: string) {
       else delete state.joinPhrase;
     }
     if (clean.accountSid !== undefined || clean.authToken) delete state.accountName;
+    if (clean.enabled === true && !state.enabled) state.pollSince = now;
     if (clean.enabled !== undefined) state.enabled = clean.enabled;
     if (state.enabled && (!state.accountSid || !authToken(state) || !state.allowed.length)) {
       throw Object.assign(new Error("Add the Account SID, the auth token and your WhatsApp number before switching WhatsApp on"), { status: 400 });
@@ -195,6 +196,12 @@ export function createWhatsAppSettings(dataDir: string) {
     save(state);
   }
 
+  /** The stored token, or `candidate` when one is given: what a check should try. */
+  function candidateCredentials(candidate: { accountSid?: string; authToken?: string }): { accountSid: string; authToken: string } {
+    const state = load();
+    return { accountSid: candidate.accountSid?.trim() || state.accountSid, authToken: candidate.authToken?.trim() || authToken(state) };
+  }
+
   function setAccountName(name: string, now: number): void {
     const state = load();
     state.accountName = name.slice(0, 80);
@@ -203,12 +210,12 @@ export function createWhatsAppSettings(dataDir: string) {
     save(state);
   }
 
-  /** A fresh one-time code; only its hash is kept. Reading starts from now, so older messages are never replayed. */
+  /** A fresh one-time code; only its hash is kept. While WhatsApp is off, reading restarts now, so nothing older is replayed. */
   function startLink(now: number): { code: string; expiresAt: number } {
     const state = load();
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
     state.link = { codeHash: hashCode(code), expiresAt: now + LINK_TTL_MS };
-    state.pollSince = Math.min(state.pollSince ?? now, now);
+    if (!state.enabled || state.pollSince === undefined) state.pollSince = now;
     save(state);
     return { code, expiresAt: state.link.expiresAt };
   }
@@ -241,7 +248,7 @@ export function createWhatsAppSettings(dataDir: string) {
 
   return {
     load, publicSettings, update, authToken, firstSighting, contact, patchContact, numberForThread, recordError,
-    setAccountName, startLink, linkPending, claimLink, setPollSince,
+    setAccountName, startLink, linkPending, claimLink, setPollSince, candidateCredentials,
   };
 }
 

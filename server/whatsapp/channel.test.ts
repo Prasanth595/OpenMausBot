@@ -53,7 +53,10 @@ function makeChannel() {
     needsInput: (message) => Boolean(message.card?.requestId),
     reachable: () => reachable,
     fetchImpl: (async (url: string, init: RequestInit = {}) => {
-      if (url.endsWith(`/Accounts/${SID}.json`)) return new Response(JSON.stringify({ friendly_name: "Azad" }), { status: 200 });
+      if (url.endsWith(".json") && url.includes("/Accounts/") && !url.includes("/Messages")) {
+        const token = Buffer.from(String((init.headers as Record<string, string>).authorization).replace("Basic ", ""), "base64").toString().split(":")[1];
+        return token === "bad" ? new Response("{}", { status: 401 }) : new Response(JSON.stringify({ friendly_name: "Azad" }), { status: 200 });
+      }
       if (!init.method) {
         if (listFails) return new Response(JSON.stringify({ message: "Service unavailable" }), { status: 503 });
         return new Response(JSON.stringify({ messages: inbox }), { status: 200 });
@@ -84,8 +87,8 @@ const incoming = (body: string, sid: string, from = ME) => ({ From: `whatsapp:${
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "omb-whatsapp-"));
   settings = createWhatsAppSettings(dir);
-  settings.update({ accountSid: SID, authToken: TOKEN, allowed: [ME], enabled: true });
   clock = 1_000_000;
+  settings.update({ accountSid: SID, authToken: TOKEN, allowed: [ME], enabled: true }, clock);
   delivered = [];
   sent = [];
   paths = new Map();
@@ -261,7 +264,7 @@ describe("checking Twilio when this computer is not reachable", () => {
   });
 
   it("reads each new message once, skipping ones from before setup", async () => {
-    inbox = [row("SM2", "second", clock - 1_000), row("SM1", "first", clock - 2_000), row("SM0", "before setup", clock - 120_000)];
+    inbox = [row("SM2", "second", clock + 2_000), row("SM1", "first", clock + 1_000), row("SM0", "before setup", clock - 120_000)];
     expect(await channel.poll()).toBe(POLL_MS);
     await channel.idle();
     expect(delivered.map((entry) => entry.text)).toEqual(["first", "second"]);
@@ -293,5 +296,35 @@ describe("checking Twilio when this computer is not reachable", () => {
     await channel.idle();
     expect(delivered).toEqual([]);
     expect(channel.mode()).toBe("instant");
+  });
+});
+
+describe("review fixes", () => {
+  it("keeps working credentials when Twilio refuses new ones", async () => {
+    expect(await channel.verify({ authToken: "bad" })).toEqual({ ok: false, error: "Twilio didn't accept that Account SID and auth token." });
+    expect(settings.authToken()).toBe(TOKEN);
+    expect(settings.publicSettings().enabled).toBe(true);
+    expect(await channel.verify({ authToken: "fresh-token" })).toEqual({ ok: true, name: "Azad" });
+    expect(settings.authToken()).toBe("fresh-token");
+  });
+
+  it("does not replay messages that arrived while WhatsApp was off", async () => {
+    reachable = false;
+    settings.setAccountName("Azad", clock - 60_000);
+    settings.update({ enabled: false }, clock);
+    clock += 3 * 24 * 60 * 60_000;
+    inbox = [row("SMold", "delete everything", clock - 60_000)];
+    settings.update({ enabled: true }, clock);
+    await channel.poll();
+    await channel.idle();
+    expect(delivered).toEqual([]);
+  });
+
+  it("answers Twilio even when recording the message fails", async () => {
+    const original = settings.firstSighting;
+    settings.firstSighting = () => { throw new Error("disk full"); };
+    expect(await post(incoming("hi", "SM1"))).toBe(200);
+    settings.firstSighting = original;
+    expect(delivered).toEqual([]);
   });
 });

@@ -40,11 +40,13 @@ it("routes a WhatsApp request through MausBot to the right Chief of Staff and re
   const fake = await fakeTwilio();
   const { sent } = fake;
   const twilioBase = fake.base;
-
-  const session = await launchVerificationServer({ ...process.env, OMB_TWILIO_API_BASE: twilioBase }, undefined, undefined, undefined, undefined, { scripted: true });
-  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
-  const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
+  let session: Awaited<ReturnType<typeof launchVerificationServer>> | undefined;
   try {
+
+  session = await launchVerificationServer({ ...process.env, OMB_TWILIO_API_BASE: twilioBase }, undefined, undefined, undefined, undefined, { scripted: true });
+  const url = session.info.url;
+  const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: url } }) as Promise<any>;
+  const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, url) as Promise<any>;
     const maus = (await api("/api/bots")).bots.find((bot: any) => bot.defaultBot);
     expect(maus, "the fixture has a MausBot").toBeTruthy();
     const chief = (await cli("new-bot", "--name", "Mira", "--section", "Marketing")).bot;
@@ -89,17 +91,19 @@ it("routes a WhatsApp request through MausBot to the right Chief of Staff and re
     expect(existsSync(join(session.info.dataDir, "whatsapp.json"))).toBe(true);
     expect(readFileSync(join(session.info.dataDir, "whatsapp.json"), "utf8")).not.toContain(TOKEN);
   } finally {
-    await session.close();
+    await session?.close();
     await fake.close();
   }
 }, 120_000);
 
 it("sets up with no public address: checks Twilio, links the phone by code, then hears it by polling", async () => {
   const fake = await fakeTwilio();
-  const session = await launchVerificationServer({ ...process.env, OMB_TWILIO_API_BASE: fake.base }, undefined, undefined, undefined, undefined, { scripted: true });
-  const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
+  let session: Awaited<ReturnType<typeof launchVerificationServer>> | undefined;
   const row = (sid: string, body: string) => ({ sid, from: `whatsapp:${ME}`, to: "whatsapp:+14155238886", body, direction: "inbound", date_created: new Date(Date.now() + 1_000).toUTCString(), num_media: "0" });
   try {
+    session = await launchVerificationServer({ ...process.env, OMB_TWILIO_API_BASE: fake.base }, undefined, undefined, undefined, undefined, { scripted: true });
+    const url = session.info.url;
+    const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, url) as Promise<any>;
     const maus = (await api("/api/bots")).bots.find((bot: any) => bot.defaultBot);
     writeFileSync(join(session.info.dataDir, "room-plan.json"), JSON.stringify({ [maus.id]: { reply: "Here is your week: three meetings and one deadline." } }));
     const checked = await api("/api/whatsapp/verify", { accountSid: SID, authToken: TOKEN });
@@ -117,7 +121,7 @@ it("sets up with no public address: checks Twilio, links the phone by code, then
       .toEqual([expect.stringContaining("You're connected."), "Here is your week: three meetings and one deadline."]);
     expect(fake.sent.every((entry) => entry.to === `whatsapp:${ME}`)).toBe(true);
   } finally {
-    await session.close();
+    await session?.close();
     await fake.close();
   }
 }, 120_000);

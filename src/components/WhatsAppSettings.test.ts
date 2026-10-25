@@ -92,6 +92,17 @@ describe("WhatsApp guided setup", () => {
     expect(host.querySelector("[role='switch']")?.getAttribute("aria-checked")).toBe("true");
   });
 
+  it("switches off with only that change, and a test message keeps what is being typed", async () => {
+    await mount({ ...base, enabled: true, accountSid: "AC1", hasToken: true, accountName: "Azad", allowed: ["+14155550100"], linked: ["+1 415 ••• 0100"] });
+    flushSync(() => type(input("Your WhatsApp number"), "+1 415 555 0199"));
+    flushSync(() => button("Send test message").click());
+    await settle();
+    expect(input("Your WhatsApp number").value).toBe("+1 415 555 0199");
+    flushSync(() => host.querySelector<HTMLButtonElement>("[role='switch']")!.click());
+    await settle();
+    expect(server.calls.at(-1)).toEqual({ path: "/api/whatsapp", body: { enabled: false } });
+  });
+
   it("keeps the raw fields and the webhook URL under Advanced", async () => {
     await mount({ ...base });
     const advanced = host.querySelector("details")!;

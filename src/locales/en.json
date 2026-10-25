@@ -1128,6 +1128,7 @@
   "whatsapp.save": "Save",
   "whatsapp.saved": "WhatsApp settings saved.",
   "whatsapp.test": "Send test message",
+  "whatsapp.testUsesSaved": "Uses the saved settings, not unsaved changes",
   "whatsapp.testSent": "Test message sent. Check WhatsApp on your phone.",
   "whatsapp.failed": "Something went wrong. Try again.",
   "whatsapp.webhook": "Twilio webhook URL",

@@ -24,8 +24,9 @@ async function serve(webhookBase: string, teamCloud = false) {
     settings,
     channel: {
       sendTest: async () => { tests += 1; return { ok: true as const }; },
-      verify: async () => {
+      verify: async (candidate: { accountSid?: string; authToken?: string } = {}) => {
         if (!verifyOk) return { ok: false as const, error: "Twilio didn't accept that Account SID and auth token." };
+        settings.update(candidate);
         settings.setAccountName("Azad", Date.now());
         return { ok: true as const, name: "Azad" };
       },

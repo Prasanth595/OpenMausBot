@@ -83,12 +83,15 @@ export function WhatsAppSettings() {
     setAuthToken("");
   };
 
-  const run = async (kind: NonNullable<typeof busy>, work: () => Promise<WhatsAppStatus>, done?: string) => {
+  /** `keepDrafts`: the action used what is saved, so what the person is typing stays. */
+  const run = async (kind: NonNullable<typeof busy>, work: () => Promise<WhatsAppStatus>, done?: string, keepDrafts = false) => {
     setBusy(kind);
     setError(null);
     setNotice(null);
     try {
-      adopt(await work());
+      const next = await work();
+      if (keepDrafts) setStatus(next);
+      else adopt(next);
       if (done) setNotice(done);
     } catch (cause) {
       setError(errorText(cause));
@@ -141,11 +144,12 @@ export function WhatsAppSettings() {
     setLink({ code: next.code, linkUrl: next.linkUrl });
     return next;
   });
-  const saveAdvanced = (enabled = status.enabled) => run("saving", () => api("/api/whatsapp", {
+  const saveAdvanced = () => run("saving", () => api("/api/whatsapp", {
     method: "PUT",
-    body: JSON.stringify({ from: from.trim(), allowed: allowed.split(/[,\n]/).map((value) => value.trim()).filter(Boolean), enabled }),
+    body: JSON.stringify({ from: from.trim(), allowed: allowed.split(/[,\n]/).map((value) => value.trim()).filter(Boolean) }),
   }), t("whatsapp.saved"));
-  const test = () => run("testing", () => api("/api/whatsapp/test", { method: "POST" }), t("whatsapp.testSent"));
+  const test = () => run("testing", () => api("/api/whatsapp/test", { method: "POST" }), t("whatsapp.testSent"), true);
+  const toggle = () => run("saving", () => api("/api/whatsapp", { method: "PUT", body: JSON.stringify({ enabled: !status.enabled }) }), undefined, true);
 
   return (
     <Card title={t("whatsapp.title")} subtitle={t("whatsapp.subtitle")}>
@@ -156,7 +160,7 @@ export function WhatsAppSettings() {
               <p className="text-[13px] font-medium text-ink">{status.enabled ? t("whatsapp.setup.on", { to: sender }) : t("whatsapp.setup.off")}</p>
               <p className="text-[11.5px] text-ink-secondary">{t("whatsapp.setup.linkedTo", { numbers: status.linked.join(", ") })} · {status.mode === "instant" ? t("whatsapp.setup.instant") : t("whatsapp.setup.polling")}</p>
             </div>
-            <Switch checked={status.enabled} aria-label={t("whatsapp.enable")} disabled={busy !== null} onClick={() => void saveAdvanced(!status.enabled)} />
+            <Switch checked={status.enabled} aria-label={t("whatsapp.enable")} disabled={busy !== null} onClick={() => void toggle()} />
           </div>
         )}
 
@@ -231,7 +235,7 @@ export function WhatsAppSettings() {
             </label>
             <div className="flex flex-wrap gap-2">
               <button type="submit" disabled={busy !== null} className={secondaryCls}><Check size={14} />{t("whatsapp.save")}</button>
-              <button type="button" disabled={busy !== null || !status.hasToken || !linked} onClick={() => void test()} className={secondaryCls}>
+              <button type="button" title={t("whatsapp.testUsesSaved")} disabled={busy !== null || !status.hasToken || !linked} onClick={() => void test()} className={secondaryCls}>
                 {busy === "testing" ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}{t("whatsapp.test")}
               </button>
             </div>

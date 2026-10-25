@@ -167,7 +167,12 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
     }
     reply(res, 200);
     const message = parseInbound(form);
-    if (message) await handleInbound(message);
+    if (!message) return;
+    try {
+      await handleInbound(message);
+    } catch (error) {
+      log(`could not handle an incoming message: ${(error as Error).message}`);
+    }
   }
 
   /** One message from WhatsApp, however it arrived. */
@@ -264,12 +269,16 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
     });
   }
 
-  async function verify(): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
-    const state = deps.settings.load();
-    const authToken = deps.settings.authToken(state);
-    if (!state.accountSid || !authToken) return { ok: false, error: "Add the Account SID and the auth token first." };
-    const result = await fetchAccount({ accountSid: state.accountSid, authToken }, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase });
+  /** Checks the candidate credentials with Twilio first; only credentials Twilio accepts replace the stored ones. */
+  async function verify(candidate: { accountSid?: string; authToken?: string } = {}): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+    const creds = deps.settings.candidateCredentials(candidate);
+    if (!creds.accountSid || !creds.authToken) return { ok: false, error: "Add the Account SID and the auth token first." };
+    const result = await fetchAccount(creds, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase });
     if (!result.ok) return { ok: false, error: result.error };
+    deps.settings.update({
+      ...(candidate.accountSid?.trim() ? { accountSid: candidate.accountSid.trim() } : {}),
+      ...(candidate.authToken?.trim() ? { authToken: candidate.authToken.trim() } : {}),
+    }, now());
     deps.settings.setAccountName(result.name, now());
     return { ok: true, name: result.name };
   }

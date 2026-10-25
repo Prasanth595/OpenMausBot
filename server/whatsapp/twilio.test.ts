@@ -137,6 +137,26 @@ describe("setup helpers", () => {
     expect(new URL(asked).searchParams.get("DateSent>")).toBe("2026-10-25");
   });
 
+  it("follows Twilio's pages until it reaches messages from before `since`", async () => {
+    const since = Date.parse("2026-10-25T10:00:00Z");
+    const pages: Record<string, unknown> = {
+      first: { messages: [{ sid: "SM3", from: "whatsapp:+14155550100", to: "whatsapp:+14155238886", body: "third", direction: "inbound", date_created: "Sat, 25 Oct 2026 10:03:00 +0000" }], next_page_uri: "/2010-04-01/Accounts/x/Messages.json?Page=1" },
+      second: { messages: [
+        { sid: "SM2", from: "whatsapp:+14155550100", to: "whatsapp:+14155238886", body: "second", direction: "inbound", date_created: "Sat, 25 Oct 2026 10:02:00 +0000" },
+        { sid: "SM0", from: "whatsapp:+14155550100", to: "whatsapp:+14155238886", body: "old", direction: "inbound", date_created: "Sat, 25 Oct 2026 09:00:00 +0000" },
+      ], next_page_uri: "/2010-04-01/Accounts/x/Messages.json?Page=2" },
+    };
+    const asked: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      asked.push(url);
+      return new Response(JSON.stringify(url.includes("Page=1") ? pages.second : url.includes("Page=2") ? { messages: [] } : pages.first), { status: 200 });
+    }) as unknown as typeof fetch;
+    const result = await listInbound(creds, since, { fetchImpl });
+    expect(result.ok && result.messages.map((m) => m.body)).toEqual(["second", "third"]);
+    expect(asked).toHaveLength(2);
+    expect(asked[1]).toBe("https://api.twilio.com/2010-04-01/Accounts/x/Messages.json?Page=1");
+  });
+
   it("opens WhatsApp with the message already typed", () => {
     expect(whatsappLink("whatsapp:+14155238886", "join brave-tiger")).toBe("https://wa.me/14155238886?text=join%20brave-tiger");
   });

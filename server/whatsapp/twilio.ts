@@ -177,6 +177,8 @@ export async function fetchAccount(
   }
 }
 
+const MAX_POLL_PAGES = 20;
+
 export interface PolledMessage extends InboundMessage {
   at: number;
 }
@@ -192,10 +194,20 @@ export async function listInbound(
   const query = new URLSearchParams({ To: credentials.from, "DateSent>": new Date(since).toISOString().slice(0, 10), PageSize: "50" });
   const url = `${options.apiBase ?? TWILIO_API_BASE}/2010-04-01/Accounts/${encodeURIComponent(credentials.accountSid)}/Messages.json?${query}`;
   try {
-    const response = await fetchImpl(url, { headers: { authorization: basicAuth(credentials) }, signal: AbortSignal.timeout(15_000) });
-    const json = await response.json().catch(() => ({})) as { messages?: unknown; message?: unknown };
-    if (!response.ok) return { ok: false, error: typeof json.message === "string" ? json.message : `Twilio answered ${response.status}`, status: response.status };
-    const rows = Array.isArray(json.messages) ? json.messages as Array<Record<string, unknown>> : [];
+    const rows: Array<Record<string, unknown>> = [];
+    let pageUrl: string | undefined = url;
+    for (let page = 0; pageUrl && page < MAX_POLL_PAGES; page += 1) {
+      const response = await fetchImpl(pageUrl, { headers: { authorization: basicAuth(credentials) }, signal: AbortSignal.timeout(15_000) });
+      const json = await response.json().catch(() => ({})) as { messages?: unknown; message?: unknown; next_page_uri?: unknown };
+      if (!response.ok) return { ok: false, error: typeof json.message === "string" ? json.message : `Twilio answered ${response.status}`, status: response.status };
+      const batch = Array.isArray(json.messages) ? json.messages as Array<Record<string, unknown>> : [];
+      rows.push(...batch);
+      // Twilio lists newest first: once a page reaches back past `since`, older pages hold nothing new.
+      const reachedSince = batch.some((row) => Date.parse(String(row.date_created ?? "")) <= since);
+      pageUrl = !reachedSince && typeof json.next_page_uri === "string" && json.next_page_uri
+        ? new URL(json.next_page_uri, options.apiBase ?? TWILIO_API_BASE).toString()
+        : undefined;
+    }
     const messages = rows.flatMap((row): PolledMessage[] => {
       if (row.direction !== "inbound") return [];
       const at = Date.parse(String(row.date_created ?? ""));

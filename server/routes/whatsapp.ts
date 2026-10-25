@@ -1,7 +1,7 @@
 import type { ServerResponse } from "node:http";
 
 import { WHATSAPP_PATH, type WhatsAppChannel } from "../whatsapp/channel.ts";
-import type { WhatsAppSettings } from "../whatsapp/settings.ts";
+import { settingsPatchSchema, type WhatsAppSettings } from "../whatsapp/settings.ts";
 import { SANDBOX_SENDER, whatsappLink } from "../whatsapp/twilio.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
@@ -55,16 +55,17 @@ export function createWhatsAppRoutes(deps: WhatsAppRouteDeps): RouteHandler {
     }
     if (path === "/api/whatsapp/verify" && method === "POST") {
       if (deps.teamCloud) return json(res, 409, { error: "WhatsApp isn't available on a team server yet." });
+      let candidate: { accountSid?: string; authToken?: string };
       try {
         const body = await readBody(req) as { accountSid?: unknown; authToken?: unknown };
-        deps.settings.update({
+        candidate = settingsPatchSchema.pick({ accountSid: true, authToken: true }).parse({
           ...(typeof body?.accountSid === "string" ? { accountSid: body.accountSid } : {}),
           ...(typeof body?.authToken === "string" ? { authToken: body.authToken } : {}),
         });
       } catch (error) {
         return failed(res, json, error);
       }
-      const result = await deps.channel.verify();
+      const result = await deps.channel.verify(candidate);
       return json(res, result.ok ? 200 : 400, { ...(result.ok ? {} : { error: result.error }), ...status() });
     }
     if (path === "/api/whatsapp/link" && method === "POST") {
