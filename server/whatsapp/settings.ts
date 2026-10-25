@@ -1,6 +1,6 @@
 // The WhatsApp channel's own state file. The Twilio auth token is sealed with a 0600 key file of its own that no backup
 // carries, as webhooks.ts does for webhook secrets, so whatsapp.json alone never reveals it.
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
@@ -11,6 +11,9 @@ import { normalizeNumber, SANDBOX_SENDER } from "./twilio.ts";
 export const WHATSAPP_FILE = "whatsapp.json";
 export const WHATSAPP_KEY_FILE = "whatsapp-key";
 export const MAX_ALLOWED_NUMBERS = 5;
+/** How long a "link 123456" code stays good. */
+export const LINK_TTL_MS = 10 * 60_000;
+const JOIN_PHRASE = /^join [a-z]+(?:-[a-z]+)+$/;
 const SEEN_MAX = 500;
 
 const contactSchema = z.object({
@@ -29,6 +32,12 @@ const stateSchema = z.object({
   contacts: z.record(z.string(), contactSchema).default({}),
   seen: z.array(z.string()).default([]),
   lastError: z.object({ at: z.number(), message: z.string() }).optional(),
+  accountName: z.string().optional(),
+  /** The sandbox's "join two-words" phrase, shown in Twilio's console; there is no API for it. */
+  joinPhrase: z.string().optional(),
+  link: z.object({ codeHash: z.string(), expiresAt: z.number() }).optional(),
+  /** Messages before this are never read when checking Twilio for new ones. */
+  pollSince: z.number().optional(),
 });
 
 export type WhatsAppState = z.output<typeof stateSchema>;
@@ -41,6 +50,10 @@ export interface PublicWhatsAppSettings {
   from: string;
   allowed: string[];
   lastError?: { at: number; message: string };
+  accountName?: string;
+  joinPhrase?: string;
+  /** Until when a link code waits for the person's message; absent when none does. */
+  linkExpiresAt?: number;
 }
 
 export const settingsPatchSchema = z.object({
@@ -50,7 +63,10 @@ export const settingsPatchSchema = z.object({
   authToken: z.string().trim().max(128).optional(),
   from: z.string().trim().max(40).optional(),
   allowed: z.array(z.string().max(40)).max(MAX_ALLOWED_NUMBERS).optional(),
+  joinPhrase: z.string().trim().toLowerCase().max(60).refine((value) => !value || JOIN_PHRASE.test(value), "Paste the sandbox phrase exactly as Twilio shows it, such as join brave-tiger").optional(),
 }).strict();
+
+const hashCode = (code: string) => createHash("sha256").update(`whatsapp-link:${code}`).digest("hex");
 
 export type WhatsAppSettingsPatch = z.input<typeof settingsPatchSchema>;
 
@@ -104,7 +120,7 @@ export function createWhatsAppSettings(dataDir: string) {
     }
   }
 
-  function publicSettings(state = load()): PublicWhatsAppSettings {
+  function publicSettings(state = load(), now = Date.now()): PublicWhatsAppSettings {
     return {
       enabled: state.enabled,
       accountSid: state.accountSid,
@@ -112,6 +128,9 @@ export function createWhatsAppSettings(dataDir: string) {
       from: state.from,
       allowed: state.allowed,
       ...(state.lastError ? { lastError: state.lastError } : {}),
+      ...(state.accountName ? { accountName: state.accountName } : {}),
+      ...(state.joinPhrase ? { joinPhrase: state.joinPhrase } : {}),
+      ...(state.link && state.link.expiresAt > now ? { linkExpiresAt: state.link.expiresAt } : {}),
     };
   }
 
@@ -131,6 +150,11 @@ export function createWhatsAppSettings(dataDir: string) {
       if (bad) throw Object.assign(new Error(`"${bad.raw.trim()}" is not a phone number. Use the international form, such as +14155550100`), { status: 400 });
       state.allowed = [...new Set(numbers.map((entry) => entry.number).filter(Boolean))];
     }
+    if (clean.joinPhrase !== undefined) {
+      if (clean.joinPhrase) state.joinPhrase = clean.joinPhrase;
+      else delete state.joinPhrase;
+    }
+    if (clean.accountSid !== undefined || clean.authToken) delete state.accountName;
     if (clean.enabled !== undefined) state.enabled = clean.enabled;
     if (state.enabled && (!state.accountSid || !authToken(state) || !state.allowed.length)) {
       throw Object.assign(new Error("Add the Account SID, the auth token and your WhatsApp number before switching WhatsApp on"), { status: 400 });
@@ -171,7 +195,54 @@ export function createWhatsAppSettings(dataDir: string) {
     save(state);
   }
 
-  return { load, publicSettings, update, authToken, firstSighting, contact, patchContact, numberForThread, recordError };
+  function setAccountName(name: string, now: number): void {
+    const state = load();
+    state.accountName = name.slice(0, 80);
+    state.pollSince ??= now;
+    delete state.lastError;
+    save(state);
+  }
+
+  /** A fresh one-time code; only its hash is kept. Reading starts from now, so older messages are never replayed. */
+  function startLink(now: number): { code: string; expiresAt: number } {
+    const state = load();
+    const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
+    state.link = { codeHash: hashCode(code), expiresAt: now + LINK_TTL_MS };
+    state.pollSince = Math.min(state.pollSince ?? now, now);
+    save(state);
+    return { code, expiresAt: state.link.expiresAt };
+  }
+
+  function linkPending(now: number, state = load()): boolean {
+    return Boolean(state.link && state.link.expiresAt > now);
+  }
+
+  /** A live code sent from `number` makes it the owner's and switches WhatsApp on. Single use. */
+  function claimLink(code: string, number: string, now: number): boolean {
+    const state = load();
+    if (!state.link || state.link.expiresAt <= now || !number) return false;
+    const expected = Buffer.from(state.link.codeHash, "hex");
+    const actual = Buffer.from(hashCode(code), "hex");
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return false;
+    delete state.link;
+    if (!state.allowed.includes(number)) state.allowed = [...state.allowed, number].slice(-MAX_ALLOWED_NUMBERS);
+    state.enabled = Boolean(state.accountSid && authToken(state));
+    delete state.lastError;
+    save(state);
+    return state.enabled;
+  }
+
+  function setPollSince(at: number): void {
+    const state = load();
+    if ((state.pollSince ?? 0) >= at) return;
+    state.pollSince = at;
+    save(state);
+  }
+
+  return {
+    load, publicSettings, update, authToken, firstSighting, contact, patchContact, numberForThread, recordError,
+    setAccountName, startLink, linkPending, claimLink, setPollSince,
+  };
 }
 
 export type WhatsAppSettings = ReturnType<typeof createWhatsAppSettings>;

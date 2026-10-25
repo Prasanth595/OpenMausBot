@@ -6,19 +6,26 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Message } from "../store.ts";
 import type { WhatsAppSettings } from "./settings.ts";
 import {
+  fetchAccount,
+  listInbound,
   MAX_MESSAGES_PER_REPLY,
   parseInbound,
   sendWhatsApp,
   SESSION_WINDOW_MS,
   verifyTwilioSignature,
   whatsappChunks,
+  whatsappLink,
   whatsappText,
+  type InboundMessage,
   type TwilioCredentials,
 } from "./twilio.ts";
 
 export const WHATSAPP_PATH = "/whatsapp/twilio";
 export const WHATSAPP_THREAD_TITLE = "WhatsApp";
 const MAX_FORM_BYTES = 64 * 1024;
+export const POLL_MS = 4_000;
+export const POLL_BACKOFF_MS = 30_000;
+const LINK_MESSAGE = /^link\s+(\d{6})$/i;
 
 export const WHATSAPP_PROMPT = [
   "This conversation is the person's WhatsApp chat with you. Your replies go to their phone as WhatsApp messages: keep them short, in plain sentences, with no tables or headings. They cannot see cards, forms, buttons or files here, so ask questions in text with numbered options.",
@@ -38,6 +45,8 @@ export interface WhatsAppChannelDeps {
   deliver(botId: string, threadId: string, text: string, sendId: string): Promise<void>;
   activePath(threadId: string): Message[];
   needsInput(message: Message): boolean;
+  /** Whether Twilio can reach the webhook receiver. Without that, new messages are fetched from Twilio instead. */
+  reachable(): boolean;
   fetchImpl?: typeof fetch;
   apiBase?: string;
   now?: () => number;
@@ -84,6 +93,7 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
   };
 
   const active = () => !deps.teamCloud && deps.settings.load().enabled;
+  const listening = () => !deps.teamCloud && (deps.settings.load().enabled || deps.settings.linkPending(now()));
 
   function credentials(): TwilioCredentials | null {
     const state = deps.settings.load();
@@ -142,7 +152,7 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
   /** Twilio's "a message comes in" webhook. It answers at once; the work runs after. */
   async function handleTwilio(req: IncomingMessage, res: ServerResponse, publicBaseUrl: string): Promise<void> {
     if (req.method !== "POST") return reply(res, 405);
-    if (!active()) return reply(res, 404);
+    if (!listening()) return reply(res, 404);
     let form: Record<string, string>;
     try {
       form = await readForm(req);
@@ -157,14 +167,69 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
     }
     reply(res, 200);
     const message = parseInbound(form);
-    if (!message) return;
+    if (message) await handleInbound(message);
+  }
+
+  /** One message from WhatsApp, however it arrived. */
+  async function handleInbound(message: InboundMessage): Promise<void> {
+    if (!deps.settings.firstSighting(message.messageSid)) return;
     if (!deps.settings.load().allowed.includes(message.from)) {
-      log("ignored a message from a number that is not allowed");
+      const code = LINK_MESSAGE.exec(message.body)?.[1];
+      if (code && deps.settings.claimLink(code, message.from, now())) {
+        deps.settings.patchContact(message.from, { lastInboundAt: now() });
+        const name = deps.defaultBot()?.name ?? "MausBot";
+        await inLane(message.from, async () => {
+          await send(message.from, `You're connected. I'm ${name}: message me here any time, and I'll get it done or hand it to the right team.`);
+        });
+      } else if (!/^join\s/i.test(message.body)) {
+        log("ignored a message from a number that is not linked");
+      }
       return;
     }
-    if (!deps.settings.firstSighting(message.messageSid)) return;
+    if (!active()) return;
     deps.settings.patchContact(message.from, { lastInboundAt: now() });
     await inLane(message.from, () => receive(message.from, message.body, message.numMedia, message.messageSid));
+  }
+
+  let pollTimer: ReturnType<typeof setTimeout> | null = null;
+  let polling = false;
+  let stopped = true;
+
+  /** Reads new messages from Twilio when its webhook cannot reach this computer. The delay until the next check. */
+  async function poll(): Promise<number> {
+    if (deps.teamCloud || deps.reachable() || !listening()) return POLL_MS;
+    const creds = credentials();
+    const since = deps.settings.load().pollSince;
+    if (!creds || since === undefined) return POLL_MS;
+    const result = await listInbound(creds, since, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase });
+    if (!result.ok) {
+      deps.settings.recordError(`Couldn't check Twilio for new messages: ${result.error}`, now());
+      return POLL_BACKOFF_MS;
+    }
+    for (const message of result.messages) {
+      await handleInbound(message);
+      deps.settings.setPollSince(message.at);
+    }
+    return POLL_MS;
+  }
+
+  function schedule(delay: number): void {
+    if (stopped) return;
+    pollTimer = setTimeout(() => {
+      pollTimer = null;
+      if (polling) return schedule(POLL_MS);
+      polling = true;
+      void poll()
+        .catch((error: unknown) => {
+          log(`checking Twilio failed: ${(error as Error).message}`);
+          return POLL_BACKOFF_MS;
+        })
+        .then((next) => {
+          polling = false;
+          schedule(next);
+        });
+    }, delay);
+    pollTimer.unref?.();
   }
 
   /** Sends what MausBot said since the last reply. Called on every finished turn; a no-op for any other thread. */
@@ -199,6 +264,21 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
     });
   }
 
+  async function verify(): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+    const state = deps.settings.load();
+    const authToken = deps.settings.authToken(state);
+    if (!state.accountSid || !authToken) return { ok: false, error: "Add the Account SID and the auth token first." };
+    const result = await fetchAccount({ accountSid: state.accountSid, authToken }, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase });
+    if (!result.ok) return { ok: false, error: result.error };
+    deps.settings.setAccountName(result.name, now());
+    return { ok: true, name: result.name };
+  }
+
+  function startLink(): { code: string; expiresAt: number; linkUrl: string } {
+    const { code, expiresAt } = deps.settings.startLink(now());
+    return { code, expiresAt, linkUrl: whatsappLink(deps.settings.load().from, `link ${code}`) };
+  }
+
   function prompt(threadId: string): string {
     return active() && deps.settings.numberForThread(threadId) ? WHATSAPP_PROMPT : "";
   }
@@ -211,7 +291,21 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
     return sent ? { ok: true } : { ok: false, error: deps.settings.load().lastError?.message ?? "Twilio refused the message." };
   }
 
-  return { handleTwilio, noteTurnCompleted, prompt, sendTest, idle: () => Promise.allSettled(lanes.values()) };
+  return {
+    handleTwilio, handleInbound, noteTurnCompleted, prompt, sendTest, verify, startLink, poll,
+    mode: (): "instant" | "polling" => (deps.reachable() ? "instant" : "polling"),
+    start() {
+      if (!stopped) return;
+      stopped = false;
+      schedule(POLL_MS);
+    },
+    stop() {
+      stopped = true;
+      if (pollTimer) clearTimeout(pollTimer);
+      pollTimer = null;
+    },
+    idle: () => Promise.allSettled(lanes.values()),
+  };
 }
 
 export type WhatsAppChannel = ReturnType<typeof createWhatsAppChannel>;

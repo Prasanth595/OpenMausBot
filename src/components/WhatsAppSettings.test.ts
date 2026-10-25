@@ -6,16 +6,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { WhatsAppStatus } from "./WhatsAppSettings";
 
-const server = vi.hoisted(() => ({ calls: [] as Array<{ path: string; init?: RequestInit }>, status: null as unknown as WhatsAppStatus, fail: "" }));
+const server = vi.hoisted(() => ({ calls: [] as Array<{ path: string; body?: any }>, status: null as unknown as WhatsAppStatus, fail: "" }));
 vi.mock("@/state/store", async (actual) => ({
   ...(await actual<typeof import("@/state/store")>()),
   api: async (path: string, init?: RequestInit) => {
-    server.calls.push({ path, init });
+    const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+    server.calls.push({ path, body });
     if (server.fail && init?.method) throw new Error(server.fail);
-    if (init?.method === "PUT") {
-      const body = JSON.parse(String(init.body));
-      server.status = { ...server.status, ...body, hasToken: server.status.hasToken || Boolean(body.authToken), from: `whatsapp:${body.from}` };
-      delete (server.status as unknown as Record<string, unknown>).authToken;
+    if (path === "/api/whatsapp/verify") server.status = { ...server.status, accountSid: body.accountSid, hasToken: true, accountName: "Azad" };
+    if (path === "/api/whatsapp" && init?.method === "PUT" && body.joinPhrase) {
+      server.status = { ...server.status, joinPhrase: body.joinPhrase, joinUrl: `https://wa.me/14155238886?text=${encodeURIComponent(body.joinPhrase)}` };
+    }
+    if (path === "/api/whatsapp/link") {
+      server.status = { ...server.status, linkExpiresAt: Date.now() + 600_000 };
+      return { ...server.status, code: "482913", linkUrl: "https://wa.me/14155238886?text=link%20482913" };
     }
     return server.status;
   },
@@ -26,69 +30,90 @@ const { WhatsAppSettings } = await import("./WhatsAppSettings");
 let root: Root;
 let host: HTMLElement;
 const base: WhatsAppStatus = {
-  enabled: false, accountSid: "", hasToken: false, from: "whatsapp:+14155238886", allowed: [],
+  enabled: false, accountSid: "", hasToken: false, from: "whatsapp:+14155238886", allowed: [], linked: [], sandbox: true, mode: "polling",
   webhookUrl: "http://127.0.0.1:8800/whatsapp/twilio", reachable: false, available: true,
 };
 const settle = () => new Promise((done) => setTimeout(done, 0));
 const input = (label: string) => [...host.querySelectorAll("label")].find((l) => l.textContent?.startsWith(label))!.querySelector("input")!;
 const type = (el: HTMLInputElement, value: string) => {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
-  setter.call(el, value);
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(el, value);
   el.dispatchEvent(new Event("input", { bubbles: true }));
 };
 const button = (text: string) => [...host.querySelectorAll("button")].find((b) => b.textContent?.includes(text))!;
+const step = (n: number) => host.querySelector(`[data-whatsapp-step='${n}']`)!;
 
-beforeEach(async () => {
+async function mount(status: WhatsAppStatus) {
+  server.status = status;
+  flushSync(() => root.render(createElement(WhatsAppSettings)));
+  await settle();
+}
+
+beforeEach(() => {
   server.calls = [];
-  server.status = { ...base };
   server.fail = "";
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
-  flushSync(() => root.render(createElement(WhatsAppSettings)));
-  await settle();
 });
 afterEach(() => { flushSync(() => root.unmount()); host.remove(); });
 
-describe("WhatsApp settings", () => {
-  it("shows the webhook URL, warns that this computer is not reachable, and explains routing", () => {
-    expect(host.textContent).toContain("http://127.0.0.1:8800/whatsapp/twilio");
-    expect(host.textContent).toContain("Twilio can't reach this computer");
-    expect(host.textContent).toContain("Access → Additional departments");
-    expect(button("Send test message").disabled).toBe(true);
-  });
-
-  it("saves the credentials and never shows the token again", async () => {
+describe("WhatsApp guided setup", () => {
+  it("walks through connecting Twilio, joining the sandbox and linking the phone", async () => {
+    await mount({ ...base });
+    expect(step(1).textContent).toContain("Create a free account");
     flushSync(() => {
       type(input("Twilio Account SID"), "AC" + "4".repeat(32));
       type(input("Twilio auth token"), "tok");
-      type(input("Your WhatsApp number"), "+14155550100, +919876543210");
     });
-    flushSync(() => button("Save").click());
+    flushSync(() => button("Check").click());
     await settle();
-    const put = server.calls.find((call) => call.init?.method === "PUT")!;
-    expect(JSON.parse(String(put.init!.body))).toEqual({
-      accountSid: "AC" + "4".repeat(32), authToken: "tok", from: "+14155238886", allowed: ["+14155550100", "+919876543210"], enabled: false,
-    });
-    expect(input("Twilio auth token").value).toBe("");
-    expect(input("Twilio auth token").placeholder).toContain("Saved");
-    expect(host.textContent).toContain("WhatsApp settings saved.");
-    expect(button("Send test message").disabled).toBe(false);
+    expect(server.calls.at(-1)).toEqual({ path: "/api/whatsapp/verify", body: { accountSid: "AC" + "4".repeat(32), authToken: "tok" } });
+    expect(step(1).textContent).toContain("Connected to Azad");
+
+    flushSync(() => type(host.querySelector<HTMLInputElement>("[aria-label='Sandbox join phrase']")!, "join brave-tiger"));
+    flushSync(() => step(2).querySelector<HTMLButtonElement>("button[type='submit']")!.click());
+    await settle();
+    const open = [...step(2).querySelectorAll("a")].find((a) => a.textContent?.includes("Open WhatsApp"))!;
+    expect(open.getAttribute("href")).toBe("https://wa.me/14155238886?text=join%20brave-tiger");
+    expect(step(2).querySelector("svg")).not.toBeNull();
+    flushSync(() => button("I've sent it").click());
+
+    flushSync(() => button("Link my phone").click());
+    await settle();
+    expect(step(3).textContent).toContain("Or send \"link 482913\" to +14155238886 on WhatsApp.");
+    expect(step(3).textContent).toContain("Waiting for your message");
   });
 
-  it("shows the server's reason when saving fails", async () => {
-    server.fail = "Add the Account SID, the auth token and your WhatsApp number before switching WhatsApp on";
-    flushSync(() => host.querySelector<HTMLButtonElement>("[role='switch']")!.click());
+  it("shows WhatsApp on, who is linked and how it hears messages", async () => {
+    await mount({ ...base, enabled: true, accountSid: "AC1", hasToken: true, accountName: "Azad", allowed: ["+14155550100"], linked: ["+1 415 ••• 0100"] });
+    expect(host.textContent).toContain("WhatsApp is on. Message MausBot at +14155238886.");
+    expect(host.textContent).toContain("Linked: +1 415 ••• 0100");
+    expect(host.textContent).toContain("checks for messages every few seconds");
+    expect(host.querySelector("[role='switch']")?.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("keeps the raw fields and the webhook URL under Advanced", async () => {
+    await mount({ ...base });
+    const advanced = host.querySelector("details")!;
+    expect(advanced.textContent).toContain("WhatsApp sender number");
+    expect(advanced.textContent).toContain("http://127.0.0.1:8800/whatsapp/twilio");
+    expect(advanced.textContent).toContain("checks Twilio for new messages every few seconds");
+  });
+
+  it("shows Twilio's refusal in plain words", async () => {
+    await mount({ ...base });
+    server.fail = "Twilio didn't accept that Account SID and auth token.";
+    flushSync(() => {
+      type(input("Twilio Account SID"), "AC" + "4".repeat(32));
+      type(input("Twilio auth token"), "bad");
+    });
+    flushSync(() => button("Check").click());
     await settle();
-    expect(host.querySelector("[role='alert']")?.textContent).toContain("before switching WhatsApp on");
+    expect(host.querySelector("[role='alert']")?.textContent).toContain("didn't accept");
   });
 
   it("says WhatsApp is not available on a team server", async () => {
-    flushSync(() => root.unmount());
-    root = createRoot(host);
-    server.status = { ...base, available: false };
-    flushSync(() => root.render(createElement(WhatsAppSettings)));
-    await settle();
+    await mount({ ...base, available: false });
     expect(host.textContent).toContain("isn't available on a team server");
     expect(host.querySelector("input")).toBeNull();
   });

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  MESSAGE_MAX_CHARS, normalizeNumber, parseInbound, sendWhatsApp, twilioSignature, verifyTwilioSignature, whatsappChunks, whatsappText,
+  fetchAccount, listInbound, MESSAGE_MAX_CHARS, normalizeNumber, parseInbound, sendWhatsApp, twilioSignature, verifyTwilioSignature,
+  whatsappChunks, whatsappLink, whatsappText,
 } from "./twilio.ts";
 
 describe("Twilio request signatures", () => {
@@ -102,5 +103,41 @@ describe("sending", () => {
     expect(await sendWhatsApp(creds, "+14155550100", "Hi", { fetchImpl: refused })).toEqual({ ok: false, error: "Not a sandbox participant", code: 21608, status: 400 });
     const down = (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch;
     expect(await sendWhatsApp(creds, "+14155550100", "Hi", { fetchImpl: down })).toEqual({ ok: false, error: "Could not reach Twilio: ECONNREFUSED" });
+  });
+});
+
+describe("setup helpers", () => {
+  const creds = { accountSid: "AC" + "0".repeat(32), authToken: "tok", from: "whatsapp:+14155238886" };
+
+  it("checks the credentials and names the account", async () => {
+    const ok = (async (url: string) => {
+      expect(url).toBe(`https://api.twilio.com/2010-04-01/Accounts/${creds.accountSid}.json`);
+      return new Response(JSON.stringify({ friendly_name: "Azad's account" }), { status: 200 });
+    }) as unknown as typeof fetch;
+    expect(await fetchAccount(creds, { fetchImpl: ok })).toEqual({ ok: true, name: "Azad's account" });
+    const refused = (async () => new Response(JSON.stringify({ message: "Authenticate" }), { status: 401 })) as unknown as typeof fetch;
+    expect(await fetchAccount(creds, { fetchImpl: refused })).toEqual({ ok: false, error: "Twilio didn't accept that Account SID and auth token.", status: 401 });
+  });
+
+  it("lists only people's messages after a time, oldest first", async () => {
+    const since = Date.parse("2026-10-25T10:00:00Z");
+    let asked = "";
+    const fetchImpl = (async (url: string) => {
+      asked = url;
+      return new Response(JSON.stringify({ messages: [
+        { sid: "SM3", from: "whatsapp:+14155550100", to: "whatsapp:+14155238886", body: "second", direction: "inbound", date_created: "Sat, 25 Oct 2026 10:05:00 +0000", num_media: "0" },
+        { sid: "SM2", from: "whatsapp:+14155238886", to: "whatsapp:+14155550100", body: "our reply", direction: "outbound-api", date_created: "Sat, 25 Oct 2026 10:04:00 +0000" },
+        { sid: "SM1", from: "whatsapp:+14155550100", to: "whatsapp:+14155238886", body: "first", direction: "inbound", date_created: "Sat, 25 Oct 2026 10:01:00 +0000", num_media: "0" },
+        { sid: "SM0", from: "whatsapp:+14155550100", to: "whatsapp:+14155238886", body: "old", direction: "inbound", date_created: "Sat, 25 Oct 2026 09:00:00 +0000" },
+      ] }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const result = await listInbound(creds, since, { fetchImpl });
+    expect(result.ok && result.messages.map((m) => [m.messageSid, m.body, m.from])).toEqual([["SM1", "first", "+14155550100"], ["SM3", "second", "+14155550100"]]);
+    expect(new URL(asked).searchParams.get("To")).toBe("whatsapp:+14155238886");
+    expect(new URL(asked).searchParams.get("DateSent>")).toBe("2026-10-25");
+  });
+
+  it("opens WhatsApp with the message already typed", () => {
+    expect(whatsappLink("whatsapp:+14155238886", "join brave-tiger")).toBe("https://wa.me/14155238886?text=join%20brave-tiger");
   });
 });

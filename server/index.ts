@@ -5264,7 +5264,7 @@ const aboutMeFacts = createAboutMe({ read: () => cfg.profile?.aboutMe ?? "", wri
 const setupSuggestions = setupSuggestionsFor({ store, config: () => cfg, shared: sharedMembership, languageCode: () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale, engine: (bot) => registry.get(bot.modelSelection.instanceId)?.adapter.capabilities, browserOn: () => builtInBrowserEnabled(cfg),
   withinBudget: () => { try { assertWithinBudget(cfg, DATA_DIR); return true; } catch { return false; } }, writer: (botId) => sideJobs.text("setup-suggestions", botId), apps: { configured: () => composio.configured(cfg), mode: () => composio.connectionMode(cfg), connected: () => composio.connectedServices(cfg) }, log: (line) => console.log(line) });
 
-const whatsappSettings = createWhatsAppSettings(DATA_DIR), whatsapp = createWhatsAppChannel({ settings: whatsappSettings, teamCloud: Boolean(CLOUD_TEAM), defaultBot: () => viewersDefaultBot(store.bots), threadExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)), createThread: (botId, title) => store.createTask(botId, title, false)?.threadId ?? null, deliver: async (botId, threadId, text, sendId) => { await acceptDirectSend({ botId, threadId, text, sendId, trigger: { kind: "owner" }, personPresent: true }); }, activePath: (threadId) => store.activePath(threadId), needsInput: requestNeedsInput, apiBase: /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(process.env.OMB_TWILIO_API_BASE ?? "") ? process.env.OMB_TWILIO_API_BASE : undefined, log: (line) => console.log(line) });
+const whatsappSettings = createWhatsAppSettings(DATA_DIR), whatsapp = createWhatsAppChannel({ settings: whatsappSettings, teamCloud: Boolean(CLOUD_TEAM), defaultBot: () => viewersDefaultBot(store.bots), threadExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)), createThread: (botId, title) => store.createTask(botId, title, false)?.threadId ?? null, deliver: async (botId, threadId, text, sendId) => { await acceptDirectSend({ botId, threadId, text, sendId, trigger: { kind: "owner" }, personPresent: true }); }, activePath: (threadId) => store.activePath(threadId), needsInput: requestNeedsInput, reachable: () => !/^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\/?$/.test(webhookIngress?.baseUrl ?? "http://127.0.0.1"), apiBase: /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(process.env.OMB_TWILIO_API_BASE ?? "") ? process.env.OMB_TWILIO_API_BASE : undefined, log: (line) => console.log(line) });
 const memoryUpkeep = createMemoryUpkeep({
   bots: () => store.bots,
   bot: (id) => store.bot(teamHost.baseBotId(id)) ?? undefined,
@@ -16032,7 +16032,7 @@ server.listen(PORT, "127.0.0.1", async () => {
   // Only once every registry is initialized and the endpoint listens: earlier dispatch can hit uninitialized bindings.
   moveFreeze.hold(() => { routines!.start(); proactive.start(); }, () => { routines!.stop(); proactive.stop(); });
   limitClock.start();
-  moveFreeze.hold(() => memoryUpkeep.start(), () => memoryUpkeep.stop());
+  moveFreeze.hold(() => { memoryUpkeep.start(); whatsapp.start(); }, () => { memoryUpkeep.stop(); whatsapp.stop(); });
 });
 
 // Tunnel requests have no peer address, which request-auth treats as proxied: a session is required, never loopback trust.
@@ -16093,7 +16093,7 @@ const gracefulShutdown = createGracefulShutdown({
       watchdog.stop();
       routines?.close(); void appTriggers.stop();
       calendarCalls?.stop();
-      memoryUpkeep.stop();
+      memoryUpkeep.stop(); whatsapp.stop();
       cacheKeepWarm.dispose();
       skillReview.stop();
       webhookIngress?.server.close();

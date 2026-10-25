@@ -16,12 +16,22 @@ let dir: string;
 let server: Server;
 let base: string;
 let tests: number;
+let verifyOk: boolean;
 
 async function serve(webhookBase: string, teamCloud = false) {
   const settings = createWhatsAppSettings(dir);
   const routes = [createWhatsAppRoutes({
     settings,
-    channel: { sendTest: async () => { tests += 1; return { ok: true as const }; } },
+    channel: {
+      sendTest: async () => { tests += 1; return { ok: true as const }; },
+      verify: async () => {
+        if (!verifyOk) return { ok: false as const, error: "Twilio didn't accept that Account SID and auth token." };
+        settings.setAccountName("Azad", Date.now());
+        return { ok: true as const, name: "Azad" };
+      },
+      startLink: () => ({ ...settings.startLink(Date.now()), linkUrl: "https://wa.me/14155238886?text=link%20123456" }),
+      mode: () => (webhookBase.startsWith("https") ? "instant" as const : "polling" as const),
+    },
     webhookBase: () => webhookBase,
     teamCloud,
   })];
@@ -42,6 +52,7 @@ const call = async (path: string, method = "GET", body?: unknown) => {
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "omb-whatsapp-routes-"));
   tests = 0;
+  verifyOk = true;
 });
 afterEach(async () => {
   await new Promise((resolve) => server.close(resolve));
@@ -79,8 +90,35 @@ describe("WhatsApp settings routes", () => {
     expect((await call("/api/whatsapp/other")).body).toEqual({ from: "next" });
   });
 
+  it("checks the Twilio account, then hands out a link code once and shows only that one is waiting", async () => {
+    await serve("http://127.0.0.1:8800");
+    expect((await call("/api/whatsapp/link", "POST")).status).toBe(409);
+    verifyOk = false;
+    const refused = await call("/api/whatsapp/verify", "POST", { accountSid: SID, authToken: "bad" });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toMatch(/didn't accept/);
+    verifyOk = true;
+    const checked = await call("/api/whatsapp/verify", "POST", { accountSid: SID, authToken: "tok" });
+    expect(checked.status).toBe(200);
+    expect(checked.body).toMatchObject({ accountName: "Azad", hasToken: true, mode: "polling", sandbox: true });
+    expect((await call("/api/whatsapp", "PUT", { joinPhrase: "Join Brave-Tiger" })).body.joinUrl).toBe("https://wa.me/14155238886?text=join%20brave-tiger");
+    expect((await call("/api/whatsapp", "PUT", { joinPhrase: "hello" })).status).toBe(400);
+    const link = await call("/api/whatsapp/link", "POST");
+    expect(link.body.code).toMatch(/^\d{6}$/);
+    expect(link.body.linkExpiresAt).toBeGreaterThan(Date.now());
+    const after = await call("/api/whatsapp");
+    expect(after.body.code).toBeUndefined();
+    expect(JSON.stringify(after.body)).not.toContain(link.body.code);
+  });
+
+  it("masks linked numbers", async () => {
+    await serve("https://bots.example.com");
+    await call("/api/whatsapp", "PUT", { allowed: ["+14155550100"] });
+    expect((await call("/api/whatsapp")).body.linked).toEqual(["+1 415 ••• 0100"]);
+  });
+
   it("is admin-only and never reachable by service-trust loopback", () => {
-    for (const [method, path] of [["GET", "/api/whatsapp"], ["PUT", "/api/whatsapp"], ["POST", "/api/whatsapp/test"]] as const) {
+    for (const [method, path] of [["GET", "/api/whatsapp"], ["PUT", "/api/whatsapp"], ["POST", "/api/whatsapp/test"], ["POST", "/api/whatsapp/verify"], ["POST", "/api/whatsapp/link"]] as const) {
       expect(requiredScope(method, path)).toBe("admin");
       expect(serviceAllowed(method, path)).toBe(false);
     }

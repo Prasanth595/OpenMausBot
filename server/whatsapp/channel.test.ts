@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { Message } from "../store.ts";
-import { createWhatsAppChannel, WHATSAPP_PATH, WHATSAPP_PROMPT } from "./channel.ts";
+import { createWhatsAppChannel, POLL_BACKOFF_MS, POLL_MS, WHATSAPP_PATH, WHATSAPP_PROMPT } from "./channel.ts";
 import { createWhatsAppSettings, type WhatsAppSettings } from "./settings.ts";
 import { SESSION_WINDOW_MS, twilioSignature } from "./twilio.ts";
 
@@ -25,6 +25,9 @@ let paths: Map<string, Message[]>;
 let threads: string[];
 let twilioFails: boolean;
 let teamCloud: boolean;
+let reachable: boolean;
+let inbox: Array<Record<string, string>>;
+let listFails: boolean;
 let channel: ReturnType<typeof createWhatsAppChannel>;
 
 const msg = (id: string, role: "user" | "bot", text: string, extra: Partial<Message> = {}): Message =>
@@ -48,7 +51,13 @@ function makeChannel() {
     },
     activePath: (threadId) => paths.get(threadId) ?? [],
     needsInput: (message) => Boolean(message.card?.requestId),
-    fetchImpl: (async (_url: string, init: RequestInit) => {
+    reachable: () => reachable,
+    fetchImpl: (async (url: string, init: RequestInit = {}) => {
+      if (url.endsWith(`/Accounts/${SID}.json`)) return new Response(JSON.stringify({ friendly_name: "Azad" }), { status: 200 });
+      if (!init.method) {
+        if (listFails) return new Response(JSON.stringify({ message: "Service unavailable" }), { status: 503 });
+        return new Response(JSON.stringify({ messages: inbox }), { status: 200 });
+      }
       const form = new URLSearchParams(String(init.body));
       if (twilioFails) return new Response(JSON.stringify({ code: 21608, message: "Not a sandbox participant" }), { status: 400 });
       sent.push({ to: form.get("To")!, body: form.get("Body")! });
@@ -83,6 +92,9 @@ beforeEach(async () => {
   threads = [];
   twilioFails = false;
   teamCloud = false;
+  reachable = true;
+  inbox = [];
+  listFails = false;
   channel = makeChannel();
   server = createServer((req, res) => void channel.handleTwilio(req, res, base));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -203,5 +215,83 @@ describe("replies", () => {
   it("sends a test message to the first allowed number", async () => {
     expect(await channel.sendTest()).toEqual({ ok: true });
     expect(sent).toEqual([{ to: `whatsapp:${ME}`, body: "OpenMausBot is connected. Message this number to reach MausBot." }]);
+  });
+});
+
+const NEW = "+14155550199";
+const row = (sid: string, body: string, at: number, from = ME) =>
+  ({ sid, from: `whatsapp:${from}`, to: "whatsapp:+14155238886", body, direction: "inbound", date_created: new Date(at).toUTCString(), num_media: "0" });
+
+describe("linking a phone", () => {
+  it("links the number that sends a live code, switches WhatsApp on and says hello", async () => {
+    settings.update({ enabled: false, allowed: [] });
+    expect((await channel.verify())).toEqual({ ok: true, name: "Azad" });
+    const { code, linkUrl } = channel.startLink();
+    expect(linkUrl).toBe(`https://wa.me/14155238886?text=link%20${code}`);
+    expect(await post(incoming(`link ${code}`, "SM1", NEW))).toBe(200);
+    expect(settings.publicSettings()).toMatchObject({ enabled: true, allowed: [NEW] });
+    expect(settings.publicSettings().linkExpiresAt).toBeUndefined();
+    expect(sent).toEqual([{ to: `whatsapp:${NEW}`, body: "You're connected. I'm MausBot: message me here any time, and I'll get it done or hand it to the right team." }]);
+    expect(delivered).toEqual([]);
+    await post(incoming("Plan my week", "SM2", NEW));
+    expect(delivered.map((entry) => entry.text)).toEqual(["Plan my week"]);
+  });
+
+  it("ignores a wrong, expired or reused code, and the sandbox join message", async () => {
+    const { code } = channel.startLink();
+    const wrong = code === "000000" ? "111111" : "000000";
+    await post(incoming(`link ${wrong}`, "SM1", NEW));
+    await post(incoming("join brave-tiger", "SM2", NEW));
+    expect(settings.publicSettings().allowed).toEqual([ME]);
+    await post(incoming(`link ${code}`, "SM3", NEW));
+    expect(settings.publicSettings().allowed).toEqual([ME, NEW]);
+    await post(incoming(`link ${code}`, "SM4", "+14155550188"));
+    expect(settings.publicSettings().allowed).toEqual([ME, NEW]);
+    const late = channel.startLink();
+    clock += 11 * 60_000;
+    await post(incoming(`link ${late.code}`, "SM5", "+14155550177"));
+    expect(settings.publicSettings().allowed).toEqual([ME, NEW]);
+  });
+});
+
+describe("checking Twilio when this computer is not reachable", () => {
+  beforeEach(() => {
+    reachable = false;
+    settings.setAccountName("Azad", clock - 60_000);
+  });
+
+  it("reads each new message once, skipping ones from before setup", async () => {
+    inbox = [row("SM2", "second", clock - 1_000), row("SM1", "first", clock - 2_000), row("SM0", "before setup", clock - 120_000)];
+    expect(await channel.poll()).toBe(POLL_MS);
+    await channel.idle();
+    expect(delivered.map((entry) => entry.text)).toEqual(["first", "second"]);
+    await channel.poll();
+    await channel.idle();
+    expect(delivered).toHaveLength(2);
+    expect(channel.mode()).toBe("polling");
+  });
+
+  it("links a phone from a polled message too", async () => {
+    settings.update({ enabled: false, allowed: [] });
+    const { code } = channel.startLink();
+    inbox = [row("SM9", `link ${code}`, clock + 1_000, NEW)];
+    await channel.poll();
+    await channel.idle();
+    expect(settings.publicSettings()).toMatchObject({ enabled: true, allowed: [NEW] });
+  });
+
+  it("backs off and says why when Twilio can't be read", async () => {
+    listFails = true;
+    expect(await channel.poll()).toBe(POLL_BACKOFF_MS);
+    expect(settings.publicSettings().lastError?.message).toMatch(/Couldn't check Twilio/);
+  });
+
+  it("does not check Twilio while its webhook can reach this computer", async () => {
+    reachable = true;
+    inbox = [row("SM1", "first", clock - 1_000)];
+    await channel.poll();
+    await channel.idle();
+    expect(delivered).toEqual([]);
+    expect(channel.mode()).toBe("instant");
   });
 });

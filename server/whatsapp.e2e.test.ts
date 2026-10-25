@@ -14,20 +14,32 @@ const SID = "AC" + "3".repeat(32);
 const TOKEN = "e2e-auth-token";
 const ME = "+14155550100";
 
-it("routes a WhatsApp request through MausBot to the right Chief of Staff and replies on WhatsApp", async () => {
+/** A stand-in for Twilio's REST API: it records sends, names the account and lists `inbox` as incoming messages. */
+async function fakeTwilio() {
   const sent: Array<{ to: string; body: string }> = [];
-  const twilio = createServer((req, res) => {
+  const inbox: Array<Record<string, string>> = [];
+  const server = createServer((req, res) => {
     let raw = "";
     req.on("data", (chunk) => { raw += chunk; });
     req.on("end", () => {
+      res.writeHead(req.method === "POST" ? 201 : 200, { "content-type": "application/json" });
+      if (req.method !== "POST") {
+        res.end(JSON.stringify(req.url?.includes("/Messages.json") ? { messages: inbox } : { friendly_name: "Azad's Twilio" }));
+        return;
+      }
       const form = new URLSearchParams(raw);
       sent.push({ to: form.get("To") ?? "", body: form.get("Body") ?? "" });
-      res.writeHead(201, { "content-type": "application/json" });
       res.end(JSON.stringify({ sid: `SM${sent.length}` }));
     });
   });
-  await new Promise<void>((resolve) => twilio.listen(0, "127.0.0.1", resolve));
-  const twilioBase = `http://127.0.0.1:${(twilio.address() as AddressInfo).port}`;
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { sent, inbox, base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, close: () => new Promise((resolve) => server.close(resolve)) };
+}
+
+it("routes a WhatsApp request through MausBot to the right Chief of Staff and replies on WhatsApp", async () => {
+  const fake = await fakeTwilio();
+  const { sent } = fake;
+  const twilioBase = fake.base;
 
   const session = await launchVerificationServer({ ...process.env, OMB_TWILIO_API_BASE: twilioBase }, undefined, undefined, undefined, undefined, { scripted: true });
   const cli = (...args: string[]) => runControlOmb(args, { env: { OPENMAUSBOT_URL: session.info.url } }) as Promise<any>;
@@ -78,6 +90,34 @@ it("routes a WhatsApp request through MausBot to the right Chief of Staff and re
     expect(readFileSync(join(session.info.dataDir, "whatsapp.json"), "utf8")).not.toContain(TOKEN);
   } finally {
     await session.close();
-    await new Promise((resolve) => twilio.close(resolve));
+    await fake.close();
+  }
+}, 120_000);
+
+it("sets up with no public address: checks Twilio, links the phone by code, then hears it by polling", async () => {
+  const fake = await fakeTwilio();
+  const session = await launchVerificationServer({ ...process.env, OMB_TWILIO_API_BASE: fake.base }, undefined, undefined, undefined, undefined, { scripted: true });
+  const api = (path: string, body?: unknown, method = "POST") => request(path, body === undefined ? {} : { method, body: JSON.stringify(body) }, session.info.url) as Promise<any>;
+  const row = (sid: string, body: string) => ({ sid, from: `whatsapp:${ME}`, to: "whatsapp:+14155238886", body, direction: "inbound", date_created: new Date(Date.now() + 1_000).toUTCString(), num_media: "0" });
+  try {
+    const maus = (await api("/api/bots")).bots.find((bot: any) => bot.defaultBot);
+    writeFileSync(join(session.info.dataDir, "room-plan.json"), JSON.stringify({ [maus.id]: { reply: "Here is your week: three meetings and one deadline." } }));
+    const checked = await api("/api/whatsapp/verify", { accountSid: SID, authToken: TOKEN });
+    expect(checked).toMatchObject({ accountName: "Azad's Twilio", mode: "polling", sandbox: true, enabled: false });
+    const { code } = await api("/api/whatsapp/link", {});
+    expect(code).toMatch(/^\d{6}$/);
+
+    fake.inbox.push(row("SMpoll1", `link ${code}`));
+    await expect.poll(() => fake.sent.map((entry) => entry.body), { timeout: 20_000, interval: 250 })
+      .toEqual([expect.stringContaining("You're connected.")]);
+    expect(await api("/api/whatsapp")).toMatchObject({ enabled: true, allowed: [ME], linked: ["+1 415 ••• 0100"] });
+
+    fake.inbox.push(row("SMpoll2", "What does my week look like?"));
+    await expect.poll(() => fake.sent.map((entry) => entry.body), { timeout: 30_000, interval: 250 })
+      .toEqual([expect.stringContaining("You're connected."), "Here is your week: three meetings and one deadline."]);
+    expect(fake.sent.every((entry) => entry.to === `whatsapp:${ME}`)).toBe(true);
+  } finally {
+    await session.close();
+    await fake.close();
   }
 }, 120_000);
