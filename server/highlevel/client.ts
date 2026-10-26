@@ -336,13 +336,22 @@ export class HighLevelClient {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch {
-      if (!repeatable(method, options)) throw unknownOutcome(path, "HighLevel did not answer (the request timed out or the network failed)", 503);
-      throw new HighLevelError("HighLevel did not answer (the request timed out or the network failed); try again in a minute.", { status: 503 });
+      throw this.noAnswer(method, path, options);
     }
   }
 
-  private async body(response: Response): Promise<unknown> {
-    const text = await textUpTo(response, MAX_RESPONSE_BYTES);
+  private noAnswer(method: string, path: string, options: RequestOptions): HighLevelError {
+    if (!repeatable(method, options)) return unknownOutcome(path, "HighLevel did not answer (the request timed out or the network failed)", 503);
+    return new HighLevelError("HighLevel did not answer (the request timed out or the network failed); try again in a minute.", { status: 503 });
+  }
+
+  private async body(response: Response, method: string, path: string, options: RequestOptions): Promise<unknown> {
+    let text: string | null;
+    try {
+      text = await textUpTo(response, MAX_RESPONSE_BYTES);
+    } catch {
+      throw this.noAnswer(method, path, options);
+    }
     if (text === null) throw new HighLevelError("HighLevel's answer was too large to read; narrow the request.", { status: response.status });
     try {
       return text ? JSON.parse(text) : {};
@@ -361,8 +370,8 @@ export class HighLevelClient {
     let retried5xx = false;
     for (;;) {
       const response = await this.dispatch(connection, method, path, options);
-      if (response.ok) return this.body(response);
-      const body = await this.body(response);
+      if (response.ok) return this.body(response, method, path, options);
+      const body = await this.body(response, method, path, options);
       // A live token that lacks one scope: name the permission; refreshing would not add it and the token still works.
       if (response.status === 401 && isScopeRefusal(body)) throw plainError(response.status, method, path, body);
       if (response.status === 401 && this.replaced(connection)) {

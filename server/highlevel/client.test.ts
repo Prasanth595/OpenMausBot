@@ -418,6 +418,17 @@ describe("HighLevelClient resilience", () => {
     expect(pulled).toBeLessThan(10);
   });
 
+  it("says a create may have been saved when HighLevel's answer breaks off after the headers", async () => {
+    let status = 201;
+    const broken = () => new Response(new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new TypeError("terminated")); } }), { status });
+    const { client } = harness({}, { fetch: async () => broken() });
+    await expect(client.addNote("contact_1", "x")).rejects.toMatchObject({ status: 503, message: expect.stringMatching(/may have been saved anyway/u) });
+    status = 502;
+    await expect(client.addNote("contact_1", "x")).rejects.toMatchObject({ status: 503, message: expect.stringMatching(/may have been saved anyway/u) });
+    status = 200;
+    await expect(client.listPipelines()).rejects.toMatchObject({ status: 503, message: "HighLevel did not answer (the request timed out or the network failed); try again in a minute." });
+  });
+
   it("keeps under 90 calls per 10 s per location", async () => {
     const { client } = harness();
     for (let i = 0; i < BUDGET_CALLS; i++) await client.listPipelines();
