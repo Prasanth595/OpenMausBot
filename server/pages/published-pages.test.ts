@@ -332,6 +332,104 @@ describe("unpublishing a page", () => {
     expect(await f.pages.publisher.unpublish({ pageId: page })).toMatchObject({ status: 200, text: "That page was already taken down.", card: { state: "unpublished" } });
     expect(f.pages.store.get(page!)).toBeNull();
   });
+
+  it.each([["the same folder", false], ["another folder by its page id", true]])("takes a page down after an update from %s already in flight, so the update's late answer leaves no record or live card", async (_case, byId) => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    writeSite(join(f.work, "draft"));
+    await f.publish({ path: "site" });
+    const [page] = [...f.service.pages.keys()];
+    let release!: () => void;
+    const answered = new Promise<void>((resolve) => { release = resolve; });
+    let uploaded!: () => void;
+    const stored = new Promise<void>((resolve) => { uploaded = resolve; });
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method === "PUT") { uploaded(); await answered; }
+      return response;
+    };
+    const update = f.publish(byId ? { path: "draft", pageId: page } : { path: "site" });
+    await stored;
+    const unpublished = f.pages.publisher.unpublish({ pageId: page });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    expect((await update).status).toBe(200);
+    expect((await unpublished).status).toBe(200);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.store.get(page!)).toBeNull();
+    expect(f.cards.map((card) => card.card.state)).toEqual(["unpublished", "unpublished"]);
+  });
+
+  it("takes a page down after its folder's update in flight, though an update from another folder by its page id moved the page meanwhile", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    writeSite(join(f.work, "draft"));
+    await f.publish({ path: "site" });
+    const [page] = [...f.service.pages.keys()];
+    let release!: () => void;
+    const answered = new Promise<void>((resolve) => { release = resolve; });
+    let uploaded!: () => void;
+    const stored = new Promise<void>((resolve) => { uploaded = resolve; });
+    let held = false;
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method === "PUT" && !held) { held = true; uploaded(); await answered; }
+      return response;
+    };
+    const fromSite = f.publish({ path: "site" });
+    await stored;
+    const fromDraft = f.publish({ path: "draft", pageId: page });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const unpublished = f.pages.publisher.unpublish({ pageId: page });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    release();
+    expect((await Promise.all([fromSite, fromDraft, unpublished])).map((outcome) => outcome.status)).toEqual([200, 200, 200]);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.store.get(page!)).toBeNull();
+    expect(f.cards.map((card) => card.card.state)).toEqual(["unpublished", "unpublished", "unpublished"]);
+  });
+
+  it("updates the page a folder's publish waited for, though the folder moved to another page meanwhile", async () => {
+    const f = setup();
+    signIn();
+    for (const folder of ["site", "other", "draft", "draft2"]) writeSite(join(f.work, folder));
+    await f.publish({ path: "site" });
+    await f.publish({ path: "other" });
+    const [p, q] = [...f.service.pages.keys()];
+    const holds = new Map<number, { arrived: () => void; answered: Promise<void> }>();
+    const hold = (put: number) => {
+      let arrived!: () => void, release!: () => void;
+      const reached = new Promise<void>((resolve) => { arrived = resolve; });
+      holds.set(put, { arrived, answered: new Promise<void>((resolve) => { release = resolve; }) });
+      return { reached, release: () => release() };
+    };
+    let puts = 0;
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      const held = init?.method === "PUT" ? holds.get(++puts) : undefined;
+      if (held) { held.arrived(); await held.answered; }
+      return response;
+    };
+    const first = hold(1), third = hold(3);
+    const fromDraft = f.publish({ path: "draft", pageId: p });
+    await first.reached;
+    const fromSite = f.publish({ path: "site" });
+    await f.publish({ path: "site", pageId: q });
+    first.release();
+    await third.reached;
+    await f.publish({ path: "draft2", pageId: q });
+    expect((await f.pages.publisher.unpublish({ pageId: q })).status).toBe(200);
+    third.release();
+    await Promise.all([fromDraft, fromSite]);
+    expect(f.service.pages.has(q!)).toBe(false);
+    expect(f.pages.store.get(q!)).toBeNull();
+    expect(f.pages.store.get(p!)).not.toBeNull();
+  });
 });
 
 describe("sharing a chat page from its card", () => {
