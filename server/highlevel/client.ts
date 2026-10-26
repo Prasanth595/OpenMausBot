@@ -205,6 +205,24 @@ function waitFromHeaders(headers: Headers, now: number): number {
   return 2_000;
 }
 
+/** The body as UTF-8 text, or null once it passes `max` bytes; reading stops there. */
+async function textUpTo(response: Response, max: number): Promise<string | null> {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return new TextDecoder().decode(Buffer.concat(chunks));
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+}
+
 export function assertAllowedPath(method: string, path: string): void {
   if (!path.startsWith("/") || path.includes("..") || path.includes("?") || path.includes("#")) throw new HighLevelError("HighLevel request path is not valid.");
   if (FORBIDDEN_PATHS.some((pattern) => pattern.test(path))) throw new HighLevelError("OpenMausBot never sends messages, runs campaigns or workflows, or moves money through HighLevel.");
@@ -324,8 +342,8 @@ export class HighLevelClient {
   }
 
   private async body(response: Response): Promise<unknown> {
-    const text = await response.text();
-    if (text.length > MAX_RESPONSE_BYTES) throw new HighLevelError("HighLevel's answer was too large to read; narrow the request.", { status: response.status });
+    const text = await textUpTo(response, MAX_RESPONSE_BYTES);
+    if (text === null) throw new HighLevelError("HighLevel's answer was too large to read; narrow the request.", { status: response.status });
     try {
       return text ? JSON.parse(text) : {};
     } catch {

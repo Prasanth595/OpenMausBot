@@ -367,6 +367,20 @@ describe("HighLevelClient resilience", () => {
     await expect(client.getContact("contact_1")).rejects.toThrow("HighLevel did not answer (the request timed out or the network failed); try again in a minute.");
   });
 
+  it("refuses an answer over 4 MB counted in bytes, and stops reading it there", async () => {
+    const wide = harness({}, { fetch: async () => new Response(JSON.stringify({ contact: { id: "contact_1", name: "é".repeat(2_500_000) } }), { status: 200 }) });
+    await expect(wide.client.getContact("contact_1")).rejects.toThrow("HighLevel's answer was too large to read; narrow the request.");
+    let pulled = 0;
+    let cancelled = false;
+    const endless = harness({}, { fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { if (++pulled > 20) controller.close(); else controller.enqueue(new Uint8Array(1_000_000)); },
+      cancel() { cancelled = true; },
+    }), { status: 200 }) });
+    await expect(endless.client.getContact("contact_1")).rejects.toThrow(/too large to read/u);
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(10);
+  });
+
   it("keeps under 90 calls per 10 s per location", async () => {
     const { client } = harness();
     for (let i = 0; i < BUDGET_CALLS; i++) await client.listPipelines();
