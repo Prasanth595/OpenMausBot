@@ -361,8 +361,7 @@ export class HighLevelClient {
     }
   }
 
-  /** Bearer + Version; 401 → refresh once → retry; 429 → wait per headers (max 10 s) → retry once; 5xx → retry once, unless
-   * the call creates something: HighLevel may have committed it before failing. */
+  /** A create is never replayed after a 5xx: HighLevel may have saved it before failing. */
   async request(method: "GET" | "POST" | "PUT" | "DELETE", path: string, options: RequestOptions = {}): Promise<unknown> {
     assertAllowedPath(method, path);
     let connection = await this.connection();
@@ -378,6 +377,10 @@ export class HighLevelClient {
     for (;;) {
       const response = await this.dispatch(connection, method, path, options);
       if (response.ok) return this.body(response, method, path, options);
+      if (response.status >= 500 && !repeatable(method, options)) {
+        await response.body?.cancel().catch(() => {});
+        throw unknownOutcome(path, `HighLevel had trouble (${response.status})`, response.status);
+      }
       const body = await this.body(response, method, path, options);
       // A live token that lacks one scope: name the permission; refreshing would not add it and the token still works.
       if (response.status === 401 && isScopeRefusal(body)) throw plainError(response.status, method, path, body);
@@ -400,7 +403,6 @@ export class HighLevelClient {
         await this.sleep(waitFromHeaders(response.headers, this.now()));
         continue;
       }
-      if (response.status >= 500 && !repeatable(method, options)) throw unknownOutcome(path, `HighLevel had trouble (${response.status})`, response.status);
       if (response.status >= 500 && !retried5xx) {
         retried5xx = true;
         await this.sleep(1_000);

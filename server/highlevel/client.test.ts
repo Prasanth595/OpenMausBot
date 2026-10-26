@@ -449,13 +449,25 @@ describe("HighLevelClient resilience", () => {
     expect(pulled).toBeLessThan(10);
   });
 
+  it("says a create may have been saved when HighLevel fails with an answer over 4 MB, without reading it", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    const { client } = harness({}, { fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { if (++pulled > 20) controller.close(); else controller.enqueue(new Uint8Array(1_000_000)); },
+      cancel() { cancelled = true; },
+    }), { status: 502 }) });
+    await expect(client.addNote("contact_1", "x")).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/may have been saved anyway/u) });
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(2);
+  });
+
   it("says a create may have been saved when HighLevel's answer breaks off after the headers", async () => {
     let status = 201;
     const broken = () => new Response(new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new TypeError("terminated")); } }), { status });
     const { client } = harness({}, { fetch: async () => broken() });
     await expect(client.addNote("contact_1", "x")).rejects.toMatchObject({ status: 503, message: expect.stringMatching(/may have been saved anyway/u) });
     status = 502;
-    await expect(client.addNote("contact_1", "x")).rejects.toMatchObject({ status: 503, message: expect.stringMatching(/may have been saved anyway/u) });
+    await expect(client.addNote("contact_1", "x")).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/may have been saved anyway/u) });
     status = 200;
     await expect(client.listPipelines()).rejects.toMatchObject({ status: 503, message: "HighLevel did not answer (the request timed out or the network failed); try again in a minute." });
   });
