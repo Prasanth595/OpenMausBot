@@ -188,6 +188,7 @@ locations at once (one connection per installation).
   is not a sign-out (token and OAuth) while a dead token still is; the token check's 401/403/404 sentences and redaction.
 - `server/highlevel/rpc.test.ts`: per-bot scoping (read-only refusal text, grants, tools/list filtering), the write
   record and the host's activity row.
-- `server/highlevel/sign-in.test.ts`: the relay contract, the sign-in flow, the token path and the owner routes.
+- `server/highlevel/sign-in.test.ts`: the relay contract, the sign-in flow, a replaced flow's late claim, the token path
+  and the owner routes.
 - `server/highlevel.e2e.test.ts`: a real server, fake relay and fake HighLevel, Connect → tools → refresh →
   revocation → Disconnect → Private Integration token.
