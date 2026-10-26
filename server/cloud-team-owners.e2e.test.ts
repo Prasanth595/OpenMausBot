@@ -5,6 +5,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { launchCloudSendFixture, type CloudSendFixture, type CloudTeamFixture } from "../scripts/testing/cloud-send-fixture.ts";
 import { startBrokerFake, type BrokerFake } from "./testing/broker-fake.ts";
@@ -152,6 +153,14 @@ it("puts a question in a shared chat in its owner's Needs you and notifications,
   for (const token of [olive, ada]) {
     const feed = (await team.as(token, "GET", "/api/notifications")).body.notifications as Array<{ kind: string; botId: string }>;
     expect(feed.filter((entry) => entry.kind === "question" && entry.botId === fox.id)).toEqual([]);
+  }
+  // Ada opening the chat leaves Bob's question unread.
+  expect((await team.as(ada, "POST", `/api/bots/${fox.id}/tasks/${fox.threadId}?messages=0`)).status).toBe(200);
+  const db = new DatabaseSync(join(team.home, ".openmausbot", "messages.db"), { readOnly: true });
+  try {
+    expect(db.prepare("SELECT read FROM notification_log WHERE kind = 'question' AND bot_id = ?").all(fox.id)).toEqual([{ read: 0 }]);
+  } finally {
+    db.close();
   }
   // The card itself stays in the shared chat, for everyone who sees it.
   expect((await messages(ada, fox.threadId)).some((row) => row.kind === "options")).toBe(true);
