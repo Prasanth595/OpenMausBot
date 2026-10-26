@@ -1,3 +1,4 @@
+import { freeFallback, rankAis } from "../shared/ai-ranking.ts";
 import type { EffortLevel, EngineAccess, InstanceConfigMap, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
 
 export interface SelectableInstance {
@@ -13,10 +14,18 @@ export interface SelectableInstance {
 export interface DefaultSelectionContext {
   company?: (instanceId: string) => boolean;
   refusal?: (instance: SelectableInstance) => string | undefined;
+  /** What this AI's test message showed: true it answered, false it didn't, undefined not tested (server/tested-ai.ts). */
+  answered?: (instance: SelectableInstance) => boolean | undefined;
 }
 
-const claudeFirst = (instances: readonly SelectableInstance[]) =>
-  instances.find((instance) => instance.driverKind === "claudeAgent") ?? instances[0];
+/** The shared ranking (shared/ai-ranking.ts), with an AI that answered its test ahead of one that didn't or wasn't tested.
+ * OpenCode's free backup comes in only once every other AI didn't answer. */
+const best = (instances: readonly SelectableInstance[], context: DefaultSelectionContext) => {
+  const ranked = rankAis(instances);
+  const usable = (list: readonly SelectableInstance[]) => list.find((instance) => context.answered?.(instance) === true)
+    ?? list.find((instance) => context.answered?.(instance) !== false);
+  return usable(ranked.filter((instance) => !freeFallback(instance))) ?? usable(ranked) ?? ranked[0];
+};
 
 /** The saved config's enabled switch and picker group win over what the driver reports. */
 export function withInstanceConfig<T extends SelectableInstance>(instances: readonly T[], configs: InstanceConfigMap): T[] {
@@ -36,9 +45,11 @@ export function readyToRun(instance: SelectableInstance, context: DefaultSelecti
   return instance.enabled !== false && instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && !signedOut(instance);
 }
 
-const defaultModel = (instance: SelectableInstance) => instance.models.default.trim()
+/** The model a new bot gets on this engine: its catalog's default, else its first model. OpenCode names no default on
+ * purpose when it offers only free models that may keep what they are sent (drivers/acp/opencode-go.ts): it then has none. */
+export const defaultModel = (instance: SelectableInstance) => instance.models.default.trim()
   ? instance.models.default
-  : instance.models.options.find((model) => model.id.trim())?.id ?? "";
+  : instance.driverKind === "opencodeGo" ? "" : instance.models.options.find((model) => model.id.trim())?.id ?? "";
 
 /** A saved choice is intentional: an unavailable provider sends new bots to setup, never silently to another provider. On
  * an enrolled desktop a working personal engine beats a Company one, so billing stays the person's choice. */
@@ -69,10 +80,11 @@ export function selectDefaultModelSelection(
   const available = instances.filter((instance) => instance.enabled !== false && instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && defaultModel(instance));
   const ready = available.filter((instance) => readyToRun(instance, context));
   const company = context.company;
+  // OpenCode's free backup is the app's stand-in, not the person's own engine: it never outranks the company's AI.
   const personal = company && instances.some((instance) => company(instance.instanceId))
-    ? claudeFirst(ready.filter((instance) => !company(instance.instanceId)))
+    ? best(ready.filter((instance) => !company(instance.instanceId) && !instance.snapshot.freeFallback), context)
     : undefined;
-  const pick = personal ?? claudeFirst(ready) ?? claudeFirst(available);
+  const pick = personal ?? best(ready, context) ?? best(available, context);
   return { instanceId: pick?.instanceId ?? "", model: pick ? defaultModel(pick) : "" };
 }
 

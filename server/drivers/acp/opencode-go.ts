@@ -9,9 +9,15 @@ import { cloudHomeConfigured } from "../../cloud-home.ts";
 import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import { hostedWorkspaceConfigured } from "../../enterprise.ts";
 import { decodeInjectId, hostApiKey, localHost, mergeLocalInject } from "../local-inject.ts";
-import { createAcpDriver, type AccountErrorCode, type AcpSupport } from "./core.ts";
+import { applyStandaloneSpawnEnv } from "../../engine-install.ts";
+import { OPENCODE_STANDALONE } from "./opencode-release.ts";
+import { createAcpDriver, type AccountErrorCode, type AcpConfig, type AcpSupport } from "./core.ts";
 import { offeredModels } from "./config-options.ts";
-import type { ModelCatalog, ProviderErrorCode } from "../../contracts.ts";
+import { keepingNothing, keepsNothing, NO_RETENTION_FREE_MODELS, OPENCODE_OWN_MODEL } from "./opencode-free-models.ts";
+import {
+  appCopy, applyBackupEnv, BACKUP_MAY_KEEP, BACKUP_NOT_PRIVATE, backupCatalog, backupCopy, localModelsOf, signedInThroughApp,
+} from "./opencode-backup.ts";
+import type { ModelCatalog, ProviderDriver, ProviderErrorCode } from "../../contracts.ts";
 import { titleCaseModelId } from "../../contracts.ts";
 import { execCli, killCliTree, spawnCli } from "../../procs.ts";
 
@@ -543,6 +549,35 @@ function hasStoredOpenCodeAuth(env: Record<string, string | undefined>) {
   });
 }
 
+/** A login, a key or a provider key of the person's own: what makes OpenCode more than Zen's free models. */
+function ownOpenCodeAccess(env: Record<string, string | undefined>): boolean {
+  return Boolean(env.OPENCODE_API_KEY) || hasStoredOpenCodeAuth(env) || OPENCODE_PROVIDER_ENV.some((key) => Boolean(env[key]?.trim()));
+}
+
+
+/** Ready only through Zen's free no-login models: no access of the person's own and no other provider's model. A local
+ * model the app found (`custom`) is not the person signing OpenCode in to anything. An empty catalog is no fallback: it
+ * offers nothing to run. */
+export function openCodeFreeFallback(ownAccess: boolean, models: ModelCatalog): boolean {
+  return !ownAccess && models.options.length > 0
+    && models.options.every((option) => option.custom === true || OPENCODE_OWN_MODEL.test(option.id));
+}
+
+
+/** A Zen model that may keep what it is sent: not one that keeps nothing, and not known to be paid (Zen's paid models keep
+ * nothing). A price OpenCode didn't report counts as free. */
+const mayKeep = (id: string) => id.startsWith("opencode/") && !keepsNothing(id) && !paidModels.has(id);
+
+/** Any copy the app installed starts on a model that keeps nothing when one is offered, else on the usual pick unless that
+ * may keep what it is sent, else on the first offered that doesn't, else on none. */
+function appCopyPick(offered: readonly string[], pick: string): string {
+  return keepingNothing(offered) ?? (pick && !mayKeep(pick) ? pick : offered.find((id) => !mayKeep(id)) ?? "");
+}
+
+/** An OpenCode the person installed with no login or key: Zen's free models only. What the app picks on it (its default,
+ * a fallback, a background call) is one that keeps nothing or none; what the person picks still runs. */
+const ownFreeCopy = (env: Readonly<Record<string, string | undefined>>, cli: string) => !appCopy(cli) && !ownOpenCodeAccess(env);
+
 function withinFolder(path: string, folder: string): boolean {
   const rest = relative(resolvePath(folder), resolvePath(path));
   return rest === "" || (rest !== ".." && !rest.startsWith(`..${sep}`) && !isAbsolute(rest));
@@ -721,7 +756,17 @@ function openCodeLoginsFingerprint(env: Record<string, string | undefined>): str
   }).join("|");
 }
 
-const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
+/** Per instance: whether its last sign-in read found access of the person's own, whether it is the free backup, and the
+ * backup's model that keeps nothing (also its model for titles). */
+interface OpenCodeReads {
+  ownAccess: Map<string, boolean>;
+  backup: Map<string, boolean>;
+  backupModel: Map<string, string>;
+  /** The local servers the backup may use, with the models found on each. */
+  backupLocal: Map<string, Record<string, string[]>>;
+}
+
+const support = (loadCatalog: OpenCodeCatalogLoader, reads: OpenCodeReads): AcpSupport => ({
   driverKind: "opencodeGo",
   displayName: "OpenCode",
   models: NO_MODELS,
@@ -737,22 +782,66 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
     docsUrl: "https://opencode.ai/docs/",
     signInCommand: "opencode auth login",
     needsNode: true,
+    standalone: OPENCODE_STANDALONE,
   },
   spawnArgs: () => ["acp"],
+  // A folder outside git files its session under OpenCode's global project, which every non-git folder of the person's
+  // shares: a connection check or memory upkeep would show up in their history there.
+  oneShotFolder: discoveryDirectory,
   shareProcess: true,
   credentialEnv: ["OPENCODE_API_KEY", ...OPENCODE_PROVIDER_ENV],
   selectModel: { configId: "model" },
-  fallbackModel: (sessionConfig, catalogDefault) => {
+  fallbackModel: (sessionConfig, catalogDefault, launch) => {
     const offered = offeredModels(sessionConfig, "model");
+    // The backup, or a person's own OpenCode with no login, never falls back to a model that may keep what it is sent:
+    // one that keeps nothing, or none.
+    if (launch && (backupCopy(launch.env, launch.config.cli) || ownFreeCopy(launch.env, launch.config.cli))) {
+      return keepsNothing(catalogDefault) && offered.includes(catalogDefault) ? catalogDefault : keepingNothing(offered) ?? null;
+    }
+    // Any other copy the app installed never falls back to a free model that may keep what it is sent.
+    if (launch && appCopy(launch.config.cli)) {
+      if (catalogDefault && offered.includes(catalogDefault) && !mayKeep(catalogDefault)) return catalogDefault;
+      return appCopyPick(offered, preferredOpenCodeModel(offered, catalogFromOpenCodeSession(sessionConfig)?.current)) || null;
+    }
     if (catalogDefault && offered.includes(catalogDefault)) return catalogDefault;
     return preferredOpenCodeModel(offered, catalogFromOpenCodeSession(sessionConfig)?.current) || null;
+  },
+  // On the free backup nothing runs on a Zen model that may keep what it is sent. A turn's model is set by selectModel
+  // (from the catalog the person picks from, or fallbackModel); a background call (a test message, memory upkeep) asks
+  // for none, so on any copy the app installed, and on a person's own OpenCode with no login, it is switched to a model
+  // that doesn't keep what it is sent first, or not sent at all.
+  configureSession: async ({ request, sessionId, env, config, turn, configOptions }) => {
+    const backup = backupCopy(env, config.cli);
+    const freeOnly = backup || ownFreeCopy(env, config.cli);
+    if (!freeOnly && !appCopy(config.cli)) return;
+    if (turn.model) {
+      if (backup && OPENCODE_OWN_MODEL.test(turn.model) && !keepsNothing(turn.model)) throw new Error(BACKUP_MAY_KEEP);
+      return;
+    }
+    const offered = offeredModels({ configOptions }, "model");
+    const current = configOptions.find((option) => option.id === "model")?.currentValue;
+    // The backup is always switched. A copy of the person's own is moved only off a model that may keep what it's sent:
+    // signed in through the app, when that is known; with no login, also when its model is unknown. A local one stays.
+    const keeps = typeof current === "string" && mayKeep(current);
+    if (!backup && (freeOnly ? typeof current === "string" && !keeps : !keeps)) return;
+    const target = freeOnly ? keepingNothing(offered) : appCopyPick(offered, "") || undefined;
+    if (!target) throw new Error(BACKUP_NOT_PRIVATE);
+    if (current === target) return;
+    const switched = await request("session/set_config_option", { sessionId, configId: "model", value: target });
+    if (catalogFromOpenCodeSession(switched)?.current !== target) throw new Error(`OpenCode did not switch to ${target}`);
   },
   modelVariants: true,
   ownMcpOverHttp: true,
   // OpenCode 1.18.27's build agent lists 13 tools of its own (bash, read, edit, task, skill…); room for a newer CLI's.
   engineTools: 24,
   resolveTurnModel: (model, env) => model ? ensureOpenCodeInjectModel(model, env) : model,
-  transformEnv: withholdProviderKeysWhenManaged,
+  transformEnv: (env, config, instanceId, instanceEnvironment) => {
+    withholdProviderKeysWhenManaged(env, config, instanceId, instanceEnvironment);
+    applyStandaloneSpawnEnv(OPENCODE_STANDALONE, env, config.cli);
+    if (!signedInThroughApp(instanceEnvironment) && appCopy(config.cli)) {
+      applyBackupEnv(env, reads.backupModel.get(instanceId) ?? NO_RETENTION_FREE_MODELS[0], reads.backupLocal.get(instanceId) ?? {});
+    }
+  },
   spawnFingerprint: openCodeLoginsFingerprint,
   applyTurnEnv: (env, { fullAuto, botId, cwd }) => {
     if (openMausOwnsWorkingFolder(cwd)) env.OPENCODE_DISABLE_PROJECT_CONFIG = "1";
@@ -769,17 +858,32 @@ const support = (loadCatalog: OpenCodeCatalogLoader): AcpSupport => ({
   },
   pickAuthMethod: () => null,
   authFailure: "continue",
-  isAuthenticated: async (env, config) => (
-    Boolean(env.OPENCODE_API_KEY)
-    || hasStoredOpenCodeAuth(env)
-    || await canRunOpenCode(env, config.cli, loadCatalog)
-  ),
+  isAuthenticated: async (env, config, instanceId) => {
+    const backup = backupCopy(env, config.cli);
+    reads.backup.set(instanceId, backup);
+    reads.ownAccess.set(instanceId, !backup && ownOpenCodeAccess(env));
+    // Only Zen's free models make the backup ready; a login left on the computer is never used.
+    if (backup) return canRunOpenCode(env, config.cli, loadCatalog);
+    return Boolean(env.OPENCODE_API_KEY)
+      || hasStoredOpenCodeAuth(env)
+      || await canRunOpenCode(env, config.cli, loadCatalog);
+  },
   classifyError: classifyOpenCodeError,
   describeAccountError: describeOpenCodeAccountError,
-  resolveModels: async (environment, config) => mergeLocalInject(
-    await loadCatalog(environment, config.cli),
-    environment,
-  ),
+  resolveModels: async (environment, config, instanceId) => {
+    const discovered = await loadCatalog(environment, config.cli);
+    if (ownFreeCopy(environment, config.cli)) {
+      return mergeLocalInject({ ...discovered, default: keepingNothing(discovered.options.map((option) => option.id)) ?? "" }, environment);
+    }
+    if (!appCopy(config.cli)) return mergeLocalInject(discovered, environment);
+    if (!backupCopy(environment, config.cli)) {
+      return mergeLocalInject({ ...discovered, default: appCopyPick(discovered.options.map((option) => option.id), discovered.default) }, environment);
+    }
+    const catalog = backupCatalog(await mergeLocalInject(discovered, environment));
+    reads.backupModel.set(instanceId, catalog.default || NO_RETENTION_FREE_MODELS[0]);
+    reads.backupLocal.set(instanceId, localModelsOf(catalog));
+    return catalog;
+  },
   buildPromptText: (turn) => turn.system ? `${turn.system}\n\n${turn.text}` : turn.text,
 });
 
@@ -815,8 +919,32 @@ export function classifyOpenCodeError(error: unknown): ProviderErrorCode | undef
 
 export const classifyOpenCodeGoError = classifyOpenCodeError;
 
-export function createOpenCodeDriver(loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels) {
-  return createAcpDriver(support(loadCatalog));
+/** Its status says `freeFallback` while only Zen's free no-login models make it ready (contracts.ts). */
+export function createOpenCodeDriver(loadCatalog: OpenCodeCatalogLoader = discoverOpenCodeModels): ProviderDriver<AcpConfig> {
+  const reads: OpenCodeReads = { ownAccess: new Map(), backup: new Map(), backupModel: new Map(), backupLocal: new Map() };
+  const driver = createAcpDriver(support(loadCatalog, reads));
+  return {
+    ...driver,
+    async create(input) {
+      const instance = await driver.create(input);
+      const read = instance.snapshot.bind(instance);
+      instance.snapshot = async () => {
+        const snapshot = await read();
+        // The backup is ready only with a model that keeps nothing, and then always as the free backup.
+        if (reads.backup.get(input.instanceId) === true && snapshot.state === "available") {
+          if (!keepingNothing(instance.models.options.map((option) => option.id))) {
+            const { authenticated: _authenticated, ...rest } = snapshot;
+            return { ...rest, state: "unavailable", reason: BACKUP_NOT_PRIVATE };
+          }
+          return snapshot.authenticated === true ? { ...snapshot, freeFallback: true } : snapshot;
+        }
+        const own = reads.ownAccess.get(input.instanceId);
+        return snapshot.state === "available" && snapshot.authenticated === true && own !== undefined
+          && openCodeFreeFallback(own, instance.models) ? { ...snapshot, freeFallback: true } : snapshot;
+      };
+      return instance;
+    },
+  };
 }
 
 export const createOpenCodeGoDriver = createOpenCodeDriver;

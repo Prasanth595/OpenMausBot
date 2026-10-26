@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { delimiter, dirname, isAbsolute, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { removeTempDir } from "../../testing/cleanup.ts";
@@ -15,7 +15,9 @@ import {
   createOpenCodeDriver,
   describeOpenCodeAccountError,
   discoverOpenCodeModels,
+  openCodeFreeFallback,
   openCodeOwnedDirectories,
+  OpenCodeDriver,
   openCodeProviderKeysAllowed,
   openMausOwnsWorkingFolder,
   parseOpenCodeModelsOutput,
@@ -24,8 +26,11 @@ import {
   setOpenCodeProviderKeyPolicy,
 } from "./opencode-go.ts";
 import { ATTACHMENTS_DIR } from "../../attachments.ts";
+import { enginesBinDir, serverInstallFor } from "../../engine-install.ts";
+import { registerFallbackPathDir, registerPathDir, resetPathCacheForTests } from "../../env-path.ts";
+import { standaloneAssetFor, standaloneEngineDir } from "../../engine-standalone.ts";
 import { cloudHomeConfigured } from "../../cloud-home.ts";
-import { OPENCODE_PROVIDER_ENV } from "../../config.ts";
+import { DATA_DIR, OPENCODE_PROVIDER_ENV } from "../../config.ts";
 import { hostedWorkspaceConfigured } from "../../enterprise.ts";
 import { TASK_WORKSPACES_DIR, workspaceDir } from "../../workspace.ts";
 import type { ModelCatalog, ProviderInstance, SendTurnInput } from "../../contracts.ts";
@@ -134,7 +139,9 @@ describe("OpenCode catalog", () => {
       config: driver.defaultConfig(),
     });
 
-    expect(instance.models.default).toBe("opencode/big-pickle");
+    // No login here, so Big Pickle (a free model that may keep what it is sent) is listed but never the default.
+    expect(instance.models.options.map((option) => option.id)).toEqual(["opencode/big-pickle"]);
+    expect(instance.models.default).toBe("");
     expect(instance.models.options.some((option) => option.custom)).toBe(false);
     await instance.refreshModels?.();
     expect(instance.models.options.some((option) => option.id === "opencode-go/extra-two" && !option.custom)).toBe(true);
@@ -1104,5 +1111,552 @@ describe("OpenCode model choice without a saved model", () => {
       method: "session/set_config_option",
       params: { sessionId: "fake-acp-session", configId: "model", value: "opencode/longcat-2.5-preview-free" },
     }]);
+  });
+});
+
+describe("OpenCode ready only through its free models", () => {
+  const noKeys = { OPENCODE_API_KEY: "", OPENCODE_AUTH_CONTENT: "", ...Object.fromEntries(OPENCODE_PROVIDER_ENV.map((key) => [key, ""])) };
+  async function snapshotWith(models: ModelCatalog, environment: Record<string, string> = {}, login?: Record<string, unknown>) {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-fallback-"));
+    if (login) {
+      mkdirSync(join(scratch, "data", "opencode"), { recursive: true });
+      writeFileSync(join(scratch, "data", "opencode", "auth.json"), JSON.stringify(login));
+    }
+    resetOpenCodeModelCache();
+    const driver = createOpenCodeDriver(async () => models);
+    const instance = await driver.create({
+      instanceId: "opencode-fallback",
+      displayName: "OpenCode",
+      environment: { HOME: scratch, USERPROFILE: scratch, XDG_DATA_HOME: join(scratch, "data"), ...noKeys, ...environment },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      return await instance.snapshot();
+    } finally {
+      await instance.dispose();
+      await removeTempDir(scratch);
+      resetOpenCodeModelCache();
+    }
+  }
+
+  it("is a free fallback with only Zen's models and no login or key", async () => {
+    expect(await snapshotWith(catalog("opencode/big-pickle", "opencode/grok-code"))).toMatchObject({ authenticated: true, freeFallback: true });
+    // A local model the app found is not the person signing OpenCode in to anything.
+    expect(await snapshotWith({ default: "opencode/big-pickle", options: [
+      { id: "opencode/big-pickle", label: "Big Pickle" }, { id: "ollama/qwen3", label: "Qwen 3", custom: true },
+    ] })).toMatchObject({ freeFallback: true });
+  });
+
+  it("is a normal AI with an OpenCode login, an OpenCode key, or a provider key", async () => {
+    const zen = catalog("opencode/big-pickle");
+    for (const snapshot of [
+      await snapshotWith(zen, {}, { opencode: { type: "oauth", access: "acc-token", refresh: "ref-token" } }),
+      await snapshotWith(zen, { OPENCODE_API_KEY: "zen-key" }),
+      await snapshotWith(zen, { ANTHROPIC_API_KEY: "provider-key" }),
+    ]) {
+      expect(snapshot.authenticated).toBe(true);
+      expect(snapshot).not.toHaveProperty("freeFallback");
+    }
+  });
+
+  it("is no fallback with an empty catalog, which is not ready at all; local models alone still are one", () => {
+    expect(openCodeFreeFallback(false, { default: "", options: [] })).toBe(false);
+    expect(openCodeFreeFallback(false, { default: "ollama/qwen3", options: [{ id: "ollama/qwen3", label: "Qwen 3", custom: true }] })).toBe(true);
+    expect(openCodeFreeFallback(true, catalog("opencode/big-pickle"))).toBe(false);
+  });
+
+  it("is a normal AI when OpenCode offers another provider's models", async () => {
+    const snapshot = await snapshotWith(catalog("opencode/big-pickle", "openrouter/vendor/model-v2"));
+    expect(snapshot.authenticated).toBe(true);
+    expect(snapshot).not.toHaveProperty("freeFallback");
+  });
+});
+
+describe("OpenCode one-off calls (connection checks, memory upkeep)", () => {
+  it("file their session under OpenMaus's own OpenCode project, never the global one the person's other folders share", async () => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-oneshot-"));
+    const requests = join(scratch, "requests.jsonl");
+    const driver = createOpenCodeDriver(async () => catalog("opencode/big-pickle"));
+    const instance = await driver.create({
+      instanceId: "opencode-oneshot",
+      displayName: "OpenCode",
+      environment: { XDG_DATA_HOME: join(scratch, "data"), OPENCODE_API_KEY: "", FAKE_ACP_MODELS: "opencode/big-pickle", FAKE_ACP_RPC_APPEND_FILE: requests },
+      enabled: true,
+      config: { cli: FAKE_CLI, fullAuto: false },
+    });
+    try {
+      await instance.generateMemoryText!("This is a connection check. Reply with the single word OK.").catch(() => "");
+      const folders = readFileSync(requests, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as { method: string; cwd: string });
+      const opened = folders.find((request) => request.method === "session/new")!;
+      const project = realpathSync(join(DATA_DIR, "providers", "opencode", "discovery"));
+      expect(relative(project, opened.cwd).startsWith("..")).toBe(false);
+      expect(existsSync(join(project, ".git"))).toBe(true);
+      // The one-off's own folder inside it is gone again.
+      expect(existsSync(opened.cwd)).toBe(false);
+    } finally {
+      await instance.dispose();
+      await removeTempDir(scratch);
+    }
+  });
+});
+
+describe("OpenCode without Node.js", () => {
+  const release = OpenCodeDriver.install?.standalone;
+
+  it.each([
+    ["darwin-arm64", "opencode"], ["darwin-x64", "opencode"], ["linux-x64", "opencode"], ["linux-arm64", "opencode"],
+    ["linux-x64-musl", "opencode"], ["linux-arm64-musl", "opencode"], ["win32-x64", "opencode.exe"], ["win32-arm64", "opencode.exe"],
+  ])("has a pinned %s build on OpenCode's own release, from a host the installer accepts", (platform, executable) => {
+    const asset = standaloneAssetFor(release, platform);
+    expect(asset?.executable).toBe(executable);
+    const url = new URL(asset!.url);
+    expect(url.protocol).toBe("https:");
+    expect(release!.hosts).toContain(url.hostname);
+    expect(url.pathname).toBe(`/anomalyco/opencode/releases/download/v${release!.version}/${url.pathname.split("/").at(-1)}`);
+    expect(asset!.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(asset!.executableSha256).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("offers Settings' Install button with no npm on this machine", () => {
+    expect(serverInstallFor(OpenCodeDriver.install, false)).toMatchObject({ standalone: { version: release!.version } });
+  });
+
+  it.skipIf(process.platform === "win32").each([
+    ["the app's own copy with OpenCode's self-updater off", true],
+    ["a copy the person installed with its updater left alone", false],
+  ])("runs %s", async (_label, appCopy) => {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-autoupdate-"));
+    const dump = join(scratch, "env.json");
+    let cli = FAKE_CLI;
+    if (appCopy) {
+      const version = join(standaloneEngineDir("opencode"), release!.version);
+      mkdirSync(version, { recursive: true });
+      cli = join(version, "opencode");
+      writeFileSync(cli, `#!/bin/sh\nexec '${FAKE_CLI}' "$@"\n`, { mode: 0o755 });
+    }
+    const driver = createOpenCodeDriver(async () => catalog("opencode/glm-5.3-flash-free"));
+    const instance = await driver.create({
+      instanceId: `opencode-autoupdate-${appCopy}`, displayName: "OpenCode", enabled: true,
+      config: { cli, fullAuto: false, workspace: scratch },
+      environment: { HOME: scratch, XDG_CONFIG_HOME: scratch, XDG_DATA_HOME: scratch, FAKE_ACP_MODELS: "opencode/glm-5.3-flash-free", FAKE_ACP_DUMP: dump },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-autoupdate", botId: "bot-7", text: "hi", model: "opencode/glm-5.3-flash-free", approvalMode: "full" });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      const env = (JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> }).env;
+      expect(env.OPENCODE_DISABLE_AUTOUPDATE).toBe(appCopy ? "1" : undefined);
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      await removeTempDir(standaloneEngineDir("opencode"));
+      await removeTempDir(scratch);
+    }
+  });
+});
+
+describe.skipIf(process.platform === "win32")("which OpenCode runs", () => {
+  async function runTurn(scratch: string, log: string, withOwnCopy: boolean) {
+    const original = process.env.PATH;
+    const dump = join(scratch, "env.json");
+    const copy = (folder: string, label: string) => {
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, "opencode"), `#!/bin/sh\necho ${label} >> '${log}'\nexec '${FAKE_CLI}' "$@"\n`, { mode: 0o755 });
+    };
+    const own = join(scratch, "own-bin");
+    if (withOwnCopy) copy(own, "own");
+    // A copy npm put in the app's folder before OpenCode had its own build, and the app's own build.
+    copy(enginesBinDir(), "npm");
+    copy(join(standaloneEngineDir("opencode"), "bin"), "standalone");
+    process.env.PATH = withOwnCopy ? `${own}${delimiter}${original}` : original;
+    resetPathCacheForTests();
+    registerPathDir(enginesBinDir());
+    registerFallbackPathDir(join(standaloneEngineDir("opencode"), "bin"));
+    const driver = createOpenCodeDriver(async () => catalog("opencode/glm-5.3-flash-free"));
+    const instance = await driver.create({
+      instanceId: `opencode-which-${withOwnCopy}`, displayName: "OpenCode", enabled: true,
+      config: { cli: "opencode", fullAuto: false, workspace: scratch },
+      environment: { HOME: scratch, XDG_CONFIG_HOME: scratch, XDG_DATA_HOME: scratch, FAKE_ACP_MODELS: "opencode/glm-5.3-flash-free", FAKE_ACP_DUMP: dump },
+    });
+    const recorder = recordEvents(instance.adapter);
+    try {
+      await instance.adapter.sendTurn({ threadId: "t-which", botId: "bot-7", text: "hi", model: "opencode/glm-5.3-flash-free", approvalMode: "full" });
+      expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      return (JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string> }).env;
+    } finally {
+      recorder.stop();
+      await instance.dispose();
+      process.env.PATH = original;
+      resetPathCacheForTests();
+    }
+  }
+
+  let scratch = "";
+  afterEach(async () => {
+    await removeTempDir(enginesBinDir());
+    await removeTempDir(standaloneEngineDir("opencode"));
+    if (scratch) await removeTempDir(scratch);
+    scratch = "";
+  });
+
+  it("runs the person's own copy ahead of the one npm put in the app's folder, with its updater left alone", async () => {
+    scratch = mkdtempSync(join(tmpdir(), "omb-opencode-which-"));
+    const log = join(scratch, "runs.log");
+    const env = await runTurn(scratch, log, true);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["own"]);
+    expect(env.OPENCODE_DISABLE_AUTOUPDATE).toBeUndefined();
+    expect(env.PATH.split(delimiter).at(-1)).toBe(enginesBinDir());
+  });
+
+  it("runs the app's own build ahead of the npm copy, with OpenCode's self-updater off", async () => {
+    scratch = mkdtempSync(join(tmpdir(), "omb-opencode-which-"));
+    const log = join(scratch, "runs.log");
+    const env = await runTurn(scratch, log, false);
+    expect(readFileSync(log, "utf8").trim().split("\n")).toEqual(["standalone"]);
+    expect(env.OPENCODE_DISABLE_AUTOUPDATE).toBe("1");
+  });
+});
+
+describe("the free backup: the app's own copy of OpenCode with nothing the person gave the app", () => {
+  // OpenCode's own pick comes first, as discovery reports it.
+  const FREE = ["opencode/mimo-v2.6-flash-free", "opencode/big-pickle", "opencode/glm-5.3-flash-free", "opencode/deepseek-v4.1-flash-free"];
+  const RETAINING = ["opencode/mimo-v2.6-flash-free", "opencode/big-pickle"];
+  const GLM = "opencode/glm-5.3-flash-free";
+  // A model of the person's own provider, through a key they gave the app.
+  const PAID = "anthropic/claude-sonnet-5";
+  const CHECK = "This is a connection check. Reply with the single word OK.";
+
+  interface CopyOptions {
+    appCopy: boolean;
+    /** What discovery reports, and what the running OpenCode offers unless `running` says otherwise. */
+    offered?: string[];
+    running?: string[];
+    /** Keys the person gave the app: the instance's own environment. */
+    environment?: Record<string, string>;
+    /** The server's own environment, which the person never gave the app. */
+    inherited?: Record<string, string>;
+    login?: Record<string, unknown>;
+  }
+
+  async function withCopy<T>(options: CopyOptions, use: (instance: ProviderInstance, dump: string) => Promise<T>): Promise<T> {
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-backup-"));
+    const dump = join(scratch, "rpc");
+    let cli = FAKE_CLI;
+    if (options.appCopy) {
+      const bin = join(standaloneEngineDir("opencode"), "bin");
+      mkdirSync(bin, { recursive: true });
+      cli = join(bin, "opencode");
+      writeFileSync(cli, `#!/bin/sh\nexec '${FAKE_CLI}' "$@"\n`, { mode: 0o755 });
+    }
+    if (options.login) {
+      mkdirSync(join(scratch, "data", "opencode"), { recursive: true });
+      writeFileSync(join(scratch, "data", "opencode", "auth.json"), JSON.stringify(options.login));
+    }
+    const inherited = options.inherited ?? {};
+    // Every key blank in the instance, except the ones this test hands down from the server's environment.
+    const noKeys = Object.fromEntries(["OPENCODE_API_KEY", "OPENCODE_AUTH_CONTENT", "OPENCODE_CONFIG_CONTENT", ...OPENCODE_PROVIDER_ENV]
+      .filter((key) => !Object.hasOwn(inherited, key)).map((key) => [key, ""]));
+    const before = Object.fromEntries(Object.keys(inherited).map((key) => [key, process.env[key]]));
+    Object.assign(process.env, inherited);
+    resetOpenCodeModelCache();
+    const offered = options.offered ?? FREE;
+    const instance = await createOpenCodeDriver(async () => catalog(...offered)).create({
+      instanceId: `opencode-backup-${Math.random().toString(36).slice(2)}`, displayName: "OpenCode", enabled: true, config: { cli, fullAuto: false },
+      environment: {
+        HOME: scratch, USERPROFILE: scratch, XDG_CONFIG_HOME: scratch, XDG_DATA_HOME: join(scratch, "data"), ...noKeys, ...options.environment,
+        FAKE_ACP_MODELS: (options.running ?? offered).join(","), FAKE_ACP_DUMP: dump, FAKE_ACP_TEXT_REPLY: "OK",
+      },
+    });
+    try {
+      await instance.refreshModels?.();
+      return await use(instance, dump);
+    } finally {
+      await instance.dispose();
+      for (const [key, value] of Object.entries(before)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await removeTempDir(standaloneEngineDir("opencode"));
+      await removeTempDir(scratch);
+      resetOpenCodeModelCache();
+    }
+  }
+  const prompted = (dump: string) => existsSync(`${dump}.prompts.jsonl`)
+    ? readFileSync(`${dump}.prompts.jsonl`, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line).model as string) : [];
+  const spawnedEnv = (dump: string) => (JSON.parse(readFileSync(dump, "utf8")) as { env: Record<string, string | undefined> }).env;
+
+  it("starts on GLM-5.3-Flash Free, whose provider keeps nothing and trains on nothing, and offers only those that don't", async () => {
+    await withCopy({ appCopy: true }, async (instance) => {
+      expect(instance.models.default).toBe(GLM);
+      expect(instance.models.options.map((option) => option.id)).toEqual([GLM, "opencode/deepseek-v4.1-flash-free"]);
+      expect(await instance.snapshot()).toMatchObject({ state: "available", freeFallback: true });
+    });
+  });
+
+  it("takes DeepSeek V4.1 Flash Free, which keeps nothing either, when GLM is not offered", async () => {
+    await withCopy({ appCopy: true, offered: FREE.filter((id) => !id.includes("glm")) }, async (instance) => {
+      expect(instance.models.default).toBe("opencode/deepseek-v4.1-flash-free");
+    });
+  });
+
+  it("has no default and is not ready when no free model that keeps nothing is offered", async () => {
+    await withCopy({ appCopy: true, offered: RETAINING }, async (instance) => {
+      expect(instance.models.default).toBe("");
+      const snapshot = await instance.snapshot();
+      expect(snapshot).toMatchObject({ state: "unavailable", reason: expect.stringMatching(/keeps nothing you send/) });
+      expect(snapshot).not.toHaveProperty("freeFallback");
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("counts the app's own build as the backup even beside an older npm copy in the app's folder", async () => {
+    // The npm copy ranks last when OpenCode runs, so the app's own build is what runs.
+    const original = process.env.PATH;
+    const scratch = mkdtempSync(join(tmpdir(), "omb-opencode-backup-npm-"));
+    const put = (folder: string) => {
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(join(folder, "opencode"), `#!/bin/sh\nexec '${FAKE_CLI}' "$@"\n`, { mode: 0o755 });
+    };
+    put(enginesBinDir());
+    put(join(standaloneEngineDir("opencode"), "bin"));
+    resetPathCacheForTests();
+    registerPathDir(enginesBinDir());
+    registerFallbackPathDir(join(standaloneEngineDir("opencode"), "bin"));
+    resetOpenCodeModelCache();
+    const noKeys = Object.fromEntries(["OPENCODE_API_KEY", ...OPENCODE_PROVIDER_ENV].map((key) => [key, ""]));
+    const instance = await createOpenCodeDriver(async () => catalog(...FREE)).create({
+      instanceId: "opencode-backup-npm", displayName: "OpenCode", enabled: true, config: { cli: "opencode", fullAuto: false },
+      environment: { HOME: scratch, USERPROFILE: scratch, XDG_DATA_HOME: join(scratch, "data"), ...noKeys },
+    });
+    try {
+      await instance.refreshModels?.();
+      expect(instance.models.default).toBe(GLM);
+    } finally {
+      await instance.dispose();
+      process.env.PATH = original;
+      resetPathCacheForTests();
+      await removeTempDir(enginesBinDir());
+      await removeTempDir(standaloneEngineDir("opencode"));
+      await removeTempDir(scratch);
+      resetOpenCodeModelCache();
+    }
+  });
+
+  it("starts an OpenCode the person installed with no login on the model that keeps nothing, still listing all of its models", async () => {
+    await withCopy({ appCopy: false }, async (instance) => {
+      expect(instance.models.default).toBe(GLM);
+      expect(instance.models.options.map((option) => option.id)).toEqual(FREE);
+    });
+    // With none that keeps nothing, it has no default: never a new bot's AI on its own.
+    await withCopy({ appCopy: false, offered: RETAINING }, async (instance) => {
+      expect(instance.models.default).toBe("");
+    });
+  });
+
+  it.each<[string, Partial<CopyOptions>]>([
+    ["a login", { login: { opencode: { type: "oauth", access: "acc-token", refresh: "ref-token" } } }],
+    ["a key in the server's environment", { inherited: { DEEPSEEK_API_KEY: "sk-own" } }],
+  ])("leaves an OpenCode the person installed and signed in with %s on its own pick", async (_label, options) => {
+    await withCopy({ appCopy: false, ...options }, async (instance) => {
+      expect(instance.models.default).toBe("opencode/mimo-v2.6-flash-free");
+    });
+  });
+
+  it.each<[string, Partial<CopyOptions>]>([
+    ["a provider key in the server's own environment", { inherited: { DEEPSEEK_API_KEY: "sk-inherited" } }],
+    ["an OpenCode login left on this computer", { login: { opencode: { type: "oauth", access: "acc-token", refresh: "ref-token" } } }],
+  ])("stays the backup with %s, which the person never gave the app", async (_label, options) => {
+    await withCopy({ appCopy: true, ...options }, async (instance) => {
+      expect(instance.models.default).toBe(GLM);
+      expect(await instance.snapshot()).toMatchObject({ state: "available", freeFallback: true });
+    });
+  });
+
+  it.each<[string, Record<string, string>]>([
+    ["an OpenCode key", { OPENCODE_API_KEY: "zen-key" }],
+    ["a provider key", { ANTHROPIC_API_KEY: "provider-key" }],
+  ])("becomes the person's own OpenCode with %s they gave the app, still never starting on a free model that may keep it", async (_label, environment) => {
+    await withCopy({ appCopy: true, environment }, async (instance) => {
+      expect(instance.models.default).toBe(GLM);
+      expect(instance.models.options.map((option) => option.id)).toEqual(FREE);
+      expect(await instance.snapshot()).not.toHaveProperty("freeFallback");
+    });
+    // With none that keeps nothing, it starts on a model of the person's own rather than a free one that may keep it.
+    await withCopy({ appCopy: true, environment, offered: [...RETAINING, PAID] }, async (instance) => {
+      expect(instance.models.default).toBe(PAID);
+    });
+    // And with only free models that may keep it, on none: no default, so never a new bot's AI on its own.
+    await withCopy({ appCopy: true, environment, offered: RETAINING }, async (instance) => {
+      expect(instance.models.default).toBe("");
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("runs with no key or login of the person's, Zen's and local providers only, and only the models that keep nothing, titles included", async () => {
+    const inherited = { OPENAI_API_KEY: "sk-inherited", OPENCODE_CONFIG_CONTENT: JSON.stringify({ theme: "person's" }) };
+    await withCopy({ appCopy: true, inherited }, async (instance, dump) => {
+      expect(await instance.generateMemoryText!(CHECK)).toBe("OK");
+      const env = spawnedEnv(dump);
+      expect(env.OPENAI_API_KEY).toBeUndefined();
+      expect(env.OPENCODE_AUTH_CONTENT).toBe("{}");
+      const config = JSON.parse(env.OPENCODE_CONFIG_CONTENT!) as Record<string, any>;
+      expect(config.theme).toBe("person's");
+      expect(config.small_model).toBe(GLM);
+      expect(config.provider.opencode.whitelist).toEqual(["glm-5.3-flash-free", "deepseek-v4.1-flash-free"]);
+      // No local model was found: Zen alone.
+      expect(config.enabled_providers).toEqual(["opencode"]);
+    });
+    // The person's own OpenCode runs as they set it up.
+    await withCopy({ appCopy: false, inherited }, async (instance, dump) => {
+      expect(await instance.generateMemoryText!(CHECK)).toBe("OK");
+      const env = spawnedEnv(dump);
+      expect(env.OPENAI_API_KEY).toBe("sk-inherited");
+      expect(env.OPENCODE_AUTH_CONTENT).not.toBe("{}");
+      expect(env.OPENCODE_CONFIG_CONTENT).toBe(inherited.OPENCODE_CONFIG_CONTENT);
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("runs only the local models the app found, on this computer, never an Ollama cloud model", async () => {
+    // What the app's own probe of local servers found, as merged into the catalog.
+    const offered = [...FREE, "ollama::qwen3", "ollama::gpt-oss:120b-cloud"];
+    // The person's own OpenCode config points Ollama somewhere else.
+    const inherited = { OPENCODE_CONFIG_CONTENT: JSON.stringify({ provider: { ollama: { options: { baseURL: "https://ollama.example.com/v1" } } } }) };
+    await withCopy({ appCopy: true, offered, inherited }, async (instance, dump) => {
+      expect(instance.models.options.map((option) => option.id)).toEqual([GLM, "opencode/deepseek-v4.1-flash-free", "ollama::qwen3"]);
+      expect(await instance.generateMemoryText!(CHECK)).toBe("OK");
+      const config = JSON.parse(spawnedEnv(dump).OPENCODE_CONFIG_CONTENT!) as Record<string, any>;
+      expect(config.enabled_providers).toEqual(["opencode", "ollama"]);
+      expect(config.provider.ollama.options.baseURL).toBe("http://127.0.0.1:11434/v1");
+      expect(config.provider.ollama.whitelist).toEqual(["qwen3"]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("sends its background calls to the model that keeps nothing", async () => {
+    await withCopy({ appCopy: true }, async (instance, dump) => {
+      expect(await instance.generateMemoryText!(CHECK)).toBe("OK");
+      expect(prompted(dump)).toEqual([GLM]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32").each<[string, Partial<CopyOptions>, RegExp]>([
+    ["OpenCode acknowledges the switch but stays on its own pick", { environment: { FAKE_ACP_MODEL_STICKS: "1" } }, /did not switch/],
+    ["no free model that keeps nothing is offered", { offered: RETAINING }, /keeps nothing you send/],
+  ])("fails a background call rather than send it to a model that may keep it when %s", async (_label, options, error) => {
+    await withCopy({ appCopy: true, ...options }, async (instance, dump) => {
+      await expect(instance.generateMemoryText!(CHECK)).rejects.toThrow(error);
+      expect(prompted(dump)).toEqual([]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("sends the background calls of an OpenCode the person installed with no login to the model that keeps nothing", async () => {
+    await withCopy({ appCopy: false }, async (instance, dump) => {
+      expect(await instance.generateMemoryText!(CHECK)).toBe("OK");
+      expect(prompted(dump)).toEqual([GLM]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("leaves the background calls of an OpenCode the person installed with no login on its own local model", async () => {
+    await withCopy({ appCopy: false, offered: ["ollama/llama3", ...FREE] }, async (instance, dump) => {
+      expect(await instance.generateMemoryText!(CHECK)).toBe("OK");
+      expect(prompted(dump)).toEqual(["ollama/llama3"]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("leaves the background calls of an OpenCode the person installed and signed in to on its own pick", async () => {
+    await withCopy({ appCopy: false, login: { opencode: { type: "oauth", access: "acc-token", refresh: "ref-token" } } }, async (instance, dump) => {
+      expect(await instance.generateMemoryText!(CHECK)).toBe("OK");
+      expect(prompted(dump)).toEqual(["opencode/mimo-v2.6-flash-free"]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32").each<[string, Partial<CopyOptions>]>([
+    ["an OpenCode the person installed with no login", { appCopy: false }],
+    ["the app's copy signed in through the app, whose key adds no model", { appCopy: true, environment: { OPENCODE_API_KEY: "zen-key" } }],
+  ])("refuses a background call on %s when only free models that may keep it are offered", async (_label, options) => {
+    await withCopy({ appCopy: false, offered: RETAINING, ...options }, async (instance, dump) => {
+      await expect(instance.generateMemoryText!(CHECK)).rejects.toThrow(/keeps nothing you send/);
+      expect(prompted(dump)).toEqual([]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32").each<[string, Partial<CopyOptions>]>([
+    ["an OpenCode the person installed with no login", { appCopy: false }],
+    ["the app's copy signed in through the app", { appCopy: true, environment: { OPENCODE_API_KEY: "zen-key" } }],
+  ])("still runs a model the person picked themselves on %s", async (_label, options) => {
+    await withCopy({ appCopy: false, offered: RETAINING, ...options }, async (instance, dump) => {
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId: "t-picked", botId: "bot-7", text: "hi", model: "opencode/big-pickle", approvalMode: "full" });
+        expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      } finally {
+        recorder.stop();
+      }
+      expect(prompted(dump)).toEqual(["opencode/big-pickle"]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("never falls back to a free model that may keep it on an OpenCode the person installed with no login", async () => {
+    await withCopy({ appCopy: false, running: RETAINING }, async (instance, dump) => {
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId: "t-own-gone", botId: "bot-7", text: "hi", model: "opencode/retired-free", approvalMode: "full" });
+        expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: false });
+      } finally {
+        recorder.stop();
+      }
+      expect(prompted(dump)).toEqual([]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("moves the background calls of the app's copy signed in through the app off a free model that may keep them", async () => {
+    await withCopy({ appCopy: true, environment: { OPENCODE_API_KEY: "zen-key" } }, async (instance, dump) => {
+      expect(await instance.generateMemoryText!(CHECK)).toBe("OK");
+      expect(prompted(dump)).toEqual([GLM]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("falls back the app's copy signed in through the app to a model that doesn't keep what it is sent", async () => {
+    // Discovery saw GLM; the running OpenCode no longer offers it, only a free model that may keep it and a paid one.
+    await withCopy({ appCopy: true, environment: { OPENCODE_API_KEY: "zen-key" }, offered: [...FREE, PAID], running: ["opencode/mimo-v2.6-flash-free", PAID] }, async (instance, dump) => {
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId: "t-signed-in", botId: "bot-7", text: "hi", model: "opencode/retired-free", approvalMode: "full" });
+        expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      } finally {
+        recorder.stop();
+      }
+      expect(prompted(dump)).toEqual([PAID]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32").each<[string, Partial<CopyOptions>, string]>([
+    // Discovery saw GLM, but the running OpenCode no longer offers anything that keeps nothing.
+    ["falls back to nothing when only models that may keep it are offered", { running: RETAINING }, GLM],
+    ["refuses a Zen model that may keep what it is sent", {}, "opencode/big-pickle"],
+  ])("never runs a turn on a model that may keep it: %s", async (_label, options, model) => {
+    await withCopy({ appCopy: true, ...options }, async (instance, dump) => {
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId: "t-backup", botId: "bot-7", text: "hi", model, approvalMode: "full" });
+        expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: false });
+        // Nor is the conversation moved onto one.
+        expect(recorder.events.filter((event) => event.type === "runtime.notice" && /mimo|big-pickle/.test(String((event as { message?: unknown }).message)))).toEqual([]);
+      } finally {
+        recorder.stop();
+      }
+      expect(prompted(dump)).toEqual([]);
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("falls back to the model that keeps nothing when a turn's model is gone", async () => {
+    await withCopy({ appCopy: true }, async (instance, dump) => {
+      const recorder = recordEvents(instance.adapter);
+      try {
+        await instance.adapter.sendTurn({ threadId: "t-backup-gone", botId: "bot-7", text: "hi", model: "opencode/retired-free", approvalMode: "full" });
+        expect(await recorder.until((event) => event.type === "turn.completed")).toMatchObject({ ok: true });
+      } finally {
+        recorder.stop();
+      }
+      expect(prompted(dump)).toEqual([GLM]);
+    });
   });
 });

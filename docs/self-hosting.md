@@ -888,6 +888,57 @@ The offer is on by default. To switch it off, start the server with
 `OMB_QUOTA_SWITCH=0`; any other value, or none, leaves it on. It has no
 setting in `config.json` yet.
 
+### Which engine a new bot uses
+
+A saved default model (Settings, `openmausbot setup`, or the New Bot
+defaults) always wins. Without one, new bots get the first engine that can
+run, in this order: a Claude account, a ChatGPT plan, Gemini, Grok, then the
+rest in the order of `instances`; OpenCode running only Zen's free no-login
+models comes last.
+
+The server picks at once at start, then sends the person's own engines one
+tiny test message each in the background ("Reply with the single word OK",
+90 seconds at most), best first, stopping at the first that answers. One
+miss alone doesn't move the default: that engine is tried again two minutes
+later. Two misses in a row move the default to the best engine that
+answered; the engine is tried again ten minutes later, then once an hour.
+An engine that already answered (for example one the welcome checked) can
+take the default after a single miss. An organization's models and the
+trial credit are never tested this way. Results are kept for a day per
+engine and sign-in in `<data dir>/providers/ai-checks.json`, so a restart
+doesn't send them again. On a later start, where the engines are read one at
+a time, nothing is tested or moved until that read ends: never on the status
+the last run recorded.
+
+The first bot the app made follows the default until someone writes to it
+or picks a model for it or one of its conversations: it moves only after a
+test result, only to an engine that answered, and only away from one whose
+latest test missed or that is signed out or turned off, or up to a better
+one. A status read that timed out moves nothing. Apart from bots on
+OpenCode's free backup (below), no other bot ever moves. To stop the
+background test messages, start the server with `OMB_AI_CHECKS=0`.
+
+When no engine of the person's own can answer (none is ready, or every ready
+one missed twice) on two reads of the engines at least 90 seconds apart (or on
+the first read when no AI program is installed at all and the desktop isn't
+enrolled with a company), and there is no OpenCode on the machine at all, the server installs OpenCode's
+own build (no Node.js) into `<data dir>/tools/standalone/opencode/` in the
+background, so the first bot can still reply. That copy runs only Zen's free
+models that keep nothing they are sent (GLM-5.3-Flash Free, else DeepSeek
+V4.1 Flash Free): without either it is not used. It gets its test message
+and ranks last, so it is the default only while nothing else answers, and
+the welcome keeps asking the person to connect their own AI. Once their own
+engine passes its test, every bot the app put on the backup moves to it,
+with a line in its chat. Nothing is installed with a saved default, on a
+hosted workspace, a Cloud home, a server people sign in to, a branded build
+or an organization-managed computer, or next to an OpenCode the person
+installed; failed attempts wait 10 minutes, an hour, then a day
+(`<data dir>/providers/free-fallback.json`). The app's copy is moved to the
+version this release pins while a bot uses it. An OpenCode the app installed
+ignores keys in the server's environment and logins made in a terminal; to
+use it with your own account, give it a key in Settings. To turn all of this
+off, start the server with `OMB_FREE_FALLBACK=0`.
+
 ### The decision log
 
 Every approval decision — a rule that let a tool call through, a card that

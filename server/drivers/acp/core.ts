@@ -188,7 +188,7 @@ export interface AcpSupport {
   selectModel?: AcpModelSelection;
   /** With `selectModel`: the model a turn runs when it asked for none or for one this session does
    * not offer; null keeps the strict behaviour. */
-  fallbackModel?(sessionConfig: unknown, catalogDefault: string): string | null;
+  fallbackModel?(sessionConfig: unknown, catalogDefault: string, launch?: { env: Record<string, string | undefined>; config: AcpConfig }): string | null;
   /** Env var the runtime reads its new-session default model from, set at spawn so session/new runs
    * it. The runtime takes any id unchecked, so it is set only for a model this account offered. Not
    * part of the spawn contract. */
@@ -198,8 +198,8 @@ export interface AcpSupport {
   /** The approval mode is applied per turn by configureSession, which must throw unless the runtime
    * confirms it; an approval change never respawns the process. */
   sessionScopedApproval?: boolean;
-  /** False when this engine cannot run memory upkeep's one-shot text call cleanly. */
-  backgroundText?: false;
+  /** False when this engine cannot run memory upkeep's one-shot text call cleanly; oneShotFolder holds a one-shot's folder. */
+  backgroundText?: false; oneShotFolder?(): Promise<string>;
   /** Mutate the child env in place. `instanceEnvironment` tells a key put there on purpose from one
    *  riding along in the server's own env. */
   transformEnv?(
@@ -1407,7 +1407,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   && !offered.includes(wanted) && models.options.some((option) => option.id === wanted || option.id === turn.model));
                 if (support.fallbackModel && offered.length && !skipSubscriptionAuthForLocalInject(turn.model)
                     && !staleProcess && (!wanted || !offered.includes(wanted))) {
-                  const fallback = support.fallbackModel(session.sessionConfigResult, models.default);
+                  const fallback = support.fallbackModel(session.sessionConfigResult, models.default, { env: spawnEnv, config: turnConfig });
                   if (fallback && fallback !== wanted && offered.includes(fallback)) {
                     const notice = wanted ? `${wanted}\n${fallback}` : null;
                     if (notice && session.fallbackNotice !== notice) {
@@ -1689,7 +1689,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
         if (support.requireAuthenticationBeforeSpawn && !(await support.isAuthenticated(env, turnConfig, instanceId))) {
           throw new Error(support.loginNote);
         }
-        const cwd = mkdtempSync(join(tmpdir(), "omb-acp-memory-"));
+        const cwd = mkdtempSync(join(await support.oneShotFolder?.() ?? tmpdir(), "omb-acp-memory-"));
         try {
           const turn = { threadId: `memory-text-${newId()}`, text: prompt, approvalMode: "ask", cwd } as SendTurnInput;
           support.applyTurnEnv?.(env, { fullAuto: false, cwd, threadId: turn.threadId, mcpServers: [] });
