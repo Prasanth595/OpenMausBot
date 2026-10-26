@@ -175,7 +175,9 @@ export function requestOrigin(req: IncomingMessage): string | null {
 export function phoneOrigin(origin: string | null): string | null {
   if (!origin) return null;
   try {
-    return isLoopbackHost(new URL(origin).host) ? null : origin;
+    const url = new URL(origin);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) return null;
+    return isLoopbackHost(url.host) ? null : origin;
   } catch {
     return null;
   }

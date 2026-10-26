@@ -65,6 +65,9 @@ describe("origin and cookies", () => {
     expect(phoneOrigin("http://[::1]:8799")).toBeNull();
     expect(phoneOrigin("https://localhost:8799")).toBeNull();
     expect(phoneOrigin("not a url")).toBeNull();
+    expect(phoneOrigin("ftp://example.com")).toBeNull();
+    expect(phoneOrigin("javascript:alert(1)")).toBeNull();
+    expect(phoneOrigin("file:///etc/hosts")).toBeNull();
     expect(phoneOrigin(null)).toBeNull();
     expect(phoneOrigin("http://192.168.1.20:8799")).toBe("http://192.168.1.20:8799");
     expect(phoneOrigin("https://bots.example.com")).toBe("https://bots.example.com");
