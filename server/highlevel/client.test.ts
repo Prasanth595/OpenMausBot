@@ -118,6 +118,16 @@ describe("HighLevelClient requests", () => {
     expect(out.contacts[0]).toMatchObject({ id: "contact_1", email: "ada@fixture.test" });
   });
 
+  it("passes page numbers past the page-size limit through unchanged", async () => {
+    const { client } = harness();
+    expect(await client.searchContacts({ query: "ada", page: 51, limit: 50 })).toMatchObject({ page: 51 });
+    expect(hl.calls.find((call) => call.path === "/contacts/search")!.body).toMatchObject({ page: 51, pageLimit: 50 });
+    expect(await client.searchOpportunities({ page: 1000, limit: 80 })).toMatchObject({ page: 1000 });
+    expect(last().query).toMatchObject({ page: "1000", limit: "50" });
+    const page = HIGHLEVEL_TOOLS.find((tool) => tool.name === "HIGHLEVEL_SEARCH_CONTACTS")!.inputSchema.properties.page;
+    expect(page).toMatchObject({ minimum: 1, maximum: 1000 });
+  });
+
   it("creates and updates contacts with the location id and custom fields mapped from names to ids", async () => {
     const { client } = harness();
     await client.createContact({ firstName: "Grace", email: "grace@fixture.test", tags: ["new"], customFields: { "lead source": "Event", "contact.budget": 900 } });

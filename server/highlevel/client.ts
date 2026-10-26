@@ -19,7 +19,8 @@ const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 4_000_000;
 const CUSTOM_FIELDS_TTL_MS = 10 * 60_000;
 const TEXT_MAX = 4_000;
-const PAGE_MAX = 50;
+export const PAGE_MAX = 50;
+export const PAGE_NUMBER_MAX = 1_000;
 
 /** Paths this client refuses outright, whatever tool asks: nothing here sends, campaigns, automates or charges. */
 export const FORBIDDEN_PATHS = [
@@ -84,7 +85,8 @@ const list = (value: unknown): Json[] => (Array.isArray(value) ? value.filter(is
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").slice(0, 200) : []);
 /** Drops undefined fields so trimmed objects stay small. */
 const compact = <T extends object>(record: T): T => Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as T;
-const page = (value: number | undefined, fallback = 20) => Math.min(PAGE_MAX, Math.max(1, Math.floor(value ?? fallback)));
+const pageSize = (value: number | undefined) => Math.min(PAGE_MAX, Math.max(1, Math.floor(value ?? 20)));
+const pageNumber = (value: number | undefined) => Math.min(PAGE_NUMBER_MAX, Math.max(1, Math.floor(value ?? 1)));
 
 export interface CustomFieldDefinition { id: string; name: string; key?: string; dataType?: string; model?: string; options?: string[] }
 
@@ -460,9 +462,9 @@ export class HighLevelClient {
     if (input.email) filters.push({ field: "email", operator: "eq", value: input.email });
     if (input.phone) filters.push({ field: "phone", operator: "eq", value: input.phone });
     if (input.tag) filters.push({ field: "tags", operator: "eq", value: input.tag });
-    const current = page(input.page, 1);
+    const current = pageNumber(input.page);
     const raw = await this.request("POST", "/contacts/search", { repeatable: true, body: compact({
-      locationId, page: current, pageLimit: page(input.limit), query: input.query?.trim() || undefined, ...(filters.length ? { filters } : {}),
+      locationId, page: current, pageLimit: pageSize(input.limit), query: input.query?.trim() || undefined, ...(filters.length ? { filters } : {}),
     }) });
     const definitions = await this.customFieldDefinitions().catch(() => []);
     const record = isRecord(raw) ? raw : {};
@@ -554,10 +556,10 @@ export class HighLevelClient {
 
   async searchOpportunities(input: { query?: string; pipelineId?: string; stageId?: string; contactId?: string; status?: string; page?: number; limit?: number }) {
     const locationId = await this.locationId();
-    const current = page(input.page, 1);
+    const current = pageNumber(input.page);
     const raw = await this.request("GET", "/opportunities/search", { query: {
       location_id: locationId, q: input.query?.trim() || undefined, pipeline_id: input.pipelineId, pipeline_stage_id: input.stageId,
-      contact_id: input.contactId, status: input.status, page: current, limit: page(input.limit),
+      contact_id: input.contactId, status: input.status, page: current, limit: pageSize(input.limit),
     } });
     const record = isRecord(raw) ? raw : {};
     const meta = isRecord(record.meta) ? record.meta : {};
@@ -591,7 +593,7 @@ export class HighLevelClient {
     const locationId = await this.locationId();
     const raw = await this.request("GET", "/conversations/search", {
       version: HIGHLEVEL_CONVERSATIONS_VERSION,
-      query: { locationId, contactId: input.contactId, query: input.query?.trim() || undefined, limit: page(input.limit) },
+      query: { locationId, contactId: input.contactId, query: input.query?.trim() || undefined, limit: pageSize(input.limit) },
     });
     const record = isRecord(raw) ? raw : {};
     return compact({
@@ -607,7 +609,7 @@ export class HighLevelClient {
 
   async readConversation(conversationId: string, input: { limit?: number; lastMessageId?: string } = {}) {
     const raw = await this.request("GET", `/conversations/${encodeURIComponent(conversationId)}/messages`, {
-      version: HIGHLEVEL_CONVERSATIONS_VERSION, query: { limit: page(input.limit), lastMessageId: input.lastMessageId },
+      version: HIGHLEVEL_CONVERSATIONS_VERSION, query: { limit: pageSize(input.limit), lastMessageId: input.lastMessageId },
     });
     // Documented as { lastMessageId, nextPage, messages }; served as { messages: { lastMessageId, nextPage, messages } }.
     const record = isRecord(raw) ? raw : {};

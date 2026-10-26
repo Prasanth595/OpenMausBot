@@ -171,7 +171,7 @@ Every successful write appends an activity row to the thread: `tool.name` `mcp__
 - Access tokens last a day; refresh tokens a year and rotate on every use. The rotated pair is stored before the retry.
   A refresh or a sign-out lands only on the token pair it started from. A call whose tokens were replaced meanwhile
   retries with the newer tokens of the same location, or stops when another location was connected.
-- Results: at most 50 per page; text fields are cut at 4,000 characters; responses over 4 MB are refused.
+- Results: at most 50 per page, pages 1 to 1,000; text fields are cut at 4,000 characters; responses over 4 MB are refused.
 - Custom field definitions are cached for 10 minutes per location.
 
 ## Not in v1
