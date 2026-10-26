@@ -278,6 +278,26 @@ describe("a page tool call whose turn ends", () => {
     expect(f.service.minted).toEqual([]);
     expect(f.service.pages.size).toBe(0);
   });
+
+  it("shows no card when the tool call's request goes while the upload's answer is still arriving", async () => {
+    const f = setup();
+    signIn();
+    writeSite(join(f.work, "site"));
+    const gone = new AbortController();
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method !== "PUT") return response;
+      const signal = init.signal!;
+      const body = new ReadableStream({ start: (stream) => signal.addEventListener("abort", () => stream.error(signal.reason)) });
+      setTimeout(() => gone.abort());
+      return new Response(body, { status: response.status, headers: response.headers });
+    };
+    const { call, sent } = tool(f, { signal: gone.signal });
+    await call("/api/internal/pages/publish", { path: "site", title: "Bake sale" });
+    expect(sent.status).toBe(503);
+    expect(f.pages.store.list()).toEqual([]);
+  });
 });
 
 describe("unpublishing a page", () => {
