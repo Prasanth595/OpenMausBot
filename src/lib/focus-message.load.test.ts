@@ -59,3 +59,54 @@ describe("landing on a search hit older than the loaded page", () => {
     expect(actions.map((action) => action.type)).toEqual(["select", "focusMessage"]);
   });
 });
+
+describe("choosing another search hit while one is still landing", () => {
+  let held: Array<{ path: string; body?: string; resolve: (answer: unknown) => void }>;
+  const replies = (path: string, body?: string): unknown => path.includes("/active-branch")
+    ? { activeLeafId: JSON.parse(body!).messageId }
+    : path.includes("/tasks/") ? { bot: { ...bot, threadId: path.split("/").pop() } } : pages[new URL(path, "http://x").searchParams.get("before")!];
+  const answerFirst = async () => {
+    const request = held.shift()!;
+    request.resolve(replies(request.path, request.body));
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  };
+  const answerAll = async () => { while (held.length) await answerFirst(); };
+  const types = () => actions.map((action) => action.type);
+  const focused = () => actions.flatMap((action) => action.type === "focusMessage" ? [action.messageId] : []);
+  const loaded = { ...hit, botId: "scout", threadId: "t", messageId: "m450" };
+  const elsewhere = { ...hit, botId: "scout", threadId: "side", messageId: "s1", onActivePath: false };
+
+  beforeEach(() => {
+    held = [];
+    fixture.api.mockImplementation((path: string, init?: { body?: string }) => new Promise((resolve) => { held.push({ path, body: init?.body, resolve }); }));
+  });
+
+  it("does not focus the earlier hit when its older pages arrive after the newer one landed", async () => {
+    const earlier = landOnSearchHit({ ...hit, groupId: "room", threadId: "rt" }, state, dispatch, true);
+    await landOnSearchHit(loaded, state, dispatch, true);
+    await answerAll();
+    await earlier;
+    expect(focused()).toEqual(["m450"]);
+  });
+
+  it("does not switch the bot to the earlier hit's thread when the newer hit landed first", async () => {
+    const earlier = landOnSearchHit(elsewhere, state, dispatch, true);
+    await landOnSearchHit(loaded, state, dispatch, true);
+    await answerAll();
+    await earlier;
+    expect(types()).not.toContain("taskSwitched");
+    expect(types()).not.toContain("switchTask");
+    expect(focused()).toEqual(["m450"]);
+  });
+
+  it("with threads hidden, lands on the newer hit when the earlier one answers first", async () => {
+    const earlier = landOnSearchHit(elsewhere, state, dispatch, false);
+    const newer = landOnSearchHit({ ...elsewhere, threadId: "other", messageId: "o1" }, state, dispatch, false);
+    await answerFirst();
+    await earlier;
+    await answerAll();
+    await newer;
+    expect(actions.filter((action) => action.type === "switchTask")).toEqual([{ type: "switchTask", botId: "scout", threadId: "other", whole: true }]);
+    expect(focused()).toEqual(["o1"]);
+  });
+});

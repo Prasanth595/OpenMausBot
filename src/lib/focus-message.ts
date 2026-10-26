@@ -29,6 +29,8 @@ async function loadThroughMessage(
   if (older.length) dispatch({ type: "olderMessages", threadId: owner.threadId, generation, messages: older, hasMore });
 }
 
+let latestChoice = 0;
+
 export async function landOnSearchHit(
   hit: SearchHit,
   state: Pick<AppState, "bots" | "groups" | "transcriptGeneration">,
@@ -40,10 +42,12 @@ export async function landOnSearchHit(
   const group = hit.groupId ? state.groups.find((candidate) => candidate.id === hit.groupId) : undefined;
   if (!ownerId || (!bot && !group)) throw new Error("That conversation is no longer available.");
 
+  const choice = ++latestChoice;
   const switchAlone = bot && bot.threadId !== hit.threadId && !threadsShown ? bot : undefined;
   if (!switchAlone) dispatch({ type: "select", id: ownerId });
   if (bot && bot.threadId !== hit.threadId && !switchAlone) {
     const result = await api(`/api/bots/${bot.id}/tasks/${hit.threadId}`, { method: "POST" });
+    if (choice !== latestChoice) return;
     if (result?.bot) dispatch({ type: "taskSwitched", bot: result.bot });
   }
   if (group && group.threadId !== hit.threadId) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: hit.threadId, whole: true });
@@ -58,6 +62,7 @@ export async function landOnSearchHit(
       dispatch({ type: "threadActive", threadId: hit.threadId, activeLeafId: branch.activeLeafId });
     }
   }
+  if (choice !== latestChoice) return;
   if (switchAlone) dispatch({ type: "switchTask", botId: switchAlone.id, threadId: hit.threadId, whole: true });
   dispatch({
     type: "focusMessage",
