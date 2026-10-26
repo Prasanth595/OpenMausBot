@@ -46,10 +46,7 @@ export async function landOnSearchHit(
     const result = await api(`/api/bots/${bot.id}/tasks/${hit.threadId}`, { method: "POST" });
     if (result?.bot) dispatch({ type: "taskSwitched", bot: result.bot });
   }
-  if (group && group.threadId !== hit.threadId) {
-    const result = await api(`/api/groups/${group.id}/tasks/${hit.threadId}`, { method: "POST" });
-    if (result?.group) dispatch({ type: "groupPatched", group: result.group });
-  }
+  if (group && group.threadId !== hit.threadId) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: hit.threadId, whole: true });
   const open = bot?.threadId === hit.threadId ? bot : group?.threadId === hit.threadId ? group : undefined;
   if (open) await loadThroughMessage(open, hit.messageId, state.transcriptGeneration[hit.threadId] ?? 0, dispatch);
   if (bot && !hit.onActivePath) {

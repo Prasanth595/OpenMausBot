@@ -36,6 +36,7 @@ const answer = async (path: string, body: unknown) => {
 };
 
 const { StoreProvider, useStore } = await import("./store");
+const { landOnSearchHit } = await import("@/lib/focus-message");
 
 let seen!: AppState;
 let dispatch!: Dispatch<Action>;
@@ -154,5 +155,18 @@ describe("switching a room's thread", () => {
     expect(shown().messages.map((message) => message.id)).toEqual(["optimistic-s2", "r1"]);
     await answer(switchPath("one"), { group: room("one", [line("r1", "one")]) });
     expect(shown().messages.map((message) => message.id)).toEqual(["r1", "optimistic-s2"]);
+  });
+
+  it("stays on the thread switched to after a search hit asked for another", async () => {
+    const [found, picked] = tasks.map((task) => task.threadId).filter((threadId) => threadId !== shown().threadId);
+    const hit = { groupId: "room", threadId: found, messageId: "f1", name: "Room", role: "bot", kind: "text", at: 1, snippet: "f1", matchStart: 0, matchLength: 2, onActivePath: true };
+    const landing = landOnSearchHit(hit, seen, dispatch, true);
+    await settle();
+    await switchTo(picked);
+    await answer(switchPath(picked), { group: room(picked, [line("p1", picked)]) });
+    await answer([...held.keys()].find((path) => path.startsWith(`/api/groups/room/tasks/${found}`))!, { group: room(found, [line("f1", found)]) });
+    await landing;
+    expect(shown().threadId).toBe(picked);
+    expect(shown().messages.map((message) => message.id)).toEqual(["p1"]);
   });
 });
