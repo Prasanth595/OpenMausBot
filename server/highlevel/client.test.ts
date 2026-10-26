@@ -294,6 +294,43 @@ describe("HighLevelClient resilience", () => {
     expect(store.get()).toMatchObject({ accessToken: "pit-new-token-456", state: "signed-in" });
   });
 
+  it("still refreshes a same-location connection adopted while a call waited, when its token is dead too", async () => {
+    let adopted = false;
+    const { client, store } = harness({}, {
+      fetch: async (url, init) => {
+        if (!adopted) {
+          adopted = true;
+          hl.tokens.delete("hl_access_seed");
+          relay.refreshTokens.add("hl_refresh_adopted");
+          store.put({ kind: "oauth", accessToken: "hl_access_adopted", refreshToken: "hl_refresh_adopted", expiresAt: clock + 3_600_000, locationId: FAKE_LOCATION_ID, scopes: "" });
+        }
+        return fetch(url, init);
+      },
+    });
+    expect((await client.listPipelines()).pipelines).toHaveLength(1);
+    expect(relay.refreshes).toBe(1);
+    expect(relay.calls.at(-1)).toEqual({ path: "/v1/highlevel/refresh", body: { refreshToken: "hl_refresh_adopted" } });
+    expect(store.get()).toMatchObject({ accessToken: relay.issued.at(-1), state: "signed-in" });
+  });
+
+  it("stops with the changed-connection error when another location is connected after the refresh", async () => {
+    const { client, store } = harness({}, {
+      fetch: async (url, init) => {
+        const bearer = new Headers(init?.headers).get("authorization");
+        if (bearer === `Bearer ${relay.issued.at(-1)}` && store.get()?.kind === "oauth") {
+          hl.tokens.delete(relay.issued.at(-1)!);
+          hl.tokens.add("pit-account-b-token");
+          store.put({ kind: "token", accessToken: "pit-account-b-token", locationId: "loc_account_b", scopes: "" });
+        }
+        return fetch(url, init);
+      },
+    });
+    hl.tokens.delete("hl_access_seed");
+    await expect(client.listPipelines()).rejects.toMatchObject({ status: 409, signedOut: false, message: expect.stringMatching(/connection changed/u) });
+    expect(relay.refreshes).toBe(1);
+    expect(store.get()).toMatchObject({ accessToken: "pit-account-b-token", state: "signed-in" });
+  });
+
   it("refreshes ahead of expiry without waiting for a 401", async () => {
     const { client } = harness({ expiresAt: clock + 30_000 });
     await client.listPipelines();
