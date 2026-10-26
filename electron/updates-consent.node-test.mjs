@@ -13,7 +13,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check) { for (let i = 0; i < 200; i++) { if (check()) return; await sleep(5); } assert.fail("did not reach the expected state"); }
 
 async function world(t) {
-  const f = { now: 1_800_000_000_000, approved: false, supported: true, down: false, account: null, requests: [], saved: null, timer: null, available: true, gate: null };
+  const f = { now: 1_800_000_000_000, approved: false, supported: true, down: false, account: null, requests: [], saved: null, timer: null, available: true, gate: null, failWithdrawals: 0 };
   const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "device-1" }, account: { id: "account-1", email: "person@example.test" } });
   const server = createServer(async (req, res) => {
     let raw = ""; for await (const chunk of req) raw += chunk;
@@ -30,6 +30,7 @@ async function world(t) {
       if (!f.supported) return send(404, { error: "Not found." });
       if (req.url === "/api/updates-consent") {
         if (body.status === "opted_in") return send(200, { receipt: RECEIPT });
+        if (f.failWithdrawals > 0) { f.failWithdrawals--; return send(503, { error: "unavailable" }); }
         return body.receipt === RECEIPT ? send(200, { ok: true }) : send(404, { error: "unknown_receipt" });
       }
       if (!bearer) return send(401, { error: "invalid_token" });
@@ -147,7 +148,7 @@ test("a new answer given while the previous one is still on its way wins on this
     const sending = f.consent.choose(first);
     await until(() => f.requests.length === 1);
     const changing = f.consent.choose(second);
-    await until(() => f.saved.updatesConsent.status === second.status);
+    await until(() => Object.entries(second).every(([key, value]) => f.saved.updatesConsent[key] === value));
     f.gate = null; release();
     await Promise.all([sending, changing]);
   };
@@ -166,6 +167,29 @@ test("a new answer given while the previous one is still on its way wins on this
     { status: "opted_in", email: "person@example.test", installId: g.saved.installId, textVersion: UPDATES_CONSENT_VERSION },
     { status: "withdrawn", receipt: RECEIPT }]);
   assert.deepEqual(g.saved.updatesConsent, { status: "withdrawn", version: UPDATES_CONSENT_VERSION, at: g.now, email: "person@example.test", receipt: RECEIPT });
+
+  // Signed out, a new email: the earlier one is withdrawn with its receipt before the new one is sent.
+  const h = await world(t);
+  await overtake(h, { status: "opted_in", email: "old@example.test" }, { status: "opted_in", email: "new@example.test" });
+  assert.deepEqual(h.requests.map(request => request.body), [
+    { status: "opted_in", email: "old@example.test", installId: h.saved.installId, textVersion: UPDATES_CONSENT_VERSION },
+    { status: "withdrawn", receipt: RECEIPT },
+    { status: "opted_in", email: "new@example.test", installId: h.saved.installId, textVersion: UPDATES_CONSENT_VERSION }]);
+  assert.deepEqual(h.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: h.now, email: "new@example.test", receipt: RECEIPT });
+
+  // A failed withdrawal keeps the earlier receipt, and the next launch withdraws it before the new email is sent.
+  const k = await world(t);
+  k.failWithdrawals = 1;
+  await overtake(k, { status: "opted_in", email: "old@example.test" }, { status: "opted_in", email: "new@example.test" });
+  assert.deepEqual(k.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: k.now, email: "new@example.test", replacedReceipt: RECEIPT, pending: true });
+  k.launch();
+  await k.consent.sync();
+  assert.deepEqual(k.requests.map(request => request.body), [
+    { status: "opted_in", email: "old@example.test", installId: k.saved.installId, textVersion: UPDATES_CONSENT_VERSION },
+    { status: "withdrawn", receipt: RECEIPT },
+    { status: "withdrawn", receipt: RECEIPT },
+    { status: "opted_in", email: "new@example.test", installId: k.saved.installId, textVersion: UPDATES_CONSENT_VERSION }]);
+  assert.deepEqual(k.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: k.now, email: "new@example.test", receipt: RECEIPT });
 });
 
 test("nothing is asked or sent where it isn't available: a branded build, or no Cloud sign-in in this app", async t => {

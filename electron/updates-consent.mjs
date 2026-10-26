@@ -14,7 +14,8 @@ const STATE_WAIT_MS = 8_000;
 /**
  * The record kept on this computer. `account`: the MausBot Cloud account the answer belongs to (given while signed in,
  * or carried over to it). `email`: typed while signed out. `receipt`: the Admin's handle for that email-only answer,
- * the only way this computer can withdraw it. `pending`: the Admin has not recorded it yet.
+ * the only way this computer can withdraw it. `replacedReceipt`: the receipt of an earlier email that a new email
+ * replaced while it was being sent, withdrawn before anything else is sent. `pending`: the Admin has not recorded it yet.
  */
 export function parseUpdatesConsent(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -25,6 +26,7 @@ export function parseUpdatesConsent(value) {
     ...(text(value.account, 128) ? { account: value.account } : {}),
     ...(email ? { email } : {}),
     ...(typeof value.receipt === "string" && RECEIPT.test(value.receipt) ? { receipt: value.receipt } : {}),
+    ...(typeof value.replacedReceipt === "string" && RECEIPT.test(value.replacedReceipt) ? { replacedReceipt: value.replacedReceipt } : {}),
     ...(value.pending === true ? { pending: true } : {}),
   };
 }
@@ -58,18 +60,31 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
       const receipt = await client().updatesConsentByEmail({ email: local.email, installId: prefs.installId(), textVersion: local.version });
       if (sameAnswer()) return save({ ...local, receipt, pending: false });
       const latest = prefs.updatesConsent();
-      const sendsItsOwnOptIn = latest?.status === "opted_in" && latest.email;
-      if (latest && !latest.account && !latest.receipt && !sendsItsOwnOptIn) save({ ...latest, receipt });
+      if (!latest || latest.account) return;
+      if (latest.status === "opted_in" && latest.email) {
+        if (latest.email !== local.email) save({ ...latest, replacedReceipt: receipt });
+      } else if (!latest.receipt) save({ ...latest, receipt });
     } else if (local.status !== "opted_in" && local.receipt) {
       await client().withdrawUpdatesConsent({ status: local.status, receipt: local.receipt });
       if (sameAnswer()) save({ ...local, pending: false });
     } else save({ ...local, pending: false });
   }
 
+  async function withdrawReplaced(local) {
+    if (!local?.replacedReceipt) return local;
+    await client().withdrawUpdatesConsent({ status: "withdrawn", receipt: local.replacedReceipt });
+    const latest = prefs.updatesConsent();
+    if (latest?.replacedReceipt === local.replacedReceipt) {
+      const { replacedReceipt: _withdrawn, ...rest } = latest;
+      save(rest);
+    }
+    return prefs.updatesConsent();
+  }
+
   async function reconcile(sameAnswer, fresh) {
     const keep = record => { if (fresh()) save(record); };
     if (!client() || !await available()) return;
-    const local = prefs.updatesConsent(), who = signedIn();
+    const local = await withdrawReplaced(prefs.updatesConsent()), who = signedIn();
     if (!who) return signedOutSync(local, sameAnswer);
     if (local?.pending && local.account === who.id) {
       await client().recordUpdatesConsent(local.status, local.version);
@@ -123,7 +138,8 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
     choices++;
     save({ status, version: UPDATES_CONSENT_VERSION, at: now(), pending: true,
       ...(who ? { account: who.id } : {}), ...(email ? { email } : {}),
-      ...(!who && previous?.receipt && !newEmail ? { receipt: previous.receipt } : {}) });
+      ...(!who && previous?.receipt && !newEmail ? { receipt: previous.receipt } : {}),
+      ...(previous?.replacedReceipt ? { replacedReceipt: previous.replacedReceipt } : {}) });
     await sync().catch(() => {});
     return snapshot();
   }
