@@ -475,7 +475,7 @@ export function ModelPicker({
   const ownerOrAdmin = useOwnerOrAdmin();
   // A guest changes only their own conversation's model, never the shared bot's default; thread-only until
   // authority loads.
-  const simpleUpdatesBotDefault = ownerOrAdmin === true;
+  const mayChangeBotDefault = ownerOrAdmin === true;
   const [fullView, setFullView] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<{ botId: string; threadId: string;
     selection: ModelSelection; updateBotDefault: boolean; name: string } | null>(null);
@@ -657,7 +657,7 @@ export function ModelPicker({
   const pick = (instance: InstanceInfo, model: string) => {
     if (bot.busy || instance.policy) return;
     const nextSelection = modelSelectionForPick(selection, instance, model);
-    const updateBotDefault = !threadId || (simpleView ? simpleUpdatesBotDefault : scope === "bot");
+    const updateBotDefault = !threadId || (mayChangeBotDefault && (simpleView || scope === "bot"));
     const targets = updateBotDefault ? [currentTaskBot(profile, threadId ?? bot.threadId), profile] : [bot];
     if (targets.some((target) => modelSwitchNeedsAsk(approvalModeFor(target),
       state.instances.find((candidate) => candidate.instanceId === target.modelSelection.instanceId)?.driverKind,
@@ -740,7 +740,7 @@ export function ModelPicker({
     levels: [...activeLevels],
     current: selection.effort,
     onPick: (level: EffortLevel) => dispatch({ type: "setModel", botId: bot.id, threadId,
-      ...(threadId && simpleUpdatesBotDefault ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } }),
+      ...(threadId && mayChangeBotDefault ? { updateBotDefault: true } : {}), selection: { ...selection, effort: level } }),
   } : null;
 
   const botModelId = follows !== undefined && profile.modelSelection.instanceId === railInstance?.instanceId
@@ -897,7 +897,7 @@ export function ModelPicker({
               botModelId={botModelId}
               onPick={(model) => railInstance && pick(railInstance, model)}
               variantsRow={active?.capabilities?.modelVariants ? (
-                <ModelVariantRow compact wide bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId) && simpleUpdatesBotDefault}
+                <ModelVariantRow compact wide bot={bot} threadId={threadId} updateBotDefault={Boolean(threadId) && mayChangeBotDefault}
                   label={<span className="shrink-0 text-[12px] font-medium text-ink-secondary">{t("model.simple.reasoning")}</span>} />
               ) : undefined}
               effort={simpleEffort}
@@ -912,7 +912,7 @@ export function ModelPicker({
             onAddApiKeys={window.ogb?.remoteClient?.active === true ? undefined : openApiKeys} />}
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-            {threadId && (
+            {threadId && mayChangeBotDefault && (
               <div className="shrink-0 border-b border-hairline/40 px-3 py-2">
                 <div role="group" aria-label={t("model.scope.label")} className="flex gap-1">
                   {(["thread", "bot"] as const).map((value) => (
@@ -1115,7 +1115,7 @@ export function ModelPicker({
                     compact
                     bot={bot}
                     threadId={threadId}
-                    updateBotDefault={Boolean(threadId && scope === "bot")}
+                    updateBotDefault={Boolean(threadId && mayChangeBotDefault && scope === "bot")}
                     className="shrink-0 border-t border-hairline/40 px-4 py-2"
                     label={<span className="text-[13px] font-medium text-ink">{active?.capabilities?.modelVariants ? t("model.simple.reasoning") : t("model.section.effort")}</span>}
                   />

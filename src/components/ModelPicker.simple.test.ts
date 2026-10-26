@@ -49,7 +49,7 @@ vi.mock("@/state/store", async (importOriginal) => ({
   }),
 }));
 
-const { ClaudeAccountSelect, FollowBotModelRow, ModelEngineRail, ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
+const { ClaudeAccountSelect, EffortRow, FollowBotModelRow, ModelEngineRail, ModelPicker, ModelVariantRow, SIMPLE_POPOVER_WIDTH } = await import("./ModelPicker");
 const { SimpleModelPane } = await import("./SimpleModelPane");
 const { EngineSetup } = await import("./EngineSetup");
 const { InstanceProviderMark } = await import("./ProviderIcons");
@@ -455,11 +455,11 @@ describe("the model picker in Simple mode", () => {
 
   it("does not reuse the full picker's bot scope for a Cloud guest's Simple choice", () => {
     fixture.cloudHome = true;
-    fixture.ownerOrAdmin = false;
     fixture.advanced = true;
     const forBot = bot();
     const full = open(forBot);
     click(full.nodes.find((node) => node.type === "button" && node.props.children === "Thread + bot default"));
+    fixture.ownerOrAdmin = false;
     fixture.advanced = false;
     pane(render(forBot))!.props.onPick("claude-sonnet-5-5");
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ updateBotDefault: false }));
@@ -485,6 +485,20 @@ describe("the model picker in Simple mode", () => {
     const opened = open(bot());
     expect(pane(opened)).toBeUndefined();
     expect(opened.html).toContain("Only this thread");
+  });
+
+  it.each([false, null])("offers a guest no bot scope in the full picker and keeps its picks thread-only (owner status: %s)", (ownerOrAdmin) => {
+    fixture.advanced = true;
+    const forBot = bot();
+    const asOwner = open(forBot);
+    click(asOwner.nodes.find((node) => node.type === "button" && node.props.children === "Thread + bot default"));
+    fixture.ownerOrAdmin = ownerOrAdmin;
+    const asGuest = render(forBot);
+    expect(asGuest.html).not.toContain("Thread + bot default");
+    const effort = asGuest.nodes.find((node) => node.type === EffortRow)!;
+    expect(effort.props.updateBotDefault).toBe(false);
+    (asGuest.nodes.find((node) => (node.props.option as Option | undefined)?.id === "claude-sonnet-5-5")!.props.onPick as () => void)();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({ type: "setModel", updateBotDefault: false }));
   });
 
   it("shows the Simple pane inline for the bot panel's Default model and edits the bot's default", () => {
