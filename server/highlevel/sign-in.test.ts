@@ -151,7 +151,7 @@ describe("sign-in flow", () => {
     expect(await svc.connectWithToken(" pit-abcdefgh12345678 ", ` ${FAKE_LOCATION_ID} `)).toMatchObject({ state: "connected", kind: "token", location: { id: FAKE_LOCATION_ID, name: "Example Profiles" } });
     expect(svc.store.get()).toMatchObject({ kind: "token", accessToken: "pit-abcdefgh12345678", companyId: "company_1" });
     expect(svc.store.get()?.refreshToken).toBeUndefined();
-    svc.store.markNeedsSignIn("HighLevel rejected the Private Integration token.");
+    svc.store.markNeedsSignIn("HighLevel rejected the Private Integration token.", svc.store.get()!);
     expect(svc.status()).toMatchObject({ state: "needs-sign-in", kind: "token", problem: "HighLevel rejected the Private Integration token." });
   });
 });

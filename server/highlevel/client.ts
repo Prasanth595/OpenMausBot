@@ -3,7 +3,7 @@
 // in the tool list, so no later tool can grow a path to them.
 import { HIGHLEVEL_NOT_CONNECTED_TEXT, HIGHLEVEL_SIGNED_OUT_TEXT } from "./instructions.ts";
 import { HighLevelRelayError, type RelayTokens } from "./relay.ts";
-import type { HighLevelConnection, HighLevelStore } from "./store.ts";
+import { sameTokens, type HighLevelConnection, type HighLevelStore } from "./store.ts";
 
 export const HIGHLEVEL_API_URL = "https://services.leadconnectorhq.com";
 export const HIGHLEVEL_API_ENV = "OMB_HIGHLEVEL_API_URL";
@@ -210,7 +210,7 @@ export class HighLevelClient {
   private readonly now: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly budget = new Map<string, number[]>();
-  private refreshing: Promise<HighLevelConnection> | null = null;
+  private refreshing: { from: HighLevelConnection; promise: Promise<HighLevelConnection> } | null = null;
   /** `refused` holds a missing-permission answer so contact reads do not re-ask HighLevel on every call. */
   private customFieldCache: { locationId: string; at: number; fields: CustomFieldDefinition[]; refused?: HighLevelError } | null = null;
 
@@ -232,12 +232,27 @@ export class HighLevelClient {
     return current;
   }
 
-  /** One refresh at a time: a burst of calls that all see an expired token shares the rotation. */
+  /** A connection the call can no longer use as it holds it: disconnected, signed out, reconnected or rotated since. */
+  private replaced(connection: HighLevelConnection): boolean {
+    const current = this.store.get();
+    return !current || current.state !== "signed-in" || !sameTokens(current, connection);
+  }
+
+  /** What replaced `from` while a call used it: newer tokens for the same location carry the call on; another location ends it. */
+  private successor(from: HighLevelConnection): HighLevelConnection {
+    const current = this.store.get();
+    if (!current) throw new HighLevelError(HIGHLEVEL_NOT_CONNECTED_TEXT, { signedOut: true });
+    if (current.state === "needs-sign-in") throw new HighLevelError(HIGHLEVEL_SIGNED_OUT_TEXT, { signedOut: true });
+    if (current.locationId !== from.locationId) throw new HighLevelError("The HighLevel connection changed to another location while this call ran; run it again.", { status: 409 });
+    return current;
+  }
+
+  /** One refresh per token version: a burst of calls that all see an expired token shares the rotation. */
   private refresh(current: HighLevelConnection): Promise<HighLevelConnection> {
-    if (this.refreshing) return this.refreshing;
-    this.refreshing = (async () => {
+    if (this.refreshing && sameTokens(this.refreshing.from, current)) return this.refreshing.promise;
+    const promise = (async () => {
       if (current.kind !== "oauth" || !current.refreshToken) {
-        this.store.markNeedsSignIn("The saved token was rejected by HighLevel.");
+        this.store.markNeedsSignIn("The saved token was rejected by HighLevel.", current);
         throw new HighLevelError(HIGHLEVEL_SIGNED_OUT_TEXT, { status: 401, signedOut: true });
       }
       if (!this.refreshViaRelay) throw new HighLevelError("HighLevel's sign-in has expired and no OpenMausBot relay is configured to refresh it; ask the person to reconnect.", { signedOut: true });
@@ -245,8 +260,9 @@ export class HighLevelClient {
       try {
         tokens = await this.refreshViaRelay(current.refreshToken);
       } catch (error) {
+        if (this.replaced(current)) return this.successor(current);
         if (error instanceof HighLevelRelayError && error.status === 401) {
-          this.store.markNeedsSignIn("HighLevel rejected the saved sign-in (it was revoked or the app was uninstalled).");
+          this.store.markNeedsSignIn("HighLevel rejected the saved sign-in (it was revoked or the app was uninstalled).", current);
           throw new HighLevelError(HIGHLEVEL_SIGNED_OUT_TEXT, { status: 401, signedOut: true });
         }
         throw new HighLevelError("HighLevel's sign-in could not be refreshed right now (the OpenMausBot relay did not answer); try again in a minute.", { status: 503 });
@@ -254,11 +270,11 @@ export class HighLevelClient {
       const rotated = this.store.rotate({
         accessToken: tokens.accessToken, refreshToken: tokens.refreshToken,
         expiresAt: this.now() + tokens.expiresIn * 1000, scopes: tokens.scope,
-      });
-      if (!rotated) throw new HighLevelError(HIGHLEVEL_NOT_CONNECTED_TEXT, { signedOut: true });
-      return rotated;
-    })().finally(() => { this.refreshing = null; });
-    return this.refreshing;
+      }, current);
+      return rotated ?? this.successor(current);
+    })().finally(() => { if (this.refreshing?.promise === promise) this.refreshing = null; });
+    this.refreshing = { from: current, promise };
+    return promise;
   }
 
   private async spend(locationId: string): Promise<void> {
@@ -319,8 +335,12 @@ export class HighLevelClient {
       if (response.status === 401 && isScopeRefusal(body)) throw plainError(response.status, method, path, body);
       if (response.status === 401 && !refreshed) {
         refreshed = true;
+        if (this.replaced(connection)) {
+          connection = this.successor(connection);
+          continue;
+        }
         if (connection.kind === "token") {
-          this.store.markNeedsSignIn("HighLevel rejected the Private Integration token.");
+          this.store.markNeedsSignIn("HighLevel rejected the Private Integration token.", connection);
           throw new HighLevelError(HIGHLEVEL_SIGNED_OUT_TEXT, { status: 401, signedOut: true });
         }
         connection = await this.refresh(connection);
@@ -337,7 +357,7 @@ export class HighLevelClient {
         continue;
       }
       if (response.status === 401) {
-        this.store.markNeedsSignIn("HighLevel rejected the refreshed sign-in.");
+        this.store.markNeedsSignIn("HighLevel rejected the refreshed sign-in.", connection);
       }
       throw plainError(response.status, method, path, body);
     }
