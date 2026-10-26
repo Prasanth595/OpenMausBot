@@ -64,7 +64,17 @@ export interface HighLevelClientOptions {
 
 type Query = Record<string, string | number | undefined>;
 type Json = Record<string, unknown>;
-interface RequestOptions { query?: Query; body?: unknown; version?: string }
+interface RequestOptions {
+  query?: Query; body?: unknown; version?: string;
+  /** A POST HighLevel may receive twice with the same result (a search, adding tags). HighLevel takes no idempotency key. */
+  repeatable?: boolean;
+}
+
+const repeatable = (method: string, options: RequestOptions): boolean => method !== "POST" || options.repeatable === true;
+
+function unknownOutcome(path: string, cause: string, status: number): HighLevelError {
+  return new HighLevelError(`${cause}, and the ${thing(path)} may have been saved anyway. Check before trying again, so it is not added twice.`, { status });
+}
 
 const isRecord = (value: unknown): value is Json => Boolean(value) && typeof value === "object" && !Array.isArray(value);
 const str = (value: unknown): string | undefined => (typeof value === "string" && value !== "" ? value.slice(0, TEXT_MAX) : undefined);
@@ -306,6 +316,7 @@ export class HighLevelClient {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch {
+      if (!repeatable(method, options)) throw unknownOutcome(path, "HighLevel did not answer (the request timed out or the network failed)", 503);
       throw new HighLevelError("HighLevel did not answer (the request timed out or the network failed); try again in a minute.", { status: 503 });
     }
   }
@@ -320,7 +331,8 @@ export class HighLevelClient {
     }
   }
 
-  /** Bearer + Version; 401 → refresh once → retry; 429 → wait per headers (max 10 s) → retry once; 5xx → retry once. */
+  /** Bearer + Version; 401 → refresh once → retry; 429 → wait per headers (max 10 s) → retry once; 5xx → retry once, unless
+   * the call creates something: HighLevel may have committed it before failing. */
   async request(method: "GET" | "POST" | "PUT" | "DELETE", path: string, options: RequestOptions = {}): Promise<unknown> {
     assertAllowedPath(method, path);
     let connection = await this.connection();
@@ -351,6 +363,7 @@ export class HighLevelClient {
         await this.sleep(waitFromHeaders(response.headers, this.now()));
         continue;
       }
+      if (response.status >= 500 && !repeatable(method, options)) throw unknownOutcome(path, `HighLevel had trouble (${response.status})`, response.status);
       if (response.status >= 500 && !retried5xx) {
         retried5xx = true;
         await this.sleep(1_000);
@@ -448,7 +461,7 @@ export class HighLevelClient {
     if (input.phone) filters.push({ field: "phone", operator: "eq", value: input.phone });
     if (input.tag) filters.push({ field: "tags", operator: "eq", value: input.tag });
     const current = page(input.page, 1);
-    const raw = await this.request("POST", "/contacts/search", { body: compact({
+    const raw = await this.request("POST", "/contacts/search", { repeatable: true, body: compact({
       locationId, page: current, pageLimit: page(input.limit), query: input.query?.trim() || undefined, ...(filters.length ? { filters } : {}),
     }) });
     const definitions = await this.customFieldDefinitions().catch(() => []);
@@ -476,7 +489,7 @@ export class HighLevelClient {
   }
 
   async addTags(contactId: string, tags: string[]): Promise<{ contactId: string; tags: string[] }> {
-    const raw = await this.request("POST", `/contacts/${encodeURIComponent(contactId)}/tags`, { body: { tags } });
+    const raw = await this.request("POST", `/contacts/${encodeURIComponent(contactId)}/tags`, { repeatable: true, body: { tags } });
     return { contactId, tags: strings(isRecord(raw) ? raw.tags : []) };
   }
 

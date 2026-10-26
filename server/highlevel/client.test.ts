@@ -330,6 +330,33 @@ describe("HighLevelClient resilience", () => {
     await expect(client.getContact("contact_1")).rejects.toThrow("HighLevel is having trouble (502); try again in a minute.");
   });
 
+  it("never replays a create after a 5xx: HighLevel may have saved it", async () => {
+    const { client } = harness();
+    const posts = (path: string) => hl.calls.filter((call) => call.method === "POST" && call.path === path).length;
+    hl.overrides.push({ status: 502 });
+    await expect(client.addNote("contact_1", "Left voicemail")).rejects.toMatchObject({ status: 502, message: expect.stringMatching(/may have been saved anyway/u) });
+    expect(posts("/contacts/contact_1/notes")).toBe(1);
+    hl.overrides.push({ status: 500 });
+    await expect(client.addTask("contact_1", { title: "Follow up", dueDate: "2026-03-12T09:00:00.000Z" })).rejects.toThrow(/task.+may have been saved anyway/u);
+    expect(posts("/contacts/contact_1/tasks")).toBe(1);
+    hl.overrides.push({ status: 503 });
+    await expect(client.createOpportunity({ pipelineId: "pipe_1", contactId: "contact_1", name: "Deal" })).rejects.toThrow(/opportunity.+may have been saved anyway/u);
+    expect(posts("/opportunities/")).toBe(1);
+    // A search and adding tags are safe to send twice, so they still retry.
+    hl.overrides.push({ status: 503 });
+    expect((await client.searchContacts({ query: "ada" })).contacts).toHaveLength(1);
+    expect(posts("/contacts/search")).toBe(2);
+    hl.overrides.push({ status: 503 });
+    expect((await client.addTags("contact_1", ["a"])).tags).toEqual(["a"]);
+    expect(posts("/contacts/contact_1/tags")).toBe(2);
+  });
+
+  it("says a create may have been saved when HighLevel's answer is lost", async () => {
+    const { client } = harness({}, { fetch: async () => { throw new TypeError("socket hang up"); } });
+    await expect(client.addNote("contact_1", "x")).rejects.toMatchObject({ status: 503, message: expect.stringMatching(/may have been saved anyway/u) });
+    await expect(client.getContact("contact_1")).rejects.toThrow("HighLevel did not answer (the request timed out or the network failed); try again in a minute.");
+  });
+
   it("keeps under 90 calls per 10 s per location", async () => {
     const { client } = harness();
     for (let i = 0; i < BUDGET_CALLS; i++) await client.listPipelines();
