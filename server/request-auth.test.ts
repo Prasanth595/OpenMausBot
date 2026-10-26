@@ -16,7 +16,7 @@ import {
   isProxied,
   isSameOrigin,
   provesSameOrigin,
-  pairingOrigin,
+  phoneOrigin,
   parseCookies,
   requestOrigin,
   requestSource,
@@ -61,11 +61,13 @@ describe("origin and cookies", () => {
     expect(requestOrigin(request({}))).toBeNull();
   });
   it("never offers a loopback origin for a phone link", () => {
-    expect(pairingOrigin(request({ host: "127.0.0.1:8799" }))).toBeNull();
-    expect(pairingOrigin(request({ host: "[::1]:8799" }))).toBeNull();
-    expect(pairingOrigin(request({ host: "localhost:8799", "x-forwarded-proto": "https" }))).toBeNull();
-    expect(pairingOrigin(request({ host: "192.168.1.20:8799" }))).toBe("http://192.168.1.20:8799");
-    expect(pairingOrigin(request({ host: "bots.example.com", "x-forwarded-proto": "https" }))).toBe("https://bots.example.com");
+    expect(phoneOrigin("http://127.0.0.1:8799")).toBeNull();
+    expect(phoneOrigin("http://[::1]:8799")).toBeNull();
+    expect(phoneOrigin("https://localhost:8799")).toBeNull();
+    expect(phoneOrigin("not a url")).toBeNull();
+    expect(phoneOrigin(null)).toBeNull();
+    expect(phoneOrigin("http://192.168.1.20:8799")).toBe("http://192.168.1.20:8799");
+    expect(phoneOrigin("https://bots.example.com")).toBe("https://bots.example.com");
   });
   it("treats absent or matching Origin as same-origin, anything else as foreign", () => {
     expect(isSameOrigin(request({ host: "a.example" }))).toBe(true);
