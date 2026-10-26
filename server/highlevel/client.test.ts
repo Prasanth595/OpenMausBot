@@ -331,6 +331,37 @@ describe("HighLevelClient resilience", () => {
     expect(store.get()).toMatchObject({ accessToken: "pit-account-b-token", state: "signed-in" });
   });
 
+  it("gives up when the sign-in keeps changing under a call, without signing the newest one out", async () => {
+    let dispatched = 0;
+    const { client, store } = harness({}, {
+      fetch: async (url, init) => {
+        if (++dispatched > 20) throw new Error("fixture cutoff");
+        hl.tokens.clear();
+        store.put({ kind: "oauth", accessToken: `hl_access_churn_${dispatched}`, refreshToken: `hl_refresh_churn_${dispatched}`, expiresAt: clock + 3_600_000, locationId: FAKE_LOCATION_ID, scopes: "" });
+        return fetch(url, init);
+      },
+    });
+    await expect(client.listPipelines()).rejects.toMatchObject({ status: 503, signedOut: false, message: expect.stringMatching(/kept changing/u) });
+    expect(dispatched).toBeLessThanOrEqual(4);
+    expect(relay.refreshes).toBe(0);
+    expect(store.get()?.state).toBe("signed-in");
+  });
+
+  it("reports the changed location even after the call followed the sign-in as often as it may", async () => {
+    let dispatched = 0;
+    const { client, store } = harness({}, {
+      fetch: async (url, init) => {
+        dispatched++;
+        hl.tokens.clear();
+        const elsewhere = dispatched === 4;
+        store.put({ kind: "oauth", accessToken: `hl_access_churn_${dispatched}`, refreshToken: `hl_refresh_churn_${dispatched}`, expiresAt: clock + 3_600_000, locationId: elsewhere ? "loc_account_b" : FAKE_LOCATION_ID, scopes: "" });
+        return fetch(url, init);
+      },
+    });
+    await expect(client.listPipelines()).rejects.toMatchObject({ status: 409, message: expect.stringMatching(/connection changed/u) });
+    expect(dispatched).toBe(4);
+  });
+
   it("refreshes ahead of expiry without waiting for a 401", async () => {
     const { client } = harness({ expiresAt: clock + 30_000 });
     await client.listPipelines();

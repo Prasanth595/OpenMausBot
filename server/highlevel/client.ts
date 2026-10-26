@@ -15,6 +15,7 @@ export const BUDGET_CALLS = 90;
 export const BUDGET_WINDOW_MS = 10_000;
 const BACKOFF_MAX_MS = 10_000;
 const REFRESH_MARGIN_MS = 60_000;
+const MAX_SUCCESSORS = 3;
 const REQUEST_TIMEOUT_MS = 30_000;
 const MAX_RESPONSE_BYTES = 4_000_000;
 const CUSTOM_FIELDS_TTL_MS = 10 * 60_000;
@@ -368,6 +369,12 @@ export class HighLevelClient {
     let refreshed = false;
     let waited = false;
     let retried5xx = false;
+    let successors = 0;
+    const successor = (from: HighLevelConnection) => {
+      const next = this.successor(from);
+      if (++successors > MAX_SUCCESSORS) throw new HighLevelError("HighLevel's sign-in kept changing while this call ran; try again in a minute.", { status: 503 });
+      return next;
+    };
     for (;;) {
       const response = await this.dispatch(connection, method, path, options);
       if (response.ok) return this.body(response, method, path, options);
@@ -375,7 +382,7 @@ export class HighLevelClient {
       // A live token that lacks one scope: name the permission; refreshing would not add it and the token still works.
       if (response.status === 401 && isScopeRefusal(body)) throw plainError(response.status, method, path, body);
       if (response.status === 401 && this.replaced(connection)) {
-        connection = this.successor(connection);
+        connection = successor(connection);
         continue;
       }
       if (response.status === 401 && !refreshed) {
@@ -385,7 +392,7 @@ export class HighLevelClient {
         }
         const rotated = await this.refresh(connection);
         refreshed = rotated !== null;
-        connection = rotated ?? this.successor(connection);
+        connection = rotated ?? successor(connection);
         continue;
       }
       if (response.status === 429 && !waited) {
