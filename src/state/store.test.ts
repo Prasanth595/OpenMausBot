@@ -3137,3 +3137,44 @@ describe("fleet order from the server", () => {
     expect(reducer(hydrated, { type: "botsOrdered", botIds: ["a", "b", "c", "d"] })).toBe(hydrated);
   });
 });
+
+describe("a snapshot taken while a send is on its way", () => {
+  const line = (id: string, extra: Partial<Message> = {}): Message => ({ id, at: 1, role: "user", kind: "text", text: id, ...extra });
+  const ids = (messages: Message[]) => messages.map((message) => message.id);
+  const bot: Bot = {
+    id: "b1", threadId: "t1", name: "Ada", title: "", description: "", notifications: false, color: "green", unread: false,
+    modelSelection: { instanceId: "acp", model: "fake" }, messages: [line("a")], activeLeafId: "a",
+  };
+  const room: Group = {
+    id: "room", name: "Room", threadId: "rt", memberIds: [], createdAt: 1,
+    defaultResponder: { kind: "everyone" }, bulletin: "", unread: false, messages: [line("r")],
+  };
+  const sent = [
+    { type: "send", botId: "b1", text: "hi", sendId: "s1" },
+    { type: "sendGroup", groupId: "room", text: "hi", sendId: "s2" },
+  ].reduce((state, action) => reducer(state, action as Action), { ...initialState, bots: [bot], groups: [room] });
+  const hydrate = (bots: Bot[], groups: Group[]) => reducer(sent, { type: "hydrate", bots, groups, computerControl: {} });
+
+  it("keeps the sends it does not carry yet, and the bot's leaf on its send", () => {
+    const next = hydrate([bot], [room]);
+    expect(ids(visibleMessages(next.bots[0]!))).toEqual(["a", "optimistic-s1"]);
+    expect(ids(next.groups[0]!.messages)).toEqual(["r", "optimistic-s2"]);
+  });
+
+  it("shows each send once when it already carries it", () => {
+    const next = hydrate(
+      [{ ...bot, messages: [line("a"), line("m1", { sendId: "s1", parentId: "a" })], activeLeafId: "m1" }],
+      [{ ...room, messages: [line("r"), line("m2", { sendId: "s2" })] }],
+    );
+    expect(ids(next.bots[0]!.messages)).toEqual(["a", "m1"]);
+    expect(next.bots[0]!.activeLeafId).toBe("m1");
+    expect(ids(next.groups[0]!.messages)).toEqual(["r", "m2"]);
+  });
+
+  it("does not carry a send into another thread", () => {
+    const next = hydrate([{ ...bot, threadId: "t2", messages: [line("b")], activeLeafId: "b" }], [{ ...room, threadId: "rt2", messages: [] }]);
+    expect(ids(next.bots[0]!.messages)).toEqual(["b"]);
+    expect(next.bots[0]!.activeLeafId).toBe("b");
+    expect(next.groups[0]!.messages).toEqual([]);
+  });
+});
