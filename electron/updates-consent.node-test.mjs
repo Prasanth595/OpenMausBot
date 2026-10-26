@@ -184,17 +184,73 @@ test("a new answer given while the previous one is still on its way wins on this
 
   // A failed withdrawal keeps the earlier receipt, and the next launch withdraws it before the new email is sent.
   const k = await world(t);
-  k.failWithdrawals = 1;
+  k.failWithdrawals = 2;
   await overtake(k, { status: "opted_in", email: "old@example.test" }, { status: "opted_in", email: "new@example.test" });
-  assert.deepEqual(k.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: k.now, email: "new@example.test", replacedReceipt: receiptOf("old@example.test"), pending: true });
+  assert.deepEqual(k.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: k.now, email: "new@example.test", replacedReceipts: [receiptOf("old@example.test")], pending: true });
   k.launch();
   await k.consent.sync();
   assert.deepEqual(k.requests.map(request => request.body), [
     { status: "opted_in", email: "old@example.test", installId: k.saved.installId, textVersion: UPDATES_CONSENT_VERSION },
     { status: "withdrawn", receipt: receiptOf("old@example.test") },
     { status: "withdrawn", receipt: receiptOf("old@example.test") },
+    { status: "withdrawn", receipt: receiptOf("old@example.test") },
     { status: "opted_in", email: "new@example.test", installId: k.saved.installId, textVersion: UPDATES_CONSENT_VERSION }]);
   assert.deepEqual(k.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: k.now, email: "new@example.test", receipt: receiptOf("new@example.test") });
+});
+
+test("signed out, a new email chosen later: the earlier email is withdrawn before the new one is sent", async t => {
+  const f = await world(t);
+  await f.consent.choose({ status: "opted_in", email: "old@example.test" });
+  await f.consent.choose({ status: "opted_in", email: "new@example.test" });
+  assert.deepEqual(Object.fromEntries(f.emails), { "old@example.test": "withdrawn", "new@example.test": "opted_in" });
+  assert.deepEqual(f.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now, email: "new@example.test", receipt: receiptOf("new@example.test") });
+});
+
+test("signed out, offline: a withdrawal not sent yet still reaches the Admin when a new email follows it", async t => {
+  const f = await world(t);
+  await f.consent.choose({ status: "opted_in", email: "old@example.test" });
+  f.down = true;
+  await f.consent.choose({ status: "withdrawn" });
+  await f.consent.choose({ status: "opted_in", email: "new@example.test" });
+  f.down = false;
+  f.launch();
+  await f.consent.sync();
+  assert.deepEqual(Object.fromEntries(f.emails), { "old@example.test": "withdrawn", "new@example.test": "opted_in" });
+  assert.deepEqual(f.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now, email: "new@example.test", receipt: receiptOf("new@example.test") });
+});
+
+test("an email-only opt-in is withdrawn once the person signs in and the account holds the answer", async t => {
+  const f = await world(t);
+  await f.consent.choose({ status: "opted_in", email: "old@example.test" });
+  await f.signInNow();
+  await f.consent.sync();
+  assert.equal(f.account.status, "opted_in", "an account without an answer gets this computer's");
+  assert.deepEqual(Object.fromEntries(f.emails), { "old@example.test": "withdrawn" });
+  assert.deepEqual(f.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now, account: "account-1", email: "old@example.test" });
+
+  const g = await world(t);
+  await g.consent.choose({ status: "opted_in", email: "old@example.test" });
+  g.account = { status: "declined", textVersion: "2026-10-23", source: "cloud_page", decidedAt: g.now };
+  await g.signInNow();
+  await g.consent.sync();
+  assert.deepEqual(Object.fromEntries(g.emails), { "old@example.test": "withdrawn" }, "an account's own answer replaces it too");
+  assert.equal(g.saved.updatesConsent.status, "declined");
+});
+
+test("signing in while an email opt-in is on its way: an answer given on the account still withdraws the email", async t => {
+  const f = await world(t);
+  let release; f.gate = new Promise(resolve => { release = resolve; });
+  const sending = f.consent.choose({ status: "opted_in", email: "old@example.test" });
+  await until(() => f.requests.length === 1);
+  await f.signInNow();
+  const changing = f.consent.choose({ status: "declined" });
+  await until(() => f.saved.updatesConsent.status === "declined");
+  f.gate = null; release();
+  await Promise.all([sending, changing]);
+  await f.consent.sync();
+  assert.equal(f.account.status, "declined");
+  assert.deepEqual(Object.fromEntries(f.emails), { "old@example.test": "withdrawn" });
+  assert.equal(f.saved.updatesConsent.pending, undefined);
 });
 
 test("nothing is asked or sent where it isn't available: a branded build, or no Cloud sign-in in this app", async t => {
@@ -213,6 +269,9 @@ test("the record on disk: only a whole, known answer is kept", () => {
     assert.equal(parseUpdatesConsent(value), null, JSON.stringify(value));
   assert.deepEqual(parseUpdatesConsent({ status: "opted_in", version: "2026-10-23", at: 5, email: "a@b.test", receipt: "short", account: "x\n", pending: "yes", extra: 1 }),
     { status: "opted_in", version: "2026-10-23", at: 5, email: "a@b.test" });
+  assert.deepEqual(parseUpdatesConsent({ status: "withdrawn", version: "2026-10-23", at: 5, replacedReceipts: [RECEIPT, "short", 7, RECEIPT] }),
+    { status: "withdrawn", version: "2026-10-23", at: 5, replacedReceipts: [RECEIPT] });
+  assert.deepEqual(parseUpdatesConsent({ status: "withdrawn", version: "2026-10-23", at: 5, replacedReceipts: RECEIPT }), { status: "withdrawn", version: "2026-10-23", at: 5 });
   let saved = null;
   const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
   assert.equal(prefs.setUpdatesConsent({ status: "maybe" }), false);

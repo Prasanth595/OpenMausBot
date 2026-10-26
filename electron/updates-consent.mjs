@@ -14,8 +14,9 @@ const STATE_WAIT_MS = 8_000;
 /**
  * The record kept on this computer. `account`: the MausBot Cloud account the answer belongs to (given while signed in,
  * or carried over to it). `email`: typed while signed out. `receipt`: the Admin's handle for that email-only answer,
- * the only way this computer can withdraw it. `replacedReceipt`: the receipt of an earlier email that a new email
- * replaced while it was being sent, withdrawn before anything else is sent. `pending`: the Admin has not recorded it yet.
+ * the only way this computer can withdraw it. `replacedReceipts`: receipts of email-only opt-ins that a later answer
+ * replaced (another email, or an account), each kept until its withdrawal succeeds. `pending`: the Admin has not
+ * recorded it yet.
  */
 export function parseUpdatesConsent(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
@@ -26,9 +27,15 @@ export function parseUpdatesConsent(value) {
     ...(text(value.account, 128) ? { account: value.account } : {}),
     ...(email ? { email } : {}),
     ...(typeof value.receipt === "string" && RECEIPT.test(value.receipt) ? { receipt: value.receipt } : {}),
-    ...(typeof value.replacedReceipt === "string" && RECEIPT.test(value.replacedReceipt) ? { replacedReceipt: value.replacedReceipt } : {}),
+    ...withReplacedReceipts({}, Array.isArray(value.replacedReceipts) ? value.replacedReceipts.filter(receipt => typeof receipt === "string" && RECEIPT.test(receipt)) : []),
     ...(value.pending === true ? { pending: true } : {}),
   };
+}
+
+function withReplacedReceipts(record, receipts, withdrawn = null) {
+  const { replacedReceipts = [], ...rest } = record;
+  const left = [...new Set([...replacedReceipts, ...receipts])].filter(receipt => receipt && receipt !== withdrawn);
+  return left.length ? { ...rest, replacedReceipts: left } : rest;
 }
 
 /** The Admin's answer for an account: null while it has no recorded choice. Anything else unreadable throws. */
@@ -60,46 +67,49 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
       const receipt = await client().updatesConsentByEmail({ email: local.email, installId: prefs.installId(), textVersion: local.version });
       if (sameAnswer()) return save({ ...local, receipt, pending: false });
       const latest = prefs.updatesConsent();
-      if (!latest || latest.account) return;
-      if (latest.status === "opted_in" && latest.email) {
-        if (latest.email !== local.email) save({ ...latest, replacedReceipt: receipt });
-      } else if (!latest.receipt) save({ ...latest, receipt });
+      if (!latest) return;
+      if (!latest.account && latest.status !== "opted_in" && latest.email === local.email && !latest.receipt) save({ ...latest, receipt });
+      else save(withReplacedReceipts(latest, [receipt]));
     } else if (local.status !== "opted_in" && local.receipt) {
       await client().withdrawUpdatesConsent({ status: local.status, receipt: local.receipt });
       if (sameAnswer()) save({ ...local, pending: false });
     } else save({ ...local, pending: false });
   }
 
-  async function withdrawReplaced(local) {
-    if (!local?.replacedReceipt) return local;
-    await client().withdrawUpdatesConsent({ status: "withdrawn", receipt: local.replacedReceipt });
-    const latest = prefs.updatesConsent();
-    if (latest?.replacedReceipt === local.replacedReceipt) {
-      const { replacedReceipt: _withdrawn, ...rest } = latest;
-      save(rest);
+  async function withdrawReplaced() {
+    for (let receipt; (receipt = prefs.updatesConsent()?.replacedReceipts?.[0]);) {
+      await client().withdrawUpdatesConsent({ status: "withdrawn", receipt });
+      const latest = prefs.updatesConsent();
+      if (latest?.replacedReceipts?.includes(receipt)) save(withReplacedReceipts(latest, [], receipt));
     }
-    return prefs.updatesConsent();
   }
 
   async function reconcile(sameAnswer, fresh) {
-    const keep = record => { if (fresh()) save(record); };
     if (!client() || !await available()) return;
-    const local = await withdrawReplaced(prefs.updatesConsent()), who = signedIn();
+    await withdrawReplaced();
+    await send(sameAnswer, fresh);
+    await withdrawReplaced();
+  }
+
+  async function send(sameAnswer, fresh) {
+    const local = prefs.updatesConsent(), who = signedIn();
     if (!who) return signedOutSync(local, sameAnswer);
+    const { receipt, ...rest } = local ?? {};
+    const keep = record => { if (fresh()) save(withReplacedReceipts(record, [receipt])); };
     if (local?.pending && local.account === who.id) {
       await client().recordUpdatesConsent(local.status, local.version);
-      keep({ ...local, pending: false });
+      keep({ ...rest, pending: false });
       return;
     }
     const remote = parseAccountConsent(await client().updatesConsent());
     if (remote) {
       if (local?.status !== remote.status || local.account !== who.id || local.pending)
-        keep({ status: remote.status, version: remote.textVersion, at: now(), account: who.id, ...(local?.email ? { email: local.email } : {}) });
+        keep({ status: remote.status, version: remote.textVersion, at: now(), account: who.id, ...(local?.email ? { email: local.email } : {}), replacedReceipts: local?.replacedReceipts });
       return;
     }
     if (!local) return;
     await client().recordUpdatesConsent(local.status, local.version);
-    keep({ ...local, account: who.id, pending: false });
+    keep({ ...rest, account: who.id, pending: false });
   }
 
   async function settle() {
@@ -134,12 +144,12 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
     if (input.email && !typed) throw new Error("Enter a valid email address.");
     const who = signedIn(), previous = prefs.updatesConsent();
     const email = !who && status === "opted_in" ? typed ?? previous?.email ?? null : previous?.email ?? null;
-    const newEmail = status === "opted_in" && email !== null;
+    const sameReceipt = !who && !(status === "opted_in" && email !== null);
     choices++;
-    save({ status, version: UPDATES_CONSENT_VERSION, at: now(), pending: true,
+    save(withReplacedReceipts({ status, version: UPDATES_CONSENT_VERSION, at: now(), pending: true,
       ...(who ? { account: who.id } : {}), ...(email ? { email } : {}),
-      ...(!who && previous?.receipt && !newEmail ? { receipt: previous.receipt } : {}),
-      ...(previous?.replacedReceipt ? { replacedReceipt: previous.replacedReceipt } : {}) });
+      ...(sameReceipt && previous?.receipt ? { receipt: previous.receipt } : {}), replacedReceipts: previous?.replacedReceipts },
+    sameReceipt ? [] : [previous?.receipt]));
     await sync().catch(() => {});
     return snapshot();
   }
