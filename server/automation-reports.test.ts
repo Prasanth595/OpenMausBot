@@ -430,6 +430,13 @@ describe("automation reports", () => {
     expect([missed, missedAfterRequeue, unstarted, queued, failed].map((run) => f.reports.speaksFor(run))).toEqual([false, false, false, true, true]);
   });
 
+  it("leaves a missed run of a routine that delivers to the brief to the brief, with no card in the chat", () => {
+    const f = fixture();
+    const missed = f.finished(null, "Watch", { status: "missed", threadId: undefined, deliver: "brief", error: "This computer was offline" });
+    const unstarted = f.finished(null, "Watch", { status: "failed", threadId: undefined, deliver: "brief", error: "Could not create a task for this run" });
+    expect([missed, unstarted].map((run) => f.reports.speaksFor(run))).toEqual([true, true]);
+  });
+
   it("knows which conversations are a run's own whose last reply goes to another chat", () => {
     const f = fixture();
     const own = f.finished(null, "Inbox brief", { status: "running" });
