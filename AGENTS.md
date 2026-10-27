@@ -43,3 +43,7 @@ Write the smallest correct fix:
 - **Clean context at 40–50%:** Do not let a conversation grow past 50% capacity into middle-context attention loss. Produce a structured `HANDOFF.md` or Machine Packet and start a fresh turn/thread.
 - **Concise communication:** Speak in concise, simplified technical English. Report only what the operator needs to make a decision. Eliminate conversational filler and unsolicited explanations.
 - **OAuth subscription & FREE models ONLY — NO API CALLS:** Never use metered, pay-per-token API keys (e.g. OpenAI/Anthropic/xAI/paid OpenRouter API keys). All bots, tasks, and subagents MUST run exclusively on OAuth subscription accounts (Claude Code CLI / Pro / Max subscription, Codex / ChatGPT Plus/Pro subscription via PKCE, Cursor subscription) or explicitly FREE models/tiers (Google Gemini via Antigravity OAuth, free local engines like Hermes/Qwen/Ollama, free tiers). Subagents must use the fastest/cheapest subscription or free model available.
+- **Recommended Free Models:**
+  - **Fast Subagent Explorer & Coding:** `nvidia/nemotron-3.5-bolt-e4b` (NVIDIA free tier) or `cohere/north-mini-code:free` (OpenRouter).
+  - **Deep Reasoning & 1M-Context Audit:** `nvidia/nemotron-3-ultra-550b-a55b:free` (1,000,000 context, 550B MoE) or `deepseek-ai/DeepSeek-R1` (HF/local).
+  - **Auto-Failover Zero-Cost Route:** `openrouter/free` (automatically routes to the healthiest available free tool model).

@@ -11,8 +11,9 @@ export const FREE_MODEL_PREFERENCE: readonly string[] = [
   "google/gemma-4-31b-it:free",
   "poolside/laguna-s-2.1:free",
   "nvidia/nemotron-3.5-lightning:free",
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "cohere/north-mini-code:free",
 ];
-
 export const OPENROUTER_FAILURES = {
   credits: "This model needs OpenRouter credit (HTTP 402). Pick a model marked (free), or add credit at openrouter.ai/credits.",
   privacy: "OpenRouter's privacy settings block this free model (HTTP 404). Allow free model endpoints at openrouter.ai/settings/privacy, or pick another model.",
