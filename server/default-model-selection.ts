@@ -28,29 +28,48 @@ export function withInstanceConfig<T extends SelectableInstance>(instances: read
   }));
 }
 
-const API_KEY_DRIVERS: ReadonlySet<string> = new Set([
-  "openai-compat",
+const PAID_API_DRIVERS: ReadonlySet<string> = new Set([
   "openai",
   "claudeApi",
   "xaiApi",
   "mistral",
-  "cerebras",
-  "groq",
-  "openrouter",
 ]);
 
+/** Returns true if the instance or model belongs to a free tier (OpenRouter :free models, NVIDIA free tier,
+ * Hugging Face serverless free tier, Cerebras/Groq free tier, or local engines). */
+export function isFreeTierInstance(instance: SelectableInstance, modelId?: string): boolean {
+  const id = instance.instanceId.toLowerCase();
+  const driver = instance.driverKind.toLowerCase();
+  const rawModel = typeof modelId === "string" ? modelId : typeof instance.models?.default === "string" ? instance.models.default : "";
+  const activeModel = rawModel.toLowerCase();
+
+  // Explicit free naming in OpenMaus (e.g. hel1-openrouter-free, hel1-nvidia-free, huggingface-free)
+  if (id.includes("free") || id.includes("local")) return true;
+
+  // OpenRouter explicit free model suffix (e.g. "nvidia/nemotron-3.5-lightning:free")
+  if (activeModel.endsWith(":free") || activeModel.includes("/free") || activeModel.includes("free-")) return true;
+
+  // Providers with dedicated developer free tiers
+  if (driver === "cerebras" || driver === "groq") return true;
+  if (id.includes("nvidia") || id.includes("huggingface") || id.includes("hf-")) return true;
+
+  return false;
+}
+
 /** Returns true if the instance uses an OAuth subscription (Claude Code CLI, ChatGPT/Codex PKCE, Cursor, Antigravity)
- * or is a local/free engine. Returns false for paid metered API key providers. */
-export function isSubscriptionOrFreeInstance(instance: SelectableInstance): boolean {
+ * or is an explicitly free model/tier. Returns false for paid metered API key providers. */
+export function isSubscriptionOrFreeInstance(instance: SelectableInstance, modelId?: string): boolean {
+  // Explicit free tier models/instances are always allowed
+  if (isFreeTierInstance(instance, modelId)) return true;
+
   if (instance.snapshot.account?.method === "api-key") return false;
   if (instance.snapshot.billing === "metered") return false;
   if (instance.access === "custom" || instance.access === "api") return false;
-  if (API_KEY_DRIVERS.has(instance.driverKind)) return false;
   if (instance.snapshot.billing === "subscription" || instance.snapshot.chatgptPlan) return true;
   if (instance.snapshot.account?.method === "login") return true;
+  if (PAID_API_DRIVERS.has(instance.driverKind)) return false;
   return ["claudeAgent", "codex", "cursorAgent", "antigravity", "hermesAgent", "qwenAgent", "piAgent"].includes(instance.driverKind);
 }
-
 /** A custom endpoint brings its own credential, so its sign-in state does not count. */
 export function signedOut(instance: SelectableInstance): boolean {
   return instance.snapshot.state === "available" && instance.access !== "custom" && instance.snapshot.authenticated === false;
@@ -76,7 +95,7 @@ export function selectDefaultModelSelection(
   if (preferred && (preferred.instanceId || preferred.model)) {
     const instance = instances.find((candidate) => candidate.instanceId === preferred.instanceId);
     if (
-      (subscriptionOrFreeOnly && (!instance || !isSubscriptionOrFreeInstance(instance))) ||
+      (subscriptionOrFreeOnly && (!instance || !isSubscriptionOrFreeInstance(instance, preferred.model))) ||
       instance?.snapshot.state !== "available" ||
       instance.enabled === false ||
       signedOut(instance) ||
@@ -93,7 +112,7 @@ export function selectDefaultModelSelection(
     if (selection.effort && !instance.capabilities?.effortLevels?.includes(selection.effort)) delete selection.effort;
     return selection;
   }
-  const filtered = subscriptionOrFreeOnly ? instances.filter(isSubscriptionOrFreeInstance) : instances;
+  const filtered = subscriptionOrFreeOnly ? instances.filter((inst) => isSubscriptionOrFreeInstance(inst)) : instances;
   const available = filtered.filter((instance) => instance.enabled !== false && instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && defaultModel(instance));
   const ready = available.filter((instance) => readyToRun(instance, context));
   const company = context.company;

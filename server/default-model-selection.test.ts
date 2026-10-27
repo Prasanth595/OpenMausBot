@@ -40,6 +40,52 @@ describe("new bot default model selection", () => {
       .toEqual({ instanceId: "claude", model: "claude-default" });
     expect(isSubscriptionOrFreeInstance(claude)).toBe(true);
   });
+  it("accepts OpenRouter free models, NVIDIA free tier, and Hugging Face free models under subscriptionOrFreeOnly", () => {
+    const openrouterInstance: SelectableInstance = {
+      ...codex,
+      instanceId: "openrouter",
+      driverKind: "openai-compat",
+      models: {
+        default: "meta-llama/llama-3.3-70b-instruct:free",
+        options: [
+          { id: "meta-llama/llama-3.3-70b-instruct:free", label: "Llama Free" },
+          { id: "anthropic/claude-3.5-sonnet", label: "Claude Paid" },
+        ],
+      },
+    };
+
+    // OpenRouter free model with :free suffix is ALLOWED
+    const freePick = { instanceId: "openrouter", model: "meta-llama/llama-3.3-70b-instruct:free" };
+    expect(selectDefaultModelSelection([openrouterInstance], freePick, { subscriptionOrFreeOnly: true })).toEqual(freePick);
+    expect(isSubscriptionOrFreeInstance(openrouterInstance, freePick.model)).toBe(true);
+
+    // OpenRouter paid model without :free suffix is REFUSED
+    const paidPick = { instanceId: "openrouter", model: "anthropic/claude-3.5-sonnet" };
+    expect(selectDefaultModelSelection([openrouterInstance], paidPick, { subscriptionOrFreeOnly: true })).toEqual({ instanceId: "", model: "" });
+    expect(isSubscriptionOrFreeInstance(openrouterInstance, paidPick.model)).toBe(false);
+
+    // NVIDIA free tier instance is ALLOWED
+    const nvidiaInstance: SelectableInstance = {
+      ...codex,
+      instanceId: "hel1-nvidia-free",
+      driverKind: "openai-compat",
+      models: { default: "nvidia/nemotron-3.5-bolt-e4b", options: [{ id: "nvidia/nemotron-3.5-bolt-e4b", label: "Nemotron" }] },
+    };
+    expect(isSubscriptionOrFreeInstance(nvidiaInstance)).toBe(true);
+    expect(selectDefaultModelSelection([nvidiaInstance], undefined, { subscriptionOrFreeOnly: true }))
+      .toEqual({ instanceId: "hel1-nvidia-free", model: "nvidia/nemotron-3.5-bolt-e4b" });
+
+    // Hugging Face free instance is ALLOWED
+    const hfInstance: SelectableInstance = {
+      ...codex,
+      instanceId: "huggingface-free",
+      driverKind: "openai-compat",
+      models: { default: "Qwen/Qwen2.5-Coder-32B-Instruct", options: [{ id: "Qwen/Qwen2.5-Coder-32B-Instruct", label: "Qwen" }] },
+    };
+    expect(isSubscriptionOrFreeInstance(hfInstance)).toBe(true);
+    expect(selectDefaultModelSelection([hfInstance], undefined, { subscriptionOrFreeOnly: true }))
+      .toEqual({ instanceId: "huggingface-free", model: "Qwen/Qwen2.5-Coder-32B-Instruct" });
+  });
   it("keeps a saved custom endpoint even when its account sign-in is false", () => {
     const instance = { ...codex, access: "custom" as const, snapshot: { state: "available", authenticated: false } satisfies ProviderSnapshot };
     const preferred = { instanceId: "codex", model: "selected-model" };
