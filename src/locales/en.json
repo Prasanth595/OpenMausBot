@@ -450,6 +450,7 @@
   "approval.applied.teamAdded": "added {names}",
   "approval.applied.teamUpdated": "updated {names}",
   "approval.applied.botDeleted": "{name} deleted {target}",
+  "approval.applied.wait": "{name} is waiting for {title}",
   "approval.applied.teamMemory": "{name} saved to department memory: {title}",
   "approval.applied.field.name": "name",
   "approval.applied.field.title": "title",

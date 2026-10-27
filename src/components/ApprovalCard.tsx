@@ -125,7 +125,7 @@ function plainWhen(schedule: RoutineRequestSchedule): string {
   return scheduleLabel(schedule);
 }
 
-export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean } | undefined {
+export function appliedChange(card: OptionCardData, name: string): { line: string; canUndo: boolean; undoLabel?: LocaleKey } | undefined {
   const routine = card.routineRequest;
   if (routine) {
     const operation = routine.operation;
@@ -144,6 +144,8 @@ export function appliedChange(card: OptionCardData, name: string): { line: strin
             : false;
     return { line: t(AUTOMATION_APPLIED_LINE[operation.action], { name, title }), canUndo };
   }
+  const wait = card.waitRequest;
+  if (wait) return { line: t("approval.applied.wait", { name, title: wait.label }), canUndo: !wait.settled, undoLabel: "common.cancel" };
   const webhook = card.webhookRequest;
   if (webhook) {
     const target = webhook.operation.forBot ? ` · ${t("approval.applied.forBot", { target: `@${webhook.operation.forBot.name}` })}` : "";
@@ -196,7 +198,7 @@ function AppliedChangeLine({
   card: OptionCardData;
   name: string;
   threadId?: string;
-  summary: { line: string; canUndo: boolean };
+  summary: { line: string; canUndo: boolean; undoLabel?: LocaleKey };
 }) {
   const [open, setOpen] = useState(false);
   const [undoing, setUndoing] = useState(false);
@@ -254,7 +256,7 @@ function AppliedChangeLine({
             disabled={undoing}
             className={cn(TEXT_ACTION, "text-accent disabled:opacity-60")}
           >
-            {undoing ? t("approval.applied.undoing") : t("approval.applied.undo")}
+            {undoing ? t("approval.applied.undoing") : t(summary.undoLabel ?? "approval.applied.undo")}
           </button>
         )}
         {canShare && (

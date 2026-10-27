@@ -789,4 +789,19 @@ describe("one approval, one card", () => {
     expect(panel).toContain("Send to Slack?");
     expect(panel).toContain("{&quot;text&quot;:&quot;hi&quot;}");
   });
+
+  it("shows a wait with a follow-up as one line with Cancel, and no Cancel once it ended", () => {
+    const message = (settled?: "fired"): Message => ({
+      id: "m1", at: 1, role: "bot", kind: "options",
+      card: {
+        title: "Waiting: the build finishes", subtitle: "When the build finishes, Pepper will: Deploy it.",
+        options: [], answered: "allow", dismissed: true, autoApplied: true, requestId: "w1", tool: "wait_until",
+        waitRequest: { waitId: "w1", label: "the build finishes", followUp: "Deploy it.", ...(settled ? { settled } : {}) },
+      },
+    });
+    const open = renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Pepper" }, message: message(), threadId: "t1" }));
+    expect(open).toContain("Pepper is waiting for the build finishes");
+    expect(open).toContain(">Cancel<");
+    expect(renderToStaticMarkup(createElement(ApprovalCard, { bot: { name: "Pepper" }, message: message("fired"), threadId: "t1" }))).not.toContain(">Cancel<");
+  });
 });
