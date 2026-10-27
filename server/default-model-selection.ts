@@ -70,6 +70,25 @@ export function isSubscriptionOrFreeInstance(instance: SelectableInstance, model
   if (PAID_API_DRIVERS.has(instance.driverKind)) return false;
   return ["claudeAgent", "codex", "cursorAgent", "antigravity", "hermesAgent", "qwenAgent", "piAgent"].includes(instance.driverKind);
 }
+/** Purges paid per-token models from the options list so only free models can be seen or selected. */
+export function filterSubscriptionOrFreeCatalog<T extends SelectableInstance>(instance: T): T {
+  // If the instance is an OAuth subscription provider (Claude, Codex, Cursor), all its models are included in the subscription
+  if (instance.snapshot.billing === "subscription" || instance.snapshot.chatgptPlan || ["claudeAgent", "codex", "cursorAgent"].includes(instance.driverKind)) {
+    return instance;
+  }
+  // Otherwise, filter options strictly to verified free models
+  const freeOptions = instance.models.options.filter((opt) => isFreeTierInstance(instance, opt.id));
+  const defaultIsFree = isFreeTierInstance(instance, instance.models.default);
+  return {
+    ...instance,
+    models: {
+      ...instance.models,
+      default: defaultIsFree ? instance.models.default : (freeOptions[0]?.id ?? ""),
+      options: freeOptions,
+    },
+  };
+}
+
 /** A custom endpoint brings its own credential, so its sign-in state does not count. */
 export function signedOut(instance: SelectableInstance): boolean {
   return instance.snapshot.state === "available" && instance.access !== "custom" && instance.snapshot.authenticated === false;
@@ -94,6 +113,7 @@ export function selectDefaultModelSelection(
   const subscriptionOrFreeOnly = context.subscriptionOrFreeOnly ?? process.env.OMB_SUBSCRIPTION_OR_FREE_ONLY === "1";
   if (preferred && (preferred.instanceId || preferred.model)) {
     const instance = instances.find((candidate) => candidate.instanceId === preferred.instanceId);
+    const sanitized = subscriptionOrFreeOnly && instance ? filterSubscriptionOrFreeCatalog(instance) : instance;
     if (
       (subscriptionOrFreeOnly && (!instance || !isSubscriptionOrFreeInstance(instance, preferred.model))) ||
       instance?.snapshot.state !== "available" ||
@@ -103,7 +123,7 @@ export function selectDefaultModelSelection(
       // A disallowed saved engine is unusable like an unavailable one: setup, never another provider.
       context.refusal?.(instance) !== undefined ||
       (preferred.variant !== undefined && !instance.capabilities?.modelVariants) ||
-      !(instance.models.default === preferred.model || instance.models.options.some((model) => model.id === preferred.model))
+      !(sanitized?.models.default === preferred.model || sanitized?.models.options.some((model) => model.id === preferred.model))
     ) {
       return { instanceId: "", model: "" };
     }
@@ -112,7 +132,11 @@ export function selectDefaultModelSelection(
     if (selection.effort && !instance.capabilities?.effortLevels?.includes(selection.effort)) delete selection.effort;
     return selection;
   }
-  const filtered = subscriptionOrFreeOnly ? instances.filter((inst) => isSubscriptionOrFreeInstance(inst)) : instances;
+  const filtered = subscriptionOrFreeOnly
+    ? instances
+        .filter((inst) => isSubscriptionOrFreeInstance(inst))
+        .map((inst) => filterSubscriptionOrFreeCatalog(inst))
+    : instances;
   const available = filtered.filter((instance) => instance.enabled !== false && instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && defaultModel(instance));
   const ready = available.filter((instance) => readyToRun(instance, context));
   const company = context.company;
