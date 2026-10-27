@@ -1,0 +1,134 @@
+import { join } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+
+import { WAIT_KINDS, type NewWait, type WaitRecord } from "../waits.ts";
+import { createWaitRoutes, findWaitPeer, hostWaitRefusal, parseWaitRequest, waitSourceRefusal, WAIT_MESSAGES } from "./waits.ts";
+import { PASS } from "./table.ts";
+
+const HOME = "/home/maus";
+const FILE_WAIT = { label: "the report is ready", kind: "file_exists", path: "/r.txt" };
+
+const waits = {
+  create: vi.fn(async (input: NewWait) => ({ state: "created", wait: { id: "w1", label: input.label, expiresAt: 0 } }) as never),
+  list: vi.fn((_botId: string): WaitRecord[] => []),
+  cancel: vi.fn((_id: string, _botId: string): WaitRecord | null => null),
+};
+
+async function call(method: string, path: string, body?: unknown, overrides: Partial<Parameters<ReturnType<typeof createWaitRoutes>>[0]> = {}) {
+  const route = createWaitRoutes({ waits, home: () => HOME });
+  const json = vi.fn();
+  const outcome = await route({
+    method, path, res: {} as never, json, botId: "bot-1", threadId: "thread-1", readBody: async () => body,
+    sourceRefusal: () => null, hostRefusal: () => null, peer: () => null, ...overrides,
+  });
+  const [, status, payload] = json.mock.calls[0] ?? [];
+  return { outcome, status: status as number | undefined, payload: payload as { text?: string; error?: string } };
+}
+
+describe("the waits route", () => {
+  it("passes requests that are not its own", async () => {
+    expect((await call("GET", "/api/internal/triggers")).outcome).toBe(PASS);
+    expect((await call("DELETE", "/api/internal/waits")).outcome).toBe(PASS);
+  });
+  it("makes a wait for the capability's bot and chat, never ids from the body", async () => {
+    waits.create.mockClear();
+    const { status, payload } = await call("POST", "/api/internal/waits", { label: "the report is ready", kind: "file_exists", path: "~/r.txt", botId: "evil", threadId: "evil" });
+    expect(waits.create).toHaveBeenCalledWith({ botId: "bot-1", threadId: "thread-1", label: "the report is ready", condition: { kind: "file_exists", path: join(HOME, "r.txt") }, hours: 24 });
+    expect([status, payload.text]).toEqual([201, expect.stringContaining("(wait id w1)")]);
+  });
+  it("carries follow_up as followUp and says so in the answer", async () => {
+    waits.create.mockClear();
+    const { payload } = await call("POST", "/api/internal/waits", { ...FILE_WAIT, follow_up: "  tell me the size ", hours: 2 });
+    expect(waits.create).toHaveBeenCalledWith(expect.objectContaining({ followUp: "tell me the size", hours: 2 }));
+    expect(payload.text).toContain("you will then do what you wrote in follow_up");
+    expect(payload.text).toContain("plain checks, no AI, until 1970-01-01T00:00:00.000Z");
+  });
+  it("answers 200 for a condition already true and the manager's status for a refusal, and appends a note", async () => {
+    waits.create.mockResolvedValueOnce({ state: "already", text: "It exists already." } as never);
+    expect(await call("POST", "/api/internal/waits", FILE_WAIT)).toMatchObject({ status: 200, payload: { text: "It exists already." } });
+    waits.create.mockResolvedValueOnce({ state: "refused", status: 409, error: "Too many." } as never);
+    expect(await call("POST", "/api/internal/waits", FILE_WAIT)).toMatchObject({ status: 409, payload: { error: "Too many." } });
+    waits.create.mockResolvedValueOnce({ state: "created", wait: { id: "w2", label: "l", expiresAt: 0 }, note: "Slow page." } as never);
+    expect((await call("POST", "/api/internal/waits", FILE_WAIT)).payload.text).toMatch(/\n\nSlow page\.$/);
+  });
+  it("refuses a turn the person did not start in their own chat, for making and for stopping", async () => {
+    waits.create.mockClear(); waits.cancel.mockClear();
+    for (const [path, body] of [["/api/internal/waits", FILE_WAIT], ["/api/internal/waits/cancel", { id: "w1" }]] as const) {
+      expect(await call("POST", path, body, { sourceRefusal: () => WAIT_MESSAGES.notPerson })).toMatchObject({ status: 403, payload: { error: WAIT_MESSAGES.notPerson } });
+    }
+    expect(waits.create).not.toHaveBeenCalled();
+    expect(waits.cancel).not.toHaveBeenCalled();
+  });
+  it("refuses file and program waits away from the bot's own computer, and allows pages and bots there", async () => {
+    const away = { hostRefusal: () => WAIT_MESSAGES.otherComputer, peer: () => ({ id: "b2", name: "Coder" }) };
+    expect(await call("POST", "/api/internal/waits", FILE_WAIT, away)).toMatchObject({ status: 403, payload: { error: WAIT_MESSAGES.otherComputer } });
+    expect(await call("POST", "/api/internal/waits", { label: "l", kind: "process_gone", process: "make" }, away)).toMatchObject({ status: 403 });
+    expect(await call("POST", "/api/internal/waits", { label: "l", kind: "url_contains", url: "https://x.test/", text: "ok" }, away)).toMatchObject({ status: 201 });
+    expect(await call("POST", "/api/internal/waits", { label: "l", kind: "bot_idle", bot: "coder" }, away)).toMatchObject({ status: 201 });
+  });
+  it.each([
+    [{ label: "", kind: "file_exists", path: "/r" }, "label: the person's words for what you wait for, up to 120 characters."],
+    [{ label: "l", kind: "file_seen", path: "/r" }, `kind is one of: ${WAIT_KINDS.join(", ")}.`],
+    [{ label: "l", kind: "url_contains", url: "https://x.test/" }, "url_contains needs url and text."],
+    [{ label: "l", kind: "file_exists", path: "/r", text: "x" }, "text applies only to url_contains and url_missing."],
+    [{ label: "l", kind: "url_missing", url: "ftp://x.test/", text: "x" }, "url must be an http or https address."],
+    [{ label: "l", kind: "url_missing", url: "https://u:p@x.test/", text: "x" }, "Put no sign-in details in the address."],
+    [{ label: "l", kind: "url_contains", url: "https://x.test/", text: "" }, "text must be 1 to 500 characters."],
+    [{ label: "l", kind: "url_missing", url: "https://x.test/", text: "   " }, "text must be 1 to 500 characters."],
+    [{ label: "l", kind: "file_exists", path: "build/out.txt" }, "path must be a full path or start with ~."],
+    [{ label: "l", kind: "file_exists", path: "/r", hours: 169 }, "hours is a whole number from 1 to 168."],
+    [{ label: "l", kind: "file_exists", path: "/r", hours: 0 }, "hours is a whole number from 1 to 168."],
+    [{ label: "l", kind: "file_exists", path: "/r", follow_up: "   " }, "follow_up must be 1 to 2000 characters."],
+    [{ label: "l", kind: "bot_idle", bot: "x", path: "/r" }, "path applies only to file_exists, file_missing and file_changed."],
+  ])("refuses %j", async (body, error) => {
+    waits.create.mockClear();
+    expect(await call("POST", "/api/internal/waits", body)).toMatchObject({ status: 400, payload: { error } });
+    expect(waits.create).not.toHaveBeenCalled();
+  });
+  it("treats null as absent and a body that is not an object as an error", async () => {
+    expect(parseWaitRequest({ ...FILE_WAIT, text: null, hours: null }, HOME)).toMatchObject({ ok: true, request: { hours: 24 } });
+    expect(parseWaitRequest("nope", HOME)).toEqual({ ok: false, error: "Send a JSON object." });
+  });
+  it("finds the other bot by name or id among the bots it may reach, never itself", async () => {
+    const peers = [{ id: "b2", name: "Coder" }, { id: "b3", name: "Hidden", hidden: true }, { id: "bot-1", name: "Pepper" }];
+    expect(findWaitPeer(peers, "bot-1", "coder")).toEqual({ id: "b2", name: "Coder" });
+    expect(findWaitPeer(peers, "bot-1", "b2")).toEqual({ id: "b2", name: "Coder" });
+    expect([findWaitPeer(peers, "bot-1", "Hidden"), findWaitPeer(peers, "bot-1", "pepper")]).toEqual([null, "self"]);
+    expect(await call("POST", "/api/internal/waits", { label: "l", kind: "bot_idle", bot: "nobody" }, { peer: () => null })).toMatchObject({ status: 400, payload: { error: WAIT_MESSAGES.noPeer } });
+    expect(await call("POST", "/api/internal/waits", { label: "l", kind: "bot_idle", bot: "me" }, { peer: () => "self" })).toMatchObject({ status: 400, payload: { error: WAIT_MESSAGES.self } });
+  });
+  it("waits for the found bot by id and name", async () => {
+    waits.create.mockClear();
+    await call("POST", "/api/internal/waits", { label: "l", kind: "bot_idle", bot: "coder" }, { peer: () => ({ id: "b2", name: "Coder" }) });
+    expect(waits.create).toHaveBeenCalledWith(expect.objectContaining({ condition: { kind: "bot_idle", botId: "b2", botName: "Coder" } }));
+  });
+  it("lets a bot cancel only its own waits and lists only its own", async () => {
+    waits.cancel.mockClear(); waits.list.mockClear();
+    waits.cancel.mockReturnValueOnce(null);
+    expect(await call("POST", "/api/internal/waits/cancel", { id: "w9" })).toMatchObject({ status: 404, payload: { error: WAIT_MESSAGES.noWait } });
+    waits.cancel.mockReturnValueOnce({ id: "w1", label: "the build" } as WaitRecord);
+    expect(await call("POST", "/api/internal/waits/cancel", { id: "w1" })).toMatchObject({ status: 200, payload: { text: "Stopped waiting for the build." } });
+    expect(waits.cancel.mock.calls).toEqual([["w9", "bot-1"], ["w1", "bot-1"]]);
+    expect(await call("GET", "/api/internal/waits")).toMatchObject({ status: 200, payload: { text: WAIT_MESSAGES.none } });
+    expect(waits.list).toHaveBeenCalledWith("bot-1");
+    waits.list.mockReturnValueOnce([{ id: "w1", label: "the build", condition: { kind: "process_gone", process: "make" }, createdAt: 0, expiresAt: 0 } as WaitRecord]);
+    expect((await call("GET", "/api/internal/waits")).payload.text).toContain("w1 · the build");
+  });
+  it("lets only a person's own one-to-one turn make a wait", () => {
+    const person = { owned: true, room: false, depth: 0, handedOff: false, routineRun: false, outsideDriven: false, personStarted: true, guest: false };
+    expect(waitSourceRefusal(person)).toBeNull();
+    expect(waitSourceRefusal({ ...person, personStarted: false, guest: true })).toBeNull();
+    expect(waitSourceRefusal({ ...person, owned: false })).toBe(WAIT_MESSAGES.notYours);
+    expect(waitSourceRefusal({ ...person, room: true })).toBe(WAIT_MESSAGES.room);
+    for (const other of [{ depth: 1 }, { handedOff: true }, { routineRun: true }, { outsideDriven: true }, { personStarted: false }]) {
+      expect(waitSourceRefusal({ ...person, ...other }), JSON.stringify(other)).toBe(WAIT_MESSAGES.notPerson);
+    }
+  });
+  it("offers files and programs only on the bot's own computer", () => {
+    const own = { cloudHome: false, hosted: false, guest: false, place: null };
+    for (const place of [null, "local", "browser"] as const) expect(hostWaitRefusal({ ...own, place })).toBeNull();
+    for (const place of ["vm", "cloud"] as const) expect(hostWaitRefusal({ ...own, place })).toBe(WAIT_MESSAGES.otherComputer);
+    expect([hostWaitRefusal({ ...own, cloudHome: true }), hostWaitRefusal({ ...own, hosted: true }), hostWaitRefusal({ ...own, guest: true })])
+      .toEqual([WAIT_MESSAGES.serverHost, WAIT_MESSAGES.serverHost, WAIT_MESSAGES.guest]);
+  });
+});
