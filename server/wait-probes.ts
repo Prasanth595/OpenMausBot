@@ -185,6 +185,15 @@ function requestOnce(url: URL, address: { address: string; family: number }, sig
   });
 }
 
+function withinSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) return reject(signal.reason);
+    const abort = () => reject(signal.reason);
+    signal.addEventListener("abort", abort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+  });
+}
+
 export async function fetchPageText(rawUrl: string, options: PageFetchOptions = {}): Promise<PageResult> {
   const lookup = options.lookup ?? resolveTarget;
   const allow = options.allow ?? (({ address }) => addressClass(address, ownAddresses()) === "public");
@@ -203,11 +212,12 @@ export async function fetchPageText(rawUrl: string, options: PageFetchOptions = 
       }
       const host = url.hostname.replace(/^\[|\]$/g, "");
       const literal = isIP(host);
-      const addresses = literal ? [{ address: host, family: literal }] : await lookup(host);
+      const addresses = literal ? [{ address: host, family: literal }] : await withinSignal(lookup(host), signal);
       if (addresses.length === 0) return fail("That address could not be found.");
       if (!addresses.every(({ address }) => allow({ host, address }))) {
         return fail(`${host} points at this computer or a private network, which waits never check.`, true);
       }
+      signal.throwIfAborted();
       const answer = await requestOnce(url, addresses[0], signal, maxBytes);
       if (answer.status >= 300 && answer.status < 400 && answer.location) {
         if (hop >= PAGE_MAX_REDIRECTS) return fail("The page redirected too many times.");

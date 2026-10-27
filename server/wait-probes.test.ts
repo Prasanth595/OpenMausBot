@@ -10,6 +10,7 @@ import {
   fileChanged,
   fileStamp,
   listProcesses,
+  PAGE_MAX_BYTES,
   pageSays,
   pageText,
   parsePs,
@@ -120,7 +121,7 @@ describe("fetchPageText", () => {
   it("refuses loopback, private and mixed answers with the real egress check", async () => {
     const mixed = { lookup: async () => [{ address: "93.184.216.34", family: 4 }, { address: "10.0.0.5", family: 4 }] };
     expect(await fetchPageText("http://mixed.test/", mixed)).toMatchObject({ ok: false, refused: true });
-    for (const url of [`http://127.0.0.1:${port}/`, `http://localhost:${port}/`, `http://[::1]:${port}/`]) {
+    for (const url of [`http://127.0.0.1:${port}/`, `http://localhost:${port}/`, `http://[::1]:${port}/`, `http://2130706433:${port}/`, `http://[::ffff:127.0.0.1]:${port}/`, "http://169.254.169.254/"]) {
       expect(await fetchPageText(url), url).toMatchObject({ ok: false, refused: true });
     }
   });
@@ -131,8 +132,16 @@ describe("fetchPageText", () => {
   });
   it("reads at most 2 MB, and gives up after its timeout", async () => {
     const big = await fetchPageText(`http://status.test:${port}/big`, test);
+    expect(big).toMatchObject({ ok: true });
+    expect(big.ok && big.text.length).toBe(PAGE_MAX_BYTES);
     expect(big.ok && big.text.includes("needle")).toBe(false);
     expect(await fetchPageText(`http://status.test:${port}/slow`, { ...test, timeoutMs: 200 })).toEqual({ ok: false, refused: false, error: "The page took too long to answer." });
+  });
+  it("gives up on a lookup that never answers within its timeout", async () => {
+    const started = Date.now();
+    const result = await fetchPageText("http://stuck.test/", { lookup: () => new Promise(() => {}), timeoutMs: 200 });
+    expect(result).toEqual({ ok: false, refused: false, error: "The page took too long to answer." });
+    expect(Date.now() - started).toBeLessThan(1000);
   });
   it("counts an answer that is not 2xx as a failed check", async () => {
     expect(await fetchPageText(`http://status.test:${port}/404`, test)).toEqual({ ok: false, refused: false, error: "The page answered 404." });
