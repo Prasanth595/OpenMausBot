@@ -69,28 +69,28 @@ const FULL = "skills+shared+voice+escalations+x+team";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 61361,
-  "voice": 62102,
-  "shared": 63294,
-  "shared+voice": 64035,
-  "skills": 64180,
-  "skills+voice": 64921,
-  "skills+shared": 66113,
-  "skills+shared+voice": 66854,
-  "non-chief": 51512,
-  "voice+non-chief": 52253,
-  "shared+non-chief": 53445,
-  "shared+voice+non-chief": 54186,
-  "skills+non-chief": 54331,
-  "skills+voice+non-chief": 55072,
-  "skills+shared+non-chief": 56264,
-  "skills+shared+voice+non-chief": 57005,
-  "skills+shared+voice+cloud-home": 65909,
-  "skills+shared+voice+non-chief+cloud-home": 56060,
-  "default+legacy-switches": 61361,
-  "skills+shared+voice+escalations": 67714,
-  "skills+shared+voice+escalations+x": 72352,
-  "skills+shared+voice+escalations+x+team": 73899,
+  "default": 64706,
+  "voice": 65518,
+  "shared": 66639,
+  "shared+voice": 67451,
+  "skills": 67525,
+  "skills+voice": 68337,
+  "skills+shared": 69458,
+  "skills+shared+voice": 70270,
+  "non-chief": 54787,
+  "voice+non-chief": 55599,
+  "shared+non-chief": 56720,
+  "shared+voice+non-chief": 57532,
+  "skills+non-chief": 57606,
+  "skills+voice+non-chief": 58418,
+  "skills+shared+non-chief": 59539,
+  "skills+shared+voice+non-chief": 60351,
+  "skills+shared+voice+cloud-home": 69325,
+  "skills+shared+voice+non-chief+cloud-home": 59406,
+  "default+legacy-switches": 64706,
+  "skills+shared+voice+escalations": 71130,
+  "skills+shared+voice+escalations+x": 75768,
+  "skills+shared+voice+escalations+x+team": 76433,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -170,6 +170,15 @@ describe("agents proxy tools/list golden", () => {
     const wire = wires[FULL]!;
     expect(JSON.parse(wire)).toEqual(golden);
     expect(wire).toBe(JSON.stringify(golden));
+  });
+
+  it("offers the wait tools right after the trigger tools on every profile", () => {
+    for (const [name, wire] of Object.entries(wires)) {
+      const names = toolsOf(wire).map((tool) => tool.name);
+      const at = names.indexOf("manage_trigger");
+      expect(at, name).toBeGreaterThan(-1);
+      expect(names.slice(at + 1, at + 4), name).toEqual(["wait_until", "list_waits", "cancel_wait"]);
+    }
   });
 
   it("every profile matches its pinned tool names, byte count and sha256", () => {

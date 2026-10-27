@@ -15,6 +15,7 @@ describe("built-in agent tool read policy", () => {
       "tool_result_read",
       "list_triggers",
       "list_trigger_events",
+      "list_waits",
       "skills_list",
     ]);
     for (const name of READ_ONLY_AGENT_TOOL_NAMES) {
@@ -33,7 +34,7 @@ describe("built-in agent tool read policy", () => {
     // These post into the chat: never read-only.
     "attach_file", "show_widget", "update_widget", "show_html", "update_html",
     "create_bot", "request_credential", "request_sign_in", "memory_update", "create_trigger",
-    "manage_trigger", "propose_profile", "skill_manage",
+    "manage_trigger", "wait_until", "cancel_wait", "propose_profile", "skill_manage",
     "propose_team_setup", "propose_bot_deletion",
     "list_secrets", "read_credentials", "list_bots_and_delete", "unknown", "",
     "mcp__agents__list_bots", "agents.list_bots", "LIST_BOTS", " list_bots",
