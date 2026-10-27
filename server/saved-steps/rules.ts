@@ -40,6 +40,9 @@ export const KEPT_ARGS: Record<ActionTool, readonly string[]> = {
 
 const isActionTool = (tool: string): tool is ActionTool => Object.hasOwn(KEPT_ARGS, tool);
 
+export const windowScoped = (tool: ActionTool, args: Record<string, unknown>): boolean =>
+  !(KEY_TOOLS.has(tool) || ELEMENT_TOOLS.has(tool)) || args.scope === undefined || args.scope === "window";
+
 const CONTROL_CHARACTERS = /\p{Cc}/u;
 const CONTEXT_TOOLS = new Set(["get_accessibility_tree", "get_desktop_state"]);
 
@@ -183,7 +186,7 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
       || (args.pid !== undefined && pid === undefined)
       || (args.window_id !== undefined && windowId === undefined);
     if (malformed) return refuse("unknown-target");
-    if ((KEY_TOOLS.has(tool) || ELEMENT_TOOLS.has(tool)) && args.scope !== undefined && args.scope !== "window") return refuse("unknown-target");
+    if (!windowScoped(tool, args)) return refuse("unknown-target");
 
     if (ELEMENT_TOOLS.has(tool) || (tool === "press_key" && addressed)) {
       const found = resolveElement(args);

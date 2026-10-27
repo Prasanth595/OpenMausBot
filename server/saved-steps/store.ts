@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "../atomic.ts";
-import { ELEMENT_TOOLS, KEPT_ARGS, type Recipe } from "./rules.ts";
+import { ELEMENT_TOOLS, KEPT_ARGS, windowScoped, type Recipe } from "./rules.ts";
 
 export const MAX_RECIPES = 200;
 export const UNUSED_MS = 60 * 24 * 60 * 60 * 1000;
@@ -29,7 +29,7 @@ const recipeSchema = z.object({
   key: z.string().min(1),
   request: z.string(),
   reply: z.string(),
-  steps: z.array(step.refine((entry) => argsFitTool(entry.tool, entry.args) && targetsFitTool(entry))).min(1).max(40),
+  steps: z.array(step.refine((entry) => argsFitTool(entry.tool, entry.args) && windowScoped(entry.tool, entry.args) && targetsFitTool(entry))).min(1).max(40),
   createdAt: z.number().finite(),
   lastUsedAt: z.number().finite(),
 });

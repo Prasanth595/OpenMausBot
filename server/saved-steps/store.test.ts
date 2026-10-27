@@ -141,6 +141,28 @@ describe("RecipeStore", () => {
     expect(store.find("b1", "key alone")!.id).toBe("key alone");
   });
 
+  it("drops key and element steps scoped wider than their window and keeps the rest of the file", () => {
+    mkdirSync(join(dir, "b1"));
+    const app = { name: "Notes" };
+    const element = { role: "AXButton", label: "New", path: [] };
+    const withStep = (id: string, step: Recipe["steps"][number]): Recipe => ({ ...recipe(id, id), steps: [step] });
+    writeFileSync(file(), JSON.stringify({
+      version: 1,
+      recipes: [
+        withStep("desktop click", { tool: "click", args: { scope: "desktop" }, app, element }),
+        withStep("screen typing", { tool: "type_text", args: { text: "hi", scope: "screen" }, app, element }),
+        withStep("null scope", { tool: "click", args: { scope: null }, app, element }),
+        withStep("desktop hotkey", { tool: "hotkey", args: { keys: ["cmd", "s"], scope: "desktop" }, app }),
+        withStep("desktop key", { tool: "press_key", args: { key: "return", scope: "desktop" }, app }),
+        withStep("window click", { tool: "click", args: { scope: "window" }, app, element }),
+        withStep("window hotkey", { tool: "hotkey", args: { keys: ["cmd", "s"], scope: "window" }, app }),
+        withStep("unscoped key", { tool: "press_key", args: { key: "return" }, app }),
+      ],
+    }));
+    for (const dropped of ["desktop click", "screen typing", "null scope", "desktop hotkey", "desktop key"]) expect(store.find("b1", dropped)).toBeUndefined();
+    for (const kept of ["window click", "window hotkey", "unscoped key"]) expect(store.find("b1", kept)!.id).toBe(kept);
+  });
+
   it("refuses a bot id that is not a single folder name", () => {
     for (const botId of ["../x", "a/b", "a\\b", "..", ""]) {
       store.save(botId, recipe("r1", "open notes"));
