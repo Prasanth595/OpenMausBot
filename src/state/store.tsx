@@ -21,7 +21,7 @@ import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeed
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
 import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
-import { keepSendsInFlight, optimisticMessageId, optimisticUserMessage } from "./optimistic-send";
+import { keepSendsInFlight, optimisticMessageId, optimisticUserMessage, parentOnConfirmedSends } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
 export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificationTarget, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
@@ -1296,9 +1296,9 @@ export function reducer(state: AppState, action: Action): AppState {
       if (optimisticIndex >= 0) {
         return updateBot(stamped, bot.id, (current) => ({
           ...current,
-          messages: current.messages.map((message, index) =>
+          messages: parentOnConfirmedSends(current.messages.map((message, index) =>
             index === optimisticIndex ? action.message : message
-          ),
+          ), [action.message]),
           activeLeafId: current.activeLeafId === optimisticId
             ? action.message.id
             : current.activeLeafId,

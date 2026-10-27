@@ -1267,6 +1267,15 @@ describe("optimistic sent messages", () => {
     expect(reconciled.bots[0]?.activeLeafId).toBe(canonical.id);
   });
 
+  it("hangs a send still in flight on the server's copy of the send before it", () => {
+    let state: AppState = { ...initialState, bots: [bot] };
+    state = reducer(state, { type: "send", botId: bot.id, sendId: "s1", text: "one" });
+    state = reducer(state, { type: "send", botId: bot.id, sendId: "s2", text: "two" });
+    const canonical: Message = { id: "server-s1", role: "user", kind: "text", text: "one", at: 2, parentId: root.id, sendId: "s1" };
+    state = reducer(state, { type: "messageAdded", threadId: bot.threadId, message: canonical });
+    expect(visibleMessages(state.bots[0]!).map((message) => message.id)).toEqual([root.id, canonical.id, "optimistic-s2"]);
+  });
+
   it("removes only the optimistic row when a send queues or fails", () => {
     const sent = reducer(
       { ...initialState, bots: [bot] },
