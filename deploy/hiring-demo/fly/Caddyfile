@@ -1,0 +1,22 @@
+# Plain HTTP on :8080 behind Fly's TLS. Fly's proxy connects from private addresses, so its X-Forwarded-Proto (https)
+# and X-Forwarded-For pass through to the server, which uses them for the same-origin rule, Secure cookies and the
+# pairing lockout. The server itself only listens on loopback.
+{
+	admin off
+	auto_https off
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+:8080 {
+	encode zstd gzip
+	handle /hooks/* {
+		reverse_proxy 127.0.0.1:8800
+	}
+	handle {
+		reverse_proxy 127.0.0.1:8799 {
+			flush_interval -1
+		}
+	}
+}
