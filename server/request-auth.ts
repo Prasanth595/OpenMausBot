@@ -176,6 +176,18 @@ export function requestOrigin(req: IncomingMessage): string | null {
   return `${proto}://${host.toLowerCase()}`;
 }
 
+/** The origin a phone link may carry: a loopback address names the phone itself once scanned. */
+export function phoneOrigin(origin: string | null): string | null {
+  if (!origin) return null;
+  try {
+    const url = new URL(origin);
+    if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) return null;
+    return isLoopbackHost(url.host) ? null : origin;
+  } catch {
+    return null;
+  }
+}
+
 /** A proxy that hands the server a loopback Host must not turn a remote client into the owner. */
 export function isProxied(req: IncomingMessage): boolean {
   const h = req.headers;
