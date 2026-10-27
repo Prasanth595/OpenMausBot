@@ -85,7 +85,7 @@ import {
   avatarImageStatus,
 } from "./avatar-image.ts";
 import { fitsOnOneLine, parseBotProfilePatch } from "./bot-profile.ts";
-import { routeDirectTurn } from "./turn-route.ts"; import { QuickModelFallback } from "./quick-model-fallback.ts";
+import { routeDirectTurn } from "./turn-route.ts"; import { QuickModelFallback } from "./quick-model-fallback.ts"; import { COMPUTER_JOURNAL_PATH, createSavedSteps } from "./saved-steps/saved-steps.ts";
 import { groupTurnCwd } from "./room-cwd.ts";
 import { RoomTurnDeadline, RoomTurnStallRegistry, effectiveRoomTurnTimeoutMinutes, parseConversationTurnTimeout, roomTurnTimeoutMessage } from "./room-turn-timeout.ts";
 import { roomTurnEnd, type RoomClaimEnd } from "./room-turn-end.ts";
@@ -1536,6 +1536,7 @@ utilityParentPort?.on("message", (event) => {
   }
 });
 
+const savedSteps = createSavedSteps({});
 const quickFallback = new QuickModelFallback({ file: join(DATA_DIR, "refused-quick-models.json"), publish: (event) => bus.publish(event), stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true });
 const bus = new EventBus(undefined, (event) => quickFallback.take(event));
 bus.attach(registry.instances());
@@ -13379,7 +13380,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? "phone"
         : path.startsWith("/api/internal/connectors/")
         ? "connectors"
-        : path === "/api/internal/computer-control" || path === "/api/internal/computer/mcp"
+        : path === "/api/internal/computer-control" || path === "/api/internal/computer/mcp" || path === COMPUTER_JOURNAL_PATH
           ? "computer"
           : "agents";
       if (internalCapability.kind !== requiredCapabilityKind) {
@@ -13560,7 +13561,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         return json(res, 200, { result });
       }
       // The turn's capability names its Boat; the Boat credential stays here.
-      if (method === "POST" && path === "/api/internal/computer/mcp") {
+      if (await dispatchRoutes([savedSteps.journalRoutes({ capability: internalCapability, readBody: readInternalBody })], { req, res, url, path, method, auth, json, readBody })) return; if (method === "POST" && path === "/api/internal/computer/mcp") {
         const body = await readInternalBody();
         if (internalCapability.boxId === undefined) return json(res, 403, { error: "this turn has no cloud computer" });
         const abort = new AbortController();
@@ -15048,7 +15049,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         const botId = url.searchParams.get("botId") ?? "";
         const bot = store.bot(botId);
         if (!bot) return json(res, 404, { error: "no such bot" });
-        if (method === "GET") {
+        if (method === "GET") { savedSteps.gateChecked(internalCapability);
           const abort = new AbortController();
           res.once("close", () => { if (!res.writableEnded) abort.abort(); });
           return json(res, 200, await computerCallGate(internalCapability, abort.signal));
