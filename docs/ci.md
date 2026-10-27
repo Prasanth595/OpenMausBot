@@ -261,3 +261,4 @@ reserves failed with `listen EACCES 127.0.0.1:497xx`.
 The `main-ci-gate` ruleset requires the single `CI` check (it replaced the
 three legacy `typecheck + test (<os>)` names in September 2026). Renaming the
 `gate` job needs the ruleset updated first, or every PR waits forever.
+
