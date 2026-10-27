@@ -102,7 +102,7 @@ describe("RecipeStore", () => {
     mkdirSync(join(dir, "b1"));
     const withArgs = (id: string, key: string, args: Record<string, unknown>): Recipe => {
       const base = recipe(id, key);
-      return { ...base, steps: [{ tool: "click", args }] };
+      return { ...base, steps: [{ tool: "click", args, app: { name: "Notes" }, element: { role: "AXButton", label: "New", path: [] } }] };
     };
     writeFileSync(file(), JSON.stringify({
       version: 1,
@@ -117,6 +117,28 @@ describe("RecipeStore", () => {
     expect(store.find("b1", "with token")).toBeUndefined();
     expect(store.find("b1", "with stray")).toBeUndefined();
     expect(store.find("b1", "fine")!.id).toBe("r4");
+  });
+
+  it("drops element steps saved without their element or app and keeps the rest of the file", () => {
+    mkdirSync(join(dir, "b1"));
+    const app = { name: "Notes" };
+    const element = { role: "AXButton", label: "New", path: [] };
+    const withStep = (id: string, step: Recipe["steps"][number]): Recipe => ({ ...recipe(id, id), steps: [step] });
+    writeFileSync(file(), JSON.stringify({
+      version: 1,
+      recipes: [
+        withStep("no element", { tool: "click", args: {}, app }),
+        withStep("no app", { tool: "type_text", args: { text: "hi" }, element }),
+        withStep("neither", { tool: "set_value", args: { value: "hi" } }),
+        withStep("both", { tool: "click", args: {}, app, element }),
+        withStep("key alone", { tool: "press_key", args: { key: "return" } }),
+      ],
+    }));
+    expect(store.find("b1", "no element")).toBeUndefined();
+    expect(store.find("b1", "no app")).toBeUndefined();
+    expect(store.find("b1", "neither")).toBeUndefined();
+    expect(store.find("b1", "both")!.id).toBe("both");
+    expect(store.find("b1", "key alone")!.id).toBe("key alone");
   });
 
   it("refuses a bot id that is not a single folder name", () => {

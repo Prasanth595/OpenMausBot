@@ -52,7 +52,7 @@ const LOOKUPS: [string, Record<string, unknown>][] = [
 describe("resolveStep", () => {
   it("resolves an element step afresh, without a screenshot", async () => {
     expect(await resolveStep(CLICK_DOCUMENT, caller(windowState(2)), signal)).toEqual({ ok: true, args: { pid: 4242, window_id: 7, element_token: "s2-e2" } });
-    expect(calls.at(-1)).toEqual(["get_window_state", { pid: 4242, window_id: 7, include_screenshot: false }]);
+    expect(calls.at(-1)).toStrictEqual(["get_window_state", { pid: 4242, window_id: 7, include_screenshot: false }]);
     expect(calls).toEqual(LOOKUPS);
   });
 
@@ -63,6 +63,34 @@ describe("resolveStep", () => {
   it("keeps the saved arguments beside the fresh target", async () => {
     const step: RecipeStep = { ...CLICK_DOCUMENT, tool: "type_text", args: { text: "hello world" } };
     expect(await resolveStep(step, caller(windowState(3)), signal)).toEqual({ ok: true, args: { text: "hello world", pid: 4242, window_id: 7, element_token: "s3-e2" } });
+  });
+
+  it.each<[string, object]>([
+    ["marked truncated", { truncated: true }],
+    ["marked incomplete", { elements_complete: false }],
+    ["given a truncation reason", { truncation_reason: "max_elements" }],
+    ["counting more elements than it returned", { element_count: 5 }],
+    ["counting more in the whole tree", { total_element_count: 900 }],
+    ["counting more returned than it sent", { returned_element_count: 5 }],
+    ["counting more after filtering", { filtered_element_count: 5 }],
+    ["with an unreadable count", { element_count: "4" }],
+  ])("refuses a tree the driver cut short: %s", async (_case, extra) => {
+    expect(await resolveStep(CLICK_DOCUMENT, caller(state(ELEMENTS, extra)), signal)).toEqual({ ok: false, error: "only part of Untitled could be read" });
+  });
+
+  it.each<[string, object]>([
+    ["marked degraded", { degraded: true }],
+    ["with a degraded reason", { degraded_reason: "AX messaging timed out" }],
+  ])("refuses a degraded tree: %s", async (_case, extra) => {
+    expect(await resolveStep(CLICK_DOCUMENT, caller(state(ELEMENTS, extra)), signal)).toEqual({ ok: false, error: "Untitled could not be read reliably" });
+  });
+
+  it("accepts a tree whose counts match what was returned", async () => {
+    const whole = state(ELEMENTS, {
+      element_count: 4, total_element_count: 4, returned_element_count: 4, filtered_element_count: 4,
+      elements_complete: true, truncated: false, degraded: false, degraded_reason: null, truncation_reason: null,
+    });
+    expect(await resolveStep(CLICK_DOCUMENT, caller(whole), signal)).toEqual({ ok: true, args: { pid: 4242, window_id: 7, element_token: "s2-e2" } });
   });
 
   it("fails a renamed element with words a person can read", async () => {

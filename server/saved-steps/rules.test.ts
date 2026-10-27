@@ -119,6 +119,11 @@ describe("buildRecipe", () => {
     ["hotkey with a string window id", action("hotkey", { pid: 4242, window_id: "7", keys: ["cmd", "s"] })],
   ])("never drops addressing silently: %s", (_name, call) => expect(build(withCall(call))).toEqual({ ok: false, reason: "unknown-target" }));
 
+  it.each([
+    ["hotkey", action("hotkey", { keys: ["cmd", "s"], window_id: 7 })],
+    ["press_key", action("press_key", { key: "return", window_id: 7 })],
+  ])("refuses a %s with a window target but no app", (_name, call) => expect(build(withCall(call))).toEqual({ ok: false, reason: "unknown-target" }));
+
   it.each(["hello world\n", "\r\n hello world \n\n", " hello world", "hello\tworld"])("refuses typed text with whitespace or control characters %#", (text) => {
     expect(build(withCall(action("type_text", { element_token: "s1-e2", text })))).toEqual({ ok: false, reason: "typed-text-not-in-request" });
     expect(build(withCall(action("set_value", { element_token: "s1-e2", value: text })))).toEqual({ ok: false, reason: "typed-text-not-in-request" });

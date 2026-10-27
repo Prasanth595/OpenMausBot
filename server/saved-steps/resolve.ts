@@ -87,6 +87,18 @@ export function matchElement(elements: unknown, element: ElementIdentity): Match
   return match.value.path === null ? NONE : { ok: true, value: match.value.live };
 }
 
+const COUNTS = ["element_count", "total_element_count", "returned_element_count", "filtered_element_count"] as const;
+const hasText = (value: unknown) => typeof value === "string" && value.trim() !== "";
+const countsMore = (count: unknown, returned: number) => count !== undefined && count !== null && !(typeof count === "number" && count <= returned);
+
+function treeCut(state: Record<string, unknown>): boolean {
+  const returned = Array.isArray(state.elements) ? state.elements.length : 0;
+  return state.truncated === true || state.elements_complete === false || hasText(state.truncation_reason)
+    || COUNTS.some((key) => countsMore(state[key], returned));
+}
+
+const treeDegraded = (state: Record<string, unknown>) => state.degraded === true || hasText(state.degraded_reason);
+
 const appName = (app: AppIdentity) => app.name || app.bundleId || "the app";
 const fail = (error: string): Resolved => ({ ok: false, error });
 
@@ -114,9 +126,12 @@ export async function resolveStep(step: RecipeStep, caller: ComputerCaller, sign
 
   const state = await caller.call("get_window_state", { pid: pid.value, window_id: windowId.value, include_screenshot: false }, signal);
   if (!state.ok) return state;
+  const where = step.window?.title ?? name;
+  if (treeDegraded(state.structured)) return fail(`${where} could not be read reliably`);
+  if (treeCut(state.structured)) return fail(`only part of ${where} could be read`);
   const found = matchElement(state.structured.elements, step.element);
   if (!found.ok) {
-    const target = `"${step.element.label}" (${step.element.role}) in ${step.window?.title ?? name}`;
+    const target = `"${step.element.label}" (${step.element.role}) in ${where}`;
     return fail(found.reason === "none" ? `no ${target}` : `more than one ${target}`);
   }
   const { element_token: token, element_index: index } = found.value;
