@@ -59,6 +59,14 @@ describe("new bot default model selection", () => {
     expect(selectDefaultModelSelection([openrouterInstance], freePick, { subscriptionOrFreeOnly: true })).toEqual(freePick);
     expect(isSubscriptionOrFreeInstance(openrouterInstance, freePick.model)).toBe(true);
 
+    // OpenRouter openrouter/free router is ALLOWED
+    const routerPick = { instanceId: "openrouter", model: "openrouter/free" };
+    expect(isSubscriptionOrFreeInstance(openrouterInstance, routerPick.model)).toBe(true);
+
+    // OpenRouter Nemotron 1M and Cohere code models are ALLOWED
+    expect(isSubscriptionOrFreeInstance(openrouterInstance, "nvidia/nemotron-3-ultra-550b-a55b:free")).toBe(true);
+    expect(isSubscriptionOrFreeInstance(openrouterInstance, "cohere/north-mini-code:free")).toBe(true);
+
     // OpenRouter paid model without :free suffix is REFUSED
     const paidPick = { instanceId: "openrouter", model: "anthropic/claude-3.5-sonnet" };
     expect(selectDefaultModelSelection([openrouterInstance], paidPick, { subscriptionOrFreeOnly: true })).toEqual({ instanceId: "", model: "" });
