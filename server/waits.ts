@@ -1,5 +1,3 @@
-// `then` is the wait tool's argument name; it holds a string, so awaiting a record is unaffected.
-/* oxlint-disable unicorn/no-thenable */
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -40,12 +38,12 @@ export type WaitCondition =
   | { kind: "bot_idle"; botId: string; botName: string; sawBusy: boolean };
 export interface WaitNotice { status: "fired" | "expired" | "stopped"; text: string }
 export interface WaitRecord {
-  id: string; botId: string; threadId: string; label: string; condition: WaitCondition; then?: string;
+  id: string; botId: string; threadId: string; label: string; condition: WaitCondition; followUp?: string;
   createdAt: number; expiresAt: number; nextCheckAt: number; errors: number; cardMessageId?: string;
   /** Decided and saved first; posted once its chat is free. */
   ending?: WaitNotice;
 }
-export interface NewWait { botId: string; threadId: string; label: string; condition: NewWaitCondition; then?: string; hours?: number }
+export interface NewWait { botId: string; threadId: string; label: string; condition: NewWaitCondition; followUp?: string; hours?: number }
 export type CreateWaitResult =
   | { state: "created"; wait: WaitRecord; note?: string }
   | { state: "already"; text: string }
@@ -58,8 +56,8 @@ export interface WaitManagerOptions {
   botBusy(botId: string): boolean | undefined;
   /** False while a turn runs in the chat: try again next tick. */
   post(wait: WaitRecord, notice: WaitNotice): boolean;
-  followUp(wait: WaitRecord & { then: string }): void;
-  showCard(wait: WaitRecord & { then: string }): string | undefined;
+  followUp(wait: WaitRecord & { followUp: string }): void;
+  showCard(wait: WaitRecord & { followUp: string }): string | undefined;
   settleCard(wait: WaitRecord, how: "fired" | "expired" | "cancelled"): void;
 }
 
@@ -77,7 +75,7 @@ const recordSchema = z.object({
   threadId: z.string(),
   label: z.string(),
   condition: conditionSchema,
-  then: z.string().optional(),
+  followUp: z.string().optional(),
   createdAt: z.number(),
   expiresAt: z.number(),
   nextCheckAt: z.number(),
@@ -117,7 +115,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 export function waitList(waits: readonly WaitRecord[]): string {
   return waits
-    .map((w) => `- ${w.id} · ${w.label} · until ${describeCondition(w.condition)} · made ${iso(w.createdAt)} · stops ${iso(w.expiresAt)}${w.then ? ` · then: ${w.then}` : ""}`)
+    .map((w) => `- ${w.id} · ${w.label} · until ${describeCondition(w.condition)} · made ${iso(w.createdAt)} · stops ${iso(w.expiresAt)}${w.followUp ? ` · then: ${w.followUp}` : ""}`)
     .join("\n");
 }
 
@@ -188,15 +186,15 @@ export class WaitManager {
       threadId: input.threadId,
       label: input.label,
       condition,
-      ...(input.then ? { then: input.then } : {}),
+      ...(input.followUp ? { followUp: input.followUp } : {}),
       createdAt: now,
       expiresAt: now + (input.hours ?? WAIT_HOURS.default) * 3_600_000,
       nextCheckAt: now + interval(condition.kind, 0),
       errors: 0,
     };
     this.commit(() => this.waits.push(wait));
-    if (wait.then) {
-      const cardMessageId = this.options.showCard(wait as WaitRecord & { then: string });
+    if (wait.followUp) {
+      const cardMessageId = this.options.showCard(wait as WaitRecord & { followUp: string });
       if (cardMessageId) this.commit(() => { wait.cardMessageId = cardMessageId; });
     }
     const note = verdict.page && !verdict.page.ok
@@ -313,7 +311,7 @@ export class WaitManager {
         let posted = false;
         try { posted = this.options.post(wait, wait.ending); } catch (error) { console.error(`wait ${wait.id}: could not post`, error); }
         if (!posted) continue;
-        if (wait.ending.status === "fired" && wait.then) this.safely(() => this.options.followUp(wait as WaitRecord & { then: string }));
+        if (wait.ending.status === "fired" && wait.followUp) this.safely(() => this.options.followUp(wait as WaitRecord & { followUp: string }));
         if (wait.cardMessageId) this.safely(() => this.options.settleCard(wait, wait.ending!.status === "fired" ? "fired" : "expired"));
         this.waits = this.waits.filter((w) => w !== wait);
         this.save();

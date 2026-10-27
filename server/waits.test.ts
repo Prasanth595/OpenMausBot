@@ -1,4 +1,3 @@
-/* oxlint-disable unicorn/no-thenable */
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -44,8 +43,8 @@ function harness(options: Partial<WaitManagerOptions> = {}) {
     settleCard: vi.fn(),
     manager: undefined as unknown as WaitManager,
     reload: () => build(),
-    create(condition: NewWaitCondition, extra: { label?: string; then?: string; botId?: string; hours?: number } = {}) {
-      return h.manager.create({ botId: extra.botId ?? "bot-1", threadId: "t-1", label: extra.label ?? "the report is ready", condition, then: extra.then, hours: extra.hours });
+    create(condition: NewWaitCondition, extra: { label?: string; followUp?: string; botId?: string; hours?: number } = {}) {
+      return h.manager.create({ botId: extra.botId ?? "bot-1", threadId: "t-1", label: extra.label ?? "the report is ready", condition, followUp: extra.followUp, hours: extra.hours });
     },
     waitOf(id: string): WaitRecord {
       const found = JSON.parse(readFileSync(file, "utf8")).waits.find((w: WaitRecord) => w.id === id);
@@ -134,8 +133,8 @@ describe("WaitManager", () => {
   it("shows the card only for a wait with a follow-up, and stores its message id", async () => {
     const h = harness();
     h.showCard.mockReturnValue("m-1");
-    const withThen = await h.create({ kind: "file_exists", path: "/r" }, { then: "Summarise it." });
-    expect(withThen).toMatchObject({ wait: { cardMessageId: "m-1" } });
+    const withFollowUp = await h.create({ kind: "file_exists", path: "/r" }, { followUp: "Summarise it." });
+    expect(withFollowUp).toMatchObject({ wait: { cardMessageId: "m-1" } });
     const stored = h.reload().list("bot-1");
     expect(stored[0]?.cardMessageId).toBe("m-1");
     await h.create({ kind: "file_exists", path: "/s" });
@@ -144,7 +143,7 @@ describe("WaitManager", () => {
 
   it("fires once: one line, one follow-up, the card settled, and the wait gone", async () => {
     const h = harness();
-    await h.create({ kind: "file_exists", path: "/r.txt" }, { label: "the report is ready", then: "Summarise it." });
+    await h.create({ kind: "file_exists", path: "/r.txt" }, { label: "the report is ready", followUp: "Summarise it." });
     h.stamp = { size: 1, mtimeMs: 1 }; h.advance(5_000); await h.manager.tick(); await h.manager.tick();
     expect(h.posts).toEqual([{ status: "fired", text: "the report is ready: done. /r.txt is there now." }]);
     expect(h.followUp).toHaveBeenCalledTimes(1);
@@ -155,7 +154,7 @@ describe("WaitManager", () => {
 
   it("holds the line while a turn runs in the chat, then posts it once, even across a restart", async () => {
     const h = harness();
-    await h.create({ kind: "file_exists", path: "/r.txt" }, { then: "Go." });
+    await h.create({ kind: "file_exists", path: "/r.txt" }, { followUp: "Go." });
     h.stamp = { size: 1, mtimeMs: 1 }; h.postOk = false; h.advance(5_000); await h.manager.tick();
     expect(h.manager.list("bot-1")).toEqual([]);
     expect(h.manager.owners()).toEqual(["bot-1"]);
@@ -169,7 +168,7 @@ describe("WaitManager", () => {
 
   it("expires after its hours with one last check, quietly and without a follow-up", async () => {
     const h = harness();
-    await h.create({ kind: "file_exists", path: "/r" }, { label: "the build", then: "Deploy." });
+    await h.create({ kind: "file_exists", path: "/r" }, { label: "the build", followUp: "Deploy." });
     h.stampCalls = 0;
     h.advance(24 * 3_600_000); await h.manager.tick();
     expect(h.stampCalls).toBe(1);
@@ -266,7 +265,7 @@ describe("WaitManager", () => {
 
   it("drops a wait silently when its chat or bot is gone, without posting or touching the card", async () => {
     const h = harness();
-    await h.create({ kind: "file_exists", path: "/r" }, { then: "Go." });
+    await h.create({ kind: "file_exists", path: "/r" }, { followUp: "Go." });
     h.alive = false; h.stamp = { size: 1, mtimeMs: 1 }; h.advance(5_000); await h.manager.tick();
     expect([h.post.mock.calls.length, h.settleCard.mock.calls.length, h.manager.list("bot-1").length]).toEqual([0, 0, 0]);
     expect(h.reload().owners()).toEqual([]);
@@ -296,7 +295,7 @@ describe("WaitManager", () => {
 
   it("lets a bot cancel only its own waits, and settles the card", async () => {
     const h = harness();
-    const { wait } = await h.create({ kind: "file_exists", path: "/r" }, { then: "Go." }) as { wait: WaitRecord };
+    const { wait } = await h.create({ kind: "file_exists", path: "/r" }, { followUp: "Go." }) as { wait: WaitRecord };
     expect(h.manager.cancel(wait.id, "bot-2")).toBeNull();
     expect(h.manager.list("bot-1")).toHaveLength(1);
     expect(h.manager.cancel(wait.id, "bot-1")?.id).toBe(wait.id);
@@ -318,7 +317,7 @@ describe("WaitManager", () => {
     expect(describeCondition({ kind: "url_missing", url: "https://x.test/", text: "beta" })).toBe("https://x.test/ no longer says “beta”");
     expect(describeCondition({ kind: "process_gone", process: "make" })).toBe("make has stopped");
     expect(describeCondition({ kind: "bot_idle", botId: "c", botName: "Coder", sawBusy: false })).toBe("Coder finishes its work");
-    const wait: WaitRecord = { id: "w1", botId: "b", threadId: "t", label: "L", condition: { kind: "file_exists", path: "/p" }, then: "Go", createdAt: 0, expiresAt: 3_600_000, nextCheckAt: 0, errors: 0 };
+    const wait: WaitRecord = { id: "w1", botId: "b", threadId: "t", label: "L", condition: { kind: "file_exists", path: "/p" }, followUp: "Go", createdAt: 0, expiresAt: 3_600_000, nextCheckAt: 0, errors: 0 };
     expect(waitList([wait])).toBe("- w1 · L · until /p exists · made 1970-01-01T00:00:00.000Z · stops 1970-01-01T01:00:00.000Z · then: Go");
   });
 
