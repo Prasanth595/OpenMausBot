@@ -298,6 +298,26 @@ describe("OpenAICompatDriver", () => {
     await inst.dispose();
   });
 
+  it("never asks a local server that isn't LM Studio for LM Studio's native catalog", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith("/v1/models")) return Response.json({ data: [{ id: "local-model" }] });
+      return new Response("no", { status: 500 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const inst = await OpenAICompatDriver.create({
+      instanceId: "local-vllm",
+      displayName: "My vLLM",
+      enabled: true,
+      config: { url: "http://127.0.0.1:8001/v1", key: "sk-local", apiKeyEnv: "OPENAI_COMPAT_API_KEY" },
+      environment: {},
+    });
+    await inst.refreshModels?.();
+    expect(inst.models.options.map((option) => option.id)).toEqual(["local-model"]);
+    expect(fetchMock.mock.calls.some((call) => String(call[0]).includes("/api/v1/models"))).toBe(false);
+    await inst.dispose();
+  });
+
   it("keeps a configured LM Studio model when the native catalog omits it", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);

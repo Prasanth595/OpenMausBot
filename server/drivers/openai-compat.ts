@@ -77,12 +77,18 @@ function isOpenRouterUrl(url: string): boolean {
   }
 }
 
-function loopbackLmStudioV1Url(baseUrl: string): string | null {
+/**
+ * LM Studio's native catalog, asked only of a server that is LM Studio: named so (the LM Studio card names it), on LM
+ * Studio's default port, or with its placeholder key. Any other local OpenAI-compatible server is never sent the extra
+ * request.
+ */
+function loopbackLmStudioV1Url(baseUrl: string, displayName: string | undefined, key: string | undefined): string | null {
   try {
     const url = new URL(baseUrl);
     const host = url.hostname.toLowerCase();
-    if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1") return null;
+    if (host !== "127.0.0.1" && host !== "localhost" && host !== "::1" && host !== "[::1]") return null;
     if (url.pathname.replace(/\/+$/, "") !== "/v1") return null;
+    if (!/lm\s*studio/i.test(displayName ?? "") && url.port !== "1234" && key !== "lm-studio") return null;
     return `${url.origin}/api/v1/models`;
   } catch {
     return null;
@@ -164,7 +170,7 @@ export const OpenAICompatDriver: ProviderDriver<OpenAICompatConfig> = {
       if (config.managedModels) return;
       if (!apiKey) return;
       try {
-        const nativeUrl = loopbackLmStudioV1Url(config.url);
+        const nativeUrl = loopbackLmStudioV1Url(config.url, input.displayName, config.key);
         if (nativeUrl) {
           try {
             const native = await fetch(nativeUrl, {
