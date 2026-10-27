@@ -64,6 +64,8 @@ export interface ChannelRouteDeps {
   groupIsWorking(group: GroupRecord): boolean;
   groupThreadIsWorking(groupId: string, threadId: string): boolean;
   readCursor(threadId: string): { lastReadMessageId?: string };
+  /** A person opened this room (a Team Cloud's Needs you lines for them there are done). */
+  threadRead?(auth: RequestAuth, threadId: string): void;
   pageSize(raw: string | null): number | null | undefined;
   messagePage(threadId: string, limit: number | undefined): MessagePage;
   resolveReplyTarget(threadId: string, value: unknown): Message | undefined;
@@ -180,6 +182,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       if (switchLimit === null) return json(res, 400, { error: "messages must be a non-negative whole number" });
       const switched = store.switchGroupTask(group.id, m[2]);
       if (!switched) return json(res, 404, { error: "no such channel task" });
+      deps.threadRead?.(auth, switched.threadId);
       readThreadNotifications(switched.threadId, broadcast, notificationListed(auth));
       const switchedSettings = publicGroupState(switched);
       // "0": settings only (no `messages` key); a positive page: that tail; omitted: the whole transcript.
@@ -256,6 +259,7 @@ export function createChannelRoutes(deps: ChannelRouteDeps): RouteHandler {
       const room = store.group(m[1]);
       if (!room) return json(res, 404, { error: "no such room" });
       sawThread(room.threadId);
+      deps.threadRead?.(auth, room.threadId);
       const group = store.patchGroup(room.id, { unread: false, ...readCursor(room.threadId) })!;
       readThreadNotifications(room.threadId, broadcast, notificationListed(auth));
       broadcast({ kind: "group", group: publicGroupState(group) });
