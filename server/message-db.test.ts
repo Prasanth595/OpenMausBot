@@ -15,7 +15,6 @@ import { closeMessageDb,
   latestPersonLineAts,
   logNotification,
   latestSaidByBot,
-  markAllNotificationLogRead,
   markNotificationLogRead,
   markThreadNotificationLogRead,
   readMessageText,
@@ -506,6 +505,18 @@ describe("notification_log", () => {
     expect(recentNotificationLog()).toEqual([logged]);
   });
 
+  it("keeps the one person a notification is for, in a feed made before that was recorded too", () => {
+    closeMessageDb();
+    for (const suffix of ["", "-wal", "-shm"]) rmSync(join(DATA_DIR, `messages.db${suffix}`), { force: true });
+    const old = new DatabaseSync(join(DATA_DIR, "messages.db"));
+    old.exec("CREATE TABLE notification_log (id TEXT PRIMARY KEY, at INTEGER NOT NULL, kind TEXT NOT NULL, bot_id TEXT NOT NULL, bot_name TEXT NOT NULL, thread_id TEXT NOT NULL, group_id TEXT, title TEXT NOT NULL, body TEXT NOT NULL, avatar_url TEXT, read INTEGER NOT NULL DEFAULT 0)");
+    old.exec("INSERT INTO notification_log VALUES ('before', 1, 'done', 'bot-1', 'Scout', 'thread-1', NULL, 'Scout finished', 'Done', NULL, 0)");
+    old.close();
+    const tagged = logNotification({ kind: "mention", botId: "bot-1", botName: "Scout", threadId: "thread-1", title: "Ada mentioned you", body: "@Bob look", forPerson: "p_bobbobbobbobbobbobbobb" });
+    expect(recentNotificationLog()).toEqual([tagged, expect.objectContaining({ id: "before" })]);
+    expect(recentNotificationLog()[1]).not.toHaveProperty("forPerson");
+  });
+
   it("forgets a thread's notifications when the thread is deleted", () => {
     insertNotificationLog(entry("n1", 1000));
     insertNotificationLog(entry("n2", 2000, { threadId: "thread-2" }));
@@ -513,19 +524,20 @@ describe("notification_log", () => {
     expect(recentNotificationLog().map((r) => r.id)).toEqual(["n2"]);
   });
 
-  it("marking read never deletes a row: read-one and read-all only flip the flag", () => {
+  it("marking read never deletes a row: it flips only the named entries' flag", () => {
     insertNotificationLog(entry("n1", 1000));
     insertNotificationLog(entry("n2", 2000));
-    markNotificationLogRead("n1");
+    insertNotificationLog(entry("n3", 3000));
+    markNotificationLogRead(["n1"]);
     let rows = recentNotificationLog();
-    expect(rows).toHaveLength(2);
+    expect(rows).toHaveLength(3);
     expect(rows.find((r) => r.id === "n1")?.read).toBe(true);
     expect(rows.find((r) => r.id === "n2")?.read).toBe(false);
 
-    markAllNotificationLogRead();
+    markNotificationLogRead(["n1", "n2"]);
     rows = recentNotificationLog();
-    expect(rows).toHaveLength(2);
-    expect(rows.every((r) => r.read)).toBe(true);
+    expect(rows).toHaveLength(3);
+    expect(rows.filter((r) => r.read).map((r) => r.id).sort()).toEqual(["n1", "n2"]);
   });
 
   it("reading a conversation reads only its own notifications, a pending question's included", () => {

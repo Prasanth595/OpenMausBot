@@ -191,6 +191,10 @@ export interface WireTask {
   cacheKeepWarm?: CacheKeepWarmStatus;
   /** the folder this task's turns run in, pinned on its first turn. */
   cwd?: string | null;
+  /** Set me up was pressed here (server/setup-request.ts): the person's next line in this conversation runs as a
+   * setup request. Server-owned; a client only shows it. `by`: who pressed, where several people share the place (their
+   * reactor key); only their next line takes it, and only they see its chip. */
+  setupRequest?: { at: number; by?: string };
 }
 
 /** One thread's keep-warm window as a client shows it. Times are epoch ms. */
@@ -468,6 +472,11 @@ export interface WireMessage extends HelperIntroField {
   serverCard?: true;
   /** A setup suggestion the device renders in its own words (server/host/helper-suggestion.ts); `text` is the English. */
   setupSuggestion?: { kind: "helperKey"; answer?: "notNow" };
+  /** A new bot's greeting while it has no role or instructions: clients that know it draw Set me up under the text
+   * (server/setup-request.ts); `text` reads on its own for older ones. Cleared once it is pressed or the person writes. */
+  setupOffer?: true;
+  /** A person's line Set me up turned into a setup request: the bot reads it as `/setup <text>`; the chat shows `text`. */
+  setupRequest?: true;
   /** app rows (kind "app"): bot HTML or an MCP server's UI. `text` is always the readable fallback. */
   app?: AppPayload;
   /** user rows sent by an app's ui/message: the app row that sent them. Every client draws "Sent from <title>". */
@@ -562,6 +571,8 @@ export interface WireMessage extends HelperIntroField {
   routedBy?: { provider: "jev" | "workersai" | "openrouter"; probability: number };
   /** On a conversational bot's user line: the picker label of the quick model its reply ran on. */
   quickModel?: string;
+  /** On a "Sent to" hand-off row: the done_when the sender set, redacted, so the chip can show what counts as finished. */
+  doneWhen?: string;
   /** Set on the user-role line another bot delivered into this bot's own
    * conversation (coordinate_bots, start_thread). `incident`: the line is a
    * Team incidents report or Team escalations notice about that bot's thread
@@ -578,6 +589,10 @@ export interface WireMessage extends HelperIntroField {
   reaction?: string;
   /** comm chips: "Messaged @X", linking to the bot-bot channel. */
   comm?: { groupId: string; threadId?: string; withBotId: string; withName: string; withColor: string };
+  /** On a Team Cloud, a message a bot passed between people (message_person): "told" on the chip in the asking
+   * conversation names who got it, "from" on the line it delivered names who asked, "reply" on an answer that came
+   * back names who answered. */
+  relay?: { kind: "told" | "from" | "reply"; email: string; name: string };
   /** thread chips: "Opened thread #Title on @X". */
   threadRef?: { botId: string; threadId: string; title: string };
   /** A page the bot published to a public link (publish_page), or why it couldn't. `text` carries the link too. */
