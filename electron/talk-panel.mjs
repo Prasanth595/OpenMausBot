@@ -31,6 +31,7 @@ export function talkPanelBounds(workArea, height) {
 
 export function replyPreview(text, limit = 400) {
   const plain = String(text ?? "")
+    .slice(0, limit * 4)
     .replace(/```/g, " ")
     .replace(/^[ \t]*#{1,6}[ \t]+/gm, "")
     .replace(/^[ \t]*(?:[-*+]|\d+[.)])[ \t]+/gm, "")
@@ -92,6 +93,7 @@ export function createTalkPanel({ BrowserWindow, screen, iconPath, onOpen, onDis
   const live = target => target && !target.isDestroyed();
 
   function create() {
+    page ??= `data:text/html;charset=utf-8,${encodeURIComponent(talkPanelHtml(fs.readFileSync(iconPath).toString("base64")))}`;
     const target = new BrowserWindow({
       type: "panel",
       ...talkPanelBounds(workArea(), TALK_PANEL.minHeight),
@@ -134,8 +136,10 @@ export function createTalkPanel({ BrowserWindow, screen, iconPath, onOpen, onDis
       if (channel === "talk-panel:open") onOpen();
       else if (channel === "talk-panel:dismiss") onDismiss();
     });
-    page ??= `data:text/html;charset=utf-8,${encodeURIComponent(talkPanelHtml(fs.readFileSync(iconPath).toString("base64")))}`;
-    void target.loadURL(page);
+    target.on("closed", () => {
+      if (win === target) win = null;
+    });
+    target.loadURL(page).catch(() => {});
     return target;
   }
 

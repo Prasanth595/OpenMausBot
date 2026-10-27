@@ -7,7 +7,7 @@ import { TALK_LABELS, TALK_PANEL, createTalkPanel, isTalkPanel, replyPreview, ta
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const pick = (object, keys) => Object.fromEntries(keys.map(key => [key, object[key]]));
 
-function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width: 1440, height: 875 } } = {}) {
+function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width: 1440, height: 875 }, loadFails = false, iconPath = new URL("./resources/app-icon.png", import.meta.url).pathname } = {}) {
   const made = [];
   class FakeBrowserWindow {
     constructor(options) {
@@ -21,8 +21,10 @@ function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width:
         },
         setWindowOpenHandler: handler => { this.openHandler = handler; },
       });
+      this.events = new EventEmitter();
       made.push(this);
     }
+    on(...args) { this.events.on(...args); }
     setAlwaysOnTop(...args) { this.calls.push(["setAlwaysOnTop", ...args]); }
     setVisibleOnAllWorkspaces(...args) { this.calls.push(["setVisibleOnAllWorkspaces", ...args]); }
     setBounds(bounds) { this.bounds = bounds; this.calls.push(["setBounds", bounds]); }
@@ -30,7 +32,7 @@ function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width:
     show() { this.calls.push(["show"]); }
     focus() { this.calls.push(["focus"]); }
     showInactive() { this.calls.push(["showInactive"]); }
-    loadURL(url) { this.url = url; return Promise.resolve(); }
+    loadURL(url) { this.url = url; return loadFails ? Promise.reject(new Error("load failed")) : Promise.resolve(); }
     isDestroyed() { return this.destroyed; }
     destroy() { this.destroyed = true; }
   }
@@ -38,7 +40,7 @@ function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width:
   const screen = { getCursorScreenPoint: () => state.cursor, getDisplayNearestPoint: () => ({ workArea: state.workArea }) };
   const opened = [];
   const dismissed = [];
-  const panel = createTalkPanel({ BrowserWindow: FakeBrowserWindow, screen, iconPath: new URL("./resources/app-icon.png", import.meta.url).pathname, onOpen: () => opened.push(1), onDismiss: () => dismissed.push(1) });
+  const panel = createTalkPanel({ BrowserWindow: FakeBrowserWindow, screen, iconPath, onOpen: () => opened.push(1), onDismiss: () => dismissed.push(1) });
   return { panel, made, opened, dismissed, state };
 }
 
@@ -156,4 +158,54 @@ test("isTalkPanel tells the box from app windows", () => {
   panel.render({ state: "listening", text: "" });
   assert.equal(isTalkPanel(made[0]), true);
   assert.equal(isTalkPanel({}), false);
+});
+
+test("a rejected page load is swallowed, not an unhandled rejection", async () => {
+  const unhandled = [];
+  const record = reason => unhandled.push(reason);
+  process.on("unhandledRejection", record);
+  try {
+    const { panel, made } = harness({ loadFails: true });
+    panel.render({ state: "listening", text: "" });
+    panel.close();
+    await flush();
+    await flush();
+    assert.equal(made.length, 1);
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off("unhandledRejection", record);
+  }
+});
+
+test("an unreadable icon creates no window", () => {
+  const { panel, made } = harness({ iconPath: "/nonexistent/icon.png" });
+  assert.throws(() => panel.render({ state: "listening", text: "" }));
+  assert.equal(made.length, 0);
+});
+
+test("the box's security invariants are pinned", () => {
+  const { panel, made } = harness();
+  panel.render({ state: "listening", text: "" });
+  const { webPreferences } = made[0].options;
+  assert.deepEqual(pick(webPreferences, ["contextIsolation", "sandbox", "nodeIntegration"]), { contextIsolation: true, sandbox: true, nodeIntegration: false });
+  assert.ok(webPreferences.preload.endsWith("talk-panel-preload.cjs"));
+  assert.equal(made[0].excludedFromShownWindowsMenu, true);
+});
+
+test("a box destroyed outside close() is forgotten, so the next render makes a new one", async () => {
+  const { panel, made } = harness();
+  panel.render({ state: "listening", text: "" });
+  made[0].webContents.emit("did-finish-load");
+  await flush();
+  made[0].destroyed = true;
+  made[0].events.emit("closed");
+  assert.equal(panel.hovered(), false);
+  panel.render({ state: "thinking", text: "" });
+  assert.equal(made.length, 2);
+  assert.equal(made[0].webContents.scripts.length, 1);
+});
+
+test("replyPreview stays within the limit on pathological input", () => {
+  const out = replyPreview("**".repeat(200000) + " tail");
+  assert.ok(out.length <= 400);
 });
