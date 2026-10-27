@@ -11,9 +11,13 @@ test.afterEach(() => mock.timers.reset());
 
 const CHAT = { botId: "m", threadId: "t1" };
 function harness({ busy = false, prepare = async () => CHAT, ask } = {}) {
-  const h = { views: [], closed: 0, hovered: false, renderFails: false, starts: [], stops: [], opened: [], asks: [], prepares: 0, sink: null };
+  const h = { views: [], closed: 0, hovered: false, renderFails: false, startFails: false, releaseFails: false, starts: [], stops: [], finishes: [], opened: [], asks: [], prepares: 0, sink: null };
   h.session = createTalkSession({
-    speech: { start: (sink, options) => { h.sink = sink; h.starts.push(options); }, stop: sink => h.stops.push(sink === h.sink) },
+    speech: {
+      start: (sink, options) => { h.sink = sink; h.starts.push(options); if (h.startFails) throw new Error("spawn failed"); },
+      stop: sink => h.stops.push(sink === h.sink),
+      finish: sink => h.finishes.push(sink === h.sink),
+    },
     server: {
       prepare: () => { h.prepares += 1; return prepare(); },
       ask: ask ?? (async input => { h.asks.push(input); input.onUpdate({ kind: "thinking" }); input.onUpdate({ kind: "reply", text: "Hi" }); input.onUpdate({ kind: "done", ok: true, text: "Hi" }); return "done"; }),
@@ -23,7 +27,9 @@ function harness({ busy = false, prepare = async () => CHAT, ask } = {}) {
       close: () => { h.closed += 1; },
       hovered: () => h.hovered,
     },
-    voiceInUse: () => busy, release: () => ["control", "option"], openChat: chat => h.opened.push(chat), newSendId: () => "send-1",
+    voiceInUse: () => busy,
+    release: () => { if (h.releaseFails) throw new Error("no key"); return ["control", "option"]; },
+    openChat: chat => h.opened.push(chat), newSendId: () => "send-1",
   });
   return h;
 }
@@ -40,7 +46,7 @@ const holdAsk = updates => {
 };
 
 test("the box's words and timings are fixed", () => {
-  assert.deepEqual(TALK_TIMING, { replyHideMs: 12_000, noticeHideMs: 4_000, stillWorkingMs: 120_000, hoverRecheckMs: 500 });
+  assert.deepEqual(TALK_TIMING, { replyHideMs: 12_000, noticeHideMs: 4_000, stillWorkingMs: 120_000, hoverRecheckMs: 500, maxListenMs: 60_000 });
   assert.deepEqual(TALK_TEXT, {
     busy: "Voice is in use in MausBot",
     serverDown: "Open MausBot to talk",
@@ -331,4 +337,101 @@ test("quitting closes the box and cancels the ask under way", async () => {
   assert.equal(thinking.closed, 1);
   mock.timers.tick(TALK_TIMING.stillWorkingMs);
   assert.equal(thinking.views.at(-1).state, "thinking");
+});
+
+test("listening stops by itself after 60 s and sends what was heard", async () => {
+  const h = harness(); h.session.press(); say(h, "remind me to call mum");
+  mock.timers.tick(59_999);
+  assert.deepEqual(h.finishes, []);
+  assert.equal(h.views.at(-1).state, "listening");
+  mock.timers.tick(1);
+  assert.deepEqual(h.finishes, [true]);
+  assert.deepEqual(h.stops, []);
+  release(h); await flush();
+  assert.equal(h.asks[0].text, "remind me to call mum");
+  assert.deepEqual(h.views.at(-1), { state: "reply", text: "Hi" });
+
+  const sent = harness(); sent.session.press(); say(sent, "hello"); release(sent); await flush();
+  mock.timers.tick(TALK_TIMING.maxListenMs);
+  assert.deepEqual(sent.finishes, []);
+
+  const dismissed = harness(); dismissed.session.press(); dismissed.session.dismiss();
+  mock.timers.tick(TALK_TIMING.maxListenMs);
+  assert.deepEqual(dismissed.finishes, []);
+});
+
+test("an earlier ask's sink cannot touch the next ask", async () => {
+  const h = harness(); h.session.press();
+  const first = h.sink;
+  h.session.dismiss();
+  h.session.press();
+  assert.notEqual(h.sink, first);
+  const before = { views: h.views.length, closed: h.closed, stops: [...h.stops] };
+  first.transcript({ text: "old words", partial: true });
+  first.end({ code: 0, reason: "completed" });
+  first.end({ code: 1, reason: "speech-not-authorized" });
+  first.replaced();
+  await flush();
+  assert.equal(h.views.length, before.views);
+  assert.equal(h.closed, before.closed);
+  assert.deepEqual(h.stops, before.stops);
+  assert.equal(h.asks.length, 0);
+  assert.deepEqual(h.views.at(-1), { state: "listening", text: "" });
+  say(h, "new words"); release(h); await flush();
+  assert.equal(h.asks.length, 1);
+  assert.equal(h.asks[0].text, "new words");
+});
+
+test("a box that fails to draw when listening starts leaves later presses working", () => {
+  const h = harness();
+  h.renderFails = true;
+  assert.doesNotThrow(() => h.session.press());
+  assert.equal(h.starts.length, 1);
+  h.renderFails = false;
+  release(h);
+  assert.equal(h.closed, 1);
+  h.session.press();
+  assert.equal(h.starts.length, 2);
+  assert.deepEqual(h.views.at(-1), { state: "listening", text: "" });
+});
+
+test("speech that fails to start says Talking couldn't start, and a later press works", () => {
+  const h = harness();
+  h.startFails = true;
+  assert.doesNotThrow(() => h.session.press());
+  assert.deepEqual(h.views.at(-1), { state: "error", text: TALK_TEXT.unavailable });
+  assert.deepEqual(h.stops, [true]);
+  mock.timers.tick(3_999); assert.equal(h.closed, 0);
+  mock.timers.tick(1); assert.equal(h.closed, 1);
+  mock.timers.tick(TALK_TIMING.maxListenMs);
+  assert.deepEqual(h.finishes, []);
+  h.startFails = false;
+  h.session.press();
+  assert.equal(h.starts.length, 2);
+  assert.deepEqual(h.views.at(-1), { state: "listening", text: "" });
+
+  const keyless = harness();
+  keyless.releaseFails = true;
+  assert.doesNotThrow(() => keyless.session.press());
+  assert.deepEqual(keyless.starts, []);
+  assert.deepEqual(keyless.views.at(-1), { state: "error", text: TALK_TEXT.unavailable });
+  keyless.releaseFails = false;
+  keyless.session.press();
+  assert.equal(keyless.starts.length, 1);
+});
+
+test("a box that fails to draw when speech ends never throws back into speech", async () => {
+  const h = harness(); h.session.press(); say(h, "hello");
+  h.renderFails = true;
+  assert.doesNotThrow(() => release(h));
+  h.renderFails = false;
+  await flush();
+  assert.equal(h.asks.length, 1);
+  assert.deepEqual(h.views.at(-1), { state: "reply", text: "Hi" });
+
+  const denied = harness(); denied.session.press();
+  denied.renderFails = true;
+  assert.doesNotThrow(() => release(denied, { code: 1, reason: "mic-failed" }));
+  mock.timers.tick(TALK_TIMING.noticeHideMs);
+  assert.equal(denied.closed, 1);
 });

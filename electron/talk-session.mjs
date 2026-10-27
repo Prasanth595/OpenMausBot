@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { TalkServerError } from "./talk-server.mjs";
 
-export const TALK_TIMING = Object.freeze({ replyHideMs: 12_000, noticeHideMs: 4_000, stillWorkingMs: 120_000, hoverRecheckMs: 500 });
+export const TALK_TIMING = Object.freeze({ replyHideMs: 12_000, noticeHideMs: 4_000, stillWorkingMs: 120_000, hoverRecheckMs: 500, maxListenMs: 60_000 });
 
 export const TALK_TEXT = Object.freeze({
   busy: "Voice is in use in MausBot",
@@ -30,19 +30,22 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
   const live = ask => current === ask && !ask.controller.signal.aborted;
 
   function begin(state) {
-    const ask = { state, words: "", reply: "", chat: null, sink: null, controller: new AbortController(), hideTimer: null, answerTimer: null };
+    const ask = { state, words: "", reply: "", chat: null, sink: null, controller: new AbortController(), listenTimer: null, hideTimer: null, answerTimer: null };
     current = ask;
     return ask;
   }
 
   function show(ask, state, text) {
     ask.state = state;
-    panel.render({ state, text });
+    try {
+      panel.render({ state, text });
+    } catch {}
   }
 
   function closeBox(ask) {
     if (current !== ask) return;
     current = null;
+    clearTimeout(ask.listenTimer);
     clearTimeout(ask.hideTimer);
     clearTimeout(ask.answerTimer);
     ask.controller.abort();
@@ -108,7 +111,7 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
         text: ask.words,
         sendId: newSendId(),
         signal: ask.controller.signal,
-        onUpdate: update => { try { follow(ask, update); } catch {} },
+        onUpdate: update => follow(ask, update),
       }).then(outcome => answered(ask, outcome), error => { if (live(ask)) failed(ask, error); });
     }, () => {});
   }
@@ -140,7 +143,15 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
       if (ask.state === "listening") speech.stop(ask.sink);
       failed(ask, error);
     });
-    speech.start(ask.sink, { finishOnRelease: release() });
+    try {
+      speech.start(ask.sink, { finishOnRelease: release() });
+    } catch {
+      if (!listening()) return;
+      speech.stop(ask.sink);
+      settle(ask, "error", TALK_TEXT.unavailable, TALK_TIMING.noticeHideMs);
+      return;
+    }
+    ask.listenTimer = setTimeout(() => { if (listening()) speech.finish(ask.sink); }, TALK_TIMING.maxListenMs);
   }
 
   const dismiss = () => { if (current) cancel(current); };
