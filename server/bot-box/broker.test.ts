@@ -25,7 +25,7 @@ function upgradeAndHangUp(socketPath: string): Promise<void> {
   return new Promise((resolve) => {
     const client = createConnection(socketPath);
     client.on("error", () => {});
-    client.once("connect", () => { client.write("GET / HTTP/1.1\r\nHost: box\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"); client.destroy(); });
+    client.once("connect", () => { client.write("GET / HTTP/1.1\r\nHost: box\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n", () => client.destroy()); });
     client.once("close", () => resolve());
   });
 }
