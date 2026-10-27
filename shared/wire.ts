@@ -514,6 +514,8 @@ export interface WireMessage extends HelperIntroField {
    * its words. On a room line this also carries `from`, so the room renders
    * the webhook's bot as the speaker. */
   webhookPost?: boolean;
+  /** The line a wait (wait_until) posted when it ended. */
+  wait?: { id: string; status: "fired" | "expired" | "stopped" };
   /** user messages sent INTO a running turn (capabilities.queueing). */
   steered?: boolean;
   /** user messages a peer bot handed to this thread's RUNNING turn: peer
@@ -638,6 +640,14 @@ export function nextOpenThread<T extends OpenThreadCandidate>(tasks: readonly T[
   return [listed, open, own].map((candidates) => orderedThreadList(candidates)[0]).find((task) => task !== undefined);
 }
 
+/** A wait with a follow-up a bot set up from chat; Cancel stops it until it settles. */
+export interface WaitCardData {
+  waitId: string;
+  label: string;
+  followUp: string;
+  settled?: "fired" | "expired" | "cancelled";
+}
+
 export interface OptionCardData {
   /** calls: one per outbound call the card covers, in subtitle order. */
   outboundRequest?: { tool: string; app: string | null; calls?: Array<{ app: string | null; label: string }> };
@@ -685,6 +695,7 @@ export interface OptionCardData {
   routineRequest?: RoutineRequestCardData;
   /** A webhook trigger a bot made or changed from chat. */
   webhookRequest?: WebhookRequestCardData;
+  waitRequest?: WaitCardData;
   /** An app-event automation a bot made or changed from chat. */
   appTriggerRequest?: AppTriggerRequestCardData;
   /** A durable profile-change proposal (propose_profile). */
