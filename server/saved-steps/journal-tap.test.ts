@@ -15,7 +15,7 @@ describe("journal tap", () => {
     tap.request(call(5));
     let done = false;
     const waiting = tap.response(reply(5)).then(() => { done = true; });
-    await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 20));
     expect(done).toBe(false);
     expect(posted).toEqual([{ tool: "click", arguments: { element_token: "s1-e2" }, result: { isError: false } }]);
     release();

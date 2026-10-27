@@ -41,14 +41,23 @@ const APP_TYPES = { pid: "number", name: "string", bundle_id: "string", running:
 const WINDOW_TYPES = { window_id: "number", pid: "number", title: "string", app_name: "string" } as const;
 const TOP_TYPES = { pid: "number", window_id: "number", bundle_id: "string", name: "string", app_name: "string", window_title: "string" } as const;
 
-const slimList = <T>(value: unknown, keys: readonly string[], types: Record<string, "string" | "number" | "boolean">, max = Infinity): T[] | undefined =>
-  Array.isArray(value) ? value.filter(isRec).slice(0, max).map((item) => pick(item, keys, types) as T) : undefined;
+function slimList<T>(value: unknown, types: Record<string, "string" | "number" | "boolean">, required: readonly string[], max = Infinity): T[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items: Rec[] = [];
+  for (const item of value) {
+    if (items.length >= max) break;
+    if (!isRec(item)) continue;
+    const slim = pick(item, Object.keys(types), types);
+    if (required.every((key) => key in slim)) items.push(slim);
+  }
+  return items as T[];
+}
 
 function slimStructured(raw: Rec): SlimStructured {
   const out: SlimStructured = pick(raw, Object.keys(TOP_TYPES), TOP_TYPES);
-  const elements = slimList<WireElement>(raw.elements, Object.keys(ELEMENT_TYPES), ELEMENT_TYPES, MAX_ELEMENTS);
-  const apps = slimList<WireApp>(raw.apps, Object.keys(APP_TYPES), APP_TYPES);
-  const windows = slimList<WireWindow>(raw.windows, Object.keys(WINDOW_TYPES), WINDOW_TYPES);
+  const elements = slimList<WireElement>(raw.elements, ELEMENT_TYPES, ["element_index", "role", "depth"], MAX_ELEMENTS);
+  const apps = slimList<WireApp>(raw.apps, APP_TYPES, ["pid", "name"]);
+  const windows = slimList<WireWindow>(raw.windows, WINDOW_TYPES, ["window_id", "title"]);
   if (elements) out.elements = elements;
   if (apps) out.apps = apps;
   if (windows) out.windows = windows;

@@ -197,6 +197,24 @@ export function createMcpBridgeInterceptor(
   };
 }
 
+/** Without a tap, writes are synchronous. With one, a single chain keeps replies in order while each waits for its journal post; no failure in the tap may drop a reply. */
+export function createReplyQueue(
+  tap: { response(raw: string): Promise<void> } | null,
+  write: (written: string) => void,
+): (raw: string, written: string) => void {
+  let chain: Promise<void> = Promise.resolve();
+  return (raw, written) => {
+    if (!tap) {
+      write(written);
+      return;
+    }
+    chain = chain
+      .then(() => tap.response(raw))
+      .catch(() => {})
+      .then(() => write(written));
+  };
+}
+
 export function runMcpBridge(options: BridgeOptions): void {
   const env = options.env ?? { ...process.env, PATH: augmentedPath() };
   const { command, args } = resolveCliSpawn(options.command, options.args, env);
@@ -217,15 +235,7 @@ export function runMcpBridge(options: BridgeOptions): void {
   const tap = options.journal
     ? createJournalTap({ post: postJournal(options.journal.url, options.journal.token) })
     : null;
-  // One chain keeps replies in order while each waits for its journal post.
-  let writes = Promise.resolve();
-  const reply = (raw: string, written: string) => {
-    if (!tap) {
-      process.stdout.write(written + "\n");
-      return;
-    }
-    writes = writes.then(() => tap.response(raw)).then(() => { process.stdout.write(written + "\n"); });
-  };
+  const reply = createReplyQueue(tap, (written) => process.stdout.write(written + "\n"));
   const answer = (line: string) => reply(line, line);
   const forward = (line: string) => child.stdin.write(line + "\n");
   const intercept = createMcpBridgeInterceptor({

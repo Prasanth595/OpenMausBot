@@ -31,6 +31,19 @@ describe("slimResponse", () => {
     });
   });
 
+  it("drops items missing their required keys instead of passing partial records", () => {
+    const slim = slimResponse({ id: 1, result: { content: [], structuredContent: {
+      elements: [{ element_index: 1, role: "AXButton", depth: 1 }, { element_index: 2, role: "AXButton" }, { role: "AXButton", depth: 1 }],
+      apps: [{ pid: 1, name: "Notes" }, { pid: 2 }],
+      windows: [{ window_id: 3, title: "T" }, { title: "no id" }],
+    } } });
+    expect(slim.structured).toEqual({
+      elements: [{ element_index: 1, role: "AXButton", depth: 1 }],
+      apps: [{ pid: 1, name: "Notes" }],
+      windows: [{ window_id: 3, title: "T" }],
+    });
+  });
+
   it("caps elements at MAX_ELEMENTS", () => {
     const elements = Array.from({ length: 1600 }, (_, index) => ({ element_index: index, role: "AXButton", depth: 1 }));
     const slim = slimResponse({ id: 1, result: { content: [], structuredContent: { elements } } });
