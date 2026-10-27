@@ -44,7 +44,10 @@ export class ChatToolCalls {
     const omitted = (field: unknown) => field === undefined || (streaming && field === null);
     for (const [position, raw] of value.entries()) {
       const delta = object(raw);
-      const index = streaming ? delta?.index : position;
+      let index = streaming ? delta?.index : position;
+      if (streaming && delta && index === undefined && typeof delta.id === "string" && delta.id) {
+        index = [...this.calls].find(([, c]) => c.id === delta.id)?.[0] ?? this.calls.size;
+      }
       if (!delta || !Number.isInteger(index) || Number(index) < 0 || Number(index) >= MAX_REPLY_TOOL_CALLS) {
         throw new ChatProtocolError("provider returned an invalid tool-call index");
       }

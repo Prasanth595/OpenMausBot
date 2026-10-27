@@ -44,6 +44,23 @@ describe("streamed chat tool calls", () => {
     expect(() => calls.add([{ index: 0, id, function: { name, arguments: args } }], true)).toThrow(/size limit/);
   });
 });
+  it("accepts streamed tool calls with id but no index (Gemini free tier streaming format)", () => {
+    const calls = new ChatToolCalls();
+    calls.add([
+      { id: "call_gemini_1", type: "function", function: { name: "open_url", arguments: '{"url":"https://example.com"}' } },
+      { id: "call_gemini_2", type: "function", function: { name: "open_url", arguments: '{"url":"https://example.org"}' } },
+    ], true);
+    const finished = calls.finish("tool_calls", false);
+    expect(finished).toHaveLength(2);
+    expect(finished[0]!.id).toBe("call_gemini_1");
+    expect(finished[1]!.id).toBe("call_gemini_2");
+  });
+
+  it("still rejects streamed tool calls lacking both index and id", () => {
+    const calls = new ChatToolCalls();
+    expect(() => calls.add([{ type: "function", function: { name: "open_url", arguments: "{}" } }], true))
+      .toThrow(/invalid tool-call index/);
+  });
 
 describe("tool calls per reply", () => {
   it("accepts 32 calls in one reply and refuses a 33rd", () => {
