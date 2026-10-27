@@ -431,6 +431,28 @@ winOnly("resolveCli (Windows)", () => {
     expect(stdout.trim()).toBe("js target -p,hi");
   });
 
+  it("parses an npm .cmd shim whose node script has no extension down to `node <script>`", async () => {
+    const shim = JS_SHIM.replace("ombfake.js", "ombfake");
+    shimWith("ombfake.cmd", shim, "ombfake", "#!/usr/bin/env node\nconsole.log('bare target ' + process.argv.slice(2).join(','));\n");
+    onPath();
+    const r = resolveCli("ombfake", ["exec", "hi"]);
+    expect(r.args).toEqual([join(dir, "node_modules", "pkg", "bin", "ombfake"), "exec", "hi"]);
+    expect(r.command.toLowerCase()).toMatch(/node(\.exe)?$/);
+    const stdout = await new Promise<string>((resolve, reject) =>
+      execFile(r.command, r.args, (err, out) => (err ? reject(err) : resolve(out))),
+    );
+    expect(stdout.trim()).toBe("bare target exec,hi");
+  });
+
+  it("still leaves a shim alone when its extensionless target is not a node script", () => {
+    const shim = JS_SHIM.replace("ombfake.js", "ombfake");
+    shimWith("ombfake.cmd", shim, "ombfake", "#!/bin/sh\necho nope\n");
+    onPath();
+    const r = resolveCli("ombfake", ["-p"]);
+    expect(r.command.toLowerCase()).toBe(join(dir, "ombfake.cmd").toLowerCase());
+    expect(r.args).toEqual(["-p"]);
+  });
+
   it.each(["npm", "npx"] as const)("parses npm's own %s.cmd down to `node <cli.js>`, not its prefix helper", async (name) => {
     writeFileSync(join(dir, `${name}.cmd`), npmLauncher(name));
     const bin = join(dir, "node_modules", "npm", "bin");

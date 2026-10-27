@@ -248,7 +248,13 @@ function parseCmdShim(shim: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | nu
     if (node) return { command: node, args: [script] };
   }
   const exe = targets.find((p) => extname(p).toLowerCase() === ".exe");
-  return exe ? { command: exe, args: [] } : null;
+  if (exe) return { command: exe, args: [] };
+  // A package.json `bin` may name a node script with no extension (Factory's droid, xAI's grok).
+  for (const target of targets) {
+    const viaNode = parseNodeShebang(target, env);
+    if (viaNode) return viaNode;
+  }
+  return null;
 }
 
 function parseNodeShebang(file: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | null {
