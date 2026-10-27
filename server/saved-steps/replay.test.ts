@@ -53,10 +53,28 @@ beforeEach(() => {
 describe("runSteps", () => {
   it("asks once per action, resolves afresh and reports each step", async () => {
     expect(await runSteps(RECIPE, TURN, deps)).toEqual({ kind: "done" });
-    expect(asked).toEqual([["mcp__computer__click", 'click on "Document" in TextEdit'], ["mcp__computer__type_text", 'type_text on "Document" in TextEdit']]);
+    expect(asked).toEqual([["mcp__computer__click", 'click on "Document" in TextEdit'], ["mcp__computer__type_text", 'type_text "hello world" on "Document" in TextEdit']]);
     expect(acted).toEqual([["click", { pid: 4242, window_id: 7, element_token: "s2-e2" }], ["type_text", { text: "hello world", pid: 4242, window_id: 7, element_token: "s3-e2" }]]);
     expect(itemEvents()).toEqual([
       ["item.started", "turn-1", undefined], ["item.completed", "turn-1", true], ["item.started", "turn-1", undefined], ["item.completed", "turn-1", true]]);
+  });
+
+  it("words each approval with what the step types or presses", async () => {
+    const keys: Recipe = { ...RECIPE, steps: [
+      { tool: "set_value", args: { value: "hello" }, ...TARGET },
+      { tool: "press_key", args: { key: "s", modifiers: ["cmd"] }, app: TARGET.app },
+      { tool: "press_key", args: { key: "return" }, app: TARGET.app },
+      { tool: "hotkey", args: { keys: ["cmd", "shift", "s"] }, app: TARGET.app },
+    ] };
+    expect(await runSteps(keys, TURN, deps)).toEqual({ kind: "done" });
+    expect(asked).toEqual([
+      ["mcp__computer__set_value", 'set_value "hello" on "Document" in TextEdit'],
+      ["mcp__computer__press_key", 'press_key "cmd+s" on TextEdit'],
+      ["mcp__computer__press_key", 'press_key "return" on TextEdit'],
+      ["mcp__computer__hotkey", 'hotkey "cmd+shift+s" on TextEdit'],
+    ]);
+    expect(events.filter((e) => e.type === "item.started").map((e) => "input" in e && e.input))
+      .toEqual(['set_value on "Document" in TextEdit', "press_key on TextEdit", "press_key on TextEdit", "hotkey on TextEdit"]);
   });
 
   it("tells each step's item who ran it and what it did", async () => {

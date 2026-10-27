@@ -88,7 +88,7 @@ describe("computer journal", () => {
   });
 
   it("counts gate checks only for host computer turns", () => {
-    const saved = createSavedSteps({});
+    const saved = createSavedSteps({ enabled: () => true, publish: () => {}, engines: { get: () => undefined, set: () => {} }, stopped: () => false, generation: () => "g1" });
     saved.gateChecked({ ...scope, kind: "computer", boxId: null });
     saved.gateChecked({ ...scope, kind: "browser" });
     expect(saved.journal.take("t1", new Set(["g1"]))).toBeNull();

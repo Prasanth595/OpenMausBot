@@ -50,9 +50,9 @@ describe("openComputerCaller", () => {
     await caller.close();
   });
 
-  it("starts the computer without the journal switch and keeps the rest of its environment", async () => {
+  it("starts the computer with the journal switched off and keeps the rest of its environment", async () => {
     const caller = await recordingComputer({ OMB_COMPUTER_JOURNAL: "1", FIXTURE_KEPT: "yes" });
-    expect(await caller.call("read_env", {}, signal)).toEqual({ ok: true, structured: { journal: null, kept: "yes" } });
+    expect(await caller.call("read_env", {}, signal)).toEqual({ ok: true, structured: { journal: "0", kept: "yes" } });
   });
 
   it("reports a JSON-RPC error as a failed call", async () => {

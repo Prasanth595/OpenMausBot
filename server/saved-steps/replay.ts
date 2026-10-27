@@ -1,6 +1,6 @@
 import { newId, type RuntimeEvent } from "../contracts.ts";
 import { resolveStep, type ComputerCaller } from "./resolve.ts";
-import { stepLabel, type Recipe } from "./rules.ts";
+import { stepLabel, type Recipe, type RecipeStep } from "./rules.ts";
 
 export interface ReplayTurn { threadId: string; turnId: string; provider: string; providerInstanceId: string }
 export interface StepApproval { ask(tool: string, summary: string): Promise<boolean> }
@@ -13,6 +13,22 @@ export type ReplayOutcome =
 const STOPPED: ReplayOutcome = { kind: "stopped" };
 const engineToolName = (tool: string) => `mcp__computer__${tool}`;
 const stepSummary = (tool: string, label: string) => `${tool} on ${label}`;
+const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+const keyList = (value: unknown) => (Array.isArray(value) && value.every((key) => typeof key === "string") ? value : undefined);
+
+function typedOrPressed({ tool, args }: RecipeStep): string | undefined {
+  if (tool === "type_text") return text(args.text);
+  if (tool === "set_value") return text(args.value);
+  if (tool === "hotkey") return keyList(args.keys)?.join("+");
+  if (tool !== "press_key") return undefined;
+  const key = text(args.key);
+  return key === undefined ? undefined : [...(keyList(args.modifiers) ?? []), key].join("+");
+}
+
+function approvalSummary(step: RecipeStep, label: string): string {
+  const typed = typedOrPressed(step);
+  return typed === undefined ? stepSummary(step.tool, label) : `${step.tool} ${JSON.stringify(typed)} on ${label}`;
+}
 
 export async function runSteps(
   recipe: Recipe,
@@ -33,7 +49,7 @@ export async function runSteps(
     if (!target.ok) return failed(target.error);
     const tool = engineToolName(step.tool);
     const summary = stepSummary(step.tool, label);
-    const allowed = await approval.ask(tool, summary);
+    const allowed = await approval.ask(tool, approvalSummary(step, label));
     if (signal.aborted) return STOPPED;
     if (!allowed) return { kind: "declined", tool: step.tool, label };
     const itemId = newId();

@@ -36,8 +36,7 @@ export function callOutcome(result: unknown): CallOutcome {
 }
 
 function unjournalled(env: Record<string, string>): Record<string, string> {
-  const { OMB_COMPUTER_JOURNAL: _journal, ...rest } = env;
-  return rest;
+  return { ...env, OMB_COMPUTER_JOURNAL: "0" };
 }
 
 export async function openComputerCaller(computer: LocalComputerSpec, signal: AbortSignal): Promise<ComputerCaller & { close(): Promise<void> }> {
