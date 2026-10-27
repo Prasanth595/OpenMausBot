@@ -147,6 +147,8 @@ describe("buildRecipe", () => {
     ["hotkey", { keys: ["cmd", "s"], pid: 4242 }],
     ["press_key", { key: "return", pid: 4242 }],
     ["press_key", { key: "return", element_token: "s1-e2" }],
+    ["click", { element_token: "s1-e2" }],
+    ["type_text", { element_token: "s1-e2", text: "hello world" }],
   ])("keeps a %s only when it is scoped to its window", (tool, args) => {
     expect(build(withCall(action(tool, { ...args, scope: "desktop" })))).toEqual({ ok: false, reason: "unknown-target" });
     expect(build(withCall(action(tool, { ...args, scope: "screen" })))).toEqual({ ok: false, reason: "unknown-target" });

@@ -183,7 +183,7 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
       || (args.pid !== undefined && pid === undefined)
       || (args.window_id !== undefined && windowId === undefined);
     if (malformed) return refuse("unknown-target");
-    if (KEY_TOOLS.has(tool) && args.scope !== undefined && args.scope !== "window") return refuse("unknown-target");
+    if ((KEY_TOOLS.has(tool) || ELEMENT_TOOLS.has(tool)) && args.scope !== undefined && args.scope !== "window") return refuse("unknown-target");
 
     if (ELEMENT_TOOLS.has(tool) || (tool === "press_key" && addressed)) {
       const found = resolveElement(args);

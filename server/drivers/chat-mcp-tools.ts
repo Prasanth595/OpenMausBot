@@ -67,7 +67,7 @@ export function chatMcpEnvironment(serverEnv: Record<string, string>, source: No
   return { ...env, ...serverEnv };
 }
 
-class ChatMcpClient {
+export class ChatMcpClient {
   private readonly frameBytes: number;
   private child: ReturnType<typeof spawnCli>;
   private buffer = "";
