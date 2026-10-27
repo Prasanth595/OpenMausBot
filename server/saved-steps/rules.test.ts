@@ -81,9 +81,47 @@ describe("buildRecipe", () => {
     });
   });
 
-  it("falls back to the latest snapshot of the pid for an index without a window", () => {
-    const out = build(withCall(action("click", { element_index: 3, pid: 4242 })));
-    expect(out.ok && out.recipe.steps.at(-1)?.element?.label).toBe("Save");
+  const stateCall = (structured: SlimResult["structured"]) => action("get_window_state", { pid: 4242, window_id: 7 }, { isError: false, structured });
+  const bare = (calls: RecordedCall[]) => build(textEditJournal({ calls }));
+  const noApp = { ...windowState(1), app_name: undefined, bundle_id: undefined };
+  const noTitle = { ...windowState(1), window_title: undefined };
+
+  it("refuses an index with only a pid", () => {
+    expect(build(withCall(action("click", { element_index: 3, pid: 4242 })))).toEqual({ ok: false, reason: "unknown-target" });
+  });
+
+  it("maps an index to the latest snapshot of its window, not another window's", () => {
+    const other = { ...windowState(1), window_id: 8, window_title: "Other", elements: [{ element_index: 3, element_token: "o-e3", role: "AXButton", label: "Delete", parent_index: 0, depth: 1 }, windowState(1).elements![0]!] };
+    const calls = [...textEditJournal().calls.slice(0, 3), action("get_window_state", { pid: 4242, window_id: 8 }, { isError: false, structured: other }),
+      stateCall(windowState(2)), action("click", { element_index: 3, window_id: 7 })];
+    const out = bare(calls);
+    expect(out.ok && out.recipe.steps[0]?.element?.label).toBe("Save");
+  });
+
+  it("refuses an index after the whole tree was read another way", () => {
+    const calls = [...textEditJournal().calls.slice(0, 3), observation("get_accessibility_tree", {}), action("click", { element_index: 3, window_id: 7 })];
+    expect(bare(calls)).toEqual({ ok: false, reason: "unknown-target" });
+  });
+
+  it("refuses an app with neither bundle id nor name", () => {
+    expect(bare([stateCall(noApp), action("click", { element_token: "s1-e2" })])).toEqual({ ok: false, reason: "unknown-target" });
+    expect(bare([stateCall(noApp), action("bring_to_front", { pid: 4242 })])).toEqual({ ok: false, reason: "unknown-target" });
+  });
+
+  it("refuses an element step whose window has no known title", () => {
+    expect(bare([stateCall(noTitle), action("click", { element_token: "s1-e2", window_id: 7 })])).toEqual({ ok: false, reason: "unknown-target" });
+  });
+
+  it.each([
+    ["hotkey with an element token", action("hotkey", { element_token: "s1-e2", keys: ["cmd", "s"] })],
+    ["launch_app with pid and window", action("launch_app", { name: "TextEdit", pid: 4242, window_id: 7 })],
+    ["hotkey with a string pid", action("hotkey", { pid: "4242", keys: ["cmd", "s"] })],
+    ["hotkey with a string window id", action("hotkey", { pid: 4242, window_id: "7", keys: ["cmd", "s"] })],
+  ])("never drops addressing silently: %s", (_name, call) => expect(build(withCall(call))).toEqual({ ok: false, reason: "unknown-target" }));
+
+  it.each(["hello world\n", "\r\n hello world \n\n", " hello world", "hello\tworld"])("refuses typed text with whitespace or control characters %#", (text) => {
+    expect(build(withCall(action("type_text", { element_token: "s1-e2", text })))).toEqual({ ok: false, reason: "typed-text-not-in-request" });
+    expect(build(withCall(action("set_value", { element_token: "s1-e2", value: text })))).toEqual({ ok: false, reason: "typed-text-not-in-request" });
   });
 
   it("keeps app and window targets for bring_to_front and pid hotkeys, and none without a pid", () => {
@@ -109,6 +147,9 @@ describe("recipeFitsRequest", () => {
     const recipe = (build() as { ok: true; recipe: Recipe }).recipe;
     expect(recipeFitsRequest(recipe, "PLEASE open TextEdit and type HELLO WORLD")).toBe(true);
     expect(recipeFitsRequest(recipe, "open textedit and type hello, world")).toBe(false);
+    for (const text of ["hello world\n", "\r\n hello world \n\n"]) {
+      expect(recipeFitsRequest({ ...recipe, steps: [{ tool: "type_text", args: { text } }] }, REQUEST)).toBe(false);
+    }
   });
 });
 

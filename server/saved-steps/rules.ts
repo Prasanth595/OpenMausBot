@@ -38,13 +38,17 @@ const KEPT_ARGS: Record<ActionTool, readonly string[]> = {
 
 const isActionTool = (tool: string): tool is ActionTool => Object.hasOwn(KEPT_ARGS, tool);
 
+const CONTROL_CHARACTERS = /\p{Cc}/u;
+const CONTEXT_TOOLS = new Set(["get_accessibility_tree", "get_desktop_state"]);
+
 type TypedWordsRefusal = "typed-text-not-in-request" | "url-not-in-request";
 
 function wordsOutsideRequest(steps: readonly Pick<RecipeStep, "tool" | "args">[], request: string): TypedWordsRefusal | null {
   const fromPerson = (value: unknown) => typeof value === "string" && inRequest(value, request);
+  const typedFromPerson = (value: unknown) => typeof value === "string" && value === value.trim() && !CONTROL_CHARACTERS.test(value) && inRequest(value, request);
   for (const { tool, args } of steps) {
-    if (tool === "type_text" && !fromPerson(args.text)) return "typed-text-not-in-request";
-    if (tool === "set_value" && !fromPerson(args.value)) return "typed-text-not-in-request";
+    if (tool === "type_text" && !typedFromPerson(args.text)) return "typed-text-not-in-request";
+    if (tool === "set_value" && !typedFromPerson(args.value)) return "typed-text-not-in-request";
     if (tool === "launch_app" && args.urls !== undefined && !(Array.isArray(args.urls) && args.urls.every(fromPerson))) return "url-not-in-request";
   }
   return null;
@@ -97,8 +101,12 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
   const windowsById = new Map<number, string>();
   const latestByWindow = new Map<string, Snapshot>();
   const seenTokens = new Set<string>();
+  const appFor = (pid: number | undefined): AppIdentity | undefined => {
+    const known = pid === undefined ? undefined : appsByPid.get(pid);
+    return known && (known.bundleId || known.name) ? stripEmpty(known) : undefined;
+  };
   const learnApp = (pid: number | undefined, identity: AppIdentity) => {
-    if (pid !== undefined) appsByPid.set(pid, fillMissing(appsByPid.get(pid), identity));
+    if (pid !== undefined && (identity.bundleId || identity.name)) appsByPid.set(pid, fillMissing(appsByPid.get(pid), identity));
   };
 
   const observe = ({ tool, result }: RecordedCall) => {
@@ -114,7 +122,9 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
       learnApp(data.pid, { bundleId: data.bundle_id, name: data.app_name });
       if (data.window_id !== undefined && data.window_title !== undefined) windowsById.set(data.window_id, data.window_title);
       const snapshot: Snapshot = { pid: data.pid, windowId: data.window_id, appName: data.app_name, windowTitle: data.window_title, elements: data.elements ?? [] };
-      latestByWindow.set(data.window_id !== undefined ? `w${data.window_id}` : `p${data.pid}`, snapshot);
+      const key = data.window_id !== undefined ? `w${data.window_id}` : `p${data.pid}`;
+      latestByWindow.delete(key);
+      latestByWindow.set(key, snapshot);
       for (const element of snapshot.elements) if (element.element_token) seenTokens.add(element.element_token);
     }
   };
@@ -137,13 +147,13 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
     }
     if (index === undefined) return "unknown-target";
     const windowId = numberArg(args, "window_id");
-    const pid = numberArg(args, "pid");
-    let snapshot = windowId !== undefined ? latestByWindow.get(`w${windowId}`) : undefined;
-    if (!snapshot && pid !== undefined) snapshot = [...latestByWindow.values()].reverse().find((candidate) => candidate.pid === pid);
+    if (windowId === undefined || indexUnsafe) return "unknown-target";
+    const snapshot = latestByWindow.get(`w${windowId}`);
     const element = snapshot?.elements.find((candidate) => candidate.element_index === index);
     return snapshot && element ? { element, snapshot } : "unknown-target";
   };
 
+  const indexUnsafe = journal.calls.some((call) => CONTEXT_TOOLS.has(call.tool));
   const steps: RecipeStep[] = [];
   for (const call of journal.calls) {
     const { tool, arguments: args, result } = call;
@@ -166,6 +176,11 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
     const addressed = args.element_token !== undefined || args.element_index !== undefined;
     const pid = numberArg(args, "pid");
     const windowId = numberArg(args, "window_id");
+    const malformed = (args.element_token !== undefined && typeof args.element_token !== "string")
+      || (args.element_index !== undefined && typeof args.element_index !== "number")
+      || (args.pid !== undefined && pid === undefined)
+      || (args.window_id !== undefined && windowId === undefined);
+    if (malformed) return refuse("unknown-target");
 
     if (ELEMENT_TOOLS.has(tool) || (tool === "press_key" && addressed)) {
       const found = resolveElement(args);
@@ -174,24 +189,26 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
       if (!element.label) return refuse("unlabelled-element");
       const path = elementPath(snapshot.elements, element);
       if (!path) return refuse("unknown-target");
-      const app = appsByPid.get(snapshot.pid ?? pid ?? -1) ?? (snapshot.appName ? { name: snapshot.appName } : undefined);
+      const app = appFor(snapshot.pid ?? pid) ?? (snapshot.appName ? { name: snapshot.appName } : undefined);
       if (!app) return refuse("unknown-target");
-      step.app = stripEmpty(app);
+      step.app = app;
       const title = snapshot.windowTitle ?? windowsById.get(snapshot.windowId ?? windowId ?? -1);
-      if (title !== undefined) step.window = { title };
+      if (title === undefined) return refuse("unknown-target");
+      step.window = { title };
       step.element = { role: element.role, label: element.label, path };
-    } else if (tool === "bring_to_front" || pid !== undefined || windowId !== undefined) {
-      if (tool !== "launch_app") {
-        if (pid !== undefined || tool === "bring_to_front") {
-          const app = appsByPid.get(pid ?? -1);
-          if (!app) return refuse("unknown-target");
-          step.app = stripEmpty(app);
-        }
-        if (windowId !== undefined) {
-          const title = windowsById.get(windowId);
-          if (title === undefined) return refuse("unknown-target");
-          step.window = { title };
-        }
+    } else if (tool === "launch_app") {
+      if (addressed || pid !== undefined || windowId !== undefined) return refuse("unknown-target");
+    } else {
+      if (addressed) return refuse("unknown-target");
+      if (pid !== undefined || tool === "bring_to_front") {
+        const app = appFor(pid);
+        if (!app) return refuse("unknown-target");
+        step.app = app;
+      }
+      if (windowId !== undefined) {
+        const title = windowsById.get(windowId);
+        if (title === undefined) return refuse("unknown-target");
+        step.window = { title };
       }
     }
     steps.push(step);
