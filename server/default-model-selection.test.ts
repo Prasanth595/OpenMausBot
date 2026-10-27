@@ -3,7 +3,7 @@ import ts from "typescript";
 import { describe, expect, it, vi } from "vitest";
 
 import type { EngineAccess, ModelCatalog, ModelSelection, ProviderSnapshot } from "./contracts.ts";
-import { readyToRun, selectDefaultModelSelection, withInstanceConfig, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
+import { isSubscriptionOrFreeInstance, readyToRun, selectDefaultModelSelection, withInstanceConfig, withNewBotEffort, type SelectableInstance } from "./default-model-selection.ts";
 import { ManagedDesktopPolicy } from "./managed-policy.ts";
 
 const codex = {
@@ -28,6 +28,17 @@ describe("new bot default model selection", () => {
     const instance = { ...codex, instanceId: "mistral", driverKind: "mistral", access: "api" as const };
     const preferred = { instanceId: "mistral", model: "selected-model" };
     expect(selectDefaultModelSelection([instance], preferred)).toEqual(preferred);
+  });
+  it("rejects paid API key providers when subscriptionOrFreeOnly is active", () => {
+    const apiInstance = { ...codex, instanceId: "mistral", driverKind: "mistral", access: "api" as const };
+    const preferred = { instanceId: "mistral", model: "selected-model" };
+    expect(selectDefaultModelSelection([apiInstance], preferred, { subscriptionOrFreeOnly: true })).toEqual({ instanceId: "", model: "" });
+    expect(isSubscriptionOrFreeInstance(apiInstance)).toBe(false);
+
+    // Claude OAuth subscription is accepted
+    expect(selectDefaultModelSelection([apiInstance, claude], undefined, { subscriptionOrFreeOnly: true }))
+      .toEqual({ instanceId: "claude", model: "claude-default" });
+    expect(isSubscriptionOrFreeInstance(claude)).toBe(true);
   });
   it("keeps a saved custom endpoint even when its account sign-in is false", () => {
     const instance = { ...codex, access: "custom" as const, snapshot: { state: "available", authenticated: false } satisfies ProviderSnapshot };

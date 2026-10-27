@@ -1,0 +1,18 @@
+{
+  "id": "ponytail",
+  "name": "Ponytail (Smallest Correct Fix)",
+  "version": "1.0.0",
+  "description": "Lazy senior developer mode: write the smallest correct change that solves the whole task. Reuse existing codebase patterns and libraries before writing new code.",
+  "defaultEnabled": true,
+  "triggerTerms": [
+    "ponytail",
+    "smallest fix",
+    "minimal diff",
+    "lazy senior dev",
+    "yagni",
+    "simplest solution",
+    "stop overbuilding",
+    "cut bloat"
+  ],
+  "requiredCapabilities": []
+}

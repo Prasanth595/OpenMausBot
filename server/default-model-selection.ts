@@ -13,6 +13,7 @@ export interface SelectableInstance {
 export interface DefaultSelectionContext {
   company?: (instanceId: string) => boolean;
   refusal?: (instance: SelectableInstance) => string | undefined;
+  subscriptionOrFreeOnly?: boolean;
 }
 
 const claudeFirst = (instances: readonly SelectableInstance[]) =>
@@ -27,15 +28,39 @@ export function withInstanceConfig<T extends SelectableInstance>(instances: read
   }));
 }
 
+const API_KEY_DRIVERS: ReadonlySet<string> = new Set([
+  "openai-compat",
+  "openai",
+  "claudeApi",
+  "xaiApi",
+  "mistral",
+  "cerebras",
+  "groq",
+  "openrouter",
+]);
+
+/** Returns true if the instance uses an OAuth subscription (Claude Code CLI, ChatGPT/Codex PKCE, Cursor, Antigravity)
+ * or is a local/free engine. Returns false for paid metered API key providers. */
+export function isSubscriptionOrFreeInstance(instance: SelectableInstance): boolean {
+  if (instance.snapshot.account?.method === "api-key") return false;
+  if (instance.snapshot.billing === "metered") return false;
+  if (instance.access === "custom" || instance.access === "api") return false;
+  if (API_KEY_DRIVERS.has(instance.driverKind)) return false;
+  if (instance.snapshot.billing === "subscription" || instance.snapshot.chatgptPlan) return true;
+  if (instance.snapshot.account?.method === "login") return true;
+  return ["claudeAgent", "codex", "cursorAgent", "antigravity", "hermesAgent", "qwenAgent", "piAgent"].includes(instance.driverKind);
+}
+
 /** A custom endpoint brings its own credential, so its sign-in state does not count. */
 export function signedOut(instance: SelectableInstance): boolean {
   return instance.snapshot.state === "available" && instance.access !== "custom" && instance.snapshot.authenticated === false;
 }
 
 export function readyToRun(instance: SelectableInstance, context: DefaultSelectionContext = {}): boolean {
+  const subscriptionOrFreeOnly = context.subscriptionOrFreeOnly ?? process.env.OMB_SUBSCRIPTION_OR_FREE_ONLY === "1";
+  if (subscriptionOrFreeOnly && !isSubscriptionOrFreeInstance(instance)) return false;
   return instance.enabled !== false && instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && !signedOut(instance);
 }
-
 const defaultModel = (instance: SelectableInstance) => instance.models.default.trim()
   ? instance.models.default
   : instance.models.options.find((model) => model.id.trim())?.id ?? "";
@@ -47,9 +72,11 @@ export function selectDefaultModelSelection(
   preferred?: ModelSelection,
   context: DefaultSelectionContext = {},
 ): ModelSelection {
+  const subscriptionOrFreeOnly = context.subscriptionOrFreeOnly ?? process.env.OMB_SUBSCRIPTION_OR_FREE_ONLY === "1";
   if (preferred && (preferred.instanceId || preferred.model)) {
     const instance = instances.find((candidate) => candidate.instanceId === preferred.instanceId);
     if (
+      (subscriptionOrFreeOnly && (!instance || !isSubscriptionOrFreeInstance(instance))) ||
       instance?.snapshot.state !== "available" ||
       instance.enabled === false ||
       signedOut(instance) ||
@@ -66,10 +93,11 @@ export function selectDefaultModelSelection(
     if (selection.effort && !instance.capabilities?.effortLevels?.includes(selection.effort)) delete selection.effort;
     return selection;
   }
-  const available = instances.filter((instance) => instance.enabled !== false && instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && defaultModel(instance));
+  const filtered = subscriptionOrFreeOnly ? instances.filter(isSubscriptionOrFreeInstance) : instances;
+  const available = filtered.filter((instance) => instance.enabled !== false && instance.snapshot.state === "available" && context.refusal?.(instance) === undefined && defaultModel(instance));
   const ready = available.filter((instance) => readyToRun(instance, context));
   const company = context.company;
-  const personal = company && instances.some((instance) => company(instance.instanceId))
+  const personal = company && filtered.some((instance) => company(instance.instanceId))
     ? claudeFirst(ready.filter((instance) => !company(instance.instanceId)))
     : undefined;
   const pick = personal ?? claudeFirst(ready) ?? claudeFirst(available);

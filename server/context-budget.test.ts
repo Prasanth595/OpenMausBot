@@ -5,6 +5,8 @@ it("keeps compaction reachable below small model windows", () => {
   expect(compactBudget(8_000)).toBe(6_400);
   expect(compactBudget(2_000, 20_000)).toBe(1_800);
   expect(compactBudget(100_000, 0.7, 50_000)).toBe(45_000);
+  expect(compactBudget(10_000, undefined, undefined, { OMB_COMPACT_RATIO: "0.4" })).toBe(4_000);
+  expect(compactBudget(10_000, undefined, undefined, { OMB_COMPACT_RATIO: "0.5" })).toBe(5_000);
 });
 
 it("rejects invalid window values and ignores invalid provider readings", () => {

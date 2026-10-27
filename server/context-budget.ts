@@ -17,10 +17,15 @@ export function compactionReading<T>(capabilities: { contextReading?: "meter" } 
   return capabilities?.contextReading === "meter" ? undefined : reading;
 }
 
-/** Leave headroom even for a small local model: an 8k floor would make compaction unreachable on an 8k window. */
-export function compactBudget(window: number, compactAt?: number, nativeCompactAt?: number): number {
+export const DEFAULT_COMPACT_RATIO = 0.8;
+
+/** Leave headroom even for a small local model: an 8k floor would make compaction unreachable on an 8k window.
+ * Defaults to DEFAULT_COMPACT_RATIO (0.8) or OMB_COMPACT_RATIO when unset. */
+export function compactBudget(window: number, compactAt?: number, nativeCompactAt?: number, env: Record<string, string | undefined> = process.env): number {
   if (!positive(window)) throw new Error("invalid model context window");
-  const configured = positive(compactAt) ? (compactAt < 1 ? window * compactAt : compactAt) : window * 0.8;
+  const envRatio = env.OMB_COMPACT_RATIO ? Number(env.OMB_COMPACT_RATIO) : undefined;
+  const ratio = positive(envRatio) && envRatio <= 1 ? envRatio : DEFAULT_COMPACT_RATIO;
+  const configured = positive(compactAt) ? (compactAt < 1 ? window * compactAt : compactAt) : window * ratio;
   return Math.max(1, Math.floor(Math.min(configured, window * 0.9, positive(nativeCompactAt) ? nativeCompactAt * 0.9 : Infinity)));
 }
 
