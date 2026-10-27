@@ -1,8 +1,8 @@
 import { mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "../atomic.ts";
-import type { Recipe } from "./rules.ts";
+import { KEPT_ARGS, type Recipe } from "./rules.ts";
 
 export const MAX_RECIPES = 200;
 export const UNUSED_MS = 60 * 24 * 60 * 60 * 1000;
@@ -18,12 +18,17 @@ const step = z.object({
   window: z.object({ title: z.string() }).optional(),
   element: z.object({ role: z.string(), label: z.string(), path: z.array(z.string()) }).optional(),
 });
+const ADDRESSING_KEYS = new Set(["x", "y", "element_token", "element_index", "pid", "window_id", "session"]);
+const argsFitTool = (tool: keyof typeof KEPT_ARGS, args: Record<string, unknown>) =>
+  Object.keys(args).every((name) => !ADDRESSING_KEYS.has(name) && KEPT_ARGS[tool].includes(name));
+const safeBotId = (botId: string) => botId !== "" && botId !== "." && botId !== ".." && basename(botId) === botId && !/[\\/]/.test(botId);
+
 const recipeSchema = z.object({
   id: z.string().min(1),
   key: z.string().min(1),
   request: z.string(),
   reply: z.string(),
-  steps: z.array(step).min(1).max(40),
+  steps: z.array(step.refine((entry) => argsFitTool(entry.tool, entry.args))).min(1).max(40),
   createdAt: z.number().finite(),
   lastUsedAt: z.number().finite(),
 });
@@ -69,6 +74,7 @@ export class RecipeStore {
   }
 
   private read(botId: string): { recipes: Recipe[] } {
+    if (!safeBotId(botId)) return { recipes: [] };
     let parsed: unknown;
     try {
       parsed = JSON.parse(readFileSync(this.path(botId), "utf8"));
@@ -88,6 +94,7 @@ export class RecipeStore {
   }
 
   private write(botId: string, recipes: Recipe[]): void {
+    if (!safeBotId(botId)) return;
     const folder = this.folder(botId);
     mkdirSync(folder, { recursive: true, mode: 0o700 });
     writeFileAtomic(this.path(botId), JSON.stringify({ version: VERSION, recipes }), { mode: 0o600 });

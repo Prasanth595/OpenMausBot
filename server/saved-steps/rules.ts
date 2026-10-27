@@ -23,7 +23,7 @@ const MAX_STEPS = 40;
 const ADDRESSING = new Set(["element_token", "element_index", "pid", "window_id", "session"]);
 const PIXEL_TOOLS = new Set(["drag", "move_cursor", "zoom"]);
 const ELEMENT_TOOLS = new Set<string>(["click", "double_click", "right_click", "type_text", "set_value", "scroll"]);
-const KEPT_ARGS: Record<ActionTool, readonly string[]> = {
+export const KEPT_ARGS: Record<ActionTool, readonly string[]> = {
   click: ["button", "count", "modifier", "action", "delivery_mode", "scope"],
   double_click: ["delivery_mode"],
   right_click: ["modifier", "delivery_mode"],

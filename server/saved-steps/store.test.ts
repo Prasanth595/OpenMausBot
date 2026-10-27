@@ -1,6 +1,6 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { Recipe } from "./rules.ts";
 import { MAX_RECIPES, RecipeStore, UNUSED_MS } from "./store.ts";
@@ -96,5 +96,36 @@ describe("RecipeStore", () => {
     writeFileSync(file(), JSON.stringify({ version: 1, recipes: [bad, recipe("r2", "open mail")] }));
     expect(store.find("b1", "open notes")).toBeUndefined();
     expect(store.find("b1", "open mail")!.id).toBe("r2");
+  });
+
+  it("drops recipes whose step args carry addressing, pixels or keys outside the tool's list", () => {
+    mkdirSync(join(dir, "b1"));
+    const withArgs = (id: string, key: string, args: Record<string, unknown>): Recipe => {
+      const base = recipe(id, key);
+      return { ...base, steps: [{ tool: "click", args }] };
+    };
+    writeFileSync(file(), JSON.stringify({
+      version: 1,
+      recipes: [
+        withArgs("r1", "with x", { x: 4, y: 5 }),
+        withArgs("r2", "with token", { element_token: "t" }),
+        withArgs("r3", "with stray", { text: "hi" }),
+        withArgs("r4", "fine", { button: "left" }),
+      ],
+    }));
+    expect(store.find("b1", "with x")).toBeUndefined();
+    expect(store.find("b1", "with token")).toBeUndefined();
+    expect(store.find("b1", "with stray")).toBeUndefined();
+    expect(store.find("b1", "fine")!.id).toBe("r4");
+  });
+
+  it("refuses a bot id that is not a single folder name", () => {
+    for (const botId of ["../x", "a/b", "a\\b", "..", ""]) {
+      store.save(botId, recipe("r1", "open notes"));
+      expect(store.find(botId, "open notes")).toBeUndefined();
+      expect(store.forget(botId, "r1")).toBe(false);
+    }
+    expect(existsSync(join(dir, "x"))).toBe(false);
+    expect(existsSync(join(dirname(dir), "x"))).toBe(false);
   });
 });
