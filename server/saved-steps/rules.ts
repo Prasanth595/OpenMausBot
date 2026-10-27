@@ -2,6 +2,7 @@ import type { Message } from "../store.ts";
 import { elementPath, type SlimStructured, type WireElement } from "./driver-wire.ts";
 import type { RecordedCall, RequestJournal } from "./journal.ts";
 import { firstSentence, hasMomentWords, inRequest, requestKey } from "./key.ts";
+import { matchElement } from "./resolve.ts";
 
 export type ActionTool = "click" | "double_click" | "right_click" | "type_text" | "set_value" | "press_key" | "scroll" | "launch_app" | "bring_to_front" | "hotkey";
 
@@ -17,12 +18,13 @@ export interface Recipe { id: string; key: string; request: string; reply: strin
 
 export type Refusal =
   | "moment-words" | "several-turns" | "incomplete-journal" | "denied" | "tool-error" | "unknown-tool" | "pixel-or-drag" | "extra-arguments"
-  | "unknown-target" | "stale-element" | "unlabelled-element" | "typed-text-not-in-request" | "url-not-in-request" | "no-steps" | "too-many-steps" | "no-reply";
+  | "unknown-target" | "stale-element" | "unlabelled-element" | "ambiguous-element" | "typed-text-not-in-request" | "url-not-in-request" | "no-steps" | "too-many-steps" | "no-reply";
 
 const MAX_STEPS = 40;
 const ADDRESSING = new Set(["element_token", "element_index", "pid", "window_id", "session"]);
 const PIXEL_TOOLS = new Set(["drag", "move_cursor", "zoom"]);
 export const ELEMENT_TOOLS: ReadonlySet<ActionTool> = new Set<ActionTool>(["click", "double_click", "right_click", "type_text", "set_value", "scroll"]);
+const KEY_TOOLS: ReadonlySet<ActionTool> = new Set<ActionTool>(["press_key", "hotkey"]);
 export const KEPT_ARGS: Record<ActionTool, readonly string[]> = {
   click: ["button", "count", "modifier", "action", "delivery_mode", "scope"],
   double_click: ["delivery_mode"],
@@ -181,6 +183,7 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
       || (args.pid !== undefined && pid === undefined)
       || (args.window_id !== undefined && windowId === undefined);
     if (malformed) return refuse("unknown-target");
+    if (KEY_TOOLS.has(tool) && args.scope !== undefined && args.scope !== "window") return refuse("unknown-target");
 
     if (ELEMENT_TOOLS.has(tool) || (tool === "press_key" && addressed)) {
       const found = resolveElement(args);
@@ -189,6 +192,8 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
       if (!element.label) return refuse("unlabelled-element");
       const path = elementPath(snapshot.elements, element);
       if (!path) return refuse("unknown-target");
+      const twins = matchElement(snapshot.elements, { role: element.role, label: element.label, path });
+      if (!twins.ok || twins.value.element_index !== element.element_index) return refuse("ambiguous-element");
       const app = appFor(snapshot.pid ?? pid) ?? (snapshot.appName ? { name: snapshot.appName } : undefined);
       if (!app) return refuse("unknown-target");
       step.app = app;
@@ -199,15 +204,12 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
     } else if (tool === "launch_app") {
       if (addressed || pid !== undefined || windowId !== undefined) return refuse("unknown-target");
     } else {
-      if (addressed) return refuse("unknown-target");
-      if (pid !== undefined || tool === "bring_to_front") {
-        const app = appFor(pid);
-        if (!app) return refuse("unknown-target");
-        step.app = app;
-      }
+      const app = appFor(pid);
+      if (addressed || !app) return refuse("unknown-target");
+      step.app = app;
       if (windowId !== undefined) {
         const title = windowsById.get(windowId);
-        if (title === undefined || !step.app) return refuse("unknown-target");
+        if (title === undefined) return refuse("unknown-target");
         step.window = { title };
       }
     }

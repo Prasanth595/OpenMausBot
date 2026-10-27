@@ -12,6 +12,11 @@ export function windowState(snapshot: number): SlimStructured {
   return { pid: 4242, app_name: "TextEdit", bundle_id: "com.apple.TextEdit", window_id: 7, window_title: "Untitled", elements };
 }
 
+export function completeWindowState(structured: SlimStructured): Record<string, unknown> {
+  const count = structured.elements?.length ?? 0;
+  return { ...structured, elements_complete: true, element_count: count, returned_element_count: count, total_element_count: count };
+}
+
 const ok = (structured?: SlimStructured) => ({ isError: false, ...(structured ? { structured } : {}) });
 
 export function textEditJournal(overrides: { calls?: RecordedCall[]; complete?: boolean; tainted?: boolean } = {}): RequestJournal {

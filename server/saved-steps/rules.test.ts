@@ -129,15 +129,39 @@ describe("buildRecipe", () => {
     expect(build(withCall(action("set_value", { element_token: "s1-e2", value: text })))).toEqual({ ok: false, reason: "typed-text-not-in-request" });
   });
 
-  it("keeps app and window targets for bring_to_front and pid hotkeys, and none without a pid", () => {
+  it("keeps app and window targets for bring_to_front and pid hotkeys", () => {
     const out = build(withCall(action("bring_to_front", { pid: 4242, window_id: 7 })));
     if (!out.ok) throw new Error(out.reason);
     expect(out.recipe.steps.at(-1)).toEqual({ tool: "bring_to_front", args: {}, app: { bundleId: "com.apple.TextEdit", name: "TextEdit" }, window: { title: "Untitled" } });
     const hotkey = build(withCall(action("hotkey", { keys: ["cmd", "s"], pid: 4242 })));
     expect(hotkey.ok && hotkey.recipe.steps.at(-1)).toEqual({ tool: "hotkey", args: { keys: ["cmd", "s"] }, app: { bundleId: "com.apple.TextEdit", name: "TextEdit" } });
-    const bare = build(withCall(action("hotkey", { keys: ["cmd", "s"] })));
-    expect(bare.ok && bare.recipe.steps.at(-1)).toEqual({ tool: "hotkey", args: { keys: ["cmd", "s"] } });
     expect(build(withCall(action("bring_to_front", { pid: 9999 })))).toEqual({ ok: false, reason: "unknown-target" });
+  });
+
+  it.each([
+    ["hotkey", action("hotkey", { keys: ["cmd", "s"] })],
+    ["press_key", action("press_key", { key: "return" })],
+  ])("refuses a %s with no app to send it to", (_name, call) => expect(build(withCall(call))).toEqual({ ok: false, reason: "unknown-target" }));
+
+  it.each<[string, Record<string, unknown>]>([
+    ["hotkey", { keys: ["cmd", "s"], pid: 4242 }],
+    ["press_key", { key: "return", pid: 4242 }],
+    ["press_key", { key: "return", element_token: "s1-e2" }],
+  ])("keeps a %s only when it is scoped to its window", (tool, args) => {
+    expect(build(withCall(action(tool, { ...args, scope: "desktop" })))).toEqual({ ok: false, reason: "unknown-target" });
+    expect(build(withCall(action(tool, { ...args, scope: "screen" })))).toEqual({ ok: false, reason: "unknown-target" });
+    const scoped = build(withCall(action(tool, { ...args, scope: "window" })));
+    expect(scoped.ok && scoped.recipe.steps.at(-1)?.args.scope).toBe("window");
+    const unscoped = build(withCall(action(tool, args)));
+    expect(unscoped.ok && unscoped.recipe.steps.at(-1)?.app).toEqual({ bundleId: "com.apple.TextEdit", name: "TextEdit" });
+  });
+
+  it("refuses an element whose role, label and path another row of its snapshot shares", () => {
+    const rows = windowState(1).elements!;
+    const twin = { ...rows[2]!, element_index: 4, element_token: "s1-e4" };
+    expect(bare([stateCall({ ...windowState(1), elements: [...rows, twin] }), action("click", { element_token: "s1-e2" })]))
+      .toEqual({ ok: false, reason: "ambiguous-element" });
+    expect(bare([stateCall(windowState(1)), action("click", { element_token: "s1-e2" })]).ok).toBe(true);
   });
 
   it("never lets a later source overwrite a known app field", () => {

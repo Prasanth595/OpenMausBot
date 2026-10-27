@@ -81,13 +81,13 @@ export function elementPath(elements: readonly WireElement[], element: WireEleme
   const byIndex = new Map(elements.map((candidate) => [candidate.element_index, candidate]));
   const chain: string[] = [];
   const seen = new Set<number>([element.element_index]);
-  let parentIndex = element.parent_index;
-  while (parentIndex !== undefined) {
-    const parent = byIndex.get(parentIndex);
+  let node = element;
+  while (node.parent_index !== undefined) {
+    const parent = byIndex.get(node.parent_index);
     if (!parent || seen.has(parent.element_index)) return null;
     seen.add(parent.element_index);
     if (!ROOT_ROLES.has(parent.role)) chain.push(`${parent.role}:${parent.label ?? ""}`);
-    parentIndex = parent.parent_index;
+    node = parent;
   }
-  return chain.reverse();
+  return node.depth > 0 ? null : chain.reverse();
 }

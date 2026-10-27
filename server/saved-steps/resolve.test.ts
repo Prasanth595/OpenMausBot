@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { windowState } from "../testing/saved-steps-fixtures.ts";
+import { completeWindowState, windowState } from "../testing/saved-steps-fixtures.ts";
 import type { WireElement } from "./driver-wire.ts";
 import type { RecipeStep } from "./rules.ts";
 import { matchApp, matchElement, matchWindow, resolveStep, type CallOutcome, type ComputerCaller } from "./resolve.ts";
@@ -20,7 +20,7 @@ const apps = (...list: object[]) => ok({ apps: list });
 const windows = (...list: object[]) => ok({ windows: list });
 
 const ELEMENTS: WireElement[] = windowState(2).elements ?? [];
-const state = (elements: WireElement[] = ELEMENTS, extra: object = {}) => ({ ...windowState(2), elements, ...extra });
+const state = (elements: WireElement[] = ELEMENTS, extra: object = {}) => ({ ...completeWindowState({ ...windowState(2), elements }), ...extra });
 const renamed = state(ELEMENTS.map((element) => (element.label === "Document" ? { ...element, label: "Body" } : element)));
 const untokened = state(ELEMENTS.map(({ element_token: _token, ...element }) => element));
 const SECOND_SAVE: WireElement = { element_index: 4, element_token: "s2-e4", role: "AXButton", label: "Save", parent_index: 0, depth: 1 };
@@ -31,7 +31,7 @@ beforeEach(() => {
   calls = [];
 });
 
-function caller(windowStateAnswer: object, answers: Partial<Record<Lookup, CallOutcome>> = {}): ComputerCaller {
+function caller(windowStateAnswer: object = state(), answers: Partial<Record<Lookup, CallOutcome>> = {}): ComputerCaller {
   const replies: Record<string, CallOutcome> = {
     list_apps: apps(TEXTEDIT_APP, NOTES_INSTALLED), list_windows: windows(UNTITLED), get_window_state: ok(windowStateAnswer), ...answers,
   };
@@ -46,14 +46,15 @@ function caller(windowStateAnswer: object, answers: Partial<Record<Lookup, CallO
 }
 
 const LOOKUPS: [string, Record<string, unknown>][] = [
-  ["list_apps", {}], ["list_windows", { pid: 4242 }], ["get_window_state", { pid: 4242, window_id: 7, include_screenshot: false }],
+  ["list_apps", {}], ["list_windows", { pid: 4242, on_screen_only: false }], ["get_window_state", { pid: 4242, window_id: 7, include_screenshot: false }],
 ];
+const tools = () => calls.map(([tool]) => tool);
 
 describe("resolveStep", () => {
   it("resolves an element step afresh, without a screenshot", async () => {
-    expect(await resolveStep(CLICK_DOCUMENT, caller(windowState(2)), signal)).toEqual({ ok: true, args: { pid: 4242, window_id: 7, element_token: "s2-e2" } });
+    expect(await resolveStep(CLICK_DOCUMENT, caller(), signal)).toEqual({ ok: true, args: { pid: 4242, window_id: 7, element_token: "s2-e2" } });
     expect(calls.at(-1)).toStrictEqual(["get_window_state", { pid: 4242, window_id: 7, include_screenshot: false }]);
-    expect(calls).toEqual(LOOKUPS);
+    expect(calls).toStrictEqual(LOOKUPS);
   });
 
   it("addresses by index when the snapshot has no tokens", async () => {
@@ -62,7 +63,14 @@ describe("resolveStep", () => {
 
   it("keeps the saved arguments beside the fresh target", async () => {
     const step: RecipeStep = { ...CLICK_DOCUMENT, tool: "type_text", args: { text: "hello world" } };
-    expect(await resolveStep(step, caller(windowState(3)), signal)).toEqual({ ok: true, args: { text: "hello world", pid: 4242, window_id: 7, element_token: "s3-e2" } });
+    expect(await resolveStep(step, caller(completeWindowState(windowState(3))), signal))
+      .toEqual({ ok: true, args: { text: "hello world", pid: 4242, window_id: 7, element_token: "s3-e2" } });
+  });
+
+  it("refuses an answer that does not say it is complete", async () => {
+    for (const answer of [windowState(2), state(ELEMENTS, { elements_complete: undefined }), state(ELEMENTS, { elements_complete: null })]) {
+      expect(await resolveStep(CLICK_DOCUMENT, caller(answer), signal)).toEqual({ ok: false, error: "only part of Untitled could be read" });
+    }
   });
 
   it.each<[string, object]>([
@@ -79,18 +87,25 @@ describe("resolveStep", () => {
   });
 
   it.each<[string, object]>([
-    ["marked degraded", { degraded: true }],
-    ["with a degraded reason", { degraded_reason: "AX messaging timed out" }],
-  ])("refuses a degraded tree: %s", async (_case, extra) => {
-    expect(await resolveStep(CLICK_DOCUMENT, caller(state(ELEMENTS, extra)), signal)).toEqual({ ok: false, error: "Untitled could not be read reliably" });
+    ["marked degraded", state(ELEMENTS, { degraded: true })],
+    ["with a degraded reason", state(ELEMENTS, { degraded_reason: "AX messaging timed out" })],
+    ["degraded with an empty tree", state([], { degraded: true, degraded_reason: "AX tree unavailable", elements_complete: false })],
+  ])("refuses a degraded tree: %s", async (_case, answer) => {
+    expect(await resolveStep(CLICK_DOCUMENT, caller(answer), signal)).toEqual({ ok: false, error: "Untitled could not be read reliably" });
   });
 
   it("accepts a tree whose counts match what was returned", async () => {
-    const whole = state(ELEMENTS, {
-      element_count: 4, total_element_count: 4, returned_element_count: 4, filtered_element_count: 4,
-      elements_complete: true, truncated: false, degraded: false, degraded_reason: null, truncation_reason: null,
-    });
+    const whole = state(ELEMENTS, { filtered_element_count: 4, truncated: false, degraded: false, degraded_reason: null, truncation_reason: null });
     expect(await resolveStep(CLICK_DOCUMENT, caller(whole), signal)).toEqual({ ok: true, args: { pid: 4242, window_id: 7, element_token: "s2-e2" } });
+  });
+
+  it.each<[string, object]>([
+    ["another app", { pid: 1 }],
+    ["another window", { window_id: 8 }],
+    ["no app", { pid: undefined }],
+    ["no window", { window_id: undefined }],
+  ])("refuses an answer that describes %s", async (_case, extra) => {
+    expect(await resolveStep(CLICK_DOCUMENT, caller(state(ELEMENTS, extra)), signal)).toEqual({ ok: false, error: "the computer answered for a different window" });
   });
 
   it("fails a renamed element with words a person can read", async () => {
@@ -102,22 +117,20 @@ describe("resolveStep", () => {
       .toEqual({ ok: false, error: 'more than one "Save" (AXButton) in Untitled' });
   });
 
-  it("resolves inside the only window after it was renamed", async () => {
-    const renamedWindow = { ...UNTITLED, window_id: 9, title: "Untitled 2" };
-    const inside = state(ELEMENTS.map((element) => (element.role === "AXWindow" ? { ...element, label: "Untitled 2" } : element)), { window_id: 9, window_title: "Untitled 2" });
-    expect(await resolveStep(CLICK_DOCUMENT, caller(inside, { list_windows: windows(renamedWindow) }), signal))
-      .toEqual({ ok: true, args: { pid: 4242, window_id: 9, element_token: "s2-e2" } });
-    expect(calls.at(-1)).toEqual(["get_window_state", { pid: 4242, window_id: 9, include_screenshot: false }]);
+  it.each<[string, CallOutcome]>([
+    ["the only window was renamed", windows({ ...UNTITLED, window_id: 9, title: "Untitled 2" })],
+    ["two windows are open and none has the saved title", windows({ ...UNTITLED, window_id: 8, title: "A" }, { ...UNTITLED, window_id: 9, title: "B" })],
+    ["the app has no window", windows()],
+    ["only another app has a window with the saved title", windows({ ...UNTITLED, pid: 1 })],
+  ])("fails without looking inside when %s", async (_case, listed) => {
+    expect(await resolveStep(CLICK_DOCUMENT, caller(state(), { list_windows: listed }), signal)).toEqual({ ok: false, error: 'no window titled "Untitled"' });
+    expect(tools()).toEqual(["list_apps", "list_windows"]);
   });
 
-  it("fails without looking inside when two windows are open and none has the saved title", async () => {
-    const two = windows({ ...UNTITLED, window_id: 8, title: "A" }, { ...UNTITLED, window_id: 9, title: "B" });
-    expect(await resolveStep(CLICK_DOCUMENT, caller(windowState(2), { list_windows: two }), signal)).toEqual({ ok: false, error: "more than one window of TextEdit" });
-    expect(calls.map(([tool]) => tool)).toEqual(["list_apps", "list_windows"]);
-  });
-
-  it("fails when the app has no window with the saved title or any other", async () => {
-    expect(await resolveStep(CLICK_DOCUMENT, caller(windowState(2), { list_windows: windows() }), signal)).toEqual({ ok: false, error: 'no window titled "Untitled"' });
+  it("fails without looking inside when two windows have the saved title", async () => {
+    const twins = windows(UNTITLED, { ...UNTITLED, window_id: 8 });
+    expect(await resolveStep(CLICK_DOCUMENT, caller(state(), { list_windows: twins }), signal)).toEqual({ ok: false, error: 'more than one window titled "Untitled"' });
+    expect(tools()).toEqual(["list_apps", "list_windows"]);
   });
 
   it.each<[string, CallOutcome]>([
@@ -125,54 +138,49 @@ describe("resolveStep", () => {
     ["list_apps lists the app as not running", apps({ ...TEXTEDIT_APP, running: false })],
     ["list_apps lists the app without a process", apps({ ...TEXTEDIT_APP, pid: 0 })],
   ])("fails when %s", async (_case, listed) => {
-    expect(await resolveStep(CLICK_DOCUMENT, caller(windowState(2), { list_apps: listed }), signal)).toEqual({ ok: false, error: "TextEdit is not running" });
-    expect(calls.map(([tool]) => tool)).toEqual(["list_apps"]);
+    expect(await resolveStep(CLICK_DOCUMENT, caller(state(), { list_apps: listed }), signal)).toEqual({ ok: false, error: "TextEdit is not running" });
+    expect(tools()).toEqual(["list_apps"]);
   });
 
   it("fails when two copies of the app are running", async () => {
     const twice = apps(TEXTEDIT_APP, { ...TEXTEDIT_APP, pid: 4343 });
-    expect(await resolveStep(CLICK_DOCUMENT, caller(windowState(2), { list_apps: twice }), signal)).toEqual({ ok: false, error: "more than one TextEdit app is running" });
+    expect(await resolveStep(CLICK_DOCUMENT, caller(state(), { list_apps: twice }), signal)).toEqual({ ok: false, error: "more than one TextEdit app is running" });
   });
 
   it.each<[Lookup, number]>([["list_apps", 1], ["list_windows", 2], ["get_window_state", 3]])("passes a %s failure through", async (tool, made) => {
-    expect(await resolveStep(CLICK_DOCUMENT, caller(windowState(2), { [tool]: { ok: false, error: "boom" } }), signal)).toEqual({ ok: false, error: "boom" });
-    expect(calls).toEqual(LOOKUPS.slice(0, made));
+    expect(await resolveStep(CLICK_DOCUMENT, caller(state(), { [tool]: { ok: false, error: "boom" } }), signal)).toEqual({ ok: false, error: "boom" });
+    expect(calls).toStrictEqual(LOOKUPS.slice(0, made));
   });
 
   it("needs no lookups for launch_app", async () => {
     const step: RecipeStep = { tool: "launch_app", args: { name: "TextEdit" } };
-    expect(await resolveStep(step, caller(windowState(2)), signal)).toEqual({ ok: true, args: { name: "TextEdit" } });
+    expect(await resolveStep(step, caller(), signal)).toEqual({ ok: true, args: { name: "TextEdit" } });
     expect(calls).toEqual([]);
   });
 
   it("targets bring_to_front and an app's hotkey at a fresh pid and window", async () => {
     const front: RecipeStep = { tool: "bring_to_front", args: {}, app: TEXTEDIT, window: { title: "Untitled" } };
-    expect(await resolveStep(front, caller(windowState(2)), signal)).toEqual({ ok: true, args: { pid: 4242, window_id: 7 } });
-    expect(calls).toEqual(LOOKUPS.slice(0, 2));
+    expect(await resolveStep(front, caller(), signal)).toEqual({ ok: true, args: { pid: 4242, window_id: 7 } });
+    expect(calls).toStrictEqual(LOOKUPS.slice(0, 2));
     calls = [];
     const save: RecipeStep = { tool: "hotkey", args: { keys: ["cmd", "s"] }, app: TEXTEDIT };
-    expect(await resolveStep(save, caller(windowState(2)), signal)).toStrictEqual({ ok: true, args: { keys: ["cmd", "s"], pid: 4242 } });
-    expect(calls).toEqual(LOOKUPS.slice(0, 1));
-  });
-
-  it("sends a hotkey saved without an app as it was recorded", async () => {
-    const step: RecipeStep = { tool: "press_key", args: { key: "return" } };
-    expect(await resolveStep(step, caller(windowState(2)), signal)).toStrictEqual({ ok: true, args: { key: "return" } });
-    expect(calls).toEqual([]);
+    expect(await resolveStep(save, caller(), signal)).toStrictEqual({ ok: true, args: { keys: ["cmd", "s"], pid: 4242 } });
+    expect(calls).toStrictEqual(LOOKUPS.slice(0, 1));
   });
 
   it.each<[string, RecipeStep]>([
-    ["a window", { tool: "hotkey", args: { keys: ["cmd", "s"] }, window: { title: "Untitled" } }],
-    ["an element", { tool: "click", args: {}, window: { title: "Untitled" }, element: DOCUMENT }],
-  ])("refuses %s target saved without its app", async (_case, step) => {
-    expect(await resolveStep(step, caller(windowState(2)), signal)).toEqual({ ok: false, error: "the saved step does not name its app" });
+    ["a key press", { tool: "press_key", args: { key: "return" } }],
+    ["a hotkey with a window", { tool: "hotkey", args: { keys: ["cmd", "s"] }, window: { title: "Untitled" } }],
+    ["an element step", { tool: "click", args: {}, window: { title: "Untitled" }, element: DOCUMENT }],
+  ])("refuses %s saved without its app", async (_case, step) => {
+    expect(await resolveStep(step, caller(), signal)).toEqual({ ok: false, error: "the saved step does not name its app" });
     expect(calls).toEqual([]);
   });
 
-  it("finds an element saved without a window in the app's only window, and names the app when it is gone", async () => {
+  it("refuses an element step saved without its window", async () => {
     const { window: _window, ...noWindow } = CLICK_DOCUMENT;
-    expect(await resolveStep(noWindow, caller(windowState(2)), signal)).toEqual({ ok: true, args: { pid: 4242, window_id: 7, element_token: "s2-e2" } });
-    expect(await resolveStep(noWindow, caller(renamed), signal)).toEqual({ ok: false, error: 'no "Document" (AXTextArea) in TextEdit' });
+    expect(await resolveStep(noWindow, caller(), signal)).toEqual({ ok: false, error: "the saved step does not name its window" });
+    expect(calls).toEqual([]);
   });
 });
 
@@ -206,9 +214,11 @@ describe("matchApp", () => {
 });
 
 describe("matchWindow", () => {
-  it("takes the only window when the title changed", () => expect(matchWindow([{ window_id: 9, pid: 4242, title: "Untitled 2" }], 4242, { title: "Untitled" })).toEqual({ ok: true, value: 9 }));
+  it("refuses the only window when its title changed", () =>
+    expect(matchWindow([{ window_id: 9, pid: 4242, title: "Untitled 2" }], 4242, { title: "Untitled" })).toEqual({ ok: false, reason: "none" }));
 
-  it("refuses two windows when none has the title", () => expect(matchWindow([{ window_id: 8, pid: 4242, title: "A" }, { window_id: 9, pid: 4242, title: "B" }], 4242, { title: "Untitled" })).toEqual({ ok: false, reason: "ambiguous" }));
+  it("refuses two windows when none has the title", () =>
+    expect(matchWindow([{ window_id: 8, pid: 4242, title: "A" }, { window_id: 9, pid: 4242, title: "B" }], 4242, { title: "Untitled" })).toEqual({ ok: false, reason: "none" }));
 
   it("takes the one window with the exact title among several", () =>
     expect(matchWindow([{ window_id: 8, pid: 4242, title: "untitled" }, { window_id: 9, pid: 4242, title: "Untitled" }], 4242, { title: "Untitled" })).toEqual({ ok: true, value: 9 }));
@@ -219,13 +229,10 @@ describe("matchWindow", () => {
   it("ignores other apps' windows", () =>
     expect(matchWindow([{ window_id: 9, pid: 1, title: "Untitled" }], 4242, { title: "Untitled" })).toEqual({ ok: false, reason: "none" }));
 
-  it("takes the only window when none was saved, and no other", () => {
-    expect(matchWindow([{ window_id: 9, pid: 4242, title: "A" }], 4242, undefined)).toEqual({ ok: true, value: 9 });
-    expect(matchWindow([{ window_id: 8, pid: 4242, title: "A" }, { window_id: 9, pid: 4242, title: "B" }], 4242, undefined)).toEqual({ ok: false, reason: "ambiguous" });
-  });
-
-  it("reads nothing from a list with an unreadable entry", () =>
-    expect(matchWindow([{ window_id: 9, pid: 4242, title: "Untitled" }, { window_id: 8, title: "B" }], 4242, { title: "Untitled" })).toEqual({ ok: false, reason: "none" }));
+  it.each<[string, unknown]>([
+    ["an unreadable entry", [{ window_id: 9, pid: 4242, title: "Untitled" }, { window_id: 8, title: "B" }]],
+    ["a repeated window id", [{ window_id: 9, pid: 4242, title: "Untitled" }, { window_id: 9, pid: 4242, title: "B" }]],
+  ])("reads nothing from a list with %s", (_case, list) => expect(matchWindow(list, 4242, { title: "Untitled" })).toEqual({ ok: false, reason: "none" }));
 });
 
 describe("matchElement", () => {
@@ -240,11 +247,15 @@ describe("matchElement", () => {
     expect(matchElement(ELEMENTS, { ...SAVE, role: "AXStaticText" })).toEqual({ ok: false, reason: "none" });
   });
 
-  it("counts a look-alike whose ancestry cannot be read as a second match", () =>
-    expect(matchElement([...ELEMENTS, { ...SECOND_SAVE, parent_index: 99 }], SAVE)).toEqual({ ok: false, reason: "ambiguous" }));
+  it.each<[string, WireElement, typeof DOCUMENT]>([
+    ["a missing parent", { ...SECOND_SAVE, parent_index: 99 }, SAVE],
+    ["no parent below the root", { element_index: 5, role: "AXTextArea", label: "Document", depth: 2 }, DOCUMENT],
+  ])("counts a look-alike whose ancestry cannot be read (%s) as a second match", (_case, lookAlike, identity) =>
+    expect(matchElement([...ELEMENTS, lookAlike], identity)).toEqual({ ok: false, reason: "ambiguous" }));
 
   it.each<[string, unknown]>([
     ["not a list", undefined],
     ["one unreadable entry beside a match", [...ELEMENTS, { element_index: 5, role: "AXButton", label: 3, depth: 1 }]],
+    ["a repeated element index", [...ELEMENTS, ELEMENTS[1]]],
   ])("reads nothing from %s", (_case, list) => expect(matchElement(list, DOCUMENT)).toEqual({ ok: false, reason: "none" }));
 });

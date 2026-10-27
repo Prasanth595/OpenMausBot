@@ -84,4 +84,14 @@ describe("elementPath", () => {
     ];
     expect(elementPath(loop, loop[0])).toBeNull();
   });
+
+  it("returns null when an element or an ancestor below the root has no parent", () => {
+    const loose: WireElement = { element_index: 5, role: "AXButton", label: "Go", depth: 2 };
+    expect(elementPath([...elements, loose], loose)).toBeNull();
+    const cutAbove: WireElement[] = [
+      { element_index: 0, role: "AXGroup", label: "Outer", depth: 1 },
+      { element_index: 1, role: "AXButton", label: "Go", parent_index: 0, depth: 2 },
+    ];
+    expect(elementPath(cutAbove, cutAbove[1])).toBeNull();
+  });
 });
