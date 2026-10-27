@@ -17,12 +17,19 @@ vi.mock("node:child_process", () => ({
 Object.defineProperty(process, "resourcesPath", { configurable: true, value: "/synthetic-speech-resources" });
 const { startSpeech, stopSpeech, finishSpeech, speechBusy } = await import("./speech.mjs");
 
+const PAGE_GONE = ["did-navigate", "render-process-gone"];
 const launch = () => {
   const events = [];
-  const win = Object.assign(new EventEmitter(), { isDestroyed: () => false, webContents: { send: (channel, body) => events.push({ channel, body }) } });
+  let destroyed = false;
+  const contents = Object.assign(new EventEmitter(), { send: (channel, body) => events.push({ channel, body }) });
+  const win = Object.assign(new EventEmitter(), { isDestroyed: () => destroyed });
+  // Electron: a destroyed BrowserWindow throws "Object has been destroyed" when its webContents is read.
+  Object.defineProperty(win, "webContents", { get: () => { if (destroyed) throw new TypeError("Object has been destroyed"); return contents; } });
+  const close = () => { destroyed = true; win.emit("closed"); };
   startSpeech(win);
-  return { ...fixture.launches.at(-1), events, win };
+  return { ...fixture.launches.at(-1), events, win, contents, close };
 };
+const pageListeners = session => PAGE_GONE.map(event => session.contents.listenerCount(event));
 const emit = (session, line) => appendFileSync(session.output, `${JSON.stringify(line)}\n`);
 
 afterEach(() => {
@@ -135,18 +142,51 @@ describe.skipIf(process.platform !== "darwin")("native speech file transport", (
   it("a window that closes stops the session it started, and an ended session lets go of its window", () => {
     const session = launch();
     expect(session.win.listenerCount("closed")).toBe(1);
-    session.win.emit("closed");
+    expect(pageListeners(session)).toEqual([1, 1]);
+    session.close();
+    expect(existsSync(session.stop)).toBe(true);
+    expect(speechBusy()).toBe(false);
+    expect(() => session.proc.emit("close", 0)).not.toThrow();
+    expect(session.events).toEqual([]);
+    expect(session.win.listenerCount("closed")).toBe(0);
+    expect(pageListeners(session)).toEqual([0, 0]);
+  });
+  it("a window's page that reloads or navigates away stops the session it started; a route change inside the page does not", () => {
+    const session = launch();
+    session.contents.emit("did-navigate-in-page", {}, "http://127.0.0.1:8799/#/settings");
+    expect(existsSync(session.stop)).toBe(false);
+    expect(speechBusy()).toBe(true);
+    session.contents.emit("did-navigate", {}, "http://127.0.0.1:8799/");
     expect(existsSync(session.stop)).toBe(true);
     expect(speechBusy()).toBe(false);
     session.proc.emit("close", 0);
     expect(session.events).toEqual([]);
     expect(session.win.listenerCount("closed")).toBe(0);
+    expect(pageListeners(session)).toEqual([0, 0]);
   });
-  it("a window that closes after its session was replaced leaves the new session alone", () => {
+  it("a window's page whose renderer goes away stops the session it started", () => {
+    const session = launch();
+    session.contents.emit("render-process-gone", {}, { reason: "crashed" });
+    expect(existsSync(session.stop)).toBe(true);
+    expect(speechBusy()).toBe(false);
+    session.proc.emit("close", 0);
+    expect(session.win.listenerCount("closed")).toBe(0);
+    expect(pageListeners(session)).toEqual([0, 0]);
+  });
+  it("a window's session that ends on its own lets go of the window and its page", () => {
+    const session = launch();
+    emit(session, { text: "done", partial: false });
+    session.proc.emit("close", 0);
+    expect(session.events.at(-1)).toEqual({ channel: "speech:end", body: { code: 0, reason: "completed" } });
+    expect(session.win.listenerCount("closed")).toBe(0);
+    expect(pageListeners(session)).toEqual([0, 0]);
+  });
+  it("a window or page that goes away after its session was replaced leaves the new session alone", () => {
     const first = launch();
     const second = launch();
     first.proc.emit("close", 0);
-    first.win.emit("closed");
+    for (const event of PAGE_GONE) first.contents.emit(event, {});
+    first.close();
     expect(existsSync(second.stop)).toBe(false);
     expect(speechBusy()).toBe(true);
   });

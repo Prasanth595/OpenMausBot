@@ -43,6 +43,7 @@ function ensureBuilt() {
 }
 
 const RELEASE_MODIFIERS = ["control", "option", "shift", "command"];
+const PAGE_GONE = ["render-process-gone", "did-navigate"];
 
 function speechTarget(target) {
   if (typeof target?.transcript === "function") return {
@@ -50,7 +51,7 @@ function speechTarget(target) {
       transcript: (line) => target.transcript(line),
       end: (info) => target.end(info),
       replaced: () => target.replaced(),
-      onClosed: () => () => {},
+      whenGone: () => () => {},
     };
   const send = (channel, body) => {
     if (!target.isDestroyed()) target.webContents.send(channel, body);
@@ -60,9 +61,15 @@ function speechTarget(target) {
     transcript: (line) => send("speech:transcript", line),
     end: (info) => send("speech:end", info),
     replaced: () => {},
-    onClosed: (listener) => {
-      target.once("closed", listener);
-      return () => target.removeListener("closed", listener);
+    whenGone: (listener) => {
+      // Electron: a destroyed BrowserWindow throws when its webContents is read.
+      const contents = target.webContents;
+      target.on("closed", listener);
+      for (const event of PAGE_GONE) contents.on(event, listener);
+      return () => {
+        target.removeListener("closed", listener);
+        for (const event of PAGE_GONE) contents.removeListener(event, listener);
+      };
     },
   };
 }
@@ -138,7 +145,7 @@ export function startSpeech(target, options = {}) {
     owner: sink.owner, target: sink,
   };
   child = speechSession;
-  const forgetWindow = sink.onClosed(() => stopSpeech(sink.owner));
+  const forgetWindow = sink.whenGone(() => stopSpeech(sink.owner));
   let buf = "";
   let offset = 0;
   let reportedError = null;
