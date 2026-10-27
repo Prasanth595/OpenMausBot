@@ -42,6 +42,8 @@ const EXCLUDED = new Set([
   // A Team Cloud's engine homes (engine-homes/layout.ts): CLI login homes, each audience's own transcripts and the held
   // folder, which no admin reads.
   "engine-homes",
+  // Waits watch this machine's files and programs and end within a week.
+  "waits.json",
 ]);
 const EXCLUSION_NOTES = [
   "Device pairing, server identity, live leases and runtime files (existing destination identities are preserved).",

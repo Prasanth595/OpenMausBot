@@ -14,7 +14,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyPendingWorkspaceRestore, commitPendingWorkspaceRestore, createWorkspaceBackup,
   readLastWorkspaceRestore, readPendingWorkspaceRestoreMetadata, readStagedWorkspaceBackup,
-  removeWorkspaceBackupJob, stageWorkspaceBackup,
+  omittedFromWorkspaceBackup, removeWorkspaceBackupJob, stageWorkspaceBackup,
 } from "./workspace-backup.ts";
 
 const PASSWORD = "correct horse battery staple";
@@ -115,6 +115,8 @@ function caseSensitiveTempFolder(): boolean {
 afterEach(() => { for (const root of scratch.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
 describe("encrypted full workspace backups", () => {
+  it("leaves waits out of backups and Cloud sends", () => expect(omittedFromWorkspaceBackup("waits.json")).toBe(true));
+
   it("leaves Sync with My Cloud's own records out of a backup", async () => {
     const source = directory();
     mkdirSync(join(source, "sync", "trash"), { recursive: true });
