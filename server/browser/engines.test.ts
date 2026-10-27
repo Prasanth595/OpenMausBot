@@ -184,6 +184,23 @@ describe("the runtime router", () => {
 });
 
 describe("the live view router", () => {
+  it("does not finish sign-in hand-back before both engines have released control", async () => {
+    const { chrome, oldLive, live } = engines();
+    let released!: () => void;
+    chrome.live.handBack.mockImplementationOnce(() => new Promise<void>((resolve) => { released = resolve; }));
+    let finished = false;
+    const handingBack = Promise.resolve(live.handBack("s")).then(() => { finished = true; });
+    const duplicate = live.handBack("s");
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    expect(oldLive.handBack).toHaveBeenCalledWith("s");
+    expect(chrome.live.handBack).toHaveBeenCalledOnce();
+    expect(oldLive.handBack).toHaveBeenCalledOnce();
+    released();
+    await Promise.all([handingBack, duplicate]);
+    expect(finished).toBe(true);
+  });
+
   it("opens a new-engine session's viewer on the v1 adapter, without the spec, and any other on agent-browser's", async () => {
     const { oldLive, chrome, live } = engines();
     const res = {} as never;

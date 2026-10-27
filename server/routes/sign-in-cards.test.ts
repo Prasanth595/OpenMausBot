@@ -1,10 +1,15 @@
 import { createServer, type Server } from "node:http";
+import { readFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import ts from "typescript";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { signInOutcome, signInResumePrompt } from "../../shared/sign-in-request.ts";
+import { savedLoginResumePrompt } from "../../shared/logins.ts";
+import type { SignInRequestCardData } from "../../shared/wire.ts";
 import { json, readBody } from "../harness/http.ts";
 import type { RequestAuth } from "../request-auth.ts";
-import { createSignInCardRoutes, type SignInOutcome } from "./sign-in-cards.ts";
+import { createSignInCardRoutes, type SignInCardRouteDeps, type SignInOutcome } from "./sign-in-cards.ts";
 import { dispatchRoutes } from "./table.ts";
 
 const servers: Server[] = [];
@@ -43,7 +48,83 @@ async function serve() {
   return { base, settled, saved, targets, post };
 }
 
+function settlement() {
+  const source = ts.createSourceFile("index.ts", readFileSync(new URL("../index.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
+  const declaration = source.statements.find((node): node is ts.FunctionDeclaration => ts.isFunctionDeclaration(node) && node.name?.text === "settleSignIn");
+  expect(declaration).toBeDefined();
+  const code = ts.transpileModule(declaration!.getText(source), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText;
+  let release!: () => void;
+  const handingBack = new Promise<void>((resolve) => { release = resolve; });
+  let message = { id: "m1", signIn: { site: "example.com", url: "https://example.com/login", place: "browser" } as SignInRequestCardData };
+  const resume = vi.fn(() => true);
+  const patch = vi.fn((_thread: string, _id: string, update: { signIn: SignInRequestCardData }) => { message = { ...message, ...update }; });
+  const handBack = vi.fn(() => handingBack);
+  const deps = {
+    store: { bot: () => ({ id: "scout", browserProfile: "work" }), patchMessage: patch },
+    signInMessage: () => message,
+    browserLive: { handBack },
+    currentBrowserSession: () => "profile-work",
+    teamHost: { browserAudience: () => "team" },
+    computerControl: { settleHelp: vi.fn(() => []), release: vi.fn() },
+    botComputerControlKey: () => "scout",
+    signInOutcome, signInResumePrompt, savedLoginResumePrompt,
+    answerCardNode: resume,
+  };
+  const settle = new Function(...Object.keys(deps), `${code}; return settleSignIn;`)(...Object.values(deps)) as SignInCardRouteDeps["settle"];
+  return { settle, release, handBack, resume, patch, card: () => message.signIn,
+    supersede: () => { message = { ...message, signIn: { ...message.signIn, superseded: true } }; } };
+}
+
+describe("sign-in settlement in the server", () => {
+  it("resumes and saves Done only after the browser hands control back", async () => {
+    const { settle, release, handBack, resume, patch, card } = settlement();
+    const answering = settle("scout", "t1", "m1", "done");
+    expect(handBack).toHaveBeenCalledExactlyOnceWith("profile-work");
+    await Promise.resolve();
+    expect(resume).not.toHaveBeenCalled();
+    expect(patch).not.toHaveBeenCalled();
+    release();
+    expect(await answering).toEqual({ status: 200, body: { done: true, resumed: true } });
+    expect(resume).toHaveBeenCalledExactlyOnceWith("t1", "m1", signInResumePrompt("example.com", "done"));
+    expect(card()).toMatchObject({ done: true, resumed: true });
+  });
+
+  it("does not resume a sign-in request superseded while browser control is returning", async () => {
+    const { settle, release, resume, patch, supersede, card } = settlement();
+    const answering = settle("scout", "t1", "m1", "done");
+    supersede();
+    release();
+    expect(await answering).toEqual({ status: 409, body: { error: "this sign-in request was superseded by a newer one" } });
+    expect(resume).not.toHaveBeenCalled();
+    expect(patch).not.toHaveBeenCalled();
+    expect(card()).toMatchObject({ superseded: true });
+    expect(card().done).toBeUndefined();
+  });
+});
+
 describe("sign-in card routes", () => {
+  it("waits for control to return before responding that Done resumed the bot", async () => {
+    let release!: () => void;
+    const handingBack = new Promise<void>((resolve) => { release = resolve; });
+    const reply = vi.fn();
+    const route = createSignInCardRoutes({
+      settle: async () => {
+        await handingBack;
+        return { status: 200, body: { done: true, resumed: true } };
+      },
+      saveLogin: async () => ({ status: 200, body: {} }),
+      saveTarget: async () => ({ status: 200, body: {} }),
+      threadVisible: () => true,
+    });
+    const url = new URL("http://localhost/api/bots/scout/sign-in-cards/m1/done");
+    const answering = route({ req: {} as never, res: {} as never, url, path: url.pathname, method: "POST", auth: {} as never, json: reply, readBody: async () => ({ threadId: "t1" }) });
+    await Promise.resolve();
+    expect(reply).not.toHaveBeenCalled();
+    release();
+    await answering;
+    expect(reply).toHaveBeenCalledWith({}, 200, { done: true, resumed: true });
+  });
+
   it("settles Done and Cancel for the named bot, thread and card", async () => {
     const { settled, post } = await serve();
     const done = await post("/api/bots/scout/sign-in-cards/m1/done", { threadId: "t1" });

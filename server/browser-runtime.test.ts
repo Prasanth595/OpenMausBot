@@ -64,13 +64,17 @@ describe("browser takeover gate", () => {
     expect(value.heldBy("s")).toBe("owner");
     const typed = deferred();
     const human = value.withHumanAction("s", "owner", () => typed.promise);
-    value.release("s", "owner");
+    let released = false;
+    const handingBack = value.release("s", "owner").then(() => { released = true; });
     expect(value.canControl("s", "owner")).toBe(false);
     expect(value.heldBy("s")).toBe("owner");
     await expect(value.withAgentAction("s", async () => "snapshot")).rejects.toThrow(/paused/);
     await expect(value.withHumanAction("s", "owner", async () => "click")).rejects.toThrow(/Take control/);
+    expect(released).toBe(false);
     typed.resolve();
     await human;
+    await handingBack;
+    expect(released).toBe(true);
     expect(value.heldBy("s")).toBeNull();
     await expect(value.withAgentAction("s", async () => "safe screenshot")).resolves.toBe("safe screenshot");
   });
@@ -947,7 +951,12 @@ describe("server-owned browser MCP runtime", () => {
     expect(after.pid).not.toBe(before.pid);
   });
 
-  it.each([false, true])("retires an idle MCP client without killing its browser descendant (ignores EOF: %s)", async (ignoresEof) => {
+  it.each([
+    { ignoresEof: false, retirement: "idle" },
+    { ignoresEof: true, retirement: "idle" },
+    { ignoresEof: false, retirement: "timeout" },
+    { ignoresEof: true, retirement: "timeout" },
+  ])("retires an MCP client after $retirement without killing its browser descendant (ignores EOF: $ignoresEof)", async ({ ignoresEof, retirement }) => {
     // Windows taskkill /T takes even a daemon with its own process group, and unref alone does not detach a Windows child from
     // its parent's console; the POSIX group stays shared so an accidental group kill still fails here.
     const fake = `
@@ -970,15 +979,22 @@ describe("server-owned browser MCP runtime", () => {
       require('node:readline').createInterface({ input: process.stdin }).on('line', line => {
         const m = JSON.parse(line);
         if (!m.id) return;
+        if (m.method === 'tools/call') return;
         pending = m; flush();
       });
 
     `;
-    const value = runtime({ idleMs: 40 });
+    const value = runtime({ idleMs: retirement === "idle" ? 40 : 10_000, requestTimeoutMs: 250 });
     const launch = { command: process.execPath, args: ["-e", fake], env: {} };
     const first = await value.agentRpc("idle", launch, "tools/list", {}) as { browserPid: number; transportPid: number };
     try {
       expect(() => process.kill(first.browserPid, 0)).not.toThrow();
+      if (retirement === "timeout") {
+        const lost = await value.agentRpc("idle", launch, "tools/call", { name: "agent_browser_snapshot" });
+        expect(lost).toMatchObject({ isError: true });
+        expect(JSON.stringify(lost)).toContain("did not answer");
+        expect(value.interrupted("idle")).toBe(true);
+      }
       await vi.waitFor(() => expect(() => process.kill(first.transportPid, 0)).toThrow(), { timeout: 2_000, interval: 30 });
       expect(() => process.kill(first.browserPid, 0)).not.toThrow();
     } finally {

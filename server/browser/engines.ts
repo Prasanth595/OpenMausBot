@@ -287,6 +287,7 @@ type SessionSpec = { session: string; spec: { command: string; args?: readonly s
 export class LiveRouter {
   readonly #old: BrowserLive;
   readonly #chrome: ChromeEngine;
+  readonly #handingBack = new Map<string, Promise<void>>();
 
   constructor(old: BrowserLive, chrome: ChromeEngine) {
     this.#old = old;
@@ -325,7 +326,14 @@ export class LiveRouter {
     return chromeTarget(session, spec) ? this.#chrome.service.download(session, id) : undefined;
   }
 
-  handBack(session: string): void { this.#chrome.live.handBack(session); this.#old.handBack(session); }
+  handBack(session: string): Promise<void> {
+    const pending = this.#handingBack.get(session);
+    if (pending) return pending;
+    const handingBack = Promise.all([this.#chrome.live.handBack(session), this.#old.handBack(session)])
+      .then(() => undefined).finally(() => this.#handingBack.delete(session));
+    this.#handingBack.set(session, handingBack);
+    return handingBack;
+  }
   closeForSession(session: string): void { this.#chrome.live.closeForSession(session); this.#chrome.stream.closeForSession(session); this.#old.closeForSession(session); }
   closeForOwner(owner: string): void { this.#chrome.live.closeForOwner(owner); this.#chrome.stream.closeForOwner(owner); this.#old.closeForOwner(owner); }
   closeForBot(botId: string): void { this.#chrome.live.closeForBot(botId); this.#chrome.stream.closeForBot(botId); this.#old.closeForBot(botId); }

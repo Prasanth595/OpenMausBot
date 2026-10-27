@@ -180,7 +180,10 @@ const MARK_SUBMIT = `((key) => {
   ${PAGE_HELPERS}
   const fields = marked(key).filter((el) => el instanceof HTMLInputElement);
   const field = fields.find((el) => /:password$/.test(el.getAttribute(MARK) || "")) || fields[fields.length - 1];
-  const label = (el) => (el.innerText || el.value || el.getAttribute("aria-label") || el.title || "").replace(/\\s+/g, " ").trim();
+  const label = (el) => {
+    const labelledBy = (el.getAttribute("aria-labelledby") || "").trim().split(/\\s+/).map((id) => document.getElementById(id)?.textContent || "").join(" ").trim();
+    return (labelledBy || el.getAttribute("aria-label") || el.innerText || el.textContent || el.value || el.title || "").replace(/\\s+/g, " ").trim();
+  };
   const NAMED = /^(?:sign ?in|log ?in|log ?on|sign ?on|continue|next|submit|verify|confirm)$/i;
   const enabled = (el) => visible(el) && !el.disabled && el.getAttribute("aria-disabled") !== "true";
   const inForm = field && field.form
@@ -258,6 +261,7 @@ function sameDocumentUrl(a: string, b: string): boolean {
 
 const FIELD_WORDS: Record<FilledField, string> = { username: "the username", password: "the password", code: "the one-time code" };
 const CODE_FROM_INBOX = "If the site sent it to the person's own email or phone, read it from their connected email or messages and type it in yourself; otherwise call request_sign_in so the person enters it.";
+const REJECTED_LOGIN_HELP = "A rejected password alone does not distinguish an incorrect saved password from an account that requires SSO (such as Google or GitHub). Check the saved login in Settings → Logins and confirm the account's sign-in method, or call request_sign_in.";
 
 interface PageState { href: string; title: string; present: boolean; busy: boolean; submitted: boolean; leaving: boolean; alert: string; human: boolean }
 
@@ -425,7 +429,7 @@ class LoginRun {
       }
       if ((fields.password && this.done.has("password")) || (fields.code > 0 && this.done.has("code"))) {
         const said = fields.alert ? ` It said: “${fields.alert}”.` : "";
-        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}: it asked for it again, and nothing was submitted twice.${said} Check the saved login in Settings → Logins, or call request_sign_in.`);
+        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}: it asked for it again, and nothing was submitted twice.${said} ${REJECTED_LOGIN_HELP}`);
       }
       if (step > 0 && !fields.password && fields.code === 0) {
         if (fields.human) return this.finish(true, `Submitted ${this.filledWords()} for ${this.who()}, and a human check (CAPTCHA) appeared. Call request_sign_in so the person finishes signing in.`);
@@ -462,7 +466,7 @@ class LoginRun {
       if (sent.human) return this.failed(`A human check (CAPTCHA) appeared on ${this.host} after the login for ${this.who()} was submitted. Call request_sign_in so the person finishes signing in.`);
       if (!sent.changed) {
         const said = sent.alert ? ` It said: “${sent.alert}”.` : " The page did not change.";
-        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}.${said} Check the saved login in Settings → Logins, or call request_sign_in.`);
+        return this.failed(`The site did not accept the login for ${this.who()} on ${this.host}.${said} ${REJECTED_LOGIN_HELP}`);
       }
       if (step + 1 >= MAX_STEPS) return this.finish(true, this.signedIn(sent.href, sent.title));
       const waitMs = !this.done.has("password") ? NEXT_STEP_WAIT_MS : this.secretsHaveTotp() && !this.done.has("code") ? 5_000 : 1_500;

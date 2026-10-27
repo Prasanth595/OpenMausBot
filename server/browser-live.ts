@@ -463,14 +463,12 @@ export class BrowserLive {
   }
 
   /** The person's dropped hold ends, as a hand-back does, once what its view held is let go. */
-  private releaseParked(parked: Parked): void {
-    const release = () => {
-      if (this.parked.get(parked.viewer.session) !== parked) return;
-      this.forget(parked);
-      this.runtime.release(parked.viewer.session, parked.viewer.id);
-      this.control(parked.viewer.session);
-    };
-    if (parked.done) release(); else void parked.settled.then(release);
+  private async releaseParked(parked: Parked): Promise<void> {
+    if (!parked.done) await parked.settled;
+    if (this.parked.get(parked.viewer.session) !== parked) return;
+    this.forget(parked);
+    await this.runtime.release(parked.viewer.session, parked.viewer.id);
+    this.control(parked.viewer.session);
   }
 
   /** A dropped hold of this person in this bot's panel. */
@@ -769,7 +767,7 @@ export class BrowserLive {
       // A hand-back sent as its own stream dropped still hands back.
       const parked = [...this.parked.values()].find((entry) => entry.viewer.id === viewerId);
       if (parked && parked.viewer.botId === botId && parked.viewer.owner === owner && object(body)?.type === "release") {
-        this.releaseParked(parked);
+        await this.releaseParked(parked);
         return { ok: true };
       }
       throw new BrowserLiveError("This browser view is no longer available. Reopen the browser panel.", 404);
@@ -858,14 +856,14 @@ export class BrowserLive {
   }
 
   /** Done on a sign-in card, from any window or device: whichever view holds this browser hands it back. */
-  handBack(session: string): void {
+  async handBack(session: string): Promise<void> {
     const holder = this.runtime.heldBy(session);
     const parked = this.parked.get(session);
-    if (holder && parked?.viewer.id === holder) { this.releaseParked(parked); return; }
+    if (holder && parked?.viewer.id === holder) { await this.releaseParked(parked); return; }
     const viewer = holder ? this.viewers.get(holder) : undefined;
     if (!viewer || viewer.session !== session) return;
     this.abandonPressedInput(viewer);
-    this.runtime.release(session, viewer.id);
+    await this.runtime.release(session, viewer.id);
     this.control(session);
   }
 

@@ -11965,23 +11965,23 @@ function signInMessage(botId: string, threadId: string, messageId: string): Mess
   return message?.kind === "signin" && message.signIn ? message : null;
 }
 
-function settleSignIn(botId: string, threadId: string, messageId: string, outcome: "done" | "cancelled", saved?: { site: string }):
-  { status: number; body: Record<string, unknown> } {
+async function settleSignIn(botId: string, threadId: string, messageId: string, outcome: "done" | "cancelled", saved?: { site: string }) {
   const bot = store.bot(botId);
   const message = signInMessage(botId, threadId, messageId);
   if (!bot || !message?.signIn) return { status: 404, body: { error: "no such sign-in request" } };
-  const card = message.signIn;
+  if (!message.signIn.superseded && !signInOutcome(message.signIn) && message.signIn.place === "browser") {
+    await browserLive.handBack(currentBrowserSession(bot.id, bot.browserProfile, teamHost.browserAudience(threadId)));
+  }
+  const card = signInMessage(botId, threadId, messageId)?.signIn;
+  if (!card) return { status: 404, body: { error: "no such sign-in request" } };
   if (card.superseded) return { status: 409, body: { error: "this sign-in request was superseded by a newer one" } };
   const settled = signInOutcome(card);
   if (settled && settled !== outcome) {
     return { status: 409, body: { error: `this sign-in request was already ${settled === "done" ? "marked done" : "cancelled"}` } };
   }
   if (settled && card.resumed) return { status: 200, body: { [outcome]: true, resumed: true } };
-  if (!settled) {
-    const pleaded = computerControl.settleHelp(message.id);
-    if (card.place === "browser") browserLive.handBack(currentBrowserSession(bot.id, bot.browserProfile, teamHost.browserAudience(threadId)));
-    else for (const key of pleaded.length ? pleaded : [botComputerControlKey(bot)]) computerControl.release(key);
-  }
+  const pleaded = settled ? [] : computerControl.settleHelp(message.id);
+  if (!settled && card.place !== "browser") for (const key of pleaded.length ? pleaded : [botComputerControlKey(bot)]) computerControl.release(key);
   const savedLogin = saved?.site ?? card.savedLogin;
   const resumed = answerCardNode(threadId, message.id, savedLogin ? savedLoginResumePrompt(savedLogin) : signInResumePrompt(card.site, outcome));
   store.patchMessage(threadId, message.id, {

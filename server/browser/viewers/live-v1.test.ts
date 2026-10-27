@@ -36,6 +36,19 @@ function setup() {
 }
 
 describe("the v1 live view on the new browser", () => {
+  it("finishes sign-in hand-back only after the page confirms releasing held input", async () => {
+    const { open, service, live, backend } = setup();
+    const { action } = await open();
+    await action({ type: "take" });
+    await action({ type: "input_keyboard", eventType: "keyDown", key: "Shift", code: "ShiftLeft", modifiers: 8 });
+    backend.chrome.delay = (method) => method === "Input.dispatchKeyEvent" ? 80 : 0;
+    await live.handBack("a");
+    expect(service.heldBy("a")).toBeNull();
+    expect(service.interrupted("a")).toBe(false);
+    const result = await service.agentRpc({ session: "a", key: "bot:a" }, "tools/call", { name: "agent_browser_status", arguments: {} }) as { isError?: boolean };
+    expect(result.isError).toBeUndefined();
+  });
+
   it("sends the events and fields the agent-browser engine sent, for a phone's whole session", async () => {
     const { live, backend } = setup();
     const records = await runV1Session({

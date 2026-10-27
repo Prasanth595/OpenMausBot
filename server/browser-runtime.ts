@@ -230,7 +230,7 @@ class BrowserClient {
       const timer = setTimeout(() => {
         // Seal the gate synchronously, before stop(): the rejection can surface through the ready handshake, outside agentRpc's classifier.
         this.onRequestTimeout(params);
-        void this.stop(new TransportError("Browser request timed out; restart the browser before taking control."));
+        void this.stop(new TransportError("Browser request timed out; restart the browser before taking control."), "transport");
       }, timeoutMs);
       timer.unref();
       this.pending.set(id, { resolve, reject, timer });
@@ -788,13 +788,22 @@ export class BrowserRuntime {
     return true;
   }
 
-  release(session: string, owner: string): void {
+  release(session: string, owner: string): Promise<void> {
     const gate = this.gates.get(session);
-    if (!owner || !gate || gate.owner !== owner) return;
+    if (!owner || !gate || gate.owner !== owner) return Promise.resolve();
     gate.ready = false;
     gate.releasing = true;
     gate.lastUsed = Date.now();
     this.changed(gate); // don't admit agents until pending human input drains.
+    if (gate.owner !== owner) return Promise.resolve();
+    return new Promise((resolve) => {
+      const check = () => {
+        if (gate.owner === owner) return;
+        gate.changed.delete(check);
+        resolve();
+      };
+      gate.changed.add(check);
+    });
   }
 
   async withHumanAction<T>(session: string, owner: string, fn: () => Promise<T>): Promise<T> {
