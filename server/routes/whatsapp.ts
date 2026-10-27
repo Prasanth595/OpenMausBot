@@ -1,11 +1,10 @@
 import type { ServerResponse } from "node:http";
 
-import { WHATSAPP_PATH, type WhatsAppChannel } from "../whatsapp/channel.ts";
+import { isPublicHttps, WHATSAPP_PATH, type WhatsAppChannel } from "../whatsapp/channel.ts";
 import { settingsPatchSchema, type WhatsAppSettings } from "../whatsapp/settings.ts";
 import { SANDBOX_SENDER, whatsappLink } from "../whatsapp/twilio.ts";
 import { PASS, type RouteContext, type RouteHandler } from "./table.ts";
 
-const LOOPBACK = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/u;
 
 /** "+14155550100" as "+1 415 ••• 0100": enough to recognise, not to copy. */
 export function maskNumber(number: string): string {
@@ -28,7 +27,7 @@ export function createWhatsAppRoutes(deps: WhatsAppRouteDeps): RouteHandler {
     return {
       ...settings,
       webhookUrl: `${base}${WHATSAPP_PATH}`,
-      reachable: !LOOPBACK.test(base),
+      reachable: isPublicHttps(base),
       mode: deps.channel.mode(),
       sandbox,
       ...(sandbox && settings.joinPhrase ? { joinUrl: whatsappLink(SANDBOX_SENDER, settings.joinPhrase) } : {}),
@@ -47,7 +46,11 @@ export function createWhatsAppRoutes(deps: WhatsAppRouteDeps): RouteHandler {
     if (path === "/api/whatsapp" && method === "PUT") {
       if (deps.teamCloud) return json(res, 409, { error: "WhatsApp isn't available on a team server yet." });
       try {
-        deps.settings.update(await readBody(req));
+        const body = await readBody(req) as Record<string, unknown> | null;
+        if (body && ("accountSid" in body || "authToken" in body)) {
+          return json(res, 400, { error: "Use Check to change the Twilio account: new credentials are saved only once Twilio accepts them." });
+        }
+        deps.settings.update(body ?? {});
         return json(res, 200, status());
       } catch (error) {
         return failed(res, json, error);

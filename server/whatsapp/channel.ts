@@ -21,6 +21,16 @@ import {
 } from "./twilio.ts";
 
 export const WHATSAPP_PATH = "/whatsapp/twilio";
+
+/** Only a public HTTPS address may carry messages from Twilio; anything else reads them by polling instead. */
+export function isPublicHttps(base: string): boolean {
+  try {
+    const url = new URL(base);
+    return url.protocol === "https:" && !/^(?:127\.\d+\.\d+\.\d+|localhost|\[::1\])$/i.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
 export const WHATSAPP_THREAD_TITLE = "WhatsApp";
 const MAX_FORM_BYTES = 64 * 1024;
 export const POLL_MS = 4_000;
@@ -150,9 +160,24 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
   }
 
   /** Twilio's "a message comes in" webhook. It answers at once; the work runs after. */
-  async function handleTwilio(req: IncomingMessage, res: ServerResponse, publicBaseUrl: string): Promise<void> {
+  /** `claim` is the server's request claim: while it is refused (a move or a restore), nothing is acknowledged or recorded. */
+  async function handleTwilio(req: IncomingMessage, res: ServerResponse, publicBaseUrl: string, claim?: () => () => void): Promise<void> {
     if (req.method !== "POST") return reply(res, 405);
     if (!listening()) return reply(res, 404);
+    let release: (() => void) | undefined;
+    try {
+      release = claim?.();
+    } catch {
+      return reply(res, 503);
+    }
+    try {
+      await answerTwilio(req, res, publicBaseUrl);
+    } finally {
+      release?.();
+    }
+  }
+
+  async function answerTwilio(req: IncomingMessage, res: ServerResponse, publicBaseUrl: string): Promise<void> {
     let form: Record<string, string>;
     try {
       form = await readForm(req);
@@ -201,24 +226,34 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
   let stopped = true;
 
   /** Reads new messages from Twilio when its webhook cannot reach this computer. The delay until the next check. */
+  let paused = false;
+  let pauses = 0;
+  let checking = 0;
+
   async function poll(): Promise<number> {
-    if (deps.teamCloud || deps.reachable() || !listening()) return POLL_MS;
+    if (paused || deps.teamCloud || deps.reachable() || !listening()) return POLL_MS;
     const creds = credentials();
     const since = deps.settings.load().pollSince;
     if (!creds || since === undefined) return POLL_MS;
     const generation = deps.settings.load().generation;
-    const result = await listInbound(creds, since, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase });
-    if (!result.ok) {
-      deps.settings.recordError(`Couldn't check Twilio for new messages: ${result.error}`, now());
-      return POLL_BACKOFF_MS;
+    const pausedBefore = pauses;
+    checking += 1;
+    try {
+      const result = await listInbound(creds, since, { fetchImpl: deps.fetchImpl, apiBase: deps.apiBase });
+      if (!result.ok) {
+        deps.settings.recordError(`Couldn't check Twilio for new messages: ${result.error}`, now());
+        return POLL_BACKOFF_MS;
+      }
+      if (result.truncated) deps.settings.recordError("More new messages arrived than one check reads; older ones were skipped.", now());
+      for (const message of result.messages) {
+        if (paused || pauses !== pausedBefore || deps.settings.load().generation !== generation) return POLL_MS;
+        await handleInbound(message);
+        deps.settings.setPollSince(message.at);
+      }
+      return POLL_MS;
+    } finally {
+      checking -= 1;
     }
-    if (result.truncated) deps.settings.recordError("More new messages arrived than one check reads; the rest are read next time.", now());
-    for (const message of result.messages) {
-      if (deps.settings.load().generation !== generation) return POLL_MS;
-      await handleInbound(message);
-      if (!result.truncated) deps.settings.setPollSince(message.at);
-    }
-    return POLL_MS;
   }
 
   function schedule(delay: number): void {
@@ -306,6 +341,15 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
   return {
     handleTwilio, handleInbound, noteTurnCompleted, prompt, sendTest, verify, startLink, poll,
     mode: (): "instant" | "polling" => (deps.reachable() ? "instant" : "polling"),
+    /** Workspace maintenance: no new checks, and a check already waiting on Twilio delivers nothing. */
+    pause() {
+      paused = true;
+      pauses += 1;
+    },
+    resume() {
+      paused = false;
+    },
+    busy: () => checking > 0 || lanes.size > 0,
     start() {
       if (!stopped) return;
       stopped = false;

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { Message } from "../store.ts";
-import { createWhatsAppChannel, POLL_BACKOFF_MS, POLL_MS, WHATSAPP_PATH, WHATSAPP_PROMPT } from "./channel.ts";
+import { createWhatsAppChannel, isPublicHttps, POLL_BACKOFF_MS, POLL_MS, WHATSAPP_PATH, WHATSAPP_PROMPT } from "./channel.ts";
 import { createWhatsAppSettings, type WhatsAppSettings } from "./settings.ts";
 import { SESSION_WINDOW_MS, twilioSignature } from "./twilio.ts";
 
@@ -29,6 +29,9 @@ let reachable: boolean;
 let inbox: Array<Record<string, string>>;
 let listFails: boolean;
 let listGate: Promise<void> | null;
+let endlessPages: boolean;
+let claimRefused: boolean;
+let released: number;
 let channel: ReturnType<typeof createWhatsAppChannel>;
 
 const msg = (id: string, role: "user" | "bot", text: string, extra: Partial<Message> = {}): Message =>
@@ -61,7 +64,7 @@ function makeChannel() {
       if (!init.method) {
         if (listGate) await listGate;
         if (listFails) return new Response(JSON.stringify({ message: "Service unavailable" }), { status: 503 });
-        return new Response(JSON.stringify({ messages: inbox }), { status: 200 });
+        return new Response(JSON.stringify({ messages: inbox, ...(endlessPages ? { next_page_uri: "/2010-04-01/x/Messages.json?Page=n" } : {}) }), { status: 200 });
       }
       const form = new URLSearchParams(String(init.body));
       if (twilioFails) return new Response(JSON.stringify({ code: 21608, message: "Not a sandbox participant" }), { status: 400 });
@@ -101,8 +104,14 @@ beforeEach(async () => {
   inbox = [];
   listFails = false;
   listGate = null;
+  endlessPages = false;
+  claimRefused = false;
+  released = 0;
   channel = makeChannel();
-  server = createServer((req, res) => void channel.handleTwilio(req, res, base));
+  server = createServer((req, res) => void channel.handleTwilio(req, res, base, () => {
+    if (claimRefused) throw Object.assign(new Error("moving"), { status: 503 });
+    return () => { released += 1; };
+  }));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
@@ -350,5 +359,65 @@ describe("a check that a switch happened during", () => {
     expect(delivered).toEqual([]);
     expect(settings.load().pollSince).toBe(clock);
     expect(settings.load().pollSince).not.toBe(before);
+  });
+});
+
+describe("second review fixes", () => {
+  it("takes the webhook path only for a public HTTPS address", () => {
+    expect(isPublicHttps("https://bots.example.com")).toBe(true);
+    expect(isPublicHttps("http://bots.example.com")).toBe(false);
+    expect(isPublicHttps("https://127.0.0.1:8800")).toBe(false);
+    expect(isPublicHttps("https://localhost")).toBe(false);
+    expect(isPublicHttps("not a url")).toBe(false);
+  });
+
+  it("answers 503 and records nothing while the server refuses work, then takes the same message later", async () => {
+    claimRefused = true;
+    expect(await post(incoming("During the move", "SM1"))).toBe(503);
+    expect(delivered).toEqual([]);
+    claimRefused = false;
+    expect(await post(incoming("During the move", "SM1"))).toBe(200);
+    expect(delivered.map((entry) => entry.sendId)).toEqual(["wa_SM1"]);
+    expect(released).toBe(1);
+  });
+
+  it("does not check while paused for maintenance, and a check paused mid-way delivers nothing", async () => {
+    reachable = false;
+    settings.setAccountName("Azad", clock - 60_000);
+    inbox = [row("SMp1", "while backing up", clock + 1_000)];
+    channel.pause();
+    await channel.poll();
+    expect(delivered).toEqual([]);
+    channel.resume();
+    let release!: () => void;
+    listGate = new Promise((resolve) => { release = resolve; });
+    const checking = channel.poll();
+    expect(channel.busy()).toBe(true);
+    channel.pause();
+    release();
+    await checking;
+    await channel.idle();
+    expect(delivered).toEqual([]);
+    expect(channel.busy()).toBe(false);
+    channel.resume();
+    listGate = null;
+    await channel.poll();
+    await channel.idle();
+    expect(delivered.map((entry) => entry.text)).toEqual(["while backing up"]);
+  });
+
+  it("moves the cursor past a check that hit the page limit, so it never gets stuck", async () => {
+    reachable = false;
+    settings.setAccountName("Azad", clock - 60_000);
+    endlessPages = true;
+    inbox = [row("SMt2", "newer", clock + 2_000), row("SMt1", "older", clock + 1_000)];
+    await channel.poll();
+    await channel.idle();
+    expect(settings.publicSettings().lastError?.message).toBe("More new messages arrived than one check reads; older ones were skipped.");
+    expect(settings.load().pollSince).toBe(clock + 2_000);
+    expect(delivered.map((entry) => entry.text)).toEqual(["older", "newer"]);
+    await channel.poll();
+    await channel.idle();
+    expect(delivered).toHaveLength(2);
   });
 });

@@ -62,7 +62,8 @@ it("routes a WhatsApp request through MausBot to the right Chief of Staff and re
       [writer.id]: { reply: "Draft written" },
     }));
 
-    const settings = await api("/api/whatsapp", { accountSid: SID, authToken: TOKEN, allowed: [ME], enabled: true }, "PUT");
+    await api("/api/whatsapp/verify", { accountSid: SID, authToken: TOKEN });
+    const settings = await api("/api/whatsapp", { allowed: [ME], enabled: true }, "PUT");
     expect(settings).toMatchObject({ enabled: true, hasToken: true, allowed: [ME] });
     const webhookUrl = settings.webhookUrl as string;
 

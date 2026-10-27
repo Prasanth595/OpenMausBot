@@ -67,11 +67,12 @@ describe("WhatsApp settings routes", () => {
   it("saves settings, never returns the token, and keeps it when left empty", async () => {
     await serve("https://bots.example.com");
     expect((await call("/api/whatsapp")).body).toMatchObject({ enabled: false, hasToken: false, webhookUrl: "https://bots.example.com/whatsapp/twilio", reachable: true, available: true });
-    const saved = await call("/api/whatsapp", "PUT", { accountSid: SID, authToken: "tok", allowed: ["+1 415 555 0100"], enabled: true });
+    expect((await call("/api/whatsapp/verify", "POST", { accountSid: SID, authToken: "tok" })).status).toBe(200);
+    const saved = await call("/api/whatsapp", "PUT", { allowed: ["+1 415 555 0100"], enabled: true });
     expect(saved.status).toBe(200);
     expect(saved.body).toMatchObject({ enabled: true, hasToken: true, allowed: ["+14155550100"] });
     expect(JSON.stringify(saved.body)).not.toContain("tok\"");
-    expect((await call("/api/whatsapp", "PUT", { authToken: "" })).body.hasToken).toBe(true);
+    expect((await call("/api/whatsapp/verify", "POST", { authToken: "" })).body.hasToken).toBe(true);
     expect((await call("/api/whatsapp/test", "POST")).status).toBe(200);
     expect(tests).toBe(1);
   });
@@ -79,7 +80,7 @@ describe("WhatsApp settings routes", () => {
   it("explains bad input and a loopback-only receiver", async () => {
     await serve("http://127.0.0.1:8800");
     expect((await call("/api/whatsapp")).body.reachable).toBe(false);
-    const bad = await call("/api/whatsapp", "PUT", { accountSid: "nope" });
+    const bad = await call("/api/whatsapp/verify", "POST", { accountSid: "nope" });
     expect(bad.status).toBe(400);
     expect(bad.body.error).toMatch(/starts with AC/);
     expect((await call("/api/whatsapp", "PUT", { enabled: true })).status).toBe(400);
@@ -121,6 +122,16 @@ describe("WhatsApp settings routes", () => {
       expect((await call("/api/whatsapp/verify", "POST", body)).status).toBe(400);
     }
     expect(verifyCalls).toBe(0);
+  });
+
+  it("never changes credentials through PUT, and treats a public HTTP address as unreachable", async () => {
+    await serve("http://bots.example.com");
+    await call("/api/whatsapp/verify", "POST", { accountSid: SID, authToken: "good" });
+    const refused = await call("/api/whatsapp", "PUT", { authToken: "bad" });
+    expect(refused.status).toBe(400);
+    expect(refused.body.error).toMatch(/Use Check/);
+    expect((await call("/api/whatsapp", "PUT", { accountSid: SID })).status).toBe(400);
+    expect((await call("/api/whatsapp")).body).toMatchObject({ hasToken: true, reachable: false });
   });
 
   it("masks linked numbers", async () => {

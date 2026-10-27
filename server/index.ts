@@ -476,7 +476,7 @@ import { createOutboundHold, OUTBOUND_HOLD_MS, type OutboundHoldAnswer } from ".
 import { connectorCallsIn, outboundCallsIn } from "../shared/outbound.ts";
 import { connectorAccessDecision, describeConnectorScopes } from "../shared/connector-scopes.ts";
 import { bindThreadLogCapProvider } from "./thread-log-rotation.ts";
-import { listenWebhookIngress, type WebhookIngress } from "./webhook-ingress.ts"; import { createWhatsAppChannel, WHATSAPP_PATH } from "./whatsapp/channel.ts"; import { createWhatsAppSettings } from "./whatsapp/settings.ts"; import { createWhatsAppRoutes } from "./routes/whatsapp.ts"; import { viewersDefaultBot } from "../shared/default-bot.ts";
+import { listenWebhookIngress, type WebhookIngress } from "./webhook-ingress.ts"; import { createWhatsAppChannel, isPublicHttps, WHATSAPP_PATH } from "./whatsapp/channel.ts"; import { createWhatsAppSettings } from "./whatsapp/settings.ts"; import { createWhatsAppRoutes } from "./routes/whatsapp.ts"; import { viewersDefaultBot } from "../shared/default-bot.ts";
 import { addressFor } from "./webhook-address.ts";
 import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
@@ -5264,7 +5264,7 @@ const aboutMeFacts = createAboutMe({ read: () => cfg.profile?.aboutMe ?? "", wri
 const setupSuggestions = setupSuggestionsFor({ store, config: () => cfg, shared: sharedMembership, languageCode: () => appLanguage() ?? Intl.DateTimeFormat().resolvedOptions().locale, engine: (bot) => registry.get(bot.modelSelection.instanceId)?.adapter.capabilities, browserOn: () => builtInBrowserEnabled(cfg),
   withinBudget: () => { try { assertWithinBudget(cfg, DATA_DIR); return true; } catch { return false; } }, writer: (botId) => sideJobs.text("setup-suggestions", botId), apps: { configured: () => composio.configured(cfg), mode: () => composio.connectionMode(cfg), connected: () => composio.connectedServices(cfg) }, log: (line) => console.log(line) });
 
-const whatsappSettings = createWhatsAppSettings(DATA_DIR), whatsapp = createWhatsAppChannel({ settings: whatsappSettings, teamCloud: Boolean(CLOUD_TEAM), defaultBot: () => viewersDefaultBot(store.bots), threadExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)), createThread: (botId, title) => store.createTask(botId, title, false)?.threadId ?? null, deliver: async (botId, threadId, text, sendId) => { await acceptDirectSend({ botId, threadId, text, sendId, trigger: { kind: "owner" }, personPresent: true }); }, activePath: (threadId) => store.activePath(threadId), needsInput: requestNeedsInput, reachable: () => !/^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\/?$/.test(webhookIngress?.baseUrl ?? "http://127.0.0.1"), apiBase: /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(process.env.OMB_TWILIO_API_BASE ?? "") ? process.env.OMB_TWILIO_API_BASE : undefined, log: (line) => console.log(line) });
+const whatsappSettings = createWhatsAppSettings(DATA_DIR), whatsapp = createWhatsAppChannel({ settings: whatsappSettings, teamCloud: Boolean(CLOUD_TEAM), defaultBot: () => viewersDefaultBot(store.bots), threadExists: (botId, threadId) => Boolean(store.taskByThread(botId, threadId)), createThread: (botId, title) => store.createTask(botId, title, false)?.threadId ?? null, deliver: async (botId, threadId, text, sendId) => { await acceptDirectSend({ botId, threadId, text, sendId, trigger: { kind: "owner" }, personPresent: true }); }, activePath: (threadId) => store.activePath(threadId), needsInput: requestNeedsInput, reachable: () => isPublicHttps(webhookIngress?.baseUrl ?? ""), apiBase: /^http:\/\/127\.0\.0\.1:\d{1,5}$/.test(process.env.OMB_TWILIO_API_BASE ?? "") ? process.env.OMB_TWILIO_API_BASE : undefined, log: (line) => console.log(line) });
 const memoryUpkeep = createMemoryUpkeep({
   bots: () => store.bots,
   bot: (id) => store.bot(teamHost.baseBotId(id)) ?? undefined,
@@ -9724,7 +9724,7 @@ let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
 try {
   webhookIngress = await listenWebhookIngress(webhooks, {
-    port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL, claimRequest: () => { moveFreeze.assertTurns(); return workspaceMaintenance.request(); }, extra: (base) => async (req, res, url) => url.pathname === WHATSAPP_PATH && (await whatsapp.handleTwilio(req, res, base()), true),
+    port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL, claimRequest: () => { moveFreeze.assertTurns(); return workspaceMaintenance.request(); }, extra: (base) => async (req, res, url, claim) => url.pathname === WHATSAPP_PATH && (await whatsapp.handleTwilio(req, res, base(), claim), true),
   });
   const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
   console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
@@ -12477,9 +12477,9 @@ const workspaceBackupAccess = {
       !computerProviderConfigTransitions.size &&
       teamComputers.list().every(computer => !teamComputerInUse(computer)) &&
       store.bots.every((bot) => !botHasActiveTurn(bot.id) && !routines?.activeRunForBot(bot.id) && !botComputerControlSnapshot(bot.id).held) &&
-      store.groups.every((group) => !groupIsWorking(group)),
-    pause: () => { routines?.stop(); calendarCalls?.stop(); watchdog.stop(); memoryUpkeep.pause(); },
-    resume: () => { if (!moveFreeze.frozen()) { routines?.start(); calendarCalls?.start(); } watchdog.start(); memoryUpkeep.resume(); },
+      store.groups.every((group) => !groupIsWorking(group)) && !whatsapp.busy(),
+    pause: () => { routines?.stop(); calendarCalls?.stop(); watchdog.stop(); memoryUpkeep.pause(); whatsapp.pause(); },
+    resume: () => { if (!moveFreeze.frozen()) { routines?.start(); calendarCalls?.start(); } watchdog.start(); memoryUpkeep.resume(); whatsapp.resume(); },
     flush: async () => {
       await Promise.all([flushAllProfileHistory(), flushAllMemoryJournals(), flushUsageLedger(DATA_DIR), flushDecisionLog(DATA_DIR), flushAdminActivity(DATA_DIR)]);
       // Writers gated and work idle: release the WAL connection for a consistent snapshot; Store reopens it lazily.

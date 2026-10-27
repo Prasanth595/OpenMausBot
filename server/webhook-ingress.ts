@@ -88,8 +88,9 @@ function eventName(req: IncomingMessage): string | undefined {
   )?.trim() || undefined;
 }
 
-/** Another receiver on this public server, such as a chat channel. True when it answered the request. */
-export type IngressExtra = (req: IncomingMessage, res: ServerResponse, url: URL) => Promise<boolean>;
+/** Another receiver on this public server, such as a chat channel. True when it answered the request. `claim` takes the
+ * same request claim the webhooks below take, and throws while the server refuses work. */
+export type IngressExtra = (req: IncomingMessage, res: ServerResponse, url: URL, claim: () => () => void) => Promise<boolean>;
 
 export function createWebhookIngressHandler(manager: WebhookManager, claimRequest?: () => () => void, extra?: IngressExtra) {
   return async (req: IncomingMessage, res: ServerResponse) => {
@@ -102,7 +103,7 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
     if (req.method === "GET" && url.pathname === "/health") {
       return json(res, 200, { app: "openmausbot-webhooks", ready: true });
     }
-    if (extra && await extra(req, res, url)) return;
+    if (extra && await extra(req, res, url, () => claimRequest?.() ?? (() => undefined))) return;
     const match = url.pathname.match(/^\/hooks\/(wh_[A-Za-z0-9_-]+)(?:\/([^/]+))?$/);
     if (!match) return json(res, 404, { error: "Unknown webhook endpoint" });
     if (req.method !== "POST") return json(res, 405, { error: "Webhooks accept POST requests" });
