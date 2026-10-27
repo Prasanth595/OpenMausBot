@@ -343,6 +343,9 @@ IF EXIST "%dp0%\\node.exe" (
 endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\pkg\\bin\\ombfake.js" %*
 `;
 
+// ...and for a bin with no extension at all, which the shim still hands to node
+const EXTENSIONLESS_SHIM = JS_SHIM.replace("ombfake.js", "ombfake");
+
 // ...and npm's own npm.cmd / npx.cmd, which Node's installer puts beside
 // node.exe with CRLF endings: the CLI entry sits in a variable, next to a
 // helper script
@@ -429,6 +432,23 @@ winOnly("resolveCli (Windows)", () => {
       execFile(r.command, r.args, (err, out) => (err ? reject(err) : resolve(out))),
     );
     expect(stdout.trim()).toBe("js target -p,hi");
+  });
+
+  it("parses a .cmd shim down to `node <bin>` when the bin has no extension", async () => {
+    shimWith(
+      "ombfake.cmd",
+      EXTENSIONLESS_SHIM,
+      "ombfake",
+      "#!/usr/bin/env node\nconsole.log('bin ' + process.argv.slice(2).join(','));\n",
+    );
+    onPath();
+    const r = resolveCli("ombfake", ["exec", "-o", "acp"]);
+    expect(r.args).toEqual([join(dir, "node_modules", "pkg", "bin", "ombfake"), "exec", "-o", "acp"]);
+    expect(r.command.toLowerCase()).toMatch(/node\.exe$/);
+    const stdout = await new Promise<string>((resolve, reject) =>
+      execFile(r.command, r.args, (err, out) => (err ? reject(err) : resolve(out))),
+    );
+    expect(stdout.trim()).toBe("bin exec,-o,acp");
   });
 
   it.each(["npm", "npx"] as const)("parses npm's own %s.cmd down to `node <cli.js>`, not its prefix helper", async (name) => {

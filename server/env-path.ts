@@ -247,6 +247,11 @@ function parseCmdShim(shim: string, env?: NodeJS.ProcessEnv): ResolvedSpawn | nu
     const node = nodeExe(dir, env);
     if (node) return { command: node, args: [script] };
   }
+  // @factory/cli 0.249.0 ships bin/droid with no extension, and the shim still hands it to node
+  for (const target of targets) {
+    const shebang = parseNodeShebang(target, env);
+    if (shebang) return shebang;
+  }
   const exe = targets.find((p) => extname(p).toLowerCase() === ".exe");
   return exe ? { command: exe, args: [] } : null;
 }
