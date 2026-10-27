@@ -3183,4 +3183,11 @@ describe("a snapshot taken while a send is on its way", () => {
     expect(next.bots[0]!.activeLeafId).toBe("b");
     expect(next.groups[0]!.messages).toEqual([]);
   });
+
+  it("hangs a send still on its way on the snapshot's copy of the send before it", () => {
+    const twice = reducer(sent, { type: "send", botId: "b1", text: "again", sendId: "s3" });
+    const settled = { ...bot, messages: [line("a"), line("m1", { sendId: "s1", parentId: "a" })], activeLeafId: "m1" };
+    const next = reducer(twice, { type: "hydrate", bots: [settled], groups: [room], computerControl: {} });
+    expect(ids(visibleMessages(next.bots[0]!))).toEqual(["a", "m1", "optimistic-s3"]);
+  });
 });
