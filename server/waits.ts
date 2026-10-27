@@ -115,7 +115,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 export function waitList(waits: readonly WaitRecord[]): string {
   return waits
-    .map((w) => `- ${w.id} · ${w.label} · until ${describeCondition(w.condition)} · made ${iso(w.createdAt)} · stops ${iso(w.expiresAt)}${w.followUp ? ` · then: ${w.followUp}` : ""}`)
+    .map((w) => `- ${w.id} · ${w.label} · until ${describeCondition(w.condition)} · made ${iso(w.createdAt)} · stops ${iso(w.expiresAt)}${w.followUp ? ` · follow_up: ${w.followUp}` : ""}`)
     .join("\n");
 }
 

@@ -323,7 +323,7 @@ describe("WaitManager", () => {
     expect(describeCondition({ kind: "process_gone", process: "make" })).toBe("make has stopped");
     expect(describeCondition({ kind: "bot_idle", botId: "c", botName: "Coder", sawBusy: false })).toBe("Coder finishes its work");
     const wait: WaitRecord = { id: "w1", botId: "b", threadId: "t", label: "L", condition: { kind: "file_exists", path: "/p" }, followUp: "Go", createdAt: 0, expiresAt: 3_600_000, nextCheckAt: 0, errors: 0 };
-    expect(waitList([wait])).toBe("- w1 · L · until /p exists · made 1970-01-01T00:00:00.000Z · stops 1970-01-01T01:00:00.000Z · then: Go");
+    expect(waitList([wait])).toBe("- w1 · L · until /p exists · made 1970-01-01T00:00:00.000Z · stops 1970-01-01T01:00:00.000Z · follow_up: Go");
   });
 
   it("checks every five seconds once started, and not at all once stopped", async () => {

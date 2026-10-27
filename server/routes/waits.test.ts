@@ -14,11 +14,13 @@ const waits = {
   cancel: vi.fn((_id: string, _botId: string): WaitRecord | null => null),
 };
 
+const readBody = vi.fn(async (): Promise<unknown> => undefined);
+
 async function call(method: string, path: string, body?: unknown, overrides: Partial<Parameters<ReturnType<typeof createWaitRoutes>>[0]> = {}) {
   const route = createWaitRoutes({ waits, home: () => HOME });
   const json = vi.fn();
   const outcome = await route({
-    method, path, res: {} as never, json, botId: "bot-1", threadId: "thread-1", readBody: async () => body,
+    method, path, res: {} as never, json, botId: "bot-1", threadId: "thread-1", readBody: async () => { readBody(); return body; },
     sourceRefusal: () => null, hostRefusal: () => null, peer: () => null, ...overrides,
   });
   const [, status, payload] = json.mock.calls[0] ?? [];
@@ -52,12 +54,13 @@ describe("the waits route", () => {
     expect((await call("POST", "/api/internal/waits", FILE_WAIT)).payload.text).toMatch(/\n\nSlow page\.$/);
   });
   it("refuses a turn the person did not start in their own chat, for making and for stopping", async () => {
-    waits.create.mockClear(); waits.cancel.mockClear();
+    waits.create.mockClear(); waits.cancel.mockClear(); readBody.mockClear();
     for (const [path, body] of [["/api/internal/waits", FILE_WAIT], ["/api/internal/waits/cancel", { id: "w1" }]] as const) {
       expect(await call("POST", path, body, { sourceRefusal: () => WAIT_MESSAGES.notPerson })).toMatchObject({ status: 403, payload: { error: WAIT_MESSAGES.notPerson } });
     }
     expect(waits.create).not.toHaveBeenCalled();
     expect(waits.cancel).not.toHaveBeenCalled();
+    expect(readBody).not.toHaveBeenCalled();
   });
   it("refuses file and program waits away from the bot's own computer, and allows pages and bots there", async () => {
     const away = { hostRefusal: () => WAIT_MESSAGES.otherComputer, peer: () => ({ id: "b2", name: "Coder" }) };
@@ -102,17 +105,32 @@ describe("the waits route", () => {
     await call("POST", "/api/internal/waits", { label: "l", kind: "bot_idle", bot: "coder" }, { peer: () => ({ id: "b2", name: "Coder" }) });
     expect(waits.create).toHaveBeenCalledWith(expect.objectContaining({ condition: { kind: "bot_idle", botId: "b2", botName: "Coder" } }));
   });
-  it("lets a bot cancel only its own waits and lists only its own", async () => {
+  it("lets a bot cancel only waits made in this chat and lists only those", async () => {
     waits.cancel.mockClear(); waits.list.mockClear();
-    waits.cancel.mockReturnValueOnce(null);
+    const mine = { id: "w1", label: "the build", threadId: "thread-1", condition: { kind: "process_gone", process: "make" }, createdAt: 0, expiresAt: 0 } as WaitRecord;
+    const elsewhere = { ...mine, id: "w9", label: "other chat", threadId: "thread-A" } as WaitRecord;
+    waits.list.mockReturnValue([mine, elsewhere]);
     expect(await call("POST", "/api/internal/waits/cancel", { id: "w9" })).toMatchObject({ status: 404, payload: { error: WAIT_MESSAGES.noWait } });
-    waits.cancel.mockReturnValueOnce({ id: "w1", label: "the build" } as WaitRecord);
+    expect(waits.cancel).not.toHaveBeenCalled();
+    waits.cancel.mockReturnValueOnce(mine);
     expect(await call("POST", "/api/internal/waits/cancel", { id: "w1" })).toMatchObject({ status: 200, payload: { text: "Stopped waiting for the build." } });
-    expect(waits.cancel.mock.calls).toEqual([["w9", "bot-1"], ["w1", "bot-1"]]);
-    expect(await call("GET", "/api/internal/waits")).toMatchObject({ status: 200, payload: { text: WAIT_MESSAGES.none } });
+    expect(waits.cancel.mock.calls).toEqual([["w1", "bot-1"]]);
+    const listed = (await call("GET", "/api/internal/waits")).payload.text;
+    expect(listed).toContain("w1 · the build");
+    expect(listed).not.toContain("w9");
     expect(waits.list).toHaveBeenCalledWith("bot-1");
-    waits.list.mockReturnValueOnce([{ id: "w1", label: "the build", condition: { kind: "process_gone", process: "make" }, createdAt: 0, expiresAt: 0 } as WaitRecord]);
-    expect((await call("GET", "/api/internal/waits")).payload.text).toContain("w1 · the build");
+    expect(await call("GET", "/api/internal/waits", undefined, { threadId: "thread-B" })).toMatchObject({ status: 200, payload: { text: WAIT_MESSAGES.none } });
+    expect(await call("POST", "/api/internal/waits/cancel", { id: "w1" }, { threadId: "thread-B" })).toMatchObject({ status: 404 });
+    waits.list.mockReturnValue([]);
+  });
+  it("keeps a turn that is not the person's conversation from listing", async () => {
+    expect(await call("GET", "/api/internal/waits", undefined, { sourceRefusal: () => WAIT_MESSAGES.notYours })).toMatchObject({ status: 403, payload: { error: WAIT_MESSAGES.notYours } });
+  });
+  it("keeps the address as the URL parser normalises it and the label to one line", async () => {
+    waits.create.mockClear();
+    await call("POST", "/api/internal/waits", { label: "l", kind: "url_contains", url: "https://X.test", text: "ok" });
+    expect(waits.create).toHaveBeenCalledWith(expect.objectContaining({ condition: { kind: "url_contains", url: "https://x.test/", text: "ok" } }));
+    expect(await call("POST", "/api/internal/waits", { ...FILE_WAIT, label: "a\nb" })).toMatchObject({ status: 400, payload: { error: "label must be a single line of plain text." } });
   });
   it("lets only a person's own one-to-one turn make a wait", () => {
     const person = { owned: true, room: false, depth: 0, handedOff: false, routineRun: false, outsideDriven: false, personStarted: true, guest: false };

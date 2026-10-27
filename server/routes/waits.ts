@@ -48,6 +48,7 @@ export function parseWaitRequest(body: unknown, home: string): { ok: true; reque
   if (!isRecord(body)) return fail("Send a JSON object.");
   const label = typeof body.label === "string" ? body.label.trim() : "";
   if (!label || label.length > 120) return fail("label: the person's words for what you wait for, up to 120 characters.");
+  if (/\p{Cc}/u.test(label)) return fail("label must be a single line of plain text.");
   const kind = WAIT_KINDS.find((candidate) => candidate === body.kind);
   if (!kind) return fail(`kind is one of: ${WAIT_KINDS.join(", ")}.`);
 
@@ -70,7 +71,7 @@ export function parseWaitRequest(body: unknown, home: string): { ok: true; reque
     try { parsed = typeof raw === "string" && raw.length <= 2048 ? new URL(raw) : null; } catch { parsed = null; }
     if (!parsed || (parsed.protocol !== "http:" && parsed.protocol !== "https:")) return fail("url must be an http or https address.");
     if (parsed.username || parsed.password) return fail("Put no sign-in details in the address.");
-    request.url = raw as string;
+    request.url = parsed.href;
     const text = size("text", 500);
     if (text === null) return lengthError("text", 500);
     request.text = text;
@@ -148,8 +149,10 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
   const home = deps.home ?? homedir;
   return async (ctx: WaitRouteContext): Promise<typeof PASS | void> => {
     const { res, json } = ctx;
+    const here = () => deps.waits.list(ctx.botId).filter((wait) => wait.threadId === ctx.threadId);
     if (ctx.method === "GET" && ctx.path === WAITS) {
-      const mine = deps.waits.list(ctx.botId);
+      if (ctx.sourceRefusal() === WAIT_MESSAGES.notYours) return void json(res, 403, { error: WAIT_MESSAGES.notYours });
+      const mine = here();
       return void json(res, 200, { text: mine.length ? waitList(mine) : WAIT_MESSAGES.none });
     }
     if (ctx.method !== "POST" || (ctx.path !== WAITS && ctx.path !== CANCEL)) return PASS;
@@ -161,7 +164,7 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
     if (ctx.path === CANCEL) {
       const id = isRecord(body) ? body.id : undefined;
       if (typeof id !== "string" || !id) return void json(res, 400, { error: "id: the wait id from list_waits." });
-      const stopped = deps.waits.cancel(id, ctx.botId);
+      const stopped = here().some((wait) => wait.id === id) ? deps.waits.cancel(id, ctx.botId) : null;
       if (!stopped) return void json(res, 404, { error: WAIT_MESSAGES.noWait });
       return void json(res, 200, { text: `Stopped waiting for ${stopped.label}.` });
     }
