@@ -9,10 +9,7 @@ import { buildErrorPage, desktopViewerErrorPage } from "./error-pages.mjs";
 import { startCua, stopCua, registerCuaIpc, requestComputerUse, setCuaStateListener } from "./cua.mjs";
 import { createAndroidDeviceController } from "./android-device.mjs";
 import { finishSpeech, speechBusy, startSpeech, stopSpeech } from "./speech.mjs";
-import { createTalkPanel, isTalkPanel } from "./talk-panel.mjs";
-import { createTalkServer } from "./talk-server.mjs";
-import { createTalkSession } from "./talk-session.mjs";
-import { createCallPresence, createTalkShortcut, TALK_SHORTCUT_UNAVAILABLE } from "./talk-shortcut.mjs";
+import { installTalk, isTalkPanel } from "./talk-main.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { linuxDisablesGpu } from "./linux-gpu.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
@@ -2481,32 +2478,8 @@ ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
   return true;
 }));
 
-ipcMain.handle("speech:start", localOnly("speech:start", (event, options) => {
-  const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win) return;
-  if (!nativeActions.appleSpeech) {
-    win.webContents.send("speech:end", { code: 2, reason: "unsupported-platform" });
-    return;
-  }
-  startSpeech(win, options);
-}));
-ipcMain.handle("speech:stop", localOnly("speech:stop", (event) => {
-  if (nativeActions.appleSpeech) stopSpeech(BrowserWindow.fromWebContents(event.sender));
-}));
-ipcMain.handle("speech:finish", localOnly("speech:finish", (event) => {
-  if (nativeActions.appleSpeech) finishSpeech(BrowserWindow.fromWebContents(event.sender));
-}));
-
-const callPresence = createCallPresence();
-let talkShortcut = null, talkSession = null;
-ipcMain.handle("talk-shortcut:state", localOnly("talk-shortcut:state", () => talkShortcut?.state() ?? TALK_SHORTCUT_UNAVAILABLE));
-ipcMain.handle("talk-shortcut:set", localOnly("talk-shortcut:set", (_event, change) => talkShortcut?.set({
-  enabled: typeof change?.enabled === "boolean" ? change.enabled : undefined,
-  key: typeof change?.key === "string" ? change.key : undefined,
-}) ?? TALK_SHORTCUT_UNAVAILABLE));
-ipcMain.handle("call:active", localOrHome("call:active", (event, active) => {
-  callPresence.set(event.sender, active === true);
-}));
+const talk = installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions.appleSpeech,
+  speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy }, packaged: app.isPackaged, devUrl: DEV_URL, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog });
 
 ipcMain.handle("companion:state", localOnly("companion:state", () => desktopCompanionState()));
 function managedRemoteAccessRefusal() {
@@ -2725,7 +2698,6 @@ const cloudLook = createCloudLook({ store: lookFile(() => path.join(app.getPath(
   homeEntry: cloudHomeEntry, saveEntry: (origin, look) => persistEnvironments(withEnvironmentLook(environmentsState, origin, look)) });
 const cloudBuy = installCloudBuy({ ipcMain, guard: localWorkspaceOnly, client: ensureCloudAccount, offersReady: cloudOffersReady, clipboard, look: cloudLook });
 const localServerRequest = (route, init = {}) => (serverProc && serverReady ? fetch(`http://127.0.0.1:${SERVER_PORT}${route}`, { ...init, redirect: "error", credentials: "omit", headers: { ...init.headers, [DESKTOP_MUTATION_HEADER]: desktopMutationToken } }) : Promise.reject(new Error("not running")));
-const talkRequest = (route, init) => (app.isPackaged ? localServerRequest(route, init) : fetch(new URL(route, DEV_URL), init));
 const teamProfileSeeds = createTeamProfileSeeds({ teamFetch: (...args) => session.defaultSession.fetch(...args), localRequest: localServerRequest, log: slog });
 const oneHome = installOneHome({ ipcMain, cloudPage: cloudPageAsking, server: () => serverProc, cookieFetch: (...args) => session.defaultSession.fetch(...args), home: () => (myCloud() && cloudAccount ? { origin: myCloud(), grant: () => cloudAccount.pairHome() } : null), power: cloudPower, file: () => path.join(app.getPath("userData"), "cloud-send.json"), localRequest: localServerRequest, space: { disk: () => cloudPlanDisk(ensureCloudAccount().state()), grow: sizeGb => ensureCloudAccount().growDisk(sizeGb) }, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }), window: () => (desktopRemoteAccess ? null : mainWindow), localOrigin: rendererOrigin, account: () => cloudAccount, journalFile: () => path.join(app.getPath("userData"), "one-home.json"), tempRoot: () => path.join(app.getPath("temp"), "openmaus-one-home"), lend: projects => useMyMac.lendByDefault({ projects }), offer: () => useMyComputer.offer(), phone: { paired: () => companionEnabledAtRest(), stop: () => stopDesktopCompanion({ remember: false }).then(() => {}), start: () => startDesktopCompanion({ waitForHosted: false, remember: false }).then(() => {}) }, openHome: () => void showHome({ place: "cloud" }), openTeam: team => void showHome({ place: { team: team.id, name: team.name } }), openLocal: () => void showHome(), restart: () => relaunchAfterDesktopRemoteChange(), version: app.getVersion(), log: slog });
 // Teams from the verified session as places this window shows (home-places.mjs): the one to open next time, and its lines.
@@ -3088,26 +3060,7 @@ app.whenReady().then(async () => {
       for (const win of appWindows()) if (!win.isDestroyed() && win.webContents !== sender) win.webContents.send("desktop-language:changed", language);
     },
     page: event => senderIsLocal(event) ? "local" : cloudPageAsking(event) ?? (workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin()) ? "server" : null) });
-  // Electron: a throw inside a globalShortcut or webContents event callback reaches no caller.
-  const logged = (what, run) => () => {
-    try { run(); } catch (error) { slog(`talk ${what} failed: ${error?.message ?? error}`); }
-  };
-  try {
-    const panel = createTalkPanel({ BrowserWindow, screen, iconPath: APP_ICON, onOpen: logged("open", () => talkSession.open()), onDismiss: logged("dismiss", () => talkSession.dismiss()) });
-    talkShortcut = createTalkShortcut({ globalShortcut, prefs: desktopPrefs, available: () => nativeActions.appleSpeech && !desktopRemoteAccess, onPress: logged("press", () => talkSession.press()) });
-    talkSession = createTalkSession({
-      speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy },
-      server: createTalkServer({ request: talkRequest, prefs: desktopPrefs, serverKey: () => (app.isPackaged ? runningDataDir : DEV_URL) ?? "local" }),
-      panel,
-      voiceInUse: () => speechBusy() || callPresence.active(),
-      release: () => talkShortcut.releaseModifiers(),
-      openChat: chat => (chat ? queueChatLink(`openmausbot://thread/${encodeURIComponent(chat.threadId)}?bot=${encodeURIComponent(chat.botId)}`) : revealForLink()),
-    });
-  } catch (error) {
-    talkShortcut?.close();
-    talkShortcut = null; talkSession = null;
-    slog(`talk shortcut unavailable: ${error?.message ?? error}`);
-  }
+  talk.start({ globalShortcut, screen, prefs: desktopPrefs, remote: () => Boolean(desktopRemoteAccess), localRequest: localServerRequest, dataDir: () => runningDataDir });
   // Before the window, so the harness has the CUA descriptor on first render.
   cuaReady =
     !desktopRemoteAccess && (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32")
@@ -3260,7 +3213,7 @@ process.once("SIGINT", requestSignalQuit);
 process.once("SIGTERM", requestSignalQuit);
 
 app.on("before-quit", (e) => {
-  talkSession?.close(); talkShortcut?.close();
+  talk.close();
   desktopShutdownStarted = true;
   startupScreen?.dispose();
   companyBackupSchedule?.close();

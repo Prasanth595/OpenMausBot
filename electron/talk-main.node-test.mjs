@@ -1,36 +1,75 @@
+import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import vm from "node:vm";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createDesktopPrefs } from "./desktop-prefs.mjs";
+import { installTalk, isTalkPanel } from "./talk-main.mjs";
 import { TALK_SHORTCUT_UNAVAILABLE } from "./talk-shortcut.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const main = readFileSync(join(here, "main.mjs"), "utf8").replace(/\r\n/g, "\n");
 const preload = readFileSync(join(here, "preload.cjs"), "utf8");
+const settle = async () => { for (let i = 0; i < 10; i += 1) await new Promise(resolve => setImmediate(resolve)); };
+const json = body => Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
+const names = windows => windows.map(win => win?.name ?? null);
 
-function slice(from, until) {
-  const start = main.indexOf(from), last = main.indexOf(until, start);
-  assert.ok(start >= 0 && last > start, `main.mjs has ${from} … ${until}`);
-  return main.slice(start, last + until.length);
-}
-
-function talkWiring({ session = {}, sessionFails = false } = {}) {
-  const seen = { log: [], links: [], reveals: 0, closed: 0, panelOptions: null, shortcutOptions: null, sessionOptions: null };
-  const context = vm.createContext({
-    BrowserWindow: {}, screen: {}, APP_ICON: "icon.png", globalShortcut: {}, desktopPrefs: {}, nativeActions: { appleSpeech: true }, desktopRemoteAccess: null,
-    startSpeech() {}, stopSpeech() {}, finishSpeech() {}, speechBusy: () => false, callPresence: { active: () => false },
-    app: { isPackaged: true }, runningDataDir: "/data", DEV_URL: "http://dev", talkRequest() {}, createTalkServer: () => ({}),
-    createTalkPanel: options => { seen.panelOptions = options; return {}; },
-    createTalkShortcut: options => { seen.shortcutOptions = options; return { close: () => { seen.closed += 1; } }; },
-    createTalkSession: options => { seen.sessionOptions = options; if (sessionFails) throw new Error("no session"); return session; },
-    queueChatLink: link => { seen.links.push(link); }, revealForLink: () => { seen.reveals += 1; }, slog: line => { seen.log.push(line); },
+function harness({ packaged = true, appleSpeech = true, remote = false, register, serve = () => undefined } = {}) {
+  const h = { handlers: new Map(), guards: new Map(), started: [], stopped: [], finished: [], requests: [], links: [], reveals: 0, log: [],
+    registered: new Map(), windows: [], busy: false, fail: {} };
+  const owners = new Map();
+  class FakeBrowserWindow {
+    static fromWebContents(contents) { return owners.get(contents) ?? null; }
+    constructor(options = {}) {
+      Object.assign(this, { options, name: options.name, destroyed: false, events: new EventEmitter() });
+      this.webContents = Object.assign(new EventEmitter(), { sent: [], setWindowOpenHandler() {}, executeJavaScript: async () => 56 });
+      this.webContents.send = (...message) => { this.webContents.sent.push(message); };
+      owners.set(this.webContents, this);
+      h.windows.push(this);
+    }
+    on(...args) { this.events.on(...args); }
+    setAlwaysOnTop() {}
+    setVisibleOnAllWorkspaces() {}
+    setBounds() {}
+    getBounds() { return { x: 0, y: 0, width: 0, height: 0 }; }
+    showInactive() {}
+    loadURL() { return Promise.resolve(); }
+    isDestroyed() { return this.destroyed; }
+    destroy() { this.destroyed = true; }
+  }
+  const failing = (name, run) => (...args) => {
+    if (h.fail[name]) throw new Error(h.fail[name]);
+    return run(...args);
+  };
+  const answer = route => serve(route) ?? new Promise(() => {});
+  const guard = kind => (channel, handler) => { h.guards.set(channel, kind); return handler; };
+  h.talk = installTalk({
+    ipcMain: { handle: (channel, handler) => h.handlers.set(channel, handler) },
+    localOnly: guard("localOnly"), localOrHome: guard("localOrHome"), BrowserWindow: FakeBrowserWindow, appleSpeech,
+    speech: {
+      start: (target, options) => { h.started.push([target, options]); },
+      stop: failing("stop", owner => { h.stopped.push(owner); }),
+      finish: owner => { h.finished.push(owner); },
+      busy: failing("busy", () => h.busy),
+    },
+    packaged, devUrl: "http://127.0.0.1:5199", iconPath: join(here, "resources", "app-icon.png"),
+    openLink: link => { h.links.push(link); }, reveal: failing("reveal", () => { h.reveals += 1; }), log: line => { h.log.push(line); },
+    fetch: url => { h.requests.push(["dev", String(url)]); return answer(`${url.pathname}${url.search}`); },
   });
-  vm.runInContext("let talkShortcut = null, talkSession = null;", context);
-  vm.runInContext(slice("  const logged = (what, run) => () => {", "slog(`talk shortcut unavailable: ${error?.message ?? error}`);\n  }\n"), context);
-  seen.value = name => vm.runInContext(name, context);
-  return seen;
+  const globalShortcut = {
+    register: register ?? ((accelerator, press) => { h.registered.set(accelerator, press); return true; }),
+    unregister: accelerator => { h.registered.delete(accelerator); },
+  };
+  const screen = { getCursorScreenPoint: () => ({ x: 0, y: 0 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 25, width: 1440, height: 875 } }) };
+  h.start = () => h.talk.start({ globalShortcut, screen, prefs: createDesktopPrefs({ read: () => null, write: () => {} }), remote: () => remote,
+    localRequest: route => { h.requests.push(["local", route]); return answer(route); }, dataDir: () => "/Users/a/.openmausbot" });
+  h.handle = (channel, event, ...args) => h.handlers.get(channel)(event, ...args);
+  h.press = () => h.registered.get("Control+Alt+Space")();
+  h.page = name => new FakeBrowserWindow({ name });
+  h.box = () => h.windows.findLast(win => isTalkPanel(win));
+  h.click = what => h.box().webContents.emit("ipc-message", {}, `talk-panel:${what}`);
+  return h;
 }
 
 test("every list of the app's windows leaves the talk box out", () => {
@@ -40,77 +79,159 @@ test("every list of the app's windows leaves the talk box out", () => {
   assert.match(main, /allWindows: \(\) => appWindows\(\)/);
 });
 
-test("the talk setting answers only this computer's page; a call can be reported from My Cloud's page too", () => {
-  for (const channel of ["talk-shortcut:state", "talk-shortcut:set"]) assert.match(main, new RegExp(`ipcMain\\.handle\\("${channel}", localOnly\\("${channel}"`));
-  assert.match(main, /ipcMain\.handle\("call:active", localOrHome\("call:active"/);
+test("main hands the talk wiring its speech sinks, this computer's own server and window, and closes it first on quit", () => {
+  assert.match(main, /const talk = installTalk\(\{ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions\.appleSpeech,\s*speech: \{ start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy \},/);
+  assert.match(main, /packaged: app\.isPackaged, devUrl: DEV_URL, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog \}\);/);
+  assert.match(main, /talk\.start\(\{ globalShortcut, screen, prefs: desktopPrefs, remote: \(\) => Boolean\(desktopRemoteAccess\), localRequest: localServerRequest, dataDir: \(\) => runningDataDir \}\);/);
+  assert.match(main, /app\.on\("before-quit", \(e\) => \{\s*talk\.close\(\);/);
+  assert.doesNotMatch(main, /ipcMain\.handle\("(?:speech|talk-shortcut|call):/);
+});
+
+test("the talk bridge keys stay off other servers' pages; a call can be reported from My Cloud's page", () => {
   const list = name => preload.match(new RegExp(`const ${name} = (?:new Set\\()?\\[([^\\]]*)\\]`))[1];
   assert.doesNotMatch(list("REMOTE_SAFE"), /talkShortcut|callActive/);
   assert.match(list("HOME_PAGE"), /"callActive"/);
   assert.doesNotMatch(list("HOME_PAGE"), /talkShortcut/);
 });
 
-test("a page's speech stop and finish touch only the session that page started", () => {
-  assert.match(main, /stopSpeech\(BrowserWindow\.fromWebContents\(event\.sender\)\)/);
-  assert.match(main, /finishSpeech\(BrowserWindow\.fromWebContents\(event\.sender\)\)/);
-});
-
-test("the talk box asks this computer's own server: the app's in a build, the dev server through Vite in development", () => {
-  assert.match(main, /const talkRequest = \(route, init\) => \(app\.isPackaged \? localServerRequest\(route, init\) : fetch\(new URL\(route, DEV_URL\), init\)\);/);
-  assert.match(main, /createTalkServer\(\{ request: talkRequest,/);
-  assert.match(main, /available: \(\) => nativeActions\.appleSpeech && !desktopRemoteAccess/);
-});
-
-test("the talk box can finish its own speech, and waits while a call or composer dictation holds the microphone", () => {
-  assert.match(main, /speech: \{ start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy \}/);
-  assert.match(main, /voiceInUse: \(\) => speechBusy\(\) \|\| callPresence\.active\(\)/);
-});
-
-test("before the shortcut is set up its setting says unavailable; a change passes on only what main understands", () => {
-  const handlers = new Map(), reported = [], changes = [];
-  const context = vm.createContext({
-    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
-    localOnly: (_channel, handler) => handler, localOrHome: (_channel, handler) => handler,
-    createCallPresence: () => ({ set: (sender, active) => reported.push([sender, active]) }),
-    TALK_SHORTCUT_UNAVAILABLE,
+test("every microphone channel answers only this computer's page; a call can be reported from My Cloud's page too", () => {
+  const { guards, handlers } = harness();
+  assert.deepEqual(Object.fromEntries(guards), {
+    "speech:start": "localOnly", "speech:stop": "localOnly", "speech:finish": "localOnly",
+    "talk-shortcut:state": "localOnly", "talk-shortcut:set": "localOnly", "call:active": "localOrHome",
   });
-  vm.runInContext(slice("const callPresence = createCallPresence();", "callPresence.set(event.sender, active === true);\n}));\n"), context);
-  assert.equal(handlers.get("talk-shortcut:state")({}), TALK_SHORTCUT_UNAVAILABLE);
-  assert.equal(handlers.get("talk-shortcut:set")({}, { enabled: false }), TALK_SHORTCUT_UNAVAILABLE);
-  context.shortcut = { state: () => "state", set: change => { changes.push({ ...change }); return "changed"; } };
-  vm.runInContext("talkShortcut = shortcut;", context);
-  assert.equal(handlers.get("talk-shortcut:state")({}), "state");
-  assert.equal(handlers.get("talk-shortcut:set")({}, { enabled: "no", key: 7, extra: 1 }), "changed");
-  handlers.get("talk-shortcut:set")({}, { enabled: true, key: "ctrl-shift-space" });
-  assert.deepEqual(changes, [{ enabled: undefined, key: undefined }, { enabled: true, key: "ctrl-shift-space" }]);
-  const sender = {};
-  handlers.get("call:active")({ sender }, "yes");
-  handlers.get("call:active")({ sender }, true);
-  assert.deepEqual(reported, [[sender, false], [sender, true]]);
+  assert.deepEqual([...handlers.keys()], [...guards.keys()]);
 });
 
-test("a talk shortcut that cannot be set up is logged and let go, and startup goes on", () => {
-  const failed = talkWiring({ sessionFails: true });
-  assert.equal(failed.closed, 1);
-  assert.equal(failed.value("talkShortcut"), null);
-  assert.equal(failed.value("talkSession"), null);
-  assert.deepEqual(failed.log, ["talk shortcut unavailable: no session"]);
+test("a page's speech stop and finish name that page's own window, so they touch only the session it started", () => {
+  const h = harness();
+  const page = h.page("page"), other = h.page("other");
+  h.handle("speech:start", { sender: page.webContents }, { endpointMs: 900 });
+  h.handle("speech:start", { sender: {} });
+  h.handle("speech:stop", { sender: other.webContents });
+  h.handle("speech:finish", { sender: page.webContents });
+  h.handle("speech:stop", { sender: page.webContents });
+  h.handle("speech:stop", { sender: {} });
+  assert.deepEqual(h.started.map(([win, options]) => [win.name, options]), [["page", { endpointMs: 900 }]]);
+  assert.deepEqual(names(h.stopped), ["other", "page", null]);
+  assert.deepEqual(names(h.finished), ["page"]);
+
+  const elsewhere = harness({ appleSpeech: false });
+  const win = elsewhere.page("page");
+  elsewhere.handle("speech:start", { sender: win.webContents });
+  elsewhere.handle("speech:stop", { sender: win.webContents });
+  elsewhere.handle("speech:finish", { sender: win.webContents });
+  assert.deepEqual(win.webContents.sent, [["speech:end", { code: 2, reason: "unsupported-platform" }]]);
+  assert.deepEqual([elsewhere.started, elsewhere.stopped, elsewhere.finished], [[], [], []]);
+});
+
+test("the shortcut is offered only with Apple speech, on a desktop that is not a remote client of another computer", () => {
+  for (const options of [{ appleSpeech: false }, { remote: true }]) {
+    const h = harness(options);
+    h.start();
+    assert.equal(h.handle("talk-shortcut:state", {}).available, false);
+    assert.deepEqual([...h.registered.keys()], []);
+  }
+  const h = harness();
+  h.start();
+  assert.equal(h.handle("talk-shortcut:state", {}).available, true);
+  assert.deepEqual([...h.registered.keys()], ["Control+Alt+Space"]);
+});
+
+test("before the shortcut is set up its setting says unavailable; afterwards a change passes on only what it understands", () => {
+  const h = harness();
+  assert.equal(h.handle("talk-shortcut:state", {}), TALK_SHORTCUT_UNAVAILABLE);
+  assert.equal(h.handle("talk-shortcut:set", {}, { enabled: false }), TALK_SHORTCUT_UNAVAILABLE);
+  h.start();
+  const shown = state => ({ enabled: state.enabled, key: state.key, taken: state.taken });
+  assert.deepEqual(shown(h.handle("talk-shortcut:set", {}, { enabled: "no", key: 7, extra: 1 })), { enabled: true, key: "ctrl-opt-space", taken: false });
+  assert.deepEqual(shown(h.handle("talk-shortcut:set", {}, { enabled: false })), { enabled: false, key: "ctrl-opt-space", taken: false });
+  assert.deepEqual([...h.registered.keys()], []);
+  h.handle("talk-shortcut:set", {}, { enabled: true, key: "ctrl-shift-space" });
+  assert.deepEqual([...h.registered.keys()], ["Control+Shift+Space"]);
+  h.talk.close();
+  assert.deepEqual([...h.registered.keys()], [], "quitting lets the key go");
+});
+
+test("a press listens until the key's modifiers are let go, and asks this computer's own server; in development, the dev server's proxy", () => {
+  const built = harness();
+  built.start();
+  built.press();
+  assert.equal(typeof built.started[0][0].transcript, "function", "the box's own speech sink, not a window");
+  assert.deepEqual(built.started.map(([, options]) => options), [{ finishOnRelease: ["control", "option"] }]);
+  assert.deepEqual(built.requests, [["local", "/api/bots?messages=0"]]);
+  built.talk.close();
+
+  const dev = harness({ packaged: false });
+  dev.start();
+  dev.press();
+  assert.deepEqual(dev.requests, [["dev", "http://127.0.0.1:5199/api/bots?messages=0"]]);
+  dev.talk.close();
+});
+
+test("a call or composer dictation holding the microphone keeps a press from listening", () => {
+  const h = harness();
+  h.start();
+  const page = new EventEmitter();
+  h.handle("call:active", { sender: page }, true);
+  h.press();
+  assert.equal(h.started.length, 0);
+  h.handle("call:active", { sender: page }, "yes");
+  h.press();
+  assert.equal(h.started.length, 1);
+  h.talk.close();
+
+  const dictating = harness();
+  dictating.busy = true;
+  dictating.start();
+  dictating.press();
+  assert.equal(dictating.started.length, 0);
+  dictating.talk.close();
+});
+
+test("a talk shortcut that cannot be set up is logged, says unavailable, and startup goes on", () => {
+  const h = harness({ register: () => { throw new Error("no hotkeys"); } });
+  assert.doesNotThrow(() => h.start());
+  assert.deepEqual(h.log, ["talk shortcut unavailable: no hotkeys"]);
+  assert.equal(h.handle("talk-shortcut:state", {}), TALK_SHORTCUT_UNAVAILABLE);
+  assert.doesNotThrow(() => h.talk.close());
 });
 
 test("a press, an open or a dismiss that throws is logged, never thrown at Electron", () => {
-  const boom = () => { throw new Error("boom"); };
-  const wired = talkWiring({ session: { press: boom, open: boom, dismiss: boom } });
-  wired.shortcutOptions.onPress(); wired.panelOptions.onOpen(); wired.panelOptions.onDismiss();
-  assert.deepEqual(wired.log, ["talk press failed: boom", "talk open failed: boom", "talk dismiss failed: boom"]);
+  const h = harness();
+  h.start();
+  h.fail.busy = "busy broke";
+  h.press();
+  h.fail.busy = null;
+  h.press();
+  h.fail.reveal = "reveal broke";
+  h.click("open");
+  h.fail.reveal = null;
+  h.press();
+  h.fail.stop = "stop broke";
+  h.click("dismiss");
+  h.fail.stop = null;
+  assert.deepEqual(h.log, ["talk press failed: busy broke", "talk open failed: reveal broke", "talk dismiss failed: stop broke"]);
+  h.talk.close();
 });
 
-test("clicking the box opens its chat by a link with both ids escaped, or else just shows MausBot", () => {
-  const wired = talkWiring();
-  wired.sessionOptions.openChat({ threadId: "t 1/x", botId: "b?1&x" });
-  wired.sessionOptions.openChat(null);
-  assert.deepEqual(wired.links, ["openmausbot://thread/t%201%2Fx?bot=b%3F1%26x"]);
-  assert.equal(wired.reveals, 1);
-});
-
-test("quitting closes the talk box and frees the shortcut first", () => {
-  assert.match(main, /app\.on\("before-quit", \(e\) => \{\s*talkSession\?\.close\(\); talkShortcut\?\.close\(\);/);
+test("clicking the box opens its chat by a link with both ids escaped, or else just shows MausBot", async () => {
+  const h = harness({ serve: route => {
+    if (route === "/api/bots?messages=0") return json({ bots: [{ id: "b?1&x", defaultBot: {}, tasks: [] }] });
+    if (route === "/api/bots/b%3F1%26x/tasks") return json({ task: { threadId: "t 1/x" } });
+    return undefined;
+  } });
+  h.start();
+  h.press();
+  h.click("open");
+  assert.equal(h.reveals, 1);
+  assert.deepEqual(h.links, []);
+  h.press();
+  await settle();
+  const [sink] = h.started.at(-1);
+  sink.transcript({ text: "what's on today" });
+  sink.end({ code: 0, reason: "completed" });
+  h.click("open");
+  assert.deepEqual(h.links, ["openmausbot://thread/t%201%2Fx?bot=b%3F1%26x"]);
+  h.talk.close();
 });
