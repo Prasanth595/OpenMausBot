@@ -5,6 +5,8 @@ import { api } from "@/state/store";
 export interface McpServerSummary {
   name: string;
   enabled: boolean;
+  localApp?: string;
+  runsOn?: { label: string };
 }
 
 let cached: { servers: McpServerSummary[] | null; error: boolean } = { servers: null, error: false };
@@ -20,7 +22,7 @@ const subscribe = (listener: () => void) => {
 export function updateMcpServers(servers: McpServerSummary[]): void {
   generation += 1;
   inflight = null;
-  cached = { servers: servers.map(({ name, enabled }) => ({ name, enabled: Boolean(enabled) })), error: false };
+  cached = { servers: servers.map(({ name, enabled, localApp, runsOn }) => ({ name, enabled: Boolean(enabled), ...(localApp ? { localApp } : {}), ...(runsOn ? { runsOn: { label: runsOn.label } } : {}) })), error: false };
   for (const listener of listeners) listener();
 }
 
@@ -56,6 +58,6 @@ export function useMcpServers(): { servers: McpServerSummary[] | null; error: bo
 
 export function mcpServersForBot(all: McpServerSummary[], own: string[] | null | undefined): McpServerSummary[] {
   const enabled = all.filter((server) => server.enabled);
-  if (own == null) return enabled;
+  if (own == null) return enabled.filter((server) => !server.localApp);
   return enabled.filter((server) => own.includes(server.name));
 }

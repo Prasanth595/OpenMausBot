@@ -110,6 +110,39 @@ it("imports atomically and mounts the selected MCP servers in fresh direct and r
   });
 }, 90_000);
 
+it("adds a local app with its credential once and mounts it, as a program on this computer, only on a bot that chose it", async () => {
+  await withFixture("happy", async ({ api, control, dump, clearDump }) => {
+    const secret = "fixture-only-local-app-token";
+    const added = await api("POST", "/api/mcp/servers", { name: "trello", ...command, env: { TRELLO_TOKEN: secret }, localApp: "trello" });
+    expect(added.status).toBe(201);
+    expect(added.body.servers).toEqual([expect.objectContaining({ name: "trello", enabled: false, envKeys: ["TRELLO_TOKEN"], localApp: "trello" })]);
+    expect(JSON.stringify(added.body)).not.toContain(secret);
+    expect((await api("POST", "/api/mcp/servers/trello/test")).body).toMatchObject({ ok: true, tools: [{ name: "read_notes" }] });
+    expect((await api("PATCH", "/api/mcp/servers/trello", { enabled: true })).body.servers).toEqual([expect.objectContaining({ name: "trello", enabled: true, localApp: "trello" })]);
+    expect((await api("PUT", "/api/mcp/servers/trello", { ...command, env: { TRELLO_TOKEN: true } })).body.servers).toEqual([expect.objectContaining({ localApp: "trello" })]);
+    expect((await api("POST", "/api/mcp/servers", { name: "notes", ...command })).status).toBe(201);
+    expect((await api("PATCH", "/api/mcp/servers/notes", { enabled: true })).status).toBe(200);
+    const { bot } = await control(["new-bot", "--name", "Local app fixture"]) as { bot: Bot };
+    expect(bot.mcpServers).toBeUndefined();
+    const turn = async () => {
+      clearDump();
+      await control(["send", "--bot", bot.id, "--text", "Reply briefly."]);
+      const mounted = await dump();
+      expect((await control(["wait", "--bot", bot.id, "--timeout", "30"])).status).toBe("settled");
+      return mounted;
+    };
+    const before = await turn();
+    expect(Object.keys(before.mcpConfig.mcpServers)).toContain("notes");
+    expect(Object.keys(before.mcpConfig.mcpServers)).not.toContain("trello");
+    expect(JSON.stringify(before)).not.toContain(secret);
+    expect((await api("PATCH", `/api/bots/${bot.id}`, { mcpServers: ["trello"] })).status).toBe(200);
+    const chosen = await turn();
+    const gated = chosen.mcpConfig.mcpServers.trello as { env: { OMB_GATE_UPSTREAM: string } };
+    expect(JSON.parse(gated.env.OMB_GATE_UPSTREAM)).toEqual({ ...command, env: { TRELLO_TOKEN: secret } });
+    expect(chosen.systemPrompt).toContain('an MCP server for you: "trello"');
+  });
+}, 90_000);
+
 it("validates MCP grants, refuses live changes and client sessions, and rechecks delayed imports after revocation", async () => {
   await withFixture("hang", async ({ api, control, dump, clearDump, url, evidence }) => {
     const { bot } = await control(["new-bot", "--name", "Working fixture"]) as { bot: Bot };

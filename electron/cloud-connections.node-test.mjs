@@ -119,6 +119,19 @@ test("a server that needs this computer goes marked as running on it, and a serv
   assert.deepEqual(result.moved.map((item) => item.id), ["mcp:docs"]);
 });
 
+test("a local app goes with its marker, pinned to this computer", async () => {
+  const trello = { command: "npx", args: ["-y", "@delorenj/mcp-server-trello@1.8.1"], env: { TRELLO_TOKEN: "t" }, enabled: true, localApp: "trello" };
+  const local = computer({
+    connections: [{ id: "mcp:trello", kind: "mcp", label: "trello", runsHere: true, launcher: "npx" }],
+    answers: { "mcp:trello": { connection: { mcp: { name: "trello", server: trello } } } },
+  });
+  const target = cloud();
+  const result = await sendConnections(await collectConnections(local), target, { local });
+  const { enabled: _enabled, ...definition } = trello;
+  assert.deepEqual(target.calls.find(([method, route]) => method === "POST" && route === "/api/mcp/servers")?.[2], { name: "trello", ...definition, runsOn: COMPUTER });
+  assert.deepEqual(result.runsHere, [{ id: "mcp:trello", label: "trello" }]);
+});
+
 test("a sign-in moves and this computer lets go of it; one that refreshed meanwhile goes again first", async () => {
   let refresh = "r1";
   const local = computer({

@@ -15,11 +15,13 @@ describe("mcpServersForBot", () => {
     { name: "notes", enabled: true },
     { name: "linear", enabled: true },
     { name: "off", enabled: false },
+    { name: "trello", enabled: true, localApp: "trello" },
   ];
 
-  it("gives a bot without a list every enabled server", () => {
+  it("gives a bot without a list every enabled server except local apps", () => {
     expect(mcpServersForBot(all, undefined).map((s) => s.name)).toEqual(["notes", "linear"]);
     expect(mcpServersForBot(all, null).map((s) => s.name)).toEqual(["notes", "linear"]);
+    expect(mcpServersForBot(all, ["trello"]).map((s) => s.name)).toEqual(["trello"]);
   });
 
   it("narrows to the bot's own names and never revives a disabled server", () => {

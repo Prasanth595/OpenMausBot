@@ -1356,7 +1356,7 @@ export function customMcpServers(cfg: AppConfig, only?: string[]): Record<string
       skipMcpEntry(name, `${parsed.error} Expected { "command": "npx", "args": [...], "env": { ... } } or { "type": "http", "url": "https://…", "headers": { ... } }`);
       continue;
     }
-    if (!parsed.server.enabled || parsed.server.runsOn) continue; // a server of another computer's never starts here
+    if (!parsed.server.enabled || parsed.server.runsOn || (!only && !isRemoteMcpServer(parsed.server) && parsed.server.localApp)) continue; // a server of another computer's never starts here
     out[name] = isRemoteMcpServer(parsed.server)
       ? { type: parsed.server.type, url: parsed.server.url, headers: parsed.server.headers }
       : { command: parsed.server.command, args: parsed.server.args, env: parsed.server.env };

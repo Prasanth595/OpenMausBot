@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   botsMissingConnectedApps,
   botsWithLimitedServiceTools,
-  hasUsableConnectedApps,
   connectorSetupNotice,
   disconnectAccountConfirmation,
 } from "./PluginsPanel";
@@ -13,6 +12,7 @@ import {
   connectedInventoryCopy,
   connectorActionLabel,
   hasActiveConnection,
+  hasUsableConnectedApps,
   requiresAccountAlias,
   type ConnectorStatus,
 } from "@/lib/connector-status";

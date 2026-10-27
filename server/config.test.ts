@@ -1911,6 +1911,14 @@ describe("customMcpServers", () => {
     expect(customMcpServers(all, ["off"])).toEqual({});
   });
 
+  it("gives a local app only to a bot whose own list names it", () => {
+    const trello = { command: "npx", args: ["-y", "@delorenj/mcp-server-trello@1.8.1"], env: { TRELLO_TOKEN: "t" } };
+    const all = cfg({ trello: { ...trello, localApp: "trello" }, notes: { command: "a" } });
+    expect(Object.keys(customMcpServers(all))).toEqual(["notes"]);
+    expect(customMcpServers(all, ["trello"])).toEqual({ trello });
+    expect(Object.keys(customMcpServers(all, ["notes", "trello"]))).toEqual(["trello", "notes"]);
+  });
+
   it("skips disabled entries silently", () => {
     expect(customMcpServers(cfg({ off: { command: "x", enabled: false } }))).toEqual({});
   });

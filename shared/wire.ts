@@ -388,7 +388,7 @@ export interface WireBot extends DefaultBotFields {
   cacheKeepWarm?: boolean;
   /** false: the workspace's helper model never writes this bot's background texts. Absent or true: allowed. */
   helperModel?: boolean;
-  /** Which of the app-wide MCP servers this bot mounts, by name. */
+  /** Which of the app-wide MCP servers this bot mounts, by name. Absent: every enabled server except local apps. */
   mcpServers?: string[];
   /** Owner-selected original tool identities. An empty allowlist permits none. */
   toolScope?: ToolScope;

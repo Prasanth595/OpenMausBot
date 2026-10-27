@@ -25,6 +25,10 @@ export function hasActiveConnection(state: ConnectorStatus | undefined): boolean
   return accounts.length ? accounts.some((account) => ACTIVE.test(account.status)) : state?.connected === true;
 }
 
+export function hasUsableConnectedApps(configured: boolean, phase: ConnectorInventoryPhase, stale: boolean, status: Record<string, ConnectorStatus>): boolean {
+  return configured && phase === "ready" && !stale && Object.values(status).some((service) => service.connected);
+}
+
 export function needsReconnect(account: ConnectorAccount): boolean {
   return !ACTIVE.test(account.status) && !UNFINISHED.test(account.status);
 }

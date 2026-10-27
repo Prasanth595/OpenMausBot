@@ -16,6 +16,7 @@ const fixture = vi.hoisted(() => ({
   index: 0,
   counting: false,
   effects: [] as Array<{ effect: EffectCallback; deps?: DependencyList }>,
+  mcpServers: [] as Array<{ name: string; enabled: boolean; localApp?: string; runsOn?: { label: string } }>,
 }));
 vi.mock("react", async (original) => {
   const react = await original<typeof import("react")>();
@@ -44,6 +45,10 @@ vi.mock("./McpServersPanel", () => ({
   McpServersPanel: ({ embedded, whopCard }: { embedded?: boolean; whopCard?: boolean }) => whopCard
     ? createElement("div", { "data-whop-card": true }, "Connect Whop")
     : createElement("div", { "data-embedded": String(Boolean(embedded)) }, "MCP inventory"),
+}));
+vi.mock("@/lib/mcp-servers", () => ({
+  updateMcpServers: vi.fn(),
+  useMcpServers: () => ({ servers: fixture.mcpServers, error: false, refresh: vi.fn() }),
 }));
 vi.mock("@/lib/analytics", () => ({ track: fixture.track }));
 vi.mock("./Avatar", () => ({ BotAvatar: ({ bot }: { bot: Bot }) => createElement("span", { "data-avatar": bot.id }) }));
@@ -101,6 +106,7 @@ beforeEach(() => {
   fixture.effects = [];
   fixture.bots = [];
   fixture.instances = [];
+  fixture.mcpServers = [];
   fixture.overrides = new Map<number, unknown>([
     [CARDS, [card("gmail"), card("slack"), card("notion")]],
     [CONFIGURED, true],
@@ -175,6 +181,41 @@ describe("Apps pop-up", () => {
     fixture.overrides.set(STATUS, {});
     fixture.overrides.set(MODE, "self-hosted");
     expect(tile(render().nodes)).toBeDefined();
+  });
+  it("lists a local app running here under Connected and counts it once, even where managed mode hides the app's tile", () => {
+    const tiles = () => render().nodes.flatMap((node) => (node.props["data-app-tile"] === undefined ? [] : [node.props["data-app-tile"]]));
+    fixture.overrides.set(CARDS, [card("gmail"), card("TRELLO"), card("twitter"), card("slack"), card("notion")]);
+    fixture.overrides.set(MODE, "managed");
+    fixture.overrides.set(TAB, "connected");
+    fixture.mcpServers = [
+      { name: "trello", enabled: true, localApp: "trello" },
+      { name: "twitter", enabled: true, localApp: "twitter" },
+      { name: "slack", enabled: true, localApp: "slack" },
+      { name: "notion", enabled: true, localApp: "notion", runsOn: { label: "Milind's MacBook" } },
+      { name: "notes", enabled: true },
+    ];
+    expect(tiles()).toEqual(["TRELLO", "twitter", "slack"]);
+    expect(render().html).toContain("3 connected");
+    fixture.mcpServers = [{ name: "trello", enabled: false, localApp: "trello" }];
+    expect(tiles()).toEqual(["slack"]);
+    expect(render().html).toContain("1 connected");
+  });
+  it("shows the one Google server under each Google app it serves", () => {
+    fixture.overrides.set(CARDS, [card("gmail"), card("googlecalendar"), card("googledrive"), card("slack")]);
+    fixture.overrides.set(TAB, "connected");
+    fixture.mcpServers = [{ name: "google", enabled: true, localApp: "google" }];
+    const { html, nodes: tree } = render();
+    expect(tree.flatMap((node) => (node.props["data-app-tile"] === undefined ? [] : [node.props["data-app-tile"]]))).toEqual(["gmail", "googlecalendar", "googledrive", "slack"]);
+    expect(tree.filter((node) => node.props.slug !== undefined && node.props.onChange !== undefined).map((node) => [node.props.slug, (node.props.server as { name?: string } | undefined)?.name]))
+      .toEqual([["gmail", "google"], ["googlecalendar", "google"], ["googledrive", "google"], ["slack", undefined]]);
+    expect(html).toContain("6 connected");
+  });
+  it("reloads Your MCP servers once a local app is set up from its tile", () => {
+    const embedded = (tree: Node[]) => tree.find((node) => node.props.embedded === true)!;
+    const row = render().nodes.find((node) => node.props.slug === "notion")!;
+    expect(embedded(render().nodes).props.refreshKey).toBe(0);
+    (row.props.onChange as () => void)();
+    expect(embedded(render().nodes).props.refreshKey).toBe(1);
   });
   it("keeps a safe explicit authorization link and reopens without creating another account", async () => {
     const url = "https://auth.example.test/flow";

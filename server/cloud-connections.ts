@@ -102,12 +102,12 @@ export function launcherOf(command: string): string {
   return basename(command.replaceAll("\\", "/")).toLowerCase().replace(/\.(?:exe|cmd|bat|ps1)$/u, "");
 }
 
-/** A server that needs this computer: it starts a program by path, reads a file or folder here, or calls an address
- * only this computer reaches. */
+/** A server that needs this computer: a local app the person set up here, or one that starts a program by path, reads a
+ * file or folder here, or calls an address only this computer reaches. */
 export function runsHere(server: StoredMcpServer): boolean {
   if (isRemoteMcpServer(server)) return addressHere(server.url);
   const command = server.command.trim();
-  if (/[\\/]/u.test(command) || command.startsWith("~") || command.startsWith(".")) return true;
+  if (server.localApp || /[\\/]/u.test(command) || command.startsWith("~") || command.startsWith(".")) return true;
   return [...server.args, ...Object.values(server.env)].some(pathHere);
 }
 
