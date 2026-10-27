@@ -30,6 +30,7 @@ import { brand } from "../lib/brand";
 import { cn } from "@/lib/cn";
 import { t } from "@/lib/i18n";
 import { FEEDBACK_URL, HELP_CENTER_URL, openExternalLink } from "@/lib/app-links";
+import { profileForSession, readSessionState, type SessionState } from "@/lib/session";
 import {
   cloudPhoneDestination,
   connectPhoneEntry,
@@ -338,7 +339,8 @@ export function profileMenuItems({
   ];
 }
 
-export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnly?: boolean; rail?: boolean } = {}) {
+/** `circle` is the phone's round avatar button at the top of the bot list. */
+export function SidebarProfileMenu({ iconOnly = false, rail = false, circle = false }: { iconOnly?: boolean; rail?: boolean; circle?: boolean } = {}) {
   const { state, dispatch } = useStore();
   const phone = useSidebarPhoneStatus();
   const connectPhone = useConnectPhoneEntry(state.config?.cloudHome === true);
@@ -349,9 +351,18 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnl
   const update = desktopUpdate ?? serverUpdate;
   const [aboutOpen, setAboutOpen] = useState(false);
   const [phoneAppOpen, setPhoneAppOpen] = useState(false);
+  const [session, setSession] = useState<SessionState | null>(null);
   const triggerRef = useRef<HTMLSpanElement>(null);
 
-  const profile = state.config?.profile;
+  useEffect(() => {
+    let active = true;
+    void readSessionState().then((state) => {
+      if (active) setSession(state);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const profile = profileForSession(state.config?.profile, session);
   const name = profileLabel(profile);
   const connectTo = (destination: PhoneDestination) => selectPhoneDestination(destination, { bridge: cloudPhone.bridge, dispatch });
   const remote = window.ogb?.remoteClient?.active === true;
@@ -385,7 +396,7 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnl
       <SidebarPopoverMenu
         items={items}
         ariaLabel={name}
-        triggerClassName={iconOnly ? "shrink-0 rounded-xl" : "w-full"}
+        triggerClassName={iconOnly ? cn("shrink-0", circle ? "rounded-full" : "rounded-xl") : "w-full"}
         triggerTitle={iconOnly ? name : undefined}
         renderTrigger={({ open }) => iconOnly ? (
           <span
@@ -393,10 +404,11 @@ export function SidebarProfileMenu({ iconOnly = false, rail = false }: { iconOnl
             className={cn(
               "relative flex items-center justify-center rounded-xl transition-colors",
               rail ? "size-10" : "size-[46px]",
+              circle && "size-10 rounded-full border border-hairline bg-card",
               open ? "bg-raised" : "hover:bg-raised/50",
             )}
           >
-            <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={rail ? 30 : 28} />
+            <InitialsAvatar initials={profileInitials(profile)} avatarUrl={profile?.avatarUrl} size={rail ? 30 : circle ? 26 : 28} />
             {noteworthy && (
               <span
                 aria-hidden
