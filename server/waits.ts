@@ -1,0 +1,388 @@
+// `then` is the wait tool's argument name; it holds a string, so awaiting a record is unaffected.
+/* oxlint-disable unicorn/no-thenable */
+import { randomUUID } from "node:crypto";
+import { mkdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join } from "node:path";
+import { z } from "zod";
+
+import { writeFileAtomic } from "./atomic.ts";
+import { DATA_DIR } from "./config.ts";
+import {
+  expandHome,
+  fetchPageText,
+  fileChanged,
+  fileStamp,
+  listProcesses,
+  pageSays,
+  processRunning,
+  type FileStamp,
+  type PageResult,
+  type ProcessEntry,
+} from "./wait-probes.ts";
+
+export const WAIT_KINDS = ["url_contains", "url_missing", "file_exists", "file_missing", "file_changed", "process_running", "process_gone", "bot_idle"] as const;
+export type WaitKind = (typeof WAIT_KINDS)[number];
+export const WAIT_LIMITS = { perBot: 10, total: 50 } as const;
+export const WAIT_HOURS = { default: 24, max: 168 } as const;
+export const WAIT_TICK_MS = 5_000, URL_CHECK_MS = 60_000, URL_BACKOFF_MAX_MS = 15 * 60_000;
+
+export type NewWaitCondition =
+  | { kind: "url_contains" | "url_missing"; url: string; text: string }
+  | { kind: "file_exists" | "file_missing" | "file_changed"; path: string }
+  | { kind: "process_running" | "process_gone"; process: string }
+  | { kind: "bot_idle"; botId: string; botName: string };
+export type WaitCondition =
+  | { kind: "url_contains" | "url_missing"; url: string; text: string }
+  | { kind: "file_exists" | "file_missing"; path: string }
+  | { kind: "file_changed"; path: string; before: FileStamp | null }
+  | { kind: "process_running" | "process_gone"; process: string }
+  | { kind: "bot_idle"; botId: string; botName: string; sawBusy: boolean };
+export interface WaitNotice { status: "fired" | "expired" | "stopped"; text: string }
+export interface WaitRecord {
+  id: string; botId: string; threadId: string; label: string; condition: WaitCondition; then?: string;
+  createdAt: number; expiresAt: number; nextCheckAt: number; errors: number; cardMessageId?: string;
+  /** Decided and saved first; posted once its chat is free. */
+  ending?: WaitNotice;
+}
+export interface NewWait { botId: string; threadId: string; label: string; condition: NewWaitCondition; then?: string; hours?: number }
+export type CreateWaitResult =
+  | { state: "created"; wait: WaitRecord; note?: string }
+  | { state: "already"; text: string }
+  | { state: "refused"; status: 400 | 409; error: string };
+export interface WaitProbes { page(url: string): Promise<PageResult>; stamp(path: string): Promise<FileStamp | null>; processes(): Promise<ProcessEntry[]> }
+export interface WaitManagerOptions {
+  file?: string; now?: () => number; probes?: Partial<WaitProbes>;
+  sourceAlive(botId: string, threadId: string): boolean;
+  /** Undefined once that bot no longer exists. */
+  botBusy(botId: string): boolean | undefined;
+  /** False while a turn runs in the chat: try again next tick. */
+  post(wait: WaitRecord, notice: WaitNotice): boolean;
+  followUp(wait: WaitRecord & { then: string }): void;
+  showCard(wait: WaitRecord & { then: string }): string | undefined;
+  settleCard(wait: WaitRecord, how: "fired" | "expired" | "cancelled"): void;
+}
+
+const stampSchema = z.object({ size: z.number(), mtimeMs: z.number() });
+const conditionSchema = z.union([
+  z.object({ kind: z.enum(["url_contains", "url_missing"]), url: z.string(), text: z.string() }),
+  z.object({ kind: z.enum(["file_exists", "file_missing"]), path: z.string() }),
+  z.object({ kind: z.literal("file_changed"), path: z.string(), before: stampSchema.nullable() }),
+  z.object({ kind: z.enum(["process_running", "process_gone"]), process: z.string() }),
+  z.object({ kind: z.literal("bot_idle"), botId: z.string(), botName: z.string(), sawBusy: z.boolean() }),
+]);
+const recordSchema = z.object({
+  id: z.string(),
+  botId: z.string(),
+  threadId: z.string(),
+  label: z.string(),
+  condition: conditionSchema,
+  then: z.string().optional(),
+  createdAt: z.number(),
+  expiresAt: z.number(),
+  nextCheckAt: z.number(),
+  errors: z.number(),
+  cardMessageId: z.string().optional(),
+  ending: z.object({ status: z.enum(["fired", "expired", "stopped"]), text: z.string() }).optional(),
+});
+const fileSchema = z.object({ version: z.literal(1), waits: z.array(z.unknown()) });
+
+export function describeCondition(condition: NewWaitCondition | WaitCondition): string {
+  switch (condition.kind) {
+    case "url_contains": return `${condition.url} says “${condition.text}”`;
+    case "url_missing": return `${condition.url} no longer says “${condition.text}”`;
+    case "file_exists": return `${condition.path} exists`;
+    case "file_missing": return `${condition.path} is gone`;
+    case "file_changed": return `${condition.path} changes`;
+    case "process_running": return `${condition.process} is running`;
+    case "process_gone": return `${condition.process} has stopped`;
+    case "bot_idle": return `${condition.botName} finishes its work`;
+  }
+}
+
+function firedDetail(condition: WaitCondition): string {
+  switch (condition.kind) {
+    case "url_contains": return `${condition.url} now says “${condition.text}”.`;
+    case "url_missing": return `${condition.url} no longer says “${condition.text}”.`;
+    case "file_exists": return `${condition.path} is there now.`;
+    case "file_missing": return `${condition.path} is gone.`;
+    case "file_changed": return `${condition.path} changed.`;
+    case "process_running": return `${condition.process} is running.`;
+    case "process_gone": return `${condition.process} stopped.`;
+    case "bot_idle": return `${condition.botName} finished.`;
+  }
+}
+
+const iso = (ms: number) => new Date(ms).toISOString();
+
+export function waitList(waits: readonly WaitRecord[]): string {
+  return waits
+    .map((w) => `- ${w.id} · ${w.label} · until ${describeCondition(w.condition)} · made ${iso(w.createdAt)} · stops ${iso(w.expiresAt)}${w.then ? ` · then: ${w.then}` : ""}`)
+    .join("\n");
+}
+
+const isPage = (condition: NewWaitCondition | WaitCondition) => condition.kind === "url_contains" || condition.kind === "url_missing";
+
+function interval(kind: WaitKind, errors: number): number {
+  if (kind !== "url_contains" && kind !== "url_missing") return WAIT_TICK_MS;
+  return Math.min(URL_CHECK_MS * 2 ** errors, URL_BACKOFF_MAX_MS);
+}
+
+function cloneWait(wait: WaitRecord): WaitRecord {
+  return structuredClone(wait);
+}
+
+type Verdict = { met: boolean; gone?: boolean; page?: { ok: true } | { ok: false; refused: boolean; error: string } };
+
+export class WaitManager {
+  private readonly file: string;
+  private readonly now: () => number;
+  private readonly probes: WaitProbes;
+  private readonly options: WaitManagerOptions;
+  private waits: WaitRecord[] = [];
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private ticking = false;
+  private pageTail: Promise<unknown> = Promise.resolve();
+  private pagesQueued = 0;
+
+  constructor(options: WaitManagerOptions) {
+    this.options = options;
+    this.file = options.file ?? join(DATA_DIR, "waits.json");
+    this.now = options.now ?? Date.now;
+    this.probes = {
+      page: (url) => fetchPageText(url),
+      stamp: (path) => fileStamp(expandHome(path, homedir())),
+      processes: () => listProcesses(),
+      ...options.probes,
+    };
+    try {
+      const parsed = fileSchema.safeParse(JSON.parse(readFileSync(this.file, "utf8")));
+      this.waits = parsed.success
+        ? parsed.data.waits.flatMap((candidate) => {
+            const record = recordSchema.safeParse(candidate);
+            return record.success ? [record.data as WaitRecord] : [];
+          })
+        : [];
+    } catch {
+      this.waits = [];
+    }
+  }
+
+  async create(input: NewWait): Promise<CreateWaitResult> {
+    const mine = this.waits.filter((w) => w.botId === input.botId && !w.ending);
+    if (mine.length >= WAIT_LIMITS.perBot) {
+      return { state: "refused", status: 409, error: `You already keep ${WAIT_LIMITS.perBot} waits, the most one bot may:\n${waitList(mine)}\nCancel one with cancel_wait first.` };
+    }
+    if (this.waits.length >= WAIT_LIMITS.total) {
+      return { state: "refused", status: 409, error: `This computer already keeps ${WAIT_LIMITS.total} waits, the most it holds. Ask the person which ones to stop.` };
+    }
+    const condition = await this.startingCondition(input.condition);
+    const verdict = await this.probe(condition, undefined);
+    if (verdict.gone) return { state: "refused", status: 400, error: `${(condition as { botName: string }).botName} no longer exists.` };
+    if (verdict.page && !verdict.page.ok && verdict.page.refused) return { state: "refused", status: 400, error: verdict.page.error };
+    if (verdict.met) return { state: "already", text: `${describeCondition(condition)} already. Nothing was set up: tell the person now.` };
+    const now = this.now();
+    const wait: WaitRecord = {
+      id: randomUUID(),
+      botId: input.botId,
+      threadId: input.threadId,
+      label: input.label,
+      condition,
+      ...(input.then ? { then: input.then } : {}),
+      createdAt: now,
+      expiresAt: now + (input.hours ?? WAIT_HOURS.default) * 3_600_000,
+      nextCheckAt: now + interval(condition.kind, 0),
+      errors: 0,
+    };
+    this.commit(() => this.waits.push(wait));
+    if (wait.then) {
+      const cardMessageId = this.options.showCard(wait as WaitRecord & { then: string });
+      if (cardMessageId) this.commit(() => { wait.cardMessageId = cardMessageId; });
+    }
+    const note = verdict.page && !verdict.page.ok
+      ? `The page could not be read just now (${verdict.page.error}); checks go on every minute and slow down while it keeps failing.`
+      : undefined;
+    return { state: "created", wait: cloneWait(wait), ...(note ? { note } : {}) };
+  }
+
+  private async startingCondition(condition: NewWaitCondition): Promise<WaitCondition> {
+    switch (condition.kind) {
+      case "file_changed": return { ...condition, before: await this.probes.stamp(condition.path) };
+      case "file_exists":
+      case "file_missing": return { kind: condition.kind, path: condition.path };
+      case "bot_idle": return { ...condition, sawBusy: false };
+      default: return { ...condition };
+    }
+  }
+
+  list(botId: string): WaitRecord[] {
+    return this.waits.filter((w) => w.botId === botId && !w.ending).map(cloneWait);
+  }
+
+  cancel(id: string, botId: string): WaitRecord | null {
+    const wait = this.waits.find((w) => w.id === id && w.botId === botId);
+    if (!wait) return null;
+    this.commit(() => { this.waits = this.waits.filter((w) => w !== wait); });
+    if (wait.cardMessageId) this.safely(() => this.options.settleCard(wait, "cancelled"));
+    return cloneWait(wait);
+  }
+
+  owners(): string[] {
+    return [...new Set(this.waits.map((w) => w.botId))];
+  }
+
+  removeForBot(botId: string): number {
+    const removed = this.waits.filter((w) => w.botId === botId).length;
+    if (!removed) return 0;
+    this.commit(() => { this.waits = this.waits.filter((w) => w.botId !== botId); });
+    return removed;
+  }
+
+  noteBotBusy(botId: string): void {
+    const pending = this.waits.filter((w) => !w.ending && w.condition.kind === "bot_idle" && w.condition.botId === botId && !w.condition.sawBusy);
+    if (!pending.length) return;
+    this.commit(() => {
+      for (const w of pending) if (w.condition.kind === "bot_idle") w.condition.sawBusy = true;
+    });
+  }
+
+  get isTicking(): boolean { return this.ticking; }
+
+  start(): void {
+    if (this.timer) return;
+    void this.tick();
+    this.timer = setInterval(() => void this.tick(), WAIT_TICK_MS);
+    this.timer.unref?.();
+  }
+
+  stop(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+  }
+
+  async tick(): Promise<void> {
+    if (this.ticking) return;
+    this.ticking = true;
+    try {
+      const alive = this.waits.filter((w) => this.options.sourceAlive(w.botId, w.threadId));
+      if (alive.length !== this.waits.length) {
+        this.waits = alive;
+        this.save();
+      }
+      const now = this.now();
+      const due = this.waits.filter((w) => !w.ending && now >= w.nextCheckAt);
+      const verdicts = new Map<WaitRecord, Verdict>();
+      let processes: Promise<ProcessEntry[]> | undefined;
+      const readProcesses = () => (processes ??= this.probes.processes());
+      const pages = this.pagesQueued > 0 ? [] : due.filter((w) => isPage(w.condition));
+      const chain = async () => {
+        for (const w of pages) verdicts.set(w, await this.probe(w.condition, readProcesses));
+      };
+      await Promise.all([
+        chain(),
+        ...due.filter((w) => !isPage(w.condition)).map(async (w) => { verdicts.set(w, await this.probe(w.condition, readProcesses)); }),
+      ]);
+
+      let decided = false;
+      for (const wait of this.waits.slice()) {
+        if (wait.ending) continue;
+        const verdict = verdicts.get(wait);
+        const expired = now >= wait.expiresAt;
+        if (!verdict) {
+          if (expired && now < wait.nextCheckAt) {
+            wait.ending = this.expiredNotice(wait);
+            decided = true;
+          }
+          continue;
+        }
+        if (verdict.met) wait.ending = { status: "fired", text: `${wait.label}: done. ${firedDetail(wait.condition)}` };
+        else if (verdict.gone && wait.condition.kind === "bot_idle") wait.ending = { status: "stopped", text: `Stopped waiting for ${wait.label}: ${wait.condition.botName} no longer exists.` };
+        else if (expired) wait.ending = this.expiredNotice(wait);
+        else {
+          wait.errors = verdict.page && !verdict.page.ok ? wait.errors + 1 : 0;
+          wait.nextCheckAt = now + interval(wait.condition.kind, wait.errors);
+          decided = true;
+          continue;
+        }
+        decided = true;
+      }
+      if (decided) this.save();
+
+      for (const wait of this.waits.slice()) {
+        if (!wait.ending) continue;
+        let posted = false;
+        try { posted = this.options.post(wait, wait.ending); } catch (error) { console.error(`wait ${wait.id}: could not post`, error); }
+        if (!posted) continue;
+        if (wait.ending.status === "fired" && wait.then) this.safely(() => this.options.followUp(wait as WaitRecord & { then: string }));
+        if (wait.cardMessageId) this.safely(() => this.options.settleCard(wait, wait.ending!.status === "fired" ? "fired" : "expired"));
+        this.waits = this.waits.filter((w) => w !== wait);
+        this.save();
+      }
+    } finally {
+      this.ticking = false;
+    }
+  }
+
+  private expiredNotice(wait: WaitRecord): WaitNotice {
+    const n = Math.round((wait.expiresAt - wait.createdAt) / 3_600_000);
+    return { status: "expired", text: `Stopped waiting for ${wait.label} after ${n} hour${n === 1 ? "" : "s"}.` };
+  }
+
+  private runPage(url: string): Promise<PageResult> {
+    this.pagesQueued++;
+    const run = this.pageTail.then(() => this.probes.page(url));
+    this.pageTail = run.then(() => undefined, () => undefined).then(() => { this.pagesQueued--; });
+    return run;
+  }
+
+  private async probe(condition: WaitCondition, processes: (() => Promise<ProcessEntry[]>) | undefined): Promise<Verdict> {
+    switch (condition.kind) {
+      case "url_contains":
+      case "url_missing": {
+        const page = await this.runPage(condition.url);
+        if (!page.ok) return { met: false, page };
+        const says = pageSays(page.text, condition.text);
+        return { met: condition.kind === "url_contains" ? says : !says, page: { ok: true } };
+      }
+      case "file_exists": return { met: (await this.probes.stamp(condition.path)) !== null };
+      case "file_missing": return { met: (await this.probes.stamp(condition.path)) === null };
+      case "file_changed": return { met: fileChanged(condition.before, await this.probes.stamp(condition.path)) };
+      case "process_running":
+      case "process_gone": {
+        try {
+          const running = processRunning(await (processes ?? (() => this.probes.processes()))(), condition.process);
+          return { met: condition.kind === "process_running" ? running : !running };
+        } catch {
+          return { met: false };
+        }
+      }
+      case "bot_idle": {
+        const busy = this.options.botBusy(condition.botId);
+        if (busy === undefined) return { met: false, gone: true };
+        if (busy) { condition.sawBusy = true; return { met: false }; }
+        return { met: condition.sawBusy };
+      }
+    }
+  }
+
+  private safely(run: () => void): void {
+    try { run(); } catch (error) { console.error("wait: callback failed", error); }
+  }
+
+  private commit(mutate: () => void): void {
+    const before = this.waits.map(cloneWait);
+    const identity = this.waits.slice();
+    try {
+      mutate();
+      this.save();
+    } catch (error) {
+      this.waits = identity.map((w, i) => Object.assign(w, before[i]));
+      throw error;
+    }
+  }
+
+  private save(): void {
+    mkdirSync(dirname(this.file), { recursive: true });
+    writeFileAtomic(this.file, JSON.stringify({ version: 1, waits: this.waits }, null, 2), { mode: 0o600 });
+  }
+}
