@@ -461,6 +461,21 @@ describe("HighLevelClient resilience", () => {
     expect(pulled).toBeLessThan(2);
   });
 
+  it("retries a read once when HighLevel fails with an answer over 4 MB, without reading it", async () => {
+    let pulled = 0;
+    let cancelled = false;
+    let calls = 0;
+    const { client } = harness({}, { fetch: async (input, init) => ++calls > 1 ? fetch(input, init) : new Response(new ReadableStream<Uint8Array>({
+      pull(controller) { if (++pulled > 20) controller.close(); else controller.enqueue(new Uint8Array(1_000_000)); },
+      cancel() { cancelled = true; },
+    }), { status: 502 }) });
+    expect((await client.getContact("contact_1")).id).toBe("contact_1");
+    expect(hl.calls.filter((call) => call.path === "/contacts/contact_1")).toHaveLength(1);
+    expect(slept).toEqual([1_000]);
+    expect(cancelled).toBe(true);
+    expect(pulled).toBeLessThan(2);
+  });
+
   it("says a create may have been saved when HighLevel's answer breaks off after the headers", async () => {
     let status = 201;
     const broken = () => new Response(new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new TypeError("terminated")); } }), { status });

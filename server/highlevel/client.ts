@@ -381,6 +381,12 @@ export class HighLevelClient {
         await response.body?.cancel().catch(() => {});
         throw unknownOutcome(path, `HighLevel had trouble (${response.status})`, response.status);
       }
+      if (response.status >= 500 && !retried5xx) {
+        await response.body?.cancel().catch(() => {});
+        retried5xx = true;
+        await this.sleep(1_000);
+        continue;
+      }
       const body = await this.body(response, method, path, options);
       // A live token that lacks one scope: name the permission; refreshing would not add it and the token still works.
       if (response.status === 401 && isScopeRefusal(body)) throw plainError(response.status, method, path, body);
@@ -401,11 +407,6 @@ export class HighLevelClient {
       if (response.status === 429 && !waited) {
         waited = true;
         await this.sleep(waitFromHeaders(response.headers, this.now()));
-        continue;
-      }
-      if (response.status >= 500 && !retried5xx) {
-        retried5xx = true;
-        await this.sleep(1_000);
         continue;
       }
       if (response.status === 401) {
