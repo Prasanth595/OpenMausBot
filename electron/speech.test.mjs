@@ -9,13 +9,13 @@ vi.mock("node:child_process", () => ({
   spawn: (_file, args) => {
     const proc = new EventEmitter();
     const arg = flag => args[args.indexOf(flag) + 1];
-    fixture.launches.push({ proc, output: arg("-o"), stop: arg("--stop-file"), finish: arg("--finish-file") });
+    fixture.launches.push({ proc, args, output: arg("-o"), stop: arg("--stop-file"), finish: arg("--finish-file") });
     return proc;
   },
 }));
 
 Object.defineProperty(process, "resourcesPath", { configurable: true, value: "/synthetic-speech-resources" });
-const { startSpeech, stopSpeech, finishSpeech } = await import("./speech.mjs");
+const { startSpeech, stopSpeech, finishSpeech, speechBusy } = await import("./speech.mjs");
 
 const launch = () => {
   const events = [];
@@ -75,5 +75,51 @@ describe.skipIf(process.platform !== "darwin")("native speech file transport", (
     emit(session, { text: "確定結果", partial: false });
     session.proc.emit("close", 0);
     expect(session.events[0].body.text).toBe("確定結果");
+  });
+
+  const sinkOf = () => {
+    const heard = { lines: [], ends: [], replaced: 0 };
+    return { heard, sink: { transcript: line => heard.lines.push(line), end: info => heard.ends.push(info), replaced: () => { heard.replaced += 1; } } };
+  };
+  const flag = (session, name) => session.args.includes(name) ? session.args[session.args.indexOf(name) + 1] : undefined;
+
+  it("delivers a sink's session to the sink and tells the helper which keys end it", () => {
+    const { heard, sink } = sinkOf();
+    startSpeech(sink, { finishOnRelease: ["control", "option"] });
+    const session = fixture.launches.at(-1);
+    expect(flag(session, "--finish-on-release")).toBe("control,option");
+    expect(speechBusy()).toBe(true);
+    emit(session, { text: "what's on today", partial: false });
+    session.proc.emit("close", 0);
+    expect(heard.lines).toEqual([{ text: "what's on today", partial: false }]);
+    expect(heard.ends).toEqual([{ code: 0, reason: "completed" }]);
+    expect(speechBusy()).toBe(false);
+  });
+  it("tells a replaced sink, and never ends it", () => {
+    const { heard, sink } = sinkOf();
+    startSpeech(sink);
+    const first = fixture.launches.at(-1);
+    launch();
+    expect(heard.replaced).toBe(1);
+    first.proc.emit("close", 0);
+    expect(heard.ends).toEqual([]);
+  });
+  it("a page's stop or finish never touches a session it did not start", () => {
+    const { sink } = sinkOf();
+    startSpeech(sink);
+    const session = fixture.launches.at(-1);
+    const page = { isDestroyed: () => false, webContents: { send: () => {} } };
+    stopSpeech(page); finishSpeech(page); stopSpeech(null);
+    expect(existsSync(session.stop)).toBe(false);
+    expect(existsSync(session.finish)).toBe(false);
+    finishSpeech(sink); expect(existsSync(session.finish)).toBe(true);
+    stopSpeech(sink); expect(existsSync(session.stop)).toBe(true);
+    expect(speechBusy()).toBe(false);
+  });
+  it("passes only known release modifiers", () => {
+    startSpeech(sinkOf().sink, { finishOnRelease: ["control", "hyper", "control"] });
+    expect(flag(fixture.launches.at(-1), "--finish-on-release")).toBe("control");
+    startSpeech(sinkOf().sink, { finishOnRelease: ["hyper"] });
+    expect(fixture.launches.at(-1).args).not.toContain("--finish-on-release");
   });
 });

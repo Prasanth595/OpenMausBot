@@ -42,14 +42,37 @@ function ensureBuilt() {
   buildSpeechHelper();
 }
 
-function sendEnd(win, info) {
-  if (!win.isDestroyed()) win.webContents.send("speech:end", info);
+const RELEASE_MODIFIERS = ["control", "option", "shift", "command"];
+
+function speechTarget(target) {
+  if (typeof target?.transcript === "function") return {
+      owner: target,
+      transcript: (line) => target.transcript(line),
+      end: (info) => target.end(info),
+      replaced: () => target.replaced(),
+    };
+  const send = (channel, body) => {
+    if (!target.isDestroyed()) target.webContents.send(channel, body);
+  };
+  return {
+    owner: target,
+    transcript: (line) => send("speech:transcript", line),
+    end: (info) => send("speech:end", info),
+    replaced: () => {},
+  };
 }
 
-export function startSpeech(win, options = {}) {
+export function speechBusy() {
+  return child !== null;
+}
+
+export function startSpeech(target, options = {}) {
+  const running = child;
   stopSpeech();
+  running?.target.replaced();
+  const sink = speechTarget(target);
   if (process.platform !== "darwin") {
-    sendEnd(win, { code: 2, reason: "unsupported-platform" });
+    sink.end({ code: 2, reason: "unsupported-platform" });
     return;
   }
   const requested = Number(options?.endpointMs);
@@ -57,11 +80,14 @@ export function startSpeech(win, options = {}) {
     ? Math.min(5_000, Math.max(250, Math.round(requested)))
     : 0;
   const args = endpointMs ? ["--endpoint-ms", String(endpointMs)] : [];
+  const release = [...new Set(Array.isArray(options?.finishOnRelease) ? options.finishOnRelease : [])]
+    .filter((name) => RELEASE_MODIFIERS.includes(name));
+  if (release.length) args.push("--finish-on-release", release.join(","));
 
   try {
     ensureBuilt();
   } catch {
-    sendEnd(win, { code: 1, reason: "helper-build-failed" });
+    sink.end({ code: 1, reason: "helper-build-failed" });
     return;
   }
 
@@ -98,11 +124,14 @@ export function startSpeech(win, options = {}) {
     );
   } catch {
     rmSync(sessionDir, { recursive: true, force: true });
-    sendEnd(win, { code: 1, reason: "helper-start-failed" });
+    sink.end({ code: 1, reason: "helper-start-failed" });
     return;
   }
 
-  const speechSession = { proc, outputPath, errorPath, stopPath, finishPath, sessionDir };
+  const speechSession = {
+    proc, outputPath, errorPath, stopPath, finishPath, sessionDir,
+    owner: sink.owner, target: sink,
+  };
   child = speechSession;
   let buf = "";
   let offset = 0;
@@ -130,9 +159,7 @@ export function startSpeech(win, options = {}) {
         if (typeof parsed.error === "string") reportedError = parsed.error;
         if (parsed.partial === false && typeof parsed.text === "string") completed = true;
         // A stopped or replaced helper can flush one last chunk: never into the session that replaced it.
-        if (child === speechSession && !win.isDestroyed()) {
-          win.webContents.send("speech:transcript", transcript(parsed));
-        }
+        if (child === speechSession) sink.transcript(transcript(parsed));
       } catch {
       }
     }
@@ -153,23 +180,25 @@ export function startSpeech(win, options = {}) {
     if (child !== speechSession) return;
     child = null;
     if (reportedError) {
-      sendEnd(win, { code: 1, reason: reportedError });
+      sink.end({ code: 1, reason: reportedError });
     } else if (completed && code === 0) {
-      sendEnd(win, { code: 0, reason: "completed" });
+      sink.end({ code: 0, reason: "completed" });
     } else {
-      sendEnd(win, { code: 1, reason: "helper-exited" });
+      sink.end({ code: 1, reason: "helper-exited" });
     }
   });
   proc.on("error", () => {
     cleanup();
     if (child !== speechSession) return;
     child = null;
-    sendEnd(win, { code: 1, reason: "helper-start-failed" });
+    sink.end({ code: 1, reason: "helper-start-failed" });
   });
 }
 
-export function stopSpeech() {
-  if (!child) return;
+const ownedBy = (owner) => child !== null && (owner === undefined || child.owner === owner);
+
+export function stopSpeech(owner) {
+  if (!ownedBy(owner)) return;
   const speechSession = child;
   child = null;
   try {
@@ -177,8 +206,8 @@ export function stopSpeech() {
   } catch {}
 }
 
-export function finishSpeech() {
-  if (!child) return;
+export function finishSpeech(owner) {
+  if (!ownedBy(owner)) return;
   try {
     writeFileSync(child.finishPath, "finish");
   } catch {}
