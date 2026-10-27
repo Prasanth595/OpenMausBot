@@ -19,7 +19,7 @@ const { startSpeech, stopSpeech, finishSpeech, speechBusy } = await import("./sp
 
 const launch = () => {
   const events = [];
-  const win = { isDestroyed: () => false, webContents: { send: (channel, body) => events.push({ channel, body }) } };
+  const win = Object.assign(new EventEmitter(), { isDestroyed: () => false, webContents: { send: (channel, body) => events.push({ channel, body }) } });
   startSpeech(win);
   return { ...fixture.launches.at(-1), events, win };
 };
@@ -130,6 +130,24 @@ describe.skipIf(process.platform !== "darwin")("native speech file transport", (
     stopSpeech(other); finishSpeech(other);
     expect(existsSync(session.stop)).toBe(false);
     expect(existsSync(session.finish)).toBe(false);
+    expect(speechBusy()).toBe(true);
+  });
+  it("a window that closes stops the session it started, and an ended session lets go of its window", () => {
+    const session = launch();
+    expect(session.win.listenerCount("closed")).toBe(1);
+    session.win.emit("closed");
+    expect(existsSync(session.stop)).toBe(true);
+    expect(speechBusy()).toBe(false);
+    session.proc.emit("close", 0);
+    expect(session.events).toEqual([]);
+    expect(session.win.listenerCount("closed")).toBe(0);
+  });
+  it("a window that closes after its session was replaced leaves the new session alone", () => {
+    const first = launch();
+    const second = launch();
+    first.proc.emit("close", 0);
+    first.win.emit("closed");
+    expect(existsSync(second.stop)).toBe(false);
     expect(speechBusy()).toBe(true);
   });
   it("passes only known release modifiers", () => {

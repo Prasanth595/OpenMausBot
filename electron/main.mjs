@@ -12,7 +12,7 @@ import { finishSpeech, speechBusy, startSpeech, stopSpeech } from "./speech.mjs"
 import { createTalkPanel, isTalkPanel } from "./talk-panel.mjs";
 import { createTalkServer } from "./talk-server.mjs";
 import { createTalkSession } from "./talk-session.mjs";
-import { createCallPresence, createTalkShortcut } from "./talk-shortcut.mjs";
+import { createCallPresence, createTalkShortcut, TALK_SHORTCUT_UNAVAILABLE } from "./talk-shortcut.mjs";
 import { openBlankTerminal } from "./terminal-launch.mjs";
 import { linuxDisablesGpu } from "./linux-gpu.mjs";
 import { pasteMenuItem } from "./paste-menu-item.mjs";
@@ -2499,11 +2499,11 @@ ipcMain.handle("speech:finish", localOnly("speech:finish", (event) => {
 
 const callPresence = createCallPresence();
 let talkShortcut = null, talkSession = null;
-ipcMain.handle("talk-shortcut:state", localOnly("talk-shortcut:state", () => talkShortcut.state()));
-ipcMain.handle("talk-shortcut:set", localOnly("talk-shortcut:set", (_event, change) => talkShortcut.set({
+ipcMain.handle("talk-shortcut:state", localOnly("talk-shortcut:state", () => talkShortcut?.state() ?? TALK_SHORTCUT_UNAVAILABLE));
+ipcMain.handle("talk-shortcut:set", localOnly("talk-shortcut:set", (_event, change) => talkShortcut?.set({
   enabled: typeof change?.enabled === "boolean" ? change.enabled : undefined,
   key: typeof change?.key === "string" ? change.key : undefined,
-})));
+}) ?? TALK_SHORTCUT_UNAVAILABLE));
 ipcMain.handle("call:active", localOrHome("call:active", (event, active) => {
   callPresence.set(event.sender, active === true);
 }));
@@ -3092,16 +3092,22 @@ app.whenReady().then(async () => {
   const logged = (what, run) => () => {
     try { run(); } catch (error) { slog(`talk ${what} failed: ${error?.message ?? error}`); }
   };
-  const panel = createTalkPanel({ BrowserWindow, screen, iconPath: APP_ICON, onOpen: logged("open", () => talkSession.open()), onDismiss: logged("dismiss", () => talkSession.dismiss()) });
-  talkShortcut = createTalkShortcut({ globalShortcut, prefs: desktopPrefs, available: () => nativeActions.appleSpeech && !desktopRemoteAccess, onPress: logged("press", () => talkSession.press()) });
-  talkSession = createTalkSession({
-    speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy },
-    server: createTalkServer({ request: talkRequest, prefs: desktopPrefs, serverKey: () => (app.isPackaged ? runningDataDir : DEV_URL) ?? "local" }),
-    panel,
-    voiceInUse: () => speechBusy() || callPresence.active(),
-    release: () => talkShortcut.releaseModifiers(),
-    openChat: chat => (chat ? queueChatLink(`openmausbot://thread/${chat.threadId}?bot=${chat.botId}`) : revealForLink()),
-  });
+  try {
+    const panel = createTalkPanel({ BrowserWindow, screen, iconPath: APP_ICON, onOpen: logged("open", () => talkSession.open()), onDismiss: logged("dismiss", () => talkSession.dismiss()) });
+    talkShortcut = createTalkShortcut({ globalShortcut, prefs: desktopPrefs, available: () => nativeActions.appleSpeech && !desktopRemoteAccess, onPress: logged("press", () => talkSession.press()) });
+    talkSession = createTalkSession({
+      speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy },
+      server: createTalkServer({ request: talkRequest, prefs: desktopPrefs, serverKey: () => (app.isPackaged ? runningDataDir : DEV_URL) ?? "local" }),
+      panel,
+      voiceInUse: () => speechBusy() || callPresence.active(),
+      release: () => talkShortcut.releaseModifiers(),
+      openChat: chat => (chat ? queueChatLink(`openmausbot://thread/${encodeURIComponent(chat.threadId)}?bot=${encodeURIComponent(chat.botId)}`) : revealForLink()),
+    });
+  } catch (error) {
+    talkShortcut?.close();
+    talkShortcut = null; talkSession = null;
+    slog(`talk shortcut unavailable: ${error?.message ?? error}`);
+  }
   // Before the window, so the harness has the CUA descriptor on first render.
   cuaReady =
     !desktopRemoteAccess && (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32")

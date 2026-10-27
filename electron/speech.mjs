@@ -50,6 +50,7 @@ function speechTarget(target) {
       transcript: (line) => target.transcript(line),
       end: (info) => target.end(info),
       replaced: () => target.replaced(),
+      onClosed: () => () => {},
     };
   const send = (channel, body) => {
     if (!target.isDestroyed()) target.webContents.send(channel, body);
@@ -59,6 +60,10 @@ function speechTarget(target) {
     transcript: (line) => send("speech:transcript", line),
     end: (info) => send("speech:end", info),
     replaced: () => {},
+    onClosed: (listener) => {
+      target.once("closed", listener);
+      return () => target.removeListener("closed", listener);
+    },
   };
 }
 
@@ -133,6 +138,7 @@ export function startSpeech(target, options = {}) {
     owner: sink.owner, target: sink,
   };
   child = speechSession;
+  const forgetWindow = sink.onClosed(() => stopSpeech(sink.owner));
   let buf = "";
   let offset = 0;
   let reportedError = null;
@@ -170,6 +176,7 @@ export function startSpeech(target, options = {}) {
   const cleanup = () => {
     if (cleaned) return;
     cleaned = true;
+    forgetWindow();
     unwatchFile(outputPath, drain);
     rmSync(sessionDir, { recursive: true, force: true });
   };

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 import { createDesktopPrefs } from "./desktop-prefs.mjs";
-import { createCallPresence, createTalkShortcut } from "./talk-shortcut.mjs";
+import { createCallPresence, createTalkShortcut, TALK_SHORTCUT_UNAVAILABLE } from "./talk-shortcut.mjs";
 
 const memoryPrefs = () => {
   let saved = null;
@@ -65,6 +65,13 @@ test("where Apple speech is unavailable nothing registers and nothing changes", 
   assert.equal(prefs.talkShortcut(), true);
   assert.equal(prefs.talkKey(), "ctrl-opt-space");
   assert.deepEqual([...shortcuts.registered.keys()], []);
+});
+
+test("a shortcut not set up says it is unavailable, in the same shape as a real one", () => {
+  assert.deepEqual(TALK_SHORTCUT_UNAVAILABLE, { available: false, enabled: false, key: "ctrl-opt-space", keys: KEYS, taken: false });
+  const real = createTalkShortcut({ globalShortcut: fakeShortcuts(), prefs: memoryPrefs(), available: () => false, onPress: () => {} }).state();
+  assert.deepEqual(Object.keys(TALK_SHORTCUT_UNAVAILABLE).sort(), Object.keys(real).sort());
+  assert.ok(Object.isFrozen(TALK_SHORTCUT_UNAVAILABLE));
 });
 
 test("a reported call blocks until it ends, its page navigates, or its renderer goes away", () => {

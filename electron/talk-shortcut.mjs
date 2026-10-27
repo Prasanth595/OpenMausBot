@@ -1,6 +1,8 @@
-import { TALK_KEYS } from "./talk-keys.mjs";
+import { DEFAULT_TALK_KEY, TALK_KEYS } from "./talk-keys.mjs";
 
 const KEY_LIST = Object.entries(TALK_KEYS).map(([id, { label }]) => ({ id, label }));
+
+export const TALK_SHORTCUT_UNAVAILABLE = Object.freeze({ available: false, enabled: false, key: DEFAULT_TALK_KEY, keys: KEY_LIST, taken: false });
 
 export function createTalkShortcut({ globalShortcut, prefs, available, onPress }) {
   let registered = null, taken = false;

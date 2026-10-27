@@ -11,6 +11,8 @@ export interface TalkShortcutState {
   taken: boolean;
 }
 export interface TalkShortcutChange { enabled?: boolean; key?: TalkKeyId }
+/** What the setting says before the shortcut is set up, or when setting it up failed. */
+export declare const TALK_SHORTCUT_UNAVAILABLE: Readonly<TalkShortcutState>;
 export interface TalkShortcutBridge {
   state(): Promise<TalkShortcutState>;
   set(change: TalkShortcutChange): Promise<TalkShortcutState>;
