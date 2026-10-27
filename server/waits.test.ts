@@ -158,7 +158,10 @@ describe("WaitManager", () => {
     h.stamp = { size: 1, mtimeMs: 1 }; h.postOk = false; h.advance(5_000); await h.manager.tick();
     expect(h.manager.list("bot-1")).toEqual([]);
     expect(h.manager.owners()).toEqual(["bot-1"]);
+    const storedAtFollowUp: number[] = [];
+    h.followUp.mockImplementation(() => { storedAtFollowUp.push(JSON.parse(readFileSync(h.file, "utf8")).waits.length); });
     const reloaded = h.reload(); h.postOk = true; await reloaded.tick();
+    expect(storedAtFollowUp).toEqual([0]);
     expect(h.post).toHaveBeenCalledTimes(2);
     expect(h.posts).toHaveLength(1);
     expect(h.followUp).toHaveBeenCalledTimes(1);
@@ -218,14 +221,16 @@ describe("WaitManager", () => {
     h.advance(5_000); await h.manager.tick(); expect(h.pageCalls).toBe(8);
   });
 
-  it("never fetches two pages at once", async () => {
+  it("never fetches two pages at once, even for concurrent creates", async () => {
     const h = harness();
     h.page = { ok: true, text: "building" };
-    for (const url of ["https://a.test/", "https://b.test/"]) await h.create({ kind: "url_contains", url, text: "shipped" }, { label: url });
-    h.pageCalls = 0; h.pageMaxInFlight = 0; h.pageDelayMs = 10;
-    h.advance(60_000);
-    await Promise.all([h.manager.tick(), h.manager.tick()]);
-    expect(h.pageCalls).toBe(2);
+    h.pageDelayMs = 10;
+    await Promise.all(["https://a.test/", "https://b.test/", "https://c.test/"].map((url) => h.create({ kind: "url_contains", url, text: "shipped" }, { label: url })));
+    expect(h.pageCalls).toBe(3);
+    expect(h.pageMaxInFlight).toBe(1);
+    h.pageCalls = 0; h.pageMaxInFlight = 0;
+    h.advance(60_000); await h.manager.tick();
+    expect(h.pageCalls).toBe(3);
     expect(h.pageMaxInFlight).toBe(1);
   });
 
@@ -332,5 +337,71 @@ describe("WaitManager", () => {
     h.manager.stop(); await vi.advanceTimersByTimeAsync(30_000);
     expect(h.stampCalls).toBe(seen + 1);
     expect(h.manager.isTicking).toBe(false);
+  });
+
+  it("keeps exactly ten waits for a bot when creates run at the same time", async () => {
+    const h = harness();
+    h.page = { ok: true, text: "building" };
+    h.pageDelayMs = 2;
+    const results = await Promise.all(Array.from({ length: 15 }, (_, i) => h.create({ kind: "url_contains", url: `https://x${i}.test/`, text: "shipped" }, { label: `p${i}` })));
+    expect(results.filter((r) => r.state === "created")).toHaveLength(10);
+    expect(results.filter((r) => r.state === "refused")).toHaveLength(5);
+    expect(h.manager.list("bot-1")).toHaveLength(10);
+    expect(h.reload().list("bot-1")).toHaveLength(10);
+  });
+
+  it("starts a bot_idle wait that was made while the bot is busy as already seen busy", async () => {
+    const h = harness();
+    h.busy.set("coder", true);
+    const created = await h.create({ kind: "bot_idle", botId: "coder", botName: "Coder" }, { label: "Coder's review" });
+    expect(created).toMatchObject({ state: "created", wait: { condition: { sawBusy: true } } });
+    h.advance(5_000); await h.manager.tick(); expect(h.posts).toEqual([]);
+    h.busy.set("coder", false); h.advance(5_000); await h.manager.tick();
+    expect(h.posts).toEqual([{ status: "fired", text: "Coder's review: done. Coder finished." }]);
+  });
+
+  it("rolls a failed save back completely, and keeps a wait whose card id could not be saved", async () => {
+    const h = harness();
+    const save = vi.spyOn(h.manager as unknown as { save(): void }, "save");
+    save.mockImplementationOnce(() => { throw new Error("disk full"); });
+    await expect(h.create({ kind: "file_exists", path: "/r" })).rejects.toThrow("disk full");
+    expect(h.manager.owners()).toEqual([]);
+
+    const { wait } = await h.create({ kind: "file_exists", path: "/s" }) as { wait: WaitRecord };
+    save.mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => h.manager.cancel(wait.id, "bot-1")).toThrow("disk full");
+    expect(h.manager.list("bot-1")).toHaveLength(1);
+
+    h.showCard.mockReturnValue("m-9");
+    save.mockImplementationOnce(() => undefined);
+    save.mockImplementationOnce(() => { throw new Error("disk full"); });
+    const withCard = await h.create({ kind: "file_exists", path: "/t" }, { followUp: "Go." });
+    expect(withCard).toMatchObject({ state: "created" });
+    expect((withCard as { wait: WaitRecord }).wait.cardMessageId).toBeUndefined();
+    expect(h.manager.list("bot-1")).toHaveLength(2);
+  });
+
+  it("restores a bot_idle record's changed flag when its save fails", async () => {
+    const h = harness();
+    h.busy.set("coder", false);
+    await h.create({ kind: "bot_idle", botId: "coder", botName: "Coder" });
+    const save = vi.spyOn(h.manager as unknown as { save(): void }, "save");
+    save.mockImplementationOnce(() => { throw new Error("disk full"); });
+    expect(() => h.manager.noteBotBusy("coder")).toThrow("disk full");
+    expect(h.manager.list("bot-1")[0]?.condition).toMatchObject({ sawBusy: false });
+  });
+
+  it("logs a tick that throws instead of leaving it unhandled", async () => {
+    vi.useFakeTimers();
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const h = harness({ now: () => Date.now() });
+    await h.create({ kind: "file_exists", path: "/r" });
+    h.stamp = { size: 1, mtimeMs: 1 };
+    vi.spyOn(h.manager as unknown as { save(): void }, "save").mockImplementation(() => { throw new Error("disk full"); });
+    h.manager.start();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(error).toHaveBeenCalledWith("wait tick failed", expect.objectContaining({ message: "disk full" }));
+    h.manager.stop();
+    error.mockRestore();
   });
 });

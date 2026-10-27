@@ -167,18 +167,15 @@ export class WaitManager {
   }
 
   async create(input: NewWait): Promise<CreateWaitResult> {
-    const mine = this.waits.filter((w) => w.botId === input.botId && !w.ending);
-    if (mine.length >= WAIT_LIMITS.perBot) {
-      return { state: "refused", status: 409, error: `You already keep ${WAIT_LIMITS.perBot} waits, the most one bot may:\n${waitList(mine)}\nCancel one with cancel_wait first.` };
-    }
-    if (this.waits.length >= WAIT_LIMITS.total) {
-      return { state: "refused", status: 409, error: `This computer already keeps ${WAIT_LIMITS.total} waits, the most it holds. Ask the person which ones to stop.` };
-    }
+    const full = this.limitRefusal(input.botId);
+    if (full) return full;
     const condition = await this.startingCondition(input.condition);
     const verdict = await this.probe(condition, undefined);
     if (verdict.gone) return { state: "refused", status: 400, error: `${(condition as { botName: string }).botName} no longer exists.` };
     if (verdict.page && !verdict.page.ok && verdict.page.refused) return { state: "refused", status: 400, error: verdict.page.error };
     if (verdict.met) return { state: "already", text: `${describeCondition(condition)} already. Nothing was set up: tell the person now.` };
+    const crowded = this.limitRefusal(input.botId);
+    if (crowded) return crowded;
     const now = this.now();
     const wait: WaitRecord = {
       id: randomUUID(),
@@ -195,12 +192,25 @@ export class WaitManager {
     this.commit(() => this.waits.push(wait));
     if (wait.followUp) {
       const cardMessageId = this.options.showCard(wait as WaitRecord & { followUp: string });
-      if (cardMessageId) this.commit(() => { wait.cardMessageId = cardMessageId; });
+      if (cardMessageId) {
+        try { this.commit(() => { wait.cardMessageId = cardMessageId; }); } catch (error) { console.error(`wait ${wait.id}: could not store the card id`, error); }
+      }
     }
     const note = verdict.page && !verdict.page.ok
       ? `The page could not be read just now (${verdict.page.error}); checks go on every minute and slow down while it keeps failing.`
       : undefined;
     return { state: "created", wait: cloneWait(wait), ...(note ? { note } : {}) };
+  }
+
+  private limitRefusal(botId: string): CreateWaitResult | null {
+    const mine = this.waits.filter((w) => w.botId === botId && !w.ending);
+    if (mine.length >= WAIT_LIMITS.perBot) {
+      return { state: "refused", status: 409, error: `You already keep ${WAIT_LIMITS.perBot} waits, the most one bot may:\n${waitList(mine)}\nCancel one with cancel_wait first.` };
+    }
+    if (this.waits.length >= WAIT_LIMITS.total) {
+      return { state: "refused", status: 409, error: `This computer already keeps ${WAIT_LIMITS.total} waits, the most it holds. Ask the person which ones to stop.` };
+    }
+    return null;
   }
 
   private async startingCondition(condition: NewWaitCondition): Promise<WaitCondition> {
@@ -248,9 +258,13 @@ export class WaitManager {
 
   start(): void {
     if (this.timer) return;
-    void this.tick();
-    this.timer = setInterval(() => void this.tick(), WAIT_TICK_MS);
+    this.runTick();
+    this.timer = setInterval(() => this.runTick(), WAIT_TICK_MS);
     this.timer.unref?.();
+  }
+
+  private runTick(): void {
+    this.tick().catch((error) => console.error("wait tick failed", error));
   }
 
   stop(): void {
@@ -311,10 +325,10 @@ export class WaitManager {
         let posted = false;
         try { posted = this.options.post(wait, wait.ending); } catch (error) { console.error(`wait ${wait.id}: could not post`, error); }
         if (!posted) continue;
-        if (wait.ending.status === "fired" && wait.followUp) this.safely(() => this.options.followUp(wait as WaitRecord & { followUp: string }));
-        if (wait.cardMessageId) this.safely(() => this.options.settleCard(wait, wait.ending!.status === "fired" ? "fired" : "expired"));
-        this.waits = this.waits.filter((w) => w !== wait);
-        this.save();
+        const status = wait.ending.status;
+        this.commit(() => { this.waits = this.waits.filter((w) => w !== wait); });
+        if (status === "fired" && wait.followUp) this.safely(() => this.options.followUp(wait as WaitRecord & { followUp: string }));
+        if (wait.cardMessageId) this.safely(() => this.options.settleCard(wait, status === "fired" ? "fired" : "expired"));
       }
     } finally {
       this.ticking = false;
@@ -374,7 +388,11 @@ export class WaitManager {
       mutate();
       this.save();
     } catch (error) {
-      this.waits = identity.map((w, i) => Object.assign(w, before[i]));
+      identity.forEach((w, i) => {
+        for (const key of Object.keys(w)) delete (w as unknown as Record<string, unknown>)[key];
+        Object.assign(w, before[i]);
+      });
+      this.waits = identity;
       throw error;
     }
   }
