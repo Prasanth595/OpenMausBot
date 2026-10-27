@@ -1,9 +1,12 @@
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   expandHome,
+  fetchPageText,
   fileChanged,
   fileStamp,
   listProcesses,
@@ -66,5 +69,72 @@ describe("file and process probes", () => {
     expect(text).toBe("Status: Shipped & done");
     expect(pageSays(text, "status:   SHIPPED")).toBe(true);
     expect(pageSays(text, "shipped=1")).toBe(false);
+  });
+});
+
+describe("fetchPageText", () => {
+  let server: Server;
+  let port = 0;
+  const seen: Array<{ host?: string; cookie?: string }> = [];
+  const test = {
+    lookup: async (host: string) => (host === "status.test" ? [{ address: "127.0.0.1", family: 4 }] : []),
+    allow: ({ host }: { host: string }) => host === "status.test",
+  };
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      const path = req.url ?? "/";
+      if (path === "/") {
+        seen.push({ host: req.headers.host, cookie: req.headers.cookie });
+        res.setHeader("content-type", "text/html");
+        res.end("<p>Build: Shipped</p>");
+      } else if (path === "/hop") {
+        res.writeHead(302, { location: "/" }).end();
+      } else if (path === "/away") {
+        res.writeHead(302, { location: `http://127.0.0.1:${port}/` }).end();
+      } else if (path === "/loop") {
+        res.writeHead(302, { location: "/loop" }).end();
+      } else if (path === "/big") {
+        res.write("a".repeat(3 * 1024 * 1024));
+        res.end("needle");
+      } else if (path === "/404") {
+        res.writeHead(404).end();
+      }
+    });
+    await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+    port = (server.address() as AddressInfo).port;
+  });
+  afterAll(() => {
+    server.closeAllConnections();
+    server.close();
+  });
+
+  it("reads a page through the address it checked, under its own name, with no cookie", async () => {
+    expect(await fetchPageText(`http://status.test:${port}/`, test)).toEqual({ ok: true, text: "Build: Shipped" });
+    expect(seen.at(-1)).toEqual({ host: `status.test:${port}`, cookie: undefined });
+  });
+  it("follows a redirect only to an address it may reach, and at most three", async () => {
+    expect(await fetchPageText(`http://status.test:${port}/hop`, test)).toEqual({ ok: true, text: "Build: Shipped" });
+    expect(await fetchPageText(`http://status.test:${port}/away`, test)).toMatchObject({ ok: false, refused: true });
+    expect(await fetchPageText(`http://status.test:${port}/loop`, test)).toEqual({ ok: false, refused: false, error: "The page redirected too many times." });
+  });
+  it("refuses loopback, private and mixed answers with the real egress check", async () => {
+    const mixed = { lookup: async () => [{ address: "93.184.216.34", family: 4 }, { address: "10.0.0.5", family: 4 }] };
+    expect(await fetchPageText("http://mixed.test/", mixed)).toMatchObject({ ok: false, refused: true });
+    for (const url of [`http://127.0.0.1:${port}/`, `http://localhost:${port}/`, `http://[::1]:${port}/`]) {
+      expect(await fetchPageText(url), url).toMatchObject({ ok: false, refused: true });
+    }
+  });
+  it("takes only http and https, with no sign-in in the address", async () => {
+    for (const url of ["file:///etc/passwd", "ftp://example.com/", "https://user:pass@example.com/"]) {
+      expect(await fetchPageText(url), url).toMatchObject({ ok: false, refused: true });
+    }
+  });
+  it("reads at most 2 MB, and gives up after its timeout", async () => {
+    const big = await fetchPageText(`http://status.test:${port}/big`, test);
+    expect(big.ok && big.text.includes("needle")).toBe(false);
+    expect(await fetchPageText(`http://status.test:${port}/slow`, { ...test, timeoutMs: 200 })).toEqual({ ok: false, refused: false, error: "The page took too long to answer." });
+  });
+  it("counts an answer that is not 2xx as a failed check", async () => {
+    expect(await fetchPageText(`http://status.test:${port}/404`, test)).toEqual({ ok: false, refused: false, error: "The page answered 404." });
   });
 });
