@@ -136,6 +136,80 @@ describe("local computer proxy (isolated child and control endpoint)", () => {
     }
   });
 
+  it("journals each tools/call before the engine sees its reply, and forwards anyway when the journal is slow", async () => {
+    const driver = `
+const readline = require("node:readline");
+readline.createInterface({input: process.stdin}).on("line", (line) => {
+  const message = JSON.parse(line);
+  process.stdout.write(JSON.stringify({jsonrpc:"2.0",id:message.id,result:{content:[{type:"text",text:"private"}],structuredContent:{pid:7,elements:[{element_index:1,role:"AXButton",label:"Go",depth:1,value:"private"}]}}}) + "\\n");
+});
+`;
+    let journalDelayMs = 300;
+    let journalNever = false;
+    const posts: Array<{ at: number; auth: string | undefined; path: string | undefined; body: any }> = [];
+    const server = createServer((request, response) => {
+      if (request.method === "POST") {
+        let raw = "";
+        request.on("data", (chunk) => { raw += chunk; });
+        request.on("end", () => {
+          posts.push({ at: Date.now(), auth: request.headers.authorization, path: request.url, body: JSON.parse(raw) });
+          if (journalNever) return;
+          setTimeout(() => { response.writeHead(200, { "content-type": "application/json" }); response.end("{}"); }, journalDelayMs);
+        });
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ held: false, helpOpen: false }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as AddressInfo).port;
+    const connection = gatedLocalComputer(
+      { command: process.execPath, args: ["-e", driver], env: {}, platform: "darwin", scope: "local-computer" },
+      { url: `http://127.0.0.1:${port}/control?botId=b1`, token: "journal-fixture-token" },
+    );
+    const run = async (env: Record<string, string>, body: (rpc: (id: number) => Promise<{ at: number; message: any }>) => Promise<void>) => {
+      const child = spawn(connection.command, connection.args, { env: { ...process.env, ...connection.env, ...env }, stdio: ["pipe", "pipe", "pipe"] });
+      try {
+        const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+        await body(async (id) => {
+          child.stdin!.write(JSON.stringify({ jsonrpc: "2.0", id, method: "tools/call", params: { name: "anything", arguments: { query: "x" } } }) + "\n");
+          const { value } = await lines.next();
+          return { at: Date.now(), message: JSON.parse(value as string) };
+        });
+      } finally {
+        child.kill("SIGKILL");
+      }
+    };
+    try {
+      await run({ OMB_COMPUTER_JOURNAL: "1" }, async (rpc) => {
+        const first = await rpc(1);
+        expect(posts).toHaveLength(1);
+        expect(first.at).toBeGreaterThanOrEqual(posts[0].at + 250);
+        expect(posts[0].path).toBe("/api/internal/computer/journal");
+        expect(posts[0].auth).toBe("Bearer journal-fixture-token");
+        expect(posts[0].body).toEqual({
+          tool: "anything", arguments: { query: "x" },
+          result: { isError: false, structured: { pid: 7, elements: [{ element_index: 1, role: "AXButton", label: "Go", depth: 1 }] } },
+        });
+        expect(first.message.result.structuredContent.pid).toBe(7);
+
+        journalNever = true;
+        const startedAt = Date.now();
+        const second = await rpc(2);
+        expect(posts).toHaveLength(2);
+        expect(second.at - startedAt).toBeLessThan(1_500);
+        expect(second.message.id).toBe(2);
+      });
+      posts.length = 0;
+      await run({ OMB_COMPUTER_JOURNAL: "" }, async (rpc) => {
+        await rpc(3);
+        expect(posts).toHaveLength(0);
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
+
   it("hands every engine a provider-safe tools/list, whatever root schema the driver ships", async () => {
     // cua-driver 0.22.1's browser_prepare root: an anyOf of untyped branches that strict providers refuse.
     const driver = `

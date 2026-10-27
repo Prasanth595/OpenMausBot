@@ -42,6 +42,7 @@ export function gatedLocalComputer(
       OMB_CUA_ARGS: JSON.stringify(connection.args),
       OMB_CONTROL_URL: control.url,
       OMB_CONTROL_TOKEN: control.token,
+      OMB_COMPUTER_JOURNAL: "1",
     },
   };
 }

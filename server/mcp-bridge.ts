@@ -5,6 +5,7 @@ import { CONTROL_ACT_WITHIN_MS, CONTROL_UNCONFIRMED, CONTROL_WAITED, controlRefu
 import { augmentedPath, resolveCliSpawn } from "./env-path.ts";
 import { textOnlyErrorResultLine } from "./mcp-error-result.ts";
 import { createToolListNormalizer } from "./mcp-tool-schema.ts";
+import { createJournalTap, postJournal } from "./saved-steps/journal-tap.ts";
 import { toolSchemaProfileFromEnv } from "./tool-schema-profile.ts";
 
 export const BRIDGE_INACTIVITY_MS = 45_000;
@@ -99,6 +100,7 @@ export interface BridgeOptions {
   /** docker's ssh connection helper takes no ConnectTimeout/ServerAlive options, so a dropped VPS wedges silently without this. */
   liveness?: BridgeLiveness;
   gate?: { url: string; token: string };
+  journal?: { url: string; token: string };
   rewriteResponse?: (line: string) => string;
 }
 
@@ -212,7 +214,19 @@ export function runMcpBridge(options: BridgeOptions): void {
     ? createControlClient({ url: options.gate.url, token: options.gate.token })
     : null;
 
-  const answer = (line: string) => process.stdout.write(line + "\n");
+  const tap = options.journal
+    ? createJournalTap({ post: postJournal(options.journal.url, options.journal.token) })
+    : null;
+  // One chain keeps replies in order while each waits for its journal post.
+  let writes = Promise.resolve();
+  const reply = (raw: string, written: string) => {
+    if (!tap) {
+      process.stdout.write(written + "\n");
+      return;
+    }
+    writes = writes.then(() => tap.response(raw)).then(() => { process.stdout.write(written + "\n"); });
+  };
+  const answer = (line: string) => reply(line, line);
   const forward = (line: string) => child.stdin.write(line + "\n");
   const intercept = createMcpBridgeInterceptor({
     answer,
@@ -223,6 +237,7 @@ export function runMcpBridge(options: BridgeOptions): void {
   let pendingInput = Promise.resolve();
   const inbound = createLineSplitter((line) => {
     toolLists.observeRequest(line);
+    tap?.request(line);
     const completion = intercept(line);
     if (completion) pendingInput = completion;
   });
@@ -237,7 +252,7 @@ export function runMcpBridge(options: BridgeOptions): void {
 
   // Injected responses must never land inside one of the child's half-written frames.
   const rewrite = options.rewriteResponse ?? ((line: string) => line);
-  const outbound = createLineSplitter((line) => process.stdout.write(textOnlyErrorResultLine(rewrite(toolLists.rewriteResponse(line))) + "\n"));
+  const outbound = createLineSplitter((line) => reply(line, textOnlyErrorResultLine(rewrite(toolLists.rewriteResponse(line)))));
   child.stdout.on("data", (chunk) => outbound.push(chunk));
   child.stdout.on("end", () => outbound.flush());
 
