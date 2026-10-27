@@ -766,13 +766,7 @@ export class RoutineManager {
   }
 
   enqueueWebhook(input: {
-    webhookId: string;
-    webhookName: string;
-    prompt: string;
-    botId: string;
-    runOn: RoutineRunOn;
-    deliveryId: string;
-    receivedAt: number;
+    webhookId: string; webhookName: string; prompt: string; botId: string; runOn: RoutineRunOn; deliveryId: string; receivedAt: number;
     eventSource?: "app" | "wait";
     /** Where the run reports, instead of the event's own results chat. */
     resultsThreadId?: string;

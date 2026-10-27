@@ -21,7 +21,7 @@ async function call(method: string, path: string, body?: unknown, overrides: Par
   const json = vi.fn();
   const outcome = await route({
     method, path, res: {} as never, json, botId: "bot-1", threadId: "thread-1", readBody: async () => { readBody(); return body; },
-    sourceRefusal: () => null, hostRefusal: () => null, peer: () => null, ...overrides,
+    sourceRefusal: () => null, hostRefusal: () => null, guest: () => false, peer: () => null, ...overrides,
   });
   const [, status, payload] = json.mock.calls[0] ?? [];
   return { outcome, status: status as number | undefined, payload: payload as { text?: string; error?: string } };
@@ -61,6 +61,16 @@ describe("the waits route", () => {
     expect(waits.create).not.toHaveBeenCalled();
     expect(waits.cancel).not.toHaveBeenCalled();
     expect(readBody).not.toHaveBeenCalled();
+  });
+  it("refuses a Cloud guest's follow-up, since it would run as the owner's, and still makes a guest's wait that only tells", async () => {
+    waits.create.mockClear();
+    const guest = { guest: () => true };
+    const page = { label: "the price drops", kind: "url_contains", url: "https://x.test/", text: "sale" };
+    expect(await call("POST", "/api/internal/waits", { ...page, follow_up: "Buy it." }, guest)).toMatchObject({ status: 403, payload: { error: WAIT_MESSAGES.guestFollowUp } });
+    expect(waits.create).not.toHaveBeenCalled();
+    expect(await call("POST", "/api/internal/waits", page, guest)).toMatchObject({ status: 201 });
+    expect(waits.create).toHaveBeenCalledWith(expect.not.objectContaining({ followUp: expect.anything() }));
+    expect(await call("POST", "/api/internal/waits", { ...page, follow_up: "Buy it." })).toMatchObject({ status: 201 });
   });
   it("refuses file and program waits away from the bot's own computer, and allows pages and bots there", async () => {
     const away = { hostRefusal: () => WAIT_MESSAGES.otherComputer, peer: () => ({ id: "b2", name: "Coder" }) };

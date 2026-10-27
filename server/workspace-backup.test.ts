@@ -117,6 +117,20 @@ afterEach(() => { for (const root of scratch.splice(0)) rmSync(root, { recursive
 describe("encrypted full workspace backups", () => {
   it("leaves waits out of backups and Cloud sends", () => expect(omittedFromWorkspaceBackup("waits.json")).toBe(true));
 
+  it("carries no waits and tells the person so, on export and on restore", async () => {
+    const source = directory();
+    writeFileSync(join(source, "waits.json"), JSON.stringify({ version: 1, waits: [] }));
+    writeFileSync(join(source, "notes.md"), "kept");
+    const exported = await createWorkspaceBackup(source, { password: PASSWORD });
+    expect(exported.summary.exclusions).toContain("Waits bots set up: each watches this computer and ends within a week; ask the bot again on the new device.");
+    expect(exported.summary.warnings.some((warning) => warning.startsWith("Restoring pauses routines, webhooks and calendar calls, brings back no waits,"))).toBe(true);
+    const target = directory();
+    const staged = await stageWorkspaceBackup(target, exported.path, { password: PASSWORD });
+    const manifest = readJson(join(target, ".backups", staged.id, "staged", "manifest.json"));
+    expect(manifest.entries.map((entry: { path: string }) => entry.path)).toContain("notes.md");
+    expect(manifest.entries.map((entry: { path: string }) => entry.path)).not.toContain("waits.json");
+  });
+
   it("leaves Sync with My Cloud's own records out of a backup", async () => {
     const source = directory();
     mkdirSync(join(source, "sync", "trash"), { recursive: true });

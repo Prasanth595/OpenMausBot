@@ -17,6 +17,7 @@ export const WAIT_MESSAGES = {
   notPerson: "Only the person can set up or stop a wait, in their own chat with you; work handed to you by a bot, a routine or an outside event cannot.",
   serverHost: "File and program waits look at the computer OpenMausBot runs on, and here that is a server, not the computer you work on. Use url_contains, url_missing or bot_idle.",
   guest: "File and program waits are only for the owner of this computer. Use url_contains, url_missing or bot_idle.",
+  guestFollowUp: "Guests can be told when something happens, but can't set a follow-up.",
   otherComputer: "You work on another computer this turn (a Local VM or a cloud computer), and file and program waits look at the one OpenMausBot runs on. Use url_contains, url_missing or bot_idle.",
   noPeer: "No bot you can reach goes by that name. Use a name or id from list_bots.",
   self: "You cannot wait for yourself to finish.",
@@ -142,6 +143,8 @@ export interface WaitRouteContext {
   readBody: () => Promise<unknown>;
   sourceRefusal: () => string | null;
   hostRefusal: () => string | null;
+  /** A Cloud guest's turn: its follow-up would run later as the owner's, so a guest's wait only tells. */
+  guest: () => boolean;
   peer: (nameOrId: string) => { id: string; name: string } | "self" | null;
 }
 
@@ -172,6 +175,7 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
     const parsed = parseWaitRequest(body, home());
     if (!parsed.ok) return void json(res, 400, { error: parsed.error });
     const { request } = parsed;
+    if (request.followUp && ctx.guest()) return void json(res, 403, { error: WAIT_MESSAGES.guestFollowUp });
     if (request.kind.startsWith("file_") || request.kind.startsWith("process_")) {
       const away = ctx.hostRefusal();
       if (away) return void json(res, 403, { error: away });

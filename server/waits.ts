@@ -227,6 +227,11 @@ export class WaitManager {
     return this.waits.filter((w) => w.botId === botId && !w.ending).map(cloneWait);
   }
 
+  /** Every wait, those ended but not yet posted too. */
+  all(): WaitRecord[] {
+    return this.waits.map(cloneWait);
+  }
+
   cancel(id: string, botId: string): WaitRecord | null {
     const wait = this.waits.find((w) => w.id === id && w.botId === botId);
     if (!wait) return null;

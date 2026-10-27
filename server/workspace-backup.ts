@@ -52,8 +52,9 @@ const EXCLUSION_NOTES = [
   "Installed dependency folders (node_modules) and symbolic links inside conversation work folders; reinstall or recreate them in the project.",
   "External project folders, CLI login homes, browser session homes, OS keychains, companion devices and other servers.",
   "VM/container disk layers and remote cloud data; durable files inside this workspace are included.",
+  "Waits bots set up: each watches this computer and ends within a week; ask the bot again on the new device.",
 ];
-const RESTORE_WARNING = "Restoring pauses routines, webhooks and calendar calls, and does not resume pending delegations, queued chat messages or queued runs. Definitions and historical receipts are retained; review before enabling them again.";
+const RESTORE_WARNING = "Restoring pauses routines, webhooks and calendar calls, brings back no waits, and does not resume pending delegations, queued chat messages or queued runs. Definitions and historical receipts are retained; review before enabling them again.";
 
 type Entry = { path: string; type: "file" | "directory"; size: number; mode: number; sha256?: string };
 interface Manifest extends WorkspaceBackupPrivateMetadata {
