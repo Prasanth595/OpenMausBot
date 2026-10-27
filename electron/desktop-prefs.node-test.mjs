@@ -304,3 +304,40 @@ test("production wiring: main answers this computer's page, My Cloud's own page 
   assert.equal(await load(`${LOCAL}/ok`), true); assert.equal(await load(`${LOCAL}/fail`), false, "a failed load answers false, never throws");
   assert.equal(await vm.runInNewContext(`${navigate}; navigateMainWindow`, { mainWindow: null })(`${LOCAL}/`), false, "no window");
 });
+
+test("the talk shortcut is on with ⌃⌥Space until changed, and the choice survives a restart", () => {
+  let saved = null;
+  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
+  assert.equal(prefs.talkShortcut(), true);
+  assert.equal(prefs.talkKey(), "ctrl-opt-space");
+  prefs.setTalkShortcut(false);
+  assert.equal(prefs.setTalkKey("opt-shift-space"), true);
+  for (const key of ["cmd-space", "__proto__", "toString", 7]) assert.equal(prefs.setTalkKey(key), false);
+  const restarted = createDesktopPrefs({ read: () => saved, write: () => {} });
+  assert.equal(restarted.talkShortcut(), false);
+  assert.equal(restarted.talkKey(), "opt-shift-space");
+  const junk = createDesktopPrefs({ read: () => ({ talkShortcut: "off", talkKey: "toString" }), write: () => {} });
+  assert.equal(junk.talkShortcut(), true);
+  assert.equal(junk.talkKey(), "ctrl-opt-space");
+});
+
+test("each server keeps its own Quick asks chat; nothing malformed is read back", () => {
+  let saved = null;
+  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
+  prefs.setQuickAsksChat("/Users/a/.openmausbot", { botId: "bot-1", threadId: "t-1" });
+  assert.deepEqual(createDesktopPrefs({ read: () => saved, write: () => {} }).quickAsksChat("/Users/a/.openmausbot"), { botId: "bot-1", threadId: "t-1" });
+  assert.equal(prefs.quickAsksChat("/Users/a/.openmausbot-aprs"), null);
+  const broken = createDesktopPrefs({ read: () => ({ quickAsks: { a: { botId: "../x", threadId: "t" }, b: "t-1", c: { botId: "b", threadId: "t", extra: 1 } } }), write: () => {} });
+  assert.equal(broken.quickAsksChat("a"), null);
+  assert.equal(broken.quickAsksChat("b"), null);
+  assert.deepEqual(broken.quickAsksChat("c"), { botId: "b", threadId: "t" });
+});
+
+test("registerDesktopPrefs works on the store main hands it", async () => {
+  const prefs = createDesktopPrefs({ read: () => null, write: () => {} });
+  const handlers = new Map();
+  registerDesktopPrefs({ prefs, ipcMain: { handle: (c, h) => handlers.set(c, h), on: () => {} }, read: () => null, write: () => {},
+    page: () => "local", cloudOffered: async () => false });
+  await handlers.get("desktop-analytics:set")({}, false);
+  assert.equal(prefs.analytics(), false);
+});
