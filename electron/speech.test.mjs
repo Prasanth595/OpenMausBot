@@ -21,7 +21,7 @@ const launch = () => {
   const events = [];
   const win = { isDestroyed: () => false, webContents: { send: (channel, body) => events.push({ channel, body }) } };
   startSpeech(win);
-  return { ...fixture.launches.at(-1), events };
+  return { ...fixture.launches.at(-1), events, win };
 };
 const emit = (session, line) => appendFileSync(session.output, `${JSON.stringify(line)}\n`);
 
@@ -115,6 +115,22 @@ describe.skipIf(process.platform !== "darwin")("native speech file transport", (
     finishSpeech(sink); expect(existsSync(session.finish)).toBe(true);
     stopSpeech(sink); expect(existsSync(session.stop)).toBe(true);
     expect(speechBusy()).toBe(false);
+  });
+  it("a window's stop and finish reach the session that window started", () => {
+    const session = launch();
+    finishSpeech(session.win);
+    expect(existsSync(session.finish)).toBe(true);
+    stopSpeech(session.win);
+    expect(existsSync(session.stop)).toBe(true);
+    expect(speechBusy()).toBe(false);
+  });
+  it("another window's stop and finish leave a window's session alone", () => {
+    const session = launch();
+    const other = { isDestroyed: () => false, webContents: { send: () => {} } };
+    stopSpeech(other); finishSpeech(other);
+    expect(existsSync(session.stop)).toBe(false);
+    expect(existsSync(session.finish)).toBe(false);
+    expect(speechBusy()).toBe(true);
   });
   it("passes only known release modifiers", () => {
     startSpeech(sinkOf().sink, { finishOnRelease: ["control", "hyper", "control"] });
