@@ -2447,6 +2447,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "es": {
@@ -7860,6 +7861,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "fr": {
@@ -10290,6 +10292,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "hi": {
@@ -12720,6 +12723,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "ja": {
@@ -19084,6 +19088,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "pt-br": {
@@ -25198,6 +25203,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "zh": {
@@ -28471,6 +28477,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "zh-tw": {
@@ -32756,6 +32763,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "uk": {
@@ -35631,6 +35639,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "vi": {
@@ -40532,6 +40541,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "tr": {
@@ -45433,6 +45443,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "pl": {
@@ -51691,6 +51702,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "ru": {
@@ -58039,6 +58051,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     },
     "it": {
@@ -64179,6 +64192,7 @@
       "sidebar.people.title": "7db20897053bb2780b9b706e5505227b005de80c236e4a4836aab37a3a7bb298",
       "sidebar.people.you": "f6bbb21a1ccae104ddb3f8fdf79e0170b54269a45f783d551d8115df00e2f422",
       "sidebar.people.yourInbox": "d268735e5d62ca61384d42257df311283c9156053028aca926b575fc275a18f9",
+      "sidebar.people.yourInboxWaiting": "6b2cd5cd106def71e8e8084f76a94bec70177c189d697a5c16aacf43336019c8",
       "sidebar.people.mention": "3367c9dc49343c4480f793b1b609c524c60b849a25739c016b7f3ed94f97892e"
     }
   }
