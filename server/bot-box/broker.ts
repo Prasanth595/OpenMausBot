@@ -83,7 +83,7 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     for (const name of Object.keys(input.grants)) if (!GRANT.test(name)) throw new Error(`Not a grant name: ${name.slice(0, 40)}`);
     const token = `${BROKER_TOKEN_PREFIX}${randomBytes(24).toString("hex")}`;
     const expiresAt = now() + (input.ttlMs ?? (bound === "process" ? BROKER_PROCESS_TTL_MS : BROKER_THREAD_TTL_MS));
-    const grants = Object.fromEntries(Object.entries(input.grants).map(([name, grant]) => [name, { upstream: grant.upstream.replace(/\/+$/, ""), headers: { ...grant.headers } }]));
+    const grants = Object.fromEntries(Object.entries(input.grants).map(([name, grant]) => [name, { upstream: grant.upstream, headers: { ...grant.headers } }]));
     tokens.set(hashToken(token).toString("hex"), { hash: hashToken(token), botId: input.botId ?? null, threadId: input.threadId ?? null, expiresAt, grants, bound });
     return { token, botId: input.botId ?? null, threadId: input.threadId ?? null, expiresAt, grants };
   };
@@ -105,11 +105,15 @@ export function openCredentialBroker(options: CredentialBrokerOptions): Promise<
     const refuse = (status: number, error: string) => { res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" }).end(JSON.stringify({ error })); req.resume(); };
     const match = /^\/b\/([^/]+)\/([^/?]+)(\/[^?]*)?(\?.*)?$/.exec(req.url ?? "");
     if (!match) return refuse(404, "not_found");
-    const [, token = "", grant = "", path = "/", query = ""] = match;
+    const [, token = "", grant = "", path = "", query = ""] = match;
     const verdict = lookup(token, grant);
     if (!verdict.ok) return refuse(verdict.status, verdict.error);
     let upstream: URL;
-    try { upstream = new URL(`${verdict.grant.upstream}${path}${query}`); } catch { return refuse(502, "bad_upstream"); }
+    try {
+      upstream = new URL(verdict.grant.upstream);
+      if (path) upstream.pathname = `${upstream.pathname.replace(/\/+$/, "")}${path}`;
+      if (query) upstream.search = upstream.search ? `${upstream.search}&${query.slice(1)}` : query;
+    } catch { return refuse(502, "bad_upstream"); }
     const headers: Record<string, string | string[]> = {};
     for (const [name, value] of Object.entries(req.headers)) if (value !== undefined && !HOP_BY_HOP.has(name) && !CREDENTIAL_HEADERS.has(name)) headers[name] = value;
     for (const [name, value] of Object.entries(verdict.grant.headers)) headers[name.toLowerCase()] = value;

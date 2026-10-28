@@ -34,12 +34,13 @@ linuxBox("the credential broker", () => {
     seen.length = 0;
   });
 
-  async function start(): Promise<number> {
+  async function start(exactPath?: string): Promise<number> {
     upstream = createServer((req, res) => {
       let body = "";
       req.on("data", (chunk) => { body += chunk; });
       req.on("end", () => {
         seen.push({ method: req.method ?? "", url: req.url ?? "", headers: req.headers, body });
+        if (exactPath !== undefined && req.url !== exactPath) { res.writeHead(404).end(); return; }
         if (req.url?.includes("/stream")) {
           res.writeHead(200, { "content-type": "text/event-stream" });
           res.write("event: message_start\ndata: {}\n\n");
@@ -74,6 +75,21 @@ linuxBox("the credential broker", () => {
     expect(stream.body).toBe("event: message_start\ndata: {}\n\nevent: message_stop\ndata: {}\n\n");
     expect(broker.stats()).toMatchObject({ tokens: 1, forwarded: 2, refused: 0 });
     expect(brokerUrl(18080, minted.token, "anthropic")).toBe(`http://127.0.0.1:18080/b/${minted.token}/anthropic`);
+  });
+
+  it.each([
+    { endpoint: "/mcp", suffix: "", expected: "/mcp" },
+    { endpoint: "/mcp?key=x", suffix: "", expected: "/mcp?key=x" },
+    { endpoint: "/mcp/?key=x%2Fy", suffix: "", expected: "/mcp/?key=x%2Fy" },
+    { endpoint: "/mcp?key=x/", suffix: "", expected: "/mcp?key=x/" },
+    { endpoint: "/mcp?key=x", suffix: "?session=1", expected: "/mcp?key=x&session=1" },
+    { endpoint: "/v1/?key=x", suffix: "/messages?beta=1", expected: "/v1/messages?key=x&beta=1" },
+  ])("forwards $endpoint with suffix '$suffix' to its exact pathname and query", async ({ endpoint, suffix, expected }) => {
+    const port = await start(expected);
+    const minted = broker.mintForThread({ threadId: "t1", grants: { mcp: { upstream: `http://127.0.0.1:${port}${endpoint}`, headers: { "x-api-key": REAL_KEY } } } });
+    const answer = await call(broker.socketPath, "POST", `/b/${minted.token}/mcp${suffix}`, {}, "{}");
+    expect(answer.status).toBe(200);
+    expect(seen[0]!.url).toBe(expected);
   });
 
   it("refuses a wrong token, another bot's grant name, a revoked token and an expired one", async () => {
