@@ -204,6 +204,9 @@ it("keeps a turn on the whole catalog until the switch is on, then mounts the br
     await control(["send-channel", "--channel", channel.id, "--text", "Stay active in this room."]);
     const room = await launched();
     expect(room.mcpConfig.mcpServers.agents!.env.OMB_AGENTS_TOOL_BRIDGE).toBe("1");
+    // A room refuses widgets, pages and a computer pick, so its turn is not listed them.
+    expect(room.mcpConfig.mcpServers.agents!.env).toMatchObject({ OMB_ROOM: "1", OMB_COMPUTER_SELECTION: "0" });
+    expect(after.mcpConfig.mcpServers.agents!.env.OMB_ROOM).toBe("0");
     expect(room.systemPrompt).toContain(AGENTS_TOOL_BRIDGE_PROMPT);
     await control(["interrupt", "--channel", channel.id]);
     await control(["wait", "--channel", channel.id, "--timeout", "30"]);

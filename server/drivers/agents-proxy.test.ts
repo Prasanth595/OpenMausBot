@@ -461,6 +461,8 @@ beforeAll(async () => {
       OMB_SHARED_COMPUTERS_ENABLED: "1",
       // A Chief's turn, so the Chief-only team tools are mounted too.
       OMB_CHIEF_OF_STAFF: "1",
+      // A person's own request, which may pick its computer.
+      OMB_COMPUTER_SELECTION: "1",
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
@@ -2074,9 +2076,9 @@ describe("standing external runtime", () => {
 
   it("sees the same one tool surface as every turn: the switches it sets change nothing", async () => {
     const list = await externalRpc("tools/list");
-    // the main child is a Chief's turn; this one is not, so only the role differs
-    const chiefOnly = ["create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "create_room", "manage_room", "retry_thread"];
-    const everyTurn = (await rpc("tools/list")).result.tools.filter((tool: any) => !chiefOnly.includes(tool.name));
+    // the main child is a Chief's turn that may pick its computer; this one is neither, so only those differ
+    const chiefOnly = ["create_bot", "list_team_setup", "list_team_library", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
+    const everyTurn = (await rpc("tools/list")).result.tools.filter((tool: any) => !chiefOnly.includes(tool.name) && tool.name !== "select_computer");
     const names = list.result.tools.map((tool: any) => tool.name);
     expect(names).toEqual(everyTurn.map((tool: any) => tool.name));
     const teamwork = ["list_room_targets", "coordinate_bots", "assignment_status", "list_bots", "list_rooms", "list_threads", "close_thread", "start_thread", "post_to_room"];
@@ -2327,7 +2329,7 @@ describe("tool bridge", () => {
   }
 
   /** The main child's switches: a Chief with skills and shared computers. */
-  const CHIEF = { OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_CHIEF_OF_STAFF: "1" };
+  const CHIEF = { OMB_SKILL_AUTHORING_ENABLED: "1", OMB_SHARED_COMPUTERS_ENABLED: "1", OMB_CHIEF_OF_STAFF: "1", OMB_COMPUTER_SELECTION: "1" };
   const CHIEF_ONLY = ["create_bot", "list_team_setup", "propose_team_setup", "propose_bot_deletion", "manage_room", "retry_thread"];
   const HOT = ["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "memory_update"];
   let chief: Rpc;
@@ -2348,8 +2350,8 @@ describe("tool bridge", () => {
 
   beforeAll(async () => {
     chief = startProxy({ ...CHIEF, OMB_AGENTS_TOOL_BRIDGE: "1" });
-    // not a Chief, nothing optional: the defaults, bridged
-    plain = startProxy({ OMB_AGENTS_TOOL_BRIDGE: "1" });
+    // not a Chief, nothing optional, a person's own request: bridged
+    plain = startProxy({ OMB_COMPUTER_SELECTION: "1", OMB_AGENTS_TOOL_BRIDGE: "1" });
     off = startProxy({ ...CHIEF, OMB_AGENTS_TOOL_BRIDGE: "0" });
     for (const proxy of [chief, plain, off]) {
       expect((await proxy("initialize", { protocolVersion: "2024-11-05" })).result.serverInfo.name).toBe("openmausbot-agents");

@@ -34,6 +34,8 @@ const profile = (options: { chief?: boolean; skills?: boolean; shared?: boolean;
     OMB_VOICE_NOTES: flag(options.voice ?? false),
     OMB_CLOUD_HOME: flag(options.cloudHome ?? false),
     OMB_MEMORY_ENABLED: flag(options.memory ?? true),
+    // A person's own request, which may pick its computer.
+    OMB_COMPUTER_SELECTION: "1",
   });
 
 /** Every switch combination the harness can ask for, as the wire test's

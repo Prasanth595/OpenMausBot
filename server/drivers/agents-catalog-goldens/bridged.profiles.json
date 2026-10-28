@@ -516,5 +516,65 @@
       "find_tool",
       "use_tool"
     ]
+  },
+  "default+handoff": {
+    "bytes": 15236,
+    "sha256": "b00c676782178536c3624ba2e6855e788b3c0b6c21a59ab683f496f7981c2060",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "attach_file",
+      "publish_page",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "default+room": {
+    "bytes": 15212,
+    "sha256": "5ff7ebe02cad0427422d0b52983a633ff14eb1a535daf1770a92bf278ac946c8",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "attach_file",
+      "publish_page",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
+  },
+  "non-chief+room": {
+    "bytes": 15095,
+    "sha256": "6e0241d85add7009186177c6ab3e266b4a1ed183cdc3fb1273fb047fd469eac8",
+    "tools": [
+      "tool_result_read",
+      "list_room_targets",
+      "coordinate_bots",
+      "list_bots",
+      "list_rooms",
+      "attach_file",
+      "publish_page",
+      "post_to_room",
+      "request_credential",
+      "request_sign_in",
+      "fill_login",
+      "memory_update",
+      "find_tool",
+      "use_tool"
+    ]
   }
 }

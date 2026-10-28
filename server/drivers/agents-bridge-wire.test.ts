@@ -51,6 +51,7 @@ function profiles(): Record<string, Record<string, string>> {
             OMB_SHARED_COMPUTERS_ENABLED: flag(shared),
             OMB_VOICE_NOTES: flag(voice),
             OMB_CHIEF_OF_STAFF: flag(chief),
+            OMB_COMPUTER_SELECTION: "1",
           };
         }
       }
@@ -64,6 +65,8 @@ function profiles(): Record<string, Record<string, string>> {
   all["skills+shared+voice+escalations+x+team"] = { ...all["skills+shared+voice+escalations+x"]!, OMB_TEAM_PEOPLE: "1" };
   all["default+legacy-switches"] = { ...all.default!, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1" };
   for (const name of ["default", "skills+shared+voice"]) all[`${name}+mausbot`] = { ...all[name]!, OMB_MAUSBOT: "1" };
+  all["default+handoff"] = { ...all.default!, OMB_COMPUTER_SELECTION: "0" };
+  for (const name of ["default", "non-chief"]) all[`${name}+room`] = { ...all[name]!, OMB_COMPUTER_SELECTION: "0", OMB_ROOM: "1" };
   return all;
 }
 
@@ -102,6 +105,9 @@ const BUDGET_BASELINE: Record<string, number> = {
   "default+legacy-switches": 16393,
   "default+mausbot": 16284,
   "skills+shared+voice+mausbot": 17163,
+  "default+handoff": 15236,
+  "default+room": 15212,
+  "non-chief+room": 15095,
 };
 
 type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };
@@ -259,10 +265,10 @@ describe("agents proxy tools/list golden with the tool bridge on", () => {
     }
     // So a bot that is not a Chief is not told the Chief-only tools exist.
     const nonChief = Object.keys(PROFILES).filter((name) => PROFILES[name]!.OMB_CHIEF_OF_STAFF === "0");
-    expect(nonChief).toHaveLength(9);
+    expect(nonChief).toHaveLength(10);
     for (const name of nonChief) {
       for (const tool of CHIEF_ONLY_TOOLS) expect(wires[name], `${name}: ${tool}`).not.toContain(tool);
-      const chiefTwin = name === "non-chief" ? "default" : name.replace("+non-chief", "");
+      const chiefTwin = name.startsWith("non-chief") ? name.replace("non-chief", "default") : name.replace("+non-chief", "");
       expect(namedHidden(wires[chiefTwin]!), name).toEqual(expect.arrayContaining(CHIEF_ONLY_TOOLS));
     }
   });
@@ -272,7 +278,8 @@ describe("agents proxy tools/list golden with the tool bridge on", () => {
     const base = hotOf("default");
     expect(base).toEqual(["tool_result_read", "list_room_targets", "coordinate_bots", "list_bots", "list_rooms", "select_computer", "attach_file", "publish_page", "post_to_room", "request_credential", "request_sign_in", "fill_login", "memory_update"]);
     for (const name of Object.keys(PROFILES)) {
-      expect(hotOf(name).filter((tool) => tool !== "send_voice_note"), name).toEqual(base);
+      const selects = PROFILES[name]!.OMB_COMPUTER_SELECTION === "1";
+      expect(hotOf(name).filter((tool) => tool !== "send_voice_note"), name).toEqual(selects ? base : base.filter((tool) => tool !== "select_computer"));
       expect(hotOf(name).includes("send_voice_note"), name).toBe(PROFILES[name]!.OMB_VOICE_NOTES === "1");
     }
   });

@@ -838,6 +838,8 @@ const CHIEF_TARGET_TOOL_NAMES = new Set(["propose_profile", "propose_model"]);
 const WATCHER_TOOL_NAMES = new Set(["create_options_card"]);
 
 const LOCAL_VM_TOOL_NAMES = new Set(["vm_exec"]);
+/** Refused in a room's thread (chat-widgets.ts, chat-apps.ts). */
+const CHAT_CARD_TOOL_NAMES = new Set(["show_widget", "show_html"]);
 const CLOUD_HOME_SURFACE = {
   type: "string", enum: ["auto", "cloud", "browser"],
   description: "auto = suitable configured computer, cloud = the bot's cloud computer, browser = built-in browser. Omit to list. This server runs in the cloud: the user's own computer and a Local VM are not places here.",
@@ -865,7 +867,9 @@ function catalogTools(profile: CatalogProfile) {
     (profile.botId === WATCHER_OPTIONS_CARD_BOT_ID || !WATCHER_TOOL_NAMES.has(tool.name)) &&
     (profile.memoryEnabled !== false || tool.name !== "memory_update") &&
     (profile.escalations === true || tool.name !== "raise_escalation") &&
-    (profile.team === true || !PERSON_TOOL_NAMES.has(tool.name)));
+    (profile.team === true || !PERSON_TOOL_NAMES.has(tool.name)) &&
+    (profile.computerSelection === true || tool.name !== "select_computer") &&
+    (profile.room !== true || !CHAT_CARD_TOOL_NAMES.has(tool.name)));
   const AUTHORING_TOOLS = profile.skillAuthoring
     ? BOT_SCOPED_TOOLS
     : BOT_SCOPED_TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));
