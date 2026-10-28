@@ -3,11 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 
-const hooks = vi.hoisted(() => ({ beforeRead: null as (() => void) | null }));
+const hooks = vi.hoisted(() => ({ beforeRead: null as (() => void) | null, redirect: null as { source: string; target: string } | null }));
 vi.mock("node:fs", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:fs")>();
   return {
     ...original,
+    openSync: (...args: Parameters<typeof original.openSync>) => {
+      const redirected = hooks.redirect && args[0] === hooks.redirect.source ? hooks.redirect.target : args[0];
+      return original.openSync(redirected, args[1], args[2]);
+    },
     readSync: (...args: Parameters<typeof original.readSync>) => {
       hooks.beforeRead?.();
       return original.readSync(...args);
@@ -19,6 +23,8 @@ const { namedUploadPaths, uploadableFiles } = await import("./browser-upload.ts"
 const dirs: string[] = [];
 afterEach(() => {
   hooks.beforeRead = null;
+  hooks.redirect = null;
+  vi.unstubAllGlobals();
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -39,4 +45,15 @@ it.skipIf(process.platform === "win32")("refuses a second file reached through a
     fs.symlinkSync(outside, sub, "dir");
   };
   expect(() => namedUploadPaths(checked.files.map((file) => ({ file, name: null })), join(base, "uploads"), Date.now(), { everyFile: true })).toThrow();
+});
+
+it("rejects a Windows open that follows a symlink swapped in after lstat", () => {
+  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-windows-")));
+  dirs.push(base);
+  const source = join(base, "report.txt"), secret = join(base, "secret.txt");
+  fs.writeFileSync(source, "report");
+  fs.writeFileSync(secret, "outside secret");
+  vi.stubGlobal("process", { ...process, platform: "win32" });
+  hooks.redirect = { source, target: secret };
+  expect(() => namedUploadPaths([{ file: source, name: "Report.txt" }], join(base, "uploads"))).toThrow(/changed/);
 });

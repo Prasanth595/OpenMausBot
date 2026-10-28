@@ -60,16 +60,18 @@ export function namedUploadPaths(files: ReadonlyArray<{ file: string; name: stri
 }
 
 function copyUpload(source: string, destination: string): void {
-  if (process.platform === "win32" && !lstatSync(source).isFile()) throw new Error(`${source} is not a file.`);
+  const checked = process.platform === "win32" ? lstatSync(source, { bigint: true }) : null;
+  if (checked && !checked.isFile()) throw new Error(`${source} is not a file.`);
   const input = openSync(source, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK | (process.platform === "darwin" ? O_NOFOLLOW_ANY : 0)));
   let output: number | undefined;
   try {
     if (process.platform === "linux" && readlinkSync(`/proc/self/fd/${input}`) !== source) throw new Error(`${source} changed while staging the upload.`);
-    const file = fstatSync(input);
+    const file = fstatSync(input, { bigint: true });
+    if (checked && (checked.dev !== file.dev || checked.ino !== file.ino)) throw new Error(`${source} changed while staging the upload.`);
     if (!file.isFile()) throw new Error(`${source} is not a file.`);
     output = openSync(destination, "wx", 0o600);
     const chunk = Buffer.allocUnsafe(1024 * 1024);
-    for (let remaining = file.size; remaining > 0;) {
+    for (let remaining = Number(file.size); remaining > 0;) {
       const count = readSync(input, chunk, 0, Math.min(chunk.length, remaining), null);
       if (!count) throw new Error(`${source} changed while staging the upload.`);
       let offset = 0;
