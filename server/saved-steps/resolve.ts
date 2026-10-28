@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { elementPath, type WireElement } from "./driver-wire.ts";
+import { elementPath, treeDegraded, wholeTree, type WireElement } from "./driver-wire.ts";
 import { KEY_TOOLS, type AppIdentity, type ElementIdentity, type RecipeStep } from "./rules.ts";
 
 /** `gate`: the computer's control gate refused the call (a person holds it, another turn has it): the step was not tried. */
@@ -93,18 +93,6 @@ export function matchElement(elements: unknown, element: ElementIdentity): Match
   if (!match.ok) return match;
   return match.value.path === null ? NONE : { ok: true, value: match.value.live };
 }
-
-const COUNTS = ["element_count", "total_element_count", "returned_element_count", "filtered_element_count"] as const;
-const hasText = (value: unknown) => typeof value === "string" && value.trim() !== "";
-const countFits = (count: unknown, returned: number) => count === undefined || count === null || (typeof count === "number" && count <= returned);
-
-function wholeTree(state: Record<string, unknown>): boolean {
-  const returned = Array.isArray(state.elements) ? state.elements.length : 0;
-  return state.elements_complete === true && state.truncated !== true && !hasText(state.truncation_reason)
-    && COUNTS.every((key) => countFits(state[key], returned));
-}
-
-const treeDegraded = (state: Record<string, unknown>) => state.degraded === true || hasText(state.degraded_reason);
 
 const appName = (app: AppIdentity) => app.name || app.bundleId || "the app";
 const fail = (error: string): Resolved => ({ ok: false, error });

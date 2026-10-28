@@ -19,7 +19,7 @@ export interface Recipe { id: string; key: string; request: string; steps: Recip
 export type Refusal =
   | "moment-words" | "several-turns" | "incomplete-journal" | "denied" | "tool-error" | "unknown-tool" | "pixel-or-drag" | "extra-arguments"
   | "unknown-target" | "stale-element" | "unlabelled-element" | "ambiguous-element" | "typed-text-not-in-request" | "url-not-in-request" | "no-steps" | "too-many-steps"
-  | "typing-appends" | "toggle-element" | "key-without-window";
+  | "typing-appends" | "toggle-element" | "key-without-window" | "partial-tree";
 
 const MAX_STEPS = 40;
 const ADDRESSING = new Set(["element_token", "element_index", "pid", "window_id", "session"]);
@@ -109,7 +109,7 @@ export function stepLabel(step: RecipeStep): string {
   return step.window?.title ?? appName ?? "the screen";
 }
 
-interface Snapshot { pid?: number; windowId?: number; appName?: string; windowTitle?: string; elements: WireElement[] }
+interface Snapshot { pid?: number; windowId?: number; appName?: string; windowTitle?: string; elements: WireElement[]; complete: boolean }
 
 const fillMissing = (known: AppIdentity | undefined, next: AppIdentity): AppIdentity => ({
   bundleId: known?.bundleId ?? next.bundleId,
@@ -150,7 +150,9 @@ export function buildRecipe(input: { request: string; journal: RequestJournal; i
     if (tool === "get_window_state") {
       learnApp(data.pid, { bundleId: data.bundle_id, name: data.app_name });
       if (data.window_id !== undefined && data.window_title !== undefined) windowsById.set(data.window_id, data.window_title);
-      const snapshot: Snapshot = { pid: data.pid, windowId: data.window_id, appName: data.app_name, windowTitle: data.window_title, elements: data.elements ?? [] };
+      const snapshot: Snapshot = {
+        pid: data.pid, windowId: data.window_id, appName: data.app_name, windowTitle: data.window_title, elements: data.elements ?? [], complete: data.elements_complete === true,
+      };
       const key = data.window_id !== undefined ? `w${data.window_id}` : `p${data.pid}`;
       latestByWindow.delete(key);
       latestByWindow.set(key, snapshot);
@@ -218,6 +220,7 @@ export function buildRecipe(input: { request: string; journal: RequestJournal; i
       const found = resolveElement(args);
       if (typeof found === "string") return refuse(found);
       const { element, snapshot } = found;
+      if (!snapshot.complete) return refuse("partial-tree");
       if (!element.label) return refuse("unlabelled-element");
       if (flipsToggle(tool, element.role)) return refuse("toggle-element");
       const path = elementPath(snapshot.elements, element);

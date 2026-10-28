@@ -18,6 +18,8 @@ export interface SlimStructured {
   name?: string;
   app_name?: string;
   window_title?: string;
+  /** The driver read the whole tree and every element survived slimming. */
+  elements_complete?: true;
   refusal?: { code?: string; message?: string };
 }
 export interface SlimResult { isError: boolean; rpcError?: true; structured?: SlimStructured }
@@ -53,12 +55,25 @@ function slimList<T>(value: unknown, types: Record<string, "string" | "number" |
   return items as T[];
 }
 
+const COUNTS = ["element_count", "total_element_count", "returned_element_count", "filtered_element_count"] as const;
+const hasText = (value: unknown) => typeof value === "string" && value.trim() !== "";
+const countFits = (count: unknown, returned: number) => count === undefined || count === null || (typeof count === "number" && count <= returned);
+
+export function wholeTree(state: Record<string, unknown>): boolean {
+  const returned = Array.isArray(state.elements) ? state.elements.length : 0;
+  return state.elements_complete === true && state.truncated !== true && !hasText(state.truncation_reason)
+    && COUNTS.every((key) => countFits(state[key], returned));
+}
+
+export const treeDegraded = (state: Record<string, unknown>) => state.degraded === true || hasText(state.degraded_reason);
+
 function slimStructured(raw: Rec): SlimStructured {
   const out: SlimStructured = pick(raw, Object.keys(TOP_TYPES), TOP_TYPES);
   const elements = slimList<WireElement>(raw.elements, ELEMENT_TYPES, ["element_index", "role", "depth"], MAX_ELEMENTS);
   const apps = slimList<WireApp>(raw.apps, APP_TYPES, ["pid", "name"]);
   const windows = slimList<WireWindow>(raw.windows, WINDOW_TYPES, ["window_id", "title"]);
   if (elements) out.elements = elements;
+  if (elements && elements.length === (raw.elements as unknown[]).length && wholeTree(raw) && !treeDegraded(raw)) out.elements_complete = true;
   if (apps) out.apps = apps;
   if (windows) out.windows = windows;
   if (isRec(raw.refusal)) {

@@ -44,6 +44,21 @@ describe("slimResponse", () => {
     });
   });
 
+  const whole = (elements: unknown[], extra: Record<string, unknown> = {}) => slimResponse({ id: 1, result: { content: [], structuredContent: {
+    elements, elements_complete: true, element_count: elements.length, ...extra } } }).structured?.elements_complete;
+  const rows = (count: number) => Array.from({ length: count }, (_, index) => ({ element_index: index, role: "AXButton", depth: 1 }));
+
+  it("says a tree is whole only when the driver read all of it and slimming kept every element", () => {
+    expect(whole(rows(3))).toBe(true);
+    expect(whole(rows(3), { elements_complete: false })).toBeUndefined();
+    expect(whole(rows(3), { elements_complete: "true" })).toBeUndefined();
+    expect(whole(rows(3), { truncated: true })).toBeUndefined();
+    expect(whole(rows(3), { element_count: 9 })).toBeUndefined();
+    expect(whole(rows(3), { degraded: true })).toBeUndefined();
+    expect(whole([...rows(3), { role: "AXButton", depth: 1 }])).toBeUndefined();
+    expect(whole(rows(MAX_ELEMENTS + 1))).toBeUndefined();
+  });
+
   it("caps elements at MAX_ELEMENTS", () => {
     const elements = Array.from({ length: 1600 }, (_, index) => ({ element_index: index, role: "AXButton", depth: 1 }));
     const slim = slimResponse({ id: 1, result: { content: [], structuredContent: { elements } } });

@@ -24,6 +24,7 @@ export interface SavedStepsDeps {
   patchMessage(threadId: string, messageId: string, patch: Partial<Message>): void;
   folder?: (botId: string) => string;
   now?: () => number;
+  platform?: NodeJS.Platform;
 }
 
 export interface SettledRequest {
@@ -56,6 +57,9 @@ const keepsFromSaving = (event: RuntimeEvent): boolean =>
   (event.type === "request.resolved" && event.behavior !== "allow") || (event.type === "turn.completed" && (event.denials?.length ?? 0) > 0);
 
 export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
+  const platform = deps.platform ?? process.platform;
+  // Linux ships cua-driver 0.19.3 and Windows its 0.28.2 Rust build; neither is known to answer list_windows and elements_complete as replay needs.
+  const enabled = () => platform === "darwin" && deps.enabled();
   const journal = new ComputerJournal();
   const now = deps.now ?? Date.now;
   const recipes = new RecipeStore({ folder: deps.folder ?? botFolder, now: deps.now });
@@ -67,7 +71,7 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
   };
   const dispatch = new SavedStepsDispatch({
     recipes,
-    enabled: deps.enabled,
+    enabled,
     publish: deps.publish,
     engines: deps.engines,
     stopped: deps.stopped,
@@ -83,7 +87,7 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
       deps.patchMessage(threadId, reply.id, { savedSteps: { recipeId: replayed, replayed: true } });
       return;
     }
-    if (!deps.enabled() || automated || !taken?.calls.length || !personTextRequest(request) || after.some((line) => line.role === "user") || !otherToolsHarmless(after)) return;
+    if (!enabled() || automated || !taken?.calls.length || !personTextRequest(request) || after.some((line) => line.role === "user") || !otherToolsHarmless(after)) return;
     const built = buildRecipe({ request: request.text ?? "", journal: taken, id: randomUUID(), now: now() });
     if (!built.ok) return;
     recipes.save(botId, built.recipe);

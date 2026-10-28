@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "../store.ts";
-import { textEditJournal, windowState } from "../testing/saved-steps-fixtures.ts";
+import { recordedWindowState, textEditJournal } from "../testing/saved-steps-fixtures.ts";
 import type { SlimResult } from "./driver-wire.ts";
 import type { RecordedCall, RequestJournal } from "./journal.ts";
 import { buildRecipe, personTextRequest, recipeFitsRequest, stepLabel, type Recipe } from "./rules.ts";
@@ -20,7 +20,7 @@ const withCall = (call: RecordedCall): RequestJournal => {
 const snapshotThenClick = ({ refreshBeforeClick, token }: { refreshBeforeClick: boolean; token: string }): RequestJournal => {
   const base = textEditJournal();
   const calls = base.calls.slice(0, 3);
-  if (refreshBeforeClick) calls.push(action("get_window_state", { pid: 4242, window_id: 7 }, { isError: false, structured: windowState(2) }));
+  if (refreshBeforeClick) calls.push(action("get_window_state", { pid: 4242, window_id: 7 }, { isError: false, structured: recordedWindowState(2) }));
   calls.push(action("click", { element_token: token }));
   return { ...base, calls };
 };
@@ -82,17 +82,23 @@ describe("buildRecipe", () => {
 
   const stateCall = (structured: SlimResult["structured"]) => action("get_window_state", { pid: 4242, window_id: 7 }, { isError: false, structured });
   const bare = (calls: RecordedCall[]) => build(textEditJournal({ calls }));
-  const noApp = { ...windowState(1), app_name: undefined, bundle_id: undefined };
-  const noTitle = { ...windowState(1), window_title: undefined };
+  const noApp = { ...recordedWindowState(1), app_name: undefined, bundle_id: undefined };
+  const noTitle = { ...recordedWindowState(1), window_title: undefined };
+
+  it("refuses an element from a snapshot that does not say it read the whole tree", () => {
+    const structured = { ...recordedWindowState(1), elements_complete: undefined };
+    expect(bare([stateCall(structured), action("click", { element_token: "s1-e2" })])).toEqual({ ok: false, reason: "partial-tree" });
+    expect(bare([stateCall(structured), action("bring_to_front", { pid: 4242 })]).ok).toBe(true);
+  });
 
   it("refuses an index with only a pid", () => {
     expect(build(withCall(action("click", { element_index: 3, pid: 4242 })))).toEqual({ ok: false, reason: "unknown-target" });
   });
 
   it("maps an index to the latest snapshot of its window, not another window's", () => {
-    const other = { ...windowState(1), window_id: 8, window_title: "Other", elements: [{ element_index: 3, element_token: "o-e3", role: "AXButton", label: "Delete", parent_index: 0, depth: 1 }, windowState(1).elements![0]!] };
+    const other = { ...recordedWindowState(1), window_id: 8, window_title: "Other", elements: [{ element_index: 3, element_token: "o-e3", role: "AXButton", label: "Delete", parent_index: 0, depth: 1 }, recordedWindowState(1).elements![0]!] };
     const calls = [...textEditJournal().calls.slice(0, 3), action("get_window_state", { pid: 4242, window_id: 8 }, { isError: false, structured: other }),
-      stateCall(windowState(2)), action("click", { element_index: 3, window_id: 7 })];
+      stateCall(recordedWindowState(2)), action("click", { element_index: 3, window_id: 7 })];
     const out = bare(calls);
     expect(out.ok && out.recipe.steps[0]?.element?.label).toBe("Save");
   });
@@ -165,17 +171,17 @@ describe("buildRecipe", () => {
   });
 
   it("refuses an element whose role, label and path another row of its snapshot shares", () => {
-    const rows = windowState(1).elements!;
+    const rows = recordedWindowState(1).elements!;
     const twin = { ...rows[2]!, element_index: 4, element_token: "s1-e4" };
-    expect(bare([stateCall({ ...windowState(1), elements: [...rows, twin] }), action("click", { element_token: "s1-e2" })]))
+    expect(bare([stateCall({ ...recordedWindowState(1), elements: [...rows, twin] }), action("click", { element_token: "s1-e2" })]))
       .toEqual({ ok: false, reason: "ambiguous-element" });
-    expect(bare([stateCall(windowState(1)), action("click", { element_token: "s1-e2" })]).ok).toBe(true);
+    expect(bare([stateCall(recordedWindowState(1)), action("click", { element_token: "s1-e2" })]).ok).toBe(true);
   });
 
   const TOGGLES = ["AXCheckBox", "AXSwitch", "AXToggle", "AXRadioButton", "AXDisclosureTriangle", "AXMenuItemCheckbox"];
   const withToggle = (role: string) => {
-    const rows = windowState(1).elements!;
-    return stateCall({ ...windowState(1), elements: [...rows, { element_index: 4, element_token: "s1-e4", role, label: "Bold", parent_index: 0, depth: 1 }] });
+    const rows = recordedWindowState(1).elements!;
+    return stateCall({ ...recordedWindowState(1), elements: [...rows, { element_index: 4, element_token: "s1-e4", role, label: "Bold", parent_index: 0, depth: 1 }] });
   };
 
   it.each(TOGGLES.flatMap((role) => ["click", "double_click", "press_key"].map((tool) => [role, tool])))("refuses a %s that a %s flips", (role, tool) => {

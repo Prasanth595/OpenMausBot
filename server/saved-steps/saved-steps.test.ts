@@ -52,6 +52,7 @@ describe("createSavedSteps", () => {
       generation: () => undefined,
       patchMessage: () => {},
       folder: (botId) => join(dir, botId),
+      platform: "darwin",
     });
     steps.recipes.save("b1", RECIPE);
     const engine = { instanceId: "claude", driverKind: "claudeAgent", adapter: { provider: "claudeAgent" } } as unknown as ProviderInstance;
@@ -81,6 +82,7 @@ describe("createSavedSteps", () => {
       generation: (threadId) => (threadId === "t1" ? "g1" : undefined),
       patchMessage: () => {},
       folder: (botId) => join(dir, botId),
+      platform: "darwin",
     });
     steps.recipes.save("b1", RECIPE);
     const engine = { instanceId: "claude", driverKind: "claudeAgent", adapter: { provider: "claudeAgent" } } as unknown as ProviderInstance;
@@ -121,6 +123,7 @@ describe("SavedSteps.requestSettled", () => {
     patchMessage: (threadId, messageId, patch) => { patches.push([threadId, messageId, patch]); },
     folder: (botId) => join(folder, botId),
     now: () => NOW,
+    platform: "darwin",
     ...change,
   });
   const settled = (change: Partial<SettledRequest> = {}): SettledRequest => ({
@@ -194,6 +197,22 @@ describe("SavedSteps.requestSettled", () => {
     }));
     expect(saved()).toBeUndefined();
     expect(patches).toEqual([]);
+  });
+
+  it.each(["linux", "win32"] as const)("neither saves nor replays on %s", async (platform) => {
+    steps = facade({ platform });
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
+    expect(saved()).toBeUndefined();
+    expect(patches).toEqual([]);
+
+    steps.recipes.save("b1", { ...RECIPE, createdAt: NOW, lastUsedAt: NOW });
+    const engine = { instanceId: "claude", driverKind: "claudeAgent", adapter: { provider: "claudeAgent" } } as unknown as ProviderInstance;
+    const start = vi.fn(async (_input: SendTurnInput): Promise<TurnStartResult> => ({ turnId: "turn-1" }));
+    const input: SendTurnInput = { threadId: "t1", botId: "b1", text: REQUEST, approvalMode: "full",
+      integrations: { localComputer: { command: process.execPath, args: [FAKE], env: {}, scope: "local-computer" } } };
+    await steps.dispatch.sendTurn(engine, { botId: "b1", message: LINE, turnText: REQUEST, placePicked: true }, input, start);
+    expect(start).toHaveBeenCalledWith(input);
   });
 
   it("saves nothing for a request whose turn began with a replay", () => {
