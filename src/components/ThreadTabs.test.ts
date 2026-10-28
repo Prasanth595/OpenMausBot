@@ -70,6 +70,8 @@ describe("a bot's threads in the chat header", () => {
     render(bot());
     expect(tabs().map((element) => element.dataset.threadTab)).toEqual(["hiring", "launch", "who", "pricing", "deck"]);
     expect(tab("who").getAttribute("aria-selected")).toBe("true");
+    expect(tab("who").id).toBe("thread-tab-who");
+    expect(tab("who").getAttribute("aria-controls")).toBe("chat-thread-panel");
     expect(tab("who").tabIndex).toBe(0);
     expect(tab("who").className).toContain("focus-visible:ring-inset");
     expect(tab("launch").getAttribute("aria-selected")).toBe("false");

@@ -24,6 +24,15 @@ type ThreadActions = ReturnType<typeof threadRowActions>;
 
 const displayTitle = (task: TabTask) => localizedTaskTitle(task.title || t("task.newShort"));
 
+/** The transcript panel the strip controls. */
+export const CHAT_THREAD_PANEL_ID = "chat-thread-panel";
+export const threadTabId = (threadId: string) => `thread-tab-${threadId}`;
+
+/** True only when the strip renders: a second listed thread, with the same filter the tab list uses. */
+export function threadTabsShown(bot: Bot): boolean {
+  return (bot.tasks ?? []).filter((task) => !task.routineRunId && (!isArchived(task) || task.threadId === bot.threadId)).length >= 2;
+}
+
 /** What a tab says besides its name: a spinner for a running turn or a dot for an unread reply, in words for a reader. */
 function tabStatus(task: TabTask): string {
   // A turn waiting on the person still reports busy, so the waiting state has to be read before the working one.
@@ -170,6 +179,8 @@ function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, 
           ref={(element) => register(task.threadId, element)}
           type="button"
           role="tab"
+          id={threadTabId(task.threadId)}
+          aria-controls={CHAT_THREAD_PANEL_ID}
           aria-selected={active}
           tabIndex={tabbable ? 0 : -1}
           data-thread-tab={task.threadId}
@@ -246,7 +257,7 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
   const [focusId, setFocusId] = useState<string | null>(null);
   const [edges, setEdges] = useState({ overflow: false, start: false, end: false, rtl: false });
   const active = bot.threadId;
-  const showing = threads.length >= 2;
+  const showing = threadTabsShown(bot);
 
   // The open tab is always reachable, even when the strip has scrolled past it. Scroll the whole row: the 24px menu
   // trigger sits after the tab button, so aligning the button's edge would leave the trigger outside the scrollport.

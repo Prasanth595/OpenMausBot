@@ -94,7 +94,7 @@ import { RenameTitle } from "./RenameTitle"; import { ChatHeadRole, chiefOfStaff
 import { BotActivityPicker } from "./TaskPicker"; import { ChatHeadPill } from "./ChatHeadPill";
 import { ELEVATED_FLOAT, ELEVATED_HOVER } from "./elevated";
 import { ModelPicker } from "./ModelPicker";
-import { ChatHeaderMenu, ChatMoreMenu } from "./ChatMoreMenu"; import { ThreadTabs } from "./ThreadTabs"; import { TeamPrivateFirstLine, TeamPrivateHeader, TeamSharedHeader } from "./TeamPrivateChatsLine";
+import { ChatHeaderMenu, ChatMoreMenu } from "./ChatMoreMenu"; import { CHAT_THREAD_PANEL_ID, ThreadTabs, threadTabId, threadTabsShown } from "./ThreadTabs"; import { TeamPrivateFirstLine, TeamPrivateHeader, TeamSharedHeader } from "./TeamPrivateChatsLine";
 import { useChatFindRequests } from "@/lib/chat-find";
 import { CitationSelectionToolbar, SentCitations } from "./CitationUI";
 import { SpeakButton } from "./SpeakButton";
@@ -835,6 +835,8 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const advanced = useAdvancedMode();
   const phone = useMediaQuery(PHONE_LAYOUT);
   const phoneMenu = phone && !remoteClient;
+  // The transcript only becomes a tabpanel when the strip is actually rendered, so it never points at an absent tab.
+  const threadTabsVisible = showThreads && !phone && threadTabsShown(profile);
   const simpleHead = !advanced && !remoteClient;
   const canWrite = useCanWriteIn(bot.threadId);
 
@@ -1100,7 +1102,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               {t("chat.backToMainThread")}
             </button>
           )}
-          {showThreads && !phone && <ThreadTabs bot={profile} dispatch={dispatch} />}
+          {threadTabsVisible && <ThreadTabs bot={profile} dispatch={dispatch} />}
         </div>
         <div
           data-chathead-controls
@@ -1170,6 +1172,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
 
       <div
         ref={scrollRef}
+        role={threadTabsVisible ? "tabpanel" : undefined}
+        id={threadTabsVisible ? CHAT_THREAD_PANEL_ID : undefined}
+        aria-labelledby={threadTabsVisible ? threadTabId(bot.threadId) : undefined}
         className="glass-scroller h-full overflow-x-hidden overflow-y-auto overscroll-y-contain px-5 [overflow-anchor:none]"
         // Simple mode's composer sits on plain canvas, so a row scrolled into view stops clear of it.
         style={advanced ? undefined : { scrollPaddingBottom: composerDock.pad }}
