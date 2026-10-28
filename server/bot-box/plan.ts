@@ -162,9 +162,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     rw(dataDir);
   }
   if (ownHome) rw(ownHome);
-  const dataHidden = !mutate.has("bind-data");
-  /** A path is already readable and writable through an earlier line (and not hidden by the data folder's tmpfs). */
-  const covered = (path: string) => (ownHome !== null && under(path, ownHome)) || (writable.some((root) => under(path, root)) && !(dataHidden && under(path, dataDir)));
+  const covered = (path: string) => mountAccess(mounts, path) === "rw";
 
   const cwd = request.cwd ? resolve(request.cwd) : null;
   const ids = cwd ? taskWorkspaceIds(cwd, dataDir) : null;
@@ -194,13 +192,9 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     const engines = resolve(root);
     mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source: engines, target: engines, optional: true });
   }
-  const readOnly = new Set<string>();
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args)]) {
     const full = resolve(path);
-    // Code and the system are already there; a file under HOME or /tmp the command line names is put back read-only.
-    if (covered(full) || readOnly.has(full)) continue;
-    if (["/usr", "/etc", "/opt", "/var/lib", ...setup.codeRoots, ...setup.engineRoots].some((base) => under(full, resolve(base)))) continue;
-    readOnly.add(full);
+    if (mountAccess(mounts, full) !== "none") continue;
     mounts.push({ kind: "ro", source: full, target: full, optional: true });
   }
 
@@ -236,9 +230,13 @@ export function bwrapArgs(plan: BoxPlan): string[] {
 
 /** Whether `path` is visible inside the box, by the plan alone: the last line that covers it decides. */
 export function visibleInBox(plan: BoxPlan, path: string): "rw" | "ro" | "none" {
+  return mountAccess(plan.mounts, path);
+}
+
+function mountAccess(mounts: readonly Mount[], path: string): "rw" | "ro" | "none" {
   const full = resolve(path);
   let verdict: "rw" | "ro" | "none" = "none";
-  for (const mount of plan.mounts) {
+  for (const mount of mounts) {
     if (mount.kind === "symlink") continue;
     if (!under(full, mount.target)) continue;
     if (mount.kind === "bind") verdict = "rw";
