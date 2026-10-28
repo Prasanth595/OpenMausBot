@@ -6608,7 +6608,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const message = pushMessage({
           role: "bot",
           kind: "activity",
-          tool: { name, spoken: narrateTool(name) ?? undefined, summary: event.summary, input: event.input, itemId: event.itemId ?? event.eventId },
+          tool: { name, spoken: narrateTool(name) ?? undefined, ...(event.step ? { step: event.step } : {}), summary: event.summary, input: event.input, itemId: event.itemId ?? event.eventId },
           turnId: liveTurnId,
         });
         if (event.itemId) toolMessageByItem.set(`${event.threadId}:${event.itemId}`, message.id);
@@ -12518,7 +12518,7 @@ ROUTES.push(createBotMessageRoutes({
     { emoji, name: person.name ?? person.email, at: Date.now() }),
 }));
 const chatApps = createChatApps({ store, dataDir: DATA_DIR });
-const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, oauth: mcpOAuth });
+const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, personMcp: teamConnections.personMcp, oauth: mcpOAuth });
 ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc }));
 const { react } = createReactions({
   store, reply: (input) => personReplies.deliver({ ...input, about: "message" }),
@@ -12780,7 +12780,7 @@ ROUTES.push(createInstanceRoutes({
   cliProbeEnvironment, threadBusy, botForThread, activeGroupTurnForBot, checkInstance: testedAi.check,
 }));
 ROUTES.push(createMcpServerRoutes({
-  cfg, sessions, mcpOAuth,
+  cfg, sessions, mcpOAuth, teamConnections,
   cloudHome: CLOUD_HOME,
   fallbackPublicUrl: FALLBACK_PUBLIC_URL,
   mcpConfigBusy: { get: () => mcpConfigBusy, set: (busy) => { mcpConfigBusy = busy; } },
