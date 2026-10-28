@@ -72,11 +72,15 @@ export function personTextRequest(message: Message): boolean {
     || message.via || message.relayed || message.setupRequest || message.steered || message.aside);
 }
 
-const READ_ONLY_TOOLS: ReadonlySet<string> = new Set(["Read", "Glob", "Grep", "LS", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch"]);
+const HARMLESS_TOOLS: ReadonlySet<string> = new Set([
+  "Read", "Glob", "Grep", "LS", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch", "mcp__agents__select_computer",
+]);
 const COMPUTER_TOOL_PREFIX = "mcp__computer__";
 
-export function otherToolsReadOnly(lines: readonly Message[]): boolean {
-  return lines.every(({ tool }) => tool?.itemId === undefined || tool.name.startsWith(COMPUTER_TOOL_PREFIX) || READ_ONLY_TOOLS.has(tool.name));
+const computerTool = (name: string): boolean => name.startsWith(COMPUTER_TOOL_PREFIX) || isActionTool(name) || OBSERVATION_TOOLS.has(name);
+
+export function otherToolsHarmless(lines: readonly Message[]): boolean {
+  return lines.every(({ tool }) => tool?.itemId === undefined || computerTool(tool.name) || HARMLESS_TOOLS.has(tool.name));
 }
 
 export function stepLabel(step: RecipeStep): string {

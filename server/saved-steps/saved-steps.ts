@@ -8,7 +8,7 @@ import type { Message } from "../store.ts";
 import { openComputerCaller } from "./computer-client.ts";
 import { SavedStepsDispatch, type EngineSlots } from "./dispatch.ts";
 import { ComputerJournal, hostScope, type JournalCapability, type RequestJournal } from "./journal.ts";
-import { buildRecipe, otherToolsReadOnly, personTextRequest } from "./rules.ts";
+import { buildRecipe, otherToolsHarmless, personTextRequest } from "./rules.ts";
 import { RecipeStore } from "./store.ts";
 
 export { COMPUTER_JOURNAL_PATH } from "./journal-tap.ts";
@@ -80,7 +80,7 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
       deps.patchMessage(threadId, reply.id, { savedSteps: { recipeId: replayed, replayed: true } });
       return;
     }
-    if (!deps.enabled() || automated || !taken?.calls.length || !personTextRequest(request) || after.some((line) => line.role === "user") || !otherToolsReadOnly(after)) return;
+    if (!deps.enabled() || automated || !taken?.calls.length || !personTextRequest(request) || after.some((line) => line.role === "user") || !otherToolsHarmless(after)) return;
     const built = buildRecipe({ request: request.text ?? "", reply: reply.text ?? "", journal: taken, id: randomUUID(), now: now() });
     if (!built.ok) return;
     recipes.save(botId, built.recipe);

@@ -255,6 +255,19 @@ describe("SavedSteps.requestSettled", () => {
     expect(saved()?.steps).toHaveLength(2);
   });
 
+  it("saves a select_computer hand-off whose second turn did the computer work", () => {
+    record(textEditJournal().calls.map((call) => ({ ...call, generation: "g2" })));
+    steps.requestSettled(settled({ generations: new Set(["g1", "g2"]), after: [toolLine("mcp__agents__select_computer", 9), ...COMPUTER_LINES, REPLY] }));
+    expect(saved()?.steps).toHaveLength(2);
+  });
+
+  it("saves a run whose engine names the computer's tools without their server prefix", () => {
+    record(textEditJournal().calls);
+    const bare = ["list_apps", "list_windows", "get_window_state", "click", "type_text"].map((name, index) => toolLine(name, 20 + index));
+    steps.requestSettled(settled({ after: [...bare, REPLY] }));
+    expect(saved()?.steps).toHaveLength(2);
+  });
+
   it("saves a computer-only run beside rows that are not tool calls", () => {
     record(textEditJournal().calls);
     const notice: Message = { id: "notice", at: 9, role: "bot", kind: "activity", tool: { name: "Bash", ok: true } };
@@ -262,7 +275,7 @@ describe("SavedSteps.requestSettled", () => {
     expect(saved()?.steps).toHaveLength(2);
   });
 
-  it.each(["Bash", "Write", "Edit", "NotebookEdit", "mcp__gmail__send_email", "mcp__browser__navigate", "mcp__agents__select_computer", "Task", "click"])(
+  it.each(["Bash", "Write", "Edit", "NotebookEdit", "mcp__gmail__send_email", "mcp__browser__navigate", "mcp__agents__use_tool", "Task", "apply_patch", "edit", "rm -rf ~/Desktop/notes"])(
     "saves nothing when the run also used %s",
     (tool) => {
       record(textEditJournal().calls);
