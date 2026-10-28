@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { customMcpServers, type AppConfig } from "./config.ts";
@@ -25,20 +25,21 @@ const python = (script: string) => ({ command: "/usr/bin/python3", args: [script
 
 describe("whose folders a command server's files are in", () => {
   it("names the bot of a workspace path, and the conversation entry of a task-workspace path", () => {
-    const data = "/data";
-    expect(botFolderUse(python("/data/workspaces/iris/tools/blender-mcp/server.py"), data)).toEqual({ botId: "iris", temporary: [] });
-    expect(botFolderUse(python("/data/task-workspaces/iris/t1/blender-mcp/server.py"), data))
-      .toEqual({ botId: "iris", temporary: ["/data/task-workspaces/iris/t1/blender-mcp"] });
-    expect(botFolderUse({ command: "node", args: ["--root=/data/task-workspaces/iris/t2"], env: {} }, data))
-      .toEqual({ botId: "iris", temporary: ["/data/task-workspaces/iris/t2"] });
-    expect(botFolderUse({ command: "python3", args: ["-m", "srv"], env: { PYTHONPATH: "/data/workspaces/iris/tools/lib" } }, data))
+    const data = resolve("/data"), at = (...parts: string[]) => join(data, ...parts);
+    expect(botFolderUse(python(at("workspaces", "iris", "tools", "blender-mcp", "server.py")), data)).toEqual({ botId: "iris", temporary: [] });
+    expect(botFolderUse(python(at("task-workspaces", "iris", "t1", "blender-mcp", "server.py")), data))
+      .toEqual({ botId: "iris", temporary: [at("task-workspaces", "iris", "t1", "blender-mcp")] });
+    expect(botFolderUse({ command: "node", args: [`--root=${at("task-workspaces", "iris", "t2")}`], env: {} }, data))
+      .toEqual({ botId: "iris", temporary: [at("task-workspaces", "iris", "t2")] });
+    expect(botFolderUse({ command: "python3", args: ["-m", "srv"], env: { PYTHONPATH: at("workspaces", "iris", "tools", "lib") } }, data))
       .toEqual({ botId: "iris", temporary: [] });
   });
 
   it("is no bot's for a command outside the data folder, and several bots' when it mixes them", () => {
-    expect(botFolderUse({ command: "npx", args: ["-y", "@x/notes-mcp"], env: {} }, "/data")).toBeNull();
-    expect(botFolderUse(python("/elsewhere/workspaces/iris/server.py"), "/data")).toBeNull();
-    expect(botFolderUse({ command: "/usr/bin/python3", args: ["/data/workspaces/iris/a.py", "/data/workspaces/paul/b.py"], env: {} }, "/data")).toBe("several");
+    const data = resolve("/data");
+    expect(botFolderUse({ command: "npx", args: ["-y", "@x/notes-mcp"], env: {} }, data)).toBeNull();
+    expect(botFolderUse(python(resolve("/elsewhere", "workspaces", "iris", "server.py")), data)).toBeNull();
+    expect(botFolderUse({ command: "/usr/bin/python3", args: [join(data, "workspaces", "iris", "a.py"), join(data, "workspaces", "paul", "b.py")], env: {} }, data)).toBe("several");
   });
 });
 
