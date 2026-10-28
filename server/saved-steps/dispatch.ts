@@ -25,7 +25,8 @@ export interface DispatchDeps {
   engines: EngineSlots;
   stopped(threadId: string): boolean;
   openCaller(computer: LocalComputerSpec, signal: AbortSignal): Promise<ComputerCaller & { close(): Promise<void> }>;
-  /** The request whose turn begins with a replay saves no steps: the screen it starts from is not the one the steps did.
+  /** Keeps the request from saving steps. A turn that begins with a replay starts from a screen the steps already changed;
+   * a turn that sends more than the request's own line did work its words do not name.
    * False when the request cannot be marked, and then no replay runs. */
   taint(threadId: string): boolean;
 }
@@ -61,6 +62,7 @@ export class SavedStepsDispatch {
 
   sendTurn(engine: ProviderInstance, request: ReplayRequest | null, input: SendTurnInput, start: Start): Promise<TurnStartResult> {
     this.runs.delete(input.threadId);
+    if (request && request.turnText !== request.message.text) this.deps.taint(input.threadId);
     const computer = input.integrations?.localComputer;
     const recipe = request && computer ? this.recipeFor(request, input) : undefined;
     if (!request || !computer || !recipe || !this.deps.taint(input.threadId)) return start(input);

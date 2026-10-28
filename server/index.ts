@@ -1541,10 +1541,10 @@ utilityParentPort?.on("message", (event) => {
   }
 });
 
-const savedSteps = createSavedSteps({ enabled: () => savedStepsEnabled(cfg), publish: (event) => bus.publish(event), engines: { get: (threadId) => runningTurnEngines.get(threadId), set: (threadId, engine) => { runningTurnEngines.set(threadId, engine); } }, stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true, generation: (threadId) => directTurnGenerationByThread.get(threadId) });
+const savedSteps = createSavedSteps({ enabled: () => savedStepsEnabled(cfg), publish: (event) => bus.publish(event), engines: { get: (threadId) => runningTurnEngines.get(threadId), set: (threadId, engine) => { runningTurnEngines.set(threadId, engine); } }, stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true, generation: (threadId) => directTurnGenerationByThread.get(threadId), patchMessage: (threadId, messageId, patch) => { store.patchMessage(threadId, messageId, patch); } });
 const quickFallback = new QuickModelFallback({ file: join(DATA_DIR, "refused-quick-models.json"), publish: (event) => { if (!savedSteps.dispatch.take(event)) bus.publish(event); }, stopped: (threadId) => directRequestOwners.get(threadId)?.stopped === true });
 const bus = new EventBus(undefined, (event) => quickFallback.take(event) || savedSteps.dispatch.take(event));
-bus.attach(registry.instances());
+bus.attach(registry.instances()); bus.subscribe((event) => savedSteps.observe(event));
 let companyRuntimeReady!: () => void;
 const companyRuntimeStarted = new Promise<void>(resolve => { companyRuntimeReady = resolve; });
 const managedPolicy = new ManagedDesktopPolicy({ onChange: () => {
@@ -4756,7 +4756,7 @@ function settleTrackedRequest(threadId: string, incoming: ReadonlySet<string> = 
   if (messages.some(requestNeedsInput) || terminal?.requestMessageId !== source.id || !terminal.turnSucceeded ||
       terminal.turnId !== owner.turnId || messages.findLast(message => message.turnId)?.turnId !== terminal.turnId ||
       messages.findLast(message => message.turnSucceeded !== undefined)?.turnSucceeded !== true) return;
-  store.patchMessage(threadId, source.id, { requestPending: false });
+  store.patchMessage(threadId, source.id, { requestPending: false }); savedSteps.requestSettled({ botId: bot.id, threadId, request: source, reply: terminal, after: messages, generations: owner.generations, automated: owner.automation !== undefined });
 }
 
 function messageWindow(threadId: string, messageId: string, limit: number) {
@@ -7939,7 +7939,7 @@ async function startTurn(
   const previousRequest = directRequestOwners.get(threadId);
   // Close the previous request first, or it reads unsettled forever.
   if (previousRequest && previousRequest.messageId !== requestMessageId) {
-    settleTrackedRequest(threadId, new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])]));
+    settleTrackedRequest(threadId, new Set([userMessage.id, ...(opts?.excludeMessageIds ?? [])])); savedSteps.requestEnded(threadId, previousRequest.generations);
   }
   const requestGenerations = requestMessageId && previousRequest?.messageId === requestMessageId
     ? previousRequest.generations : new Set<string>();

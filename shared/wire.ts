@@ -560,6 +560,9 @@ export interface WireMessage extends HelperIntroField {
   /** The last assistant text item from a settled provider turn. */
   turnTerminal?: boolean;
   turnCompletedAt?: number;
+  /** Set on the reply of a request whose computer steps were saved (`learned`) or that was answered from saved steps
+   * with no AI (`replayed`). Clients that do not know it ignore it. */
+  savedSteps?: { recipeId: string; learned?: true; replayed?: true };
   /** screen messages: a frame of the bot's computer (base64 image) */
   png?: string;
   mime?: string;

@@ -1,11 +1,14 @@
+import { randomUUID } from "node:crypto";
 import { botFolder } from "../bot-folder.ts";
 import type { AppConfig } from "../config.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import { createComputerJournalRoutes } from "../routes/computer-journal.ts";
 import type { RouteHandler } from "../routes/table.ts";
+import type { Message } from "../store.ts";
 import { openComputerCaller } from "./computer-client.ts";
 import { SavedStepsDispatch, type EngineSlots } from "./dispatch.ts";
-import { ComputerJournal, hostScope, type JournalCapability } from "./journal.ts";
+import { ComputerJournal, hostScope, type JournalCapability, type RequestJournal } from "./journal.ts";
+import { buildRecipe, personTextRequest } from "./rules.ts";
 import { RecipeStore } from "./store.ts";
 
 export { COMPUTER_JOURNAL_PATH } from "./journal-tap.ts";
@@ -16,8 +19,19 @@ export interface SavedStepsDeps {
   engines: EngineSlots;
   stopped(threadId: string): boolean;
   generation(threadId: string): string | undefined;
+  patchMessage(threadId: string, messageId: string, patch: Partial<Message>): void;
   folder?: (botId: string) => string;
   now?: () => number;
+}
+
+export interface SettledRequest {
+  botId: string;
+  threadId: string;
+  request: Message;
+  reply: Message;
+  after: readonly Message[];
+  generations: ReadonlySet<string>;
+  automated: boolean;
 }
 
 export interface SavedSteps {
@@ -26,15 +40,28 @@ export interface SavedSteps {
   dispatch: SavedStepsDispatch;
   gateChecked(capability: JournalCapability): void;
   journalRoutes(internal: { capability: JournalCapability; readBody(): Promise<unknown> }): RouteHandler;
+  requestSettled(settled: SettledRequest): void;
+  requestEnded(threadId: string, generations: ReadonlySet<string>): void;
+  observe(event: RuntimeEvent): void;
 }
 
 export function savedStepsEnabled(cfg: Pick<AppConfig, "features">): boolean {
   return cfg.features?.savedSteps !== false;
 }
 
+const denied = (event: RuntimeEvent): boolean =>
+  (event.type === "request.resolved" && event.behavior === "deny") || (event.type === "turn.completed" && (event.denials?.length ?? 0) > 0);
+
 export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
   const journal = new ComputerJournal();
+  const now = deps.now ?? Date.now;
   const recipes = new RecipeStore({ folder: deps.folder ?? botFolder, now: deps.now });
+  const taint = (threadId: string): boolean => {
+    const generation = deps.generation(threadId);
+    if (generation === undefined) return false;
+    journal.taint({ threadId, generation });
+    return true;
+  };
   const dispatch = new SavedStepsDispatch({
     recipes,
     enabled: deps.enabled,
@@ -42,13 +69,24 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
     engines: deps.engines,
     stopped: deps.stopped,
     openCaller: openComputerCaller,
-    taint: (threadId) => {
-      const generation = deps.generation(threadId);
-      if (generation === undefined) return false;
-      journal.taint({ threadId, generation });
-      return true;
-    },
+    taint,
   });
+
+  const markOrSave = ({ botId, threadId, request, reply, after, automated }: SettledRequest, taken: RequestJournal | null): void => {
+    const replayed = reply.turnId === undefined ? undefined : dispatch.replayed(threadId, reply.turnId);
+    if (replayed !== undefined) {
+      recipes.touch(botId, replayed);
+      if (request.quickModel !== undefined) deps.patchMessage(threadId, request.id, { quickModel: undefined });
+      deps.patchMessage(threadId, reply.id, { savedSteps: { recipeId: replayed, replayed: true } });
+      return;
+    }
+    if (!deps.enabled() || automated || !taken?.calls.length || !personTextRequest(request) || after.some((line) => line.role === "user")) return;
+    const built = buildRecipe({ request: request.text ?? "", reply: reply.text ?? "", journal: taken, id: randomUUID(), now: now() });
+    if (!built.ok) return;
+    recipes.save(botId, built.recipe);
+    deps.patchMessage(threadId, reply.id, { savedSteps: { recipeId: built.recipe.id, learned: true } });
+  };
+
   return {
     journal,
     recipes,
@@ -58,5 +96,19 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
       if (scope) journal.gateChecked(scope);
     },
     journalRoutes: (internal) => createComputerJournalRoutes({ ...internal, record: (scope, entry) => journal.record(scope, entry) }),
+    requestSettled(settled) {
+      const taken = journal.take(settled.threadId, settled.generations);
+      try {
+        markOrSave(settled, taken);
+      } catch (error) {
+        console.warn(`saved steps for ${settled.botId} on ${settled.threadId} not saved: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+    requestEnded(threadId, generations) {
+      journal.take(threadId, generations);
+    },
+    observe(event) {
+      if (denied(event)) taint(event.threadId);
+    },
   };
 }

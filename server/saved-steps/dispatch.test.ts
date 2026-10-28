@@ -139,13 +139,26 @@ describe("SavedStepsDispatch.sendTurn", () => {
     ["spoken", { ...REQ, message: { ...REQ.message, via: "call" } }, INPUT],
     ["no saved steps", reworded("open notes"), INPUT],
     ["new words", reworded("open textedit and type hello, world"), INPUT],
-    ["two queued lines sent as one turn", { ...REQ, turnText: `save it to the Desktop\n\n${REQUEST}` }, { ...INPUT, text: `save it to the Desktop\n\n${REQUEST}` }],
   ])("passes through: %s", async (_, request, input) => {
     expect(await dispatch.sendTurn(engine, request as never, input as SendTurnInput, start)).toEqual({ turnId: "e1" });
     expect(start).toHaveBeenCalledWith(input);
     expect(events).toEqual([]);
     expect(openCaller).not.toHaveBeenCalled();
     expect(taint).not.toHaveBeenCalled();
+    expect(slots.get("t1")).toBe(engine);
+  });
+
+  it.each([
+    ["Full access", INPUT],
+    ["Ask", { ...INPUT, approvalMode: "ask" as const }],
+  ])("lets the AI answer two queued lines sent as one turn and keeps that request from saving (%s)", async (_, input) => {
+    const turnText = `close every window without saving\n\n${REQUEST}`;
+    const sent = { ...input, text: turnText };
+    expect(await dispatch.sendTurn(engine, { ...REQ, turnText }, sent, start)).toEqual({ turnId: "e1" });
+    expect(start).toHaveBeenCalledWith(sent);
+    expect(taint).toHaveBeenCalledExactlyOnceWith("t1");
+    expect(openCaller).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
     expect(slots.get("t1")).toBe(engine);
   });
 

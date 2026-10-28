@@ -65,6 +65,17 @@ describe("computer journal", () => {
     expect(j.take("t1", new Set(["g2"]))!.tainted).toBe(false);
   });
 
+  it("is tainted when any turn of the request was, even one that made no calls", () => {
+    const j = new ComputerJournal();
+    j.taint(scope);
+    const g2 = { ...scope, generation: "g2" };
+    j.gateChecked(g2); j.record(g2, CLICK);
+    const taken = j.take("t1", new Set(["g1", "g2"]))!;
+    expect(taken.tainted).toBe(true);
+    expect(taken.complete).toBe(true);
+    expect(taken.calls.map((c) => [c.tool, c.generation])).toEqual([["click", "g2"]]);
+  });
+
   it("keeps a gate-refused entry in the journal", () => {
     const j = new ComputerJournal(); j.gateChecked(scope); j.record(scope, { ...CLICK, result: { isError: true } });
     const taken = j.take("t1", new Set(["g1"]))!;
@@ -88,7 +99,7 @@ describe("computer journal", () => {
   });
 
   it("counts gate checks only for host computer turns", () => {
-    const saved = createSavedSteps({ enabled: () => true, publish: () => {}, engines: { get: () => undefined, set: () => {} }, stopped: () => false, generation: () => "g1" });
+    const saved = createSavedSteps({ enabled: () => true, publish: () => {}, engines: { get: () => undefined, set: () => {} }, stopped: () => false, generation: () => "g1", patchMessage: () => {} });
     saved.gateChecked({ ...scope, kind: "computer", boxId: null });
     saved.gateChecked({ ...scope, kind: "browser" });
     expect(saved.journal.take("t1", new Set(["g1"]))).toBeNull();

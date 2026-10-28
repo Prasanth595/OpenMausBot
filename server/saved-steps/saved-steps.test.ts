@@ -1,12 +1,15 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderInstance, RuntimeEvent, SendTurnInput, TurnStartResult } from "../contracts.ts";
+import type { Message } from "../store.ts";
+import { textEditJournal } from "../testing/saved-steps-fixtures.ts";
+import type { RecordedCall } from "./journal.ts";
 import { requestKey } from "./key.ts";
 import type { Recipe, RecipeStep } from "./rules.ts";
-import { createSavedSteps, savedStepsEnabled } from "./saved-steps.ts";
+import { createSavedSteps, savedStepsEnabled, type SavedSteps, type SavedStepsDeps, type SettledRequest } from "./saved-steps.ts";
 
 const FAKE = fileURLToPath(new URL("../testing/fake-mcp-server.ts", import.meta.url));
 const REQUEST = "Open TextEdit and type hello world";
@@ -46,6 +49,7 @@ describe("createSavedSteps", () => {
       engines: { get: (threadId) => slots.get(threadId), set: (threadId, engine) => { slots.set(threadId, engine); } },
       stopped: () => false,
       generation: () => undefined,
+      patchMessage: () => {},
       folder: (botId) => join(dir, botId),
     });
     steps.recipes.save("b1", RECIPE);
@@ -73,6 +77,7 @@ describe("createSavedSteps", () => {
       engines: { get: (threadId) => slots.get(threadId), set: (threadId, engine) => { slots.set(threadId, engine); } },
       stopped: () => false,
       generation: (threadId) => (threadId === "t1" ? "g1" : undefined),
+      patchMessage: () => {},
       folder: (botId) => join(dir, botId),
     });
     steps.recipes.save("b1", RECIPE);
@@ -89,5 +94,159 @@ describe("createSavedSteps", () => {
     expect(steps.recipes.find("b1", RECIPE.key)).toBeUndefined();
     expect(events[0]).toMatchObject({ type: "turn.started", turnId });
     expect(slots.get("t1")).toBe(engine);
+  });
+});
+
+describe("SavedSteps.requestSettled", () => {
+  const NOW = Date.UTC(2026, 9, 28);
+  const LINE: Message = { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST };
+  const REPLY: Message = {
+    id: "reply-1", at: 2, role: "bot", kind: "text", text: "Typed hello world into TextEdit. Nothing else changed.",
+    turnId: "turn-1", requestMessageId: "m1", turnTerminal: true, turnSucceeded: true,
+  };
+  let steps: SavedSteps;
+  let patches: Array<[string, string, Partial<Message>]>;
+  let enabled: boolean;
+  let folder: string;
+
+  const facade = (change: Partial<SavedStepsDeps> = {}) => createSavedSteps({
+    enabled: () => enabled,
+    publish: () => {},
+    engines: { get: () => undefined, set: () => {} },
+    stopped: () => false,
+    generation: (threadId) => (threadId === "t1" ? "g1" : undefined),
+    patchMessage: (threadId, messageId, patch) => { patches.push([threadId, messageId, patch]); },
+    folder: (botId) => join(folder, botId),
+    now: () => NOW,
+    ...change,
+  });
+  const settled = (change: Partial<SettledRequest> = {}): SettledRequest => ({
+    botId: "b1", threadId: "t1", request: LINE, reply: REPLY, after: [REPLY], generations: new Set(["g1"]), automated: false, ...change,
+  });
+  const record = (calls: readonly RecordedCall[]) => {
+    for (const { generation, ...entry } of calls) {
+      const scope = { botId: "b1", threadId: "t1", generation };
+      steps.journal.gateChecked(scope);
+      steps.journal.record(scope, entry);
+    }
+  };
+  const saved = () => steps.recipes.find("b1", requestKey(REQUEST));
+
+  beforeEach(() => {
+    folder = mkdtempSync(join(tmpdir(), "omb-saved-steps-settle-"));
+    dirs.push(folder);
+    patches = [];
+    enabled = true;
+    steps = facade();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("saves a settled host run and marks the reply", () => {
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
+    const recipe = steps.recipes.find("b1", "open textedit and type hello world")!;
+    expect(recipe).toMatchObject({ request: REQUEST, reply: "Typed hello world into TextEdit.", createdAt: NOW, lastUsedAt: NOW });
+    expect(recipe.steps.map((step) => step.tool)).toEqual(["click", "type_text"]);
+    expect(patches).toEqual([["t1", "reply-1", { savedSteps: { recipeId: recipe.id, learned: true } }]]);
+  });
+
+  it("marks a replayed reply, touches its recipe and clears the quick model label", () => {
+    steps.recipes.save("b1", { ...RECIPE, createdAt: NOW - 5_000, lastUsedAt: NOW - 5_000 });
+    const replayed = vi.spyOn(steps.dispatch, "replayed").mockImplementation((threadId, turnId) => (threadId === "t1" && turnId === "turn-r" ? "r1" : undefined));
+    steps.journal.taint({ threadId: "t1", generation: "g1" });
+    const reply: Message = { ...REPLY, id: "reply-r", turnId: "turn-r", text: RECIPE.reply };
+
+    steps.requestSettled(settled({ request: { ...LINE, quickModel: "Haiku 4.5" }, reply, after: [reply] }));
+
+    expect(replayed).toHaveBeenCalledWith("t1", "turn-r");
+    expect(patches).toStrictEqual([["t1", "m1", { quickModel: undefined }], ["t1", "reply-r", { savedSteps: { recipeId: "r1", replayed: true } }]]);
+    expect(steps.recipes.find("b1", RECIPE.key)).toMatchObject({ id: "r1", createdAt: NOW - 5_000, lastUsedAt: NOW });
+    expect(steps.journal.take("t1", new Set(["g1"]))).toBeNull();
+  });
+
+  it("leaves the request line alone when a replayed request had no quick model label", () => {
+    steps.recipes.save("b1", RECIPE);
+    vi.spyOn(steps.dispatch, "replayed").mockReturnValue("r1");
+    steps.requestSettled(settled());
+    expect(patches).toStrictEqual([["t1", "reply-1", { savedSteps: { recipeId: "r1", replayed: true } }]]);
+  });
+
+  it.each<[string, { enabled?: boolean; automated?: boolean; after?: Message[]; request?: Partial<Message>; calls?: RecordedCall[] }]>([
+    ["the setting is off", { enabled: false }],
+    ["the request was automated", { automated: true }],
+    ["a person line followed", { after: [{ id: "m2", at: 3, role: "user", kind: "text", text: "faster" }] }],
+    ["the request was spoken", { request: { via: "call" } }],
+    ["nothing touched the computer", { calls: [] }],
+  ])("saves nothing when %s", (_, change) => {
+    enabled = change.enabled ?? true;
+    record(change.calls ?? textEditJournal().calls);
+    steps.requestSettled(settled({
+      automated: change.automated ?? false,
+      after: [REPLY, ...(change.after ?? [])],
+      request: { ...LINE, ...change.request },
+    }));
+    expect(saved()).toBeUndefined();
+    expect(patches).toEqual([]);
+  });
+
+  it("saves nothing for a request whose turn began with a replay", () => {
+    steps.journal.taint({ threadId: "t1", generation: "g1" });
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
+    expect(saved()).toBeUndefined();
+    expect(patches).toEqual([]);
+  });
+
+  it("a denial during the request stops it saving", () => {
+    record(textEditJournal().calls);
+    steps.observe({ type: "turn.completed", threadId: "t1", turnId: "x", ok: true, denials: ["Bash"] } as RuntimeEvent);
+    steps.requestSettled(settled());
+    expect(saved()).toBeUndefined();
+    expect(patches).toEqual([]);
+  });
+
+  it("a denied approval during the request stops it saving", () => {
+    steps.observe({ type: "request.resolved", threadId: "t1", turnId: "x", requestId: "q1", behavior: "deny", source: "user" } as RuntimeEvent);
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
+    expect(saved()).toBeUndefined();
+    expect(patches).toEqual([]);
+  });
+
+  it("an allowed approval and a turn with no denials leave it saveable", () => {
+    steps.observe({ type: "request.resolved", threadId: "t1", turnId: "x", requestId: "q1", behavior: "allow", source: "user" } as RuntimeEvent);
+    record(textEditJournal().calls);
+    steps.observe({ type: "turn.completed", threadId: "t1", turnId: "x", ok: true, denials: [] as string[] } as RuntimeEvent);
+    steps.observe({ type: "request.resolved", threadId: "t2", turnId: "y", requestId: "q2", behavior: "deny", source: "user" } as RuntimeEvent);
+    steps.requestSettled(settled());
+    expect(saved()?.steps).toHaveLength(2);
+  });
+
+  it("frees the journal even when it saves nothing", () => {
+    enabled = false;
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
+    expect(steps.journal.take("t1", new Set(["g1"]))).toBeNull();
+  });
+
+  it("frees a request that ended without settling, so its calls never crowd out the next request's", () => {
+    const leftover = { ...textEditJournal().calls[0]!, generation: "g0" };
+    record(Array.from({ length: 400 }, () => leftover));
+    steps.requestEnded("t1", new Set(["g0"]));
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
+    expect(saved()?.steps).toHaveLength(2);
+  });
+
+  it("keeps settling when the recipe cannot be written", () => {
+    writeFileSync(join(folder, "blocked"), "");
+    steps = facade({ folder: (botId) => join(folder, "blocked", botId) });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    record(textEditJournal().calls);
+    expect(() => steps.requestSettled(settled())).not.toThrow();
+    expect(patches).toEqual([]);
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });
