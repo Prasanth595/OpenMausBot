@@ -9820,6 +9820,7 @@ describe("harness HTTP API", () => {
     const folder = join(home, ".openmausbot", "browser-uploads");
     const backup = folder + ".backup";
     let blockedFolder = false;
+    let pending: Promise<Response> | undefined;
     try {
       expect((await api("PATCH", "/api/config", {
         features: { browser: true }, browserEngine: { engine: "chrome" },
@@ -9846,7 +9847,7 @@ describe("harness HTTP API", () => {
         blockedFolder = true;
       }
       if (mode === "changed" || mode === "stop") writeFileSync(gate, files[0]!);
-      const pending = fetch(`${BASE}/api/internal/browser/mcp`, {
+      pending = fetch(`${BASE}/api/internal/browser/mcp`, {
         method: "POST", headers: {
           "content-type": "application/json",
           authorization: `Bearer ${dump.mcpConfig.mcpServers.browser.env.OMB_MCP_TOKEN_BROWSER}`,
@@ -9867,6 +9868,7 @@ describe("harness HTTP API", () => {
     } finally {
       writeFileSync(gate + ".release", "");
       await api("POST", `/api/bots/${bot.id}/interrupt`, {}).catch(() => undefined);
+      await pending?.catch(() => undefined);
       for (const file of [gate, gate + ".entered", gate + ".release"]) rmSync(file, { force: true });
       if (blockedFolder) {
         rmSync(folder, { force: true });
