@@ -60,8 +60,11 @@ export function useWorkspacePlace({ cloudHome = false, howTo = false, onMenuClos
   const [error, setError] = useState("");
   useEffect(() => {
     let alive = true;
-    void bridge?.state().then((state) => { if (alive) setCurrent(state); }).catch(() => {});
-    return () => { alive = false; };
+    const read = () => void bridge?.state().then((state) => { if (alive) setCurrent(state); }).catch(() => {});
+    read();
+    // Main's word that a place changed (its colour, say): the switcher's dot follows.
+    const off = bridge?.onChanged?.(read);
+    return () => { alive = false; off?.(); };
   }, [bridge]);
   const power = useCloudPower(cloudHome || current?.home === true);
   const onLine = power.sleeps === null ? "" : t(power.sleeps ? "cloudSetup.sleepsWhenIdle" : "cloudSetup.alwaysOn");

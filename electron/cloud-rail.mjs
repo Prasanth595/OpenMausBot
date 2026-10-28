@@ -7,11 +7,16 @@
 // would learn the names of the person's other places; it gets none, and the native Server menu stays its switcher. A
 // circle names a saved place by its id; main opens only an id it listed itself.
 import environments from "./environments.cjs";
-import { cleanCloudListName, CLOUD_SWATCHES, cloudSetupProgress, otherOwnClouds, ownCloud, stepProgress, swatchColor } from "./cloud-list.mjs";
+import { cleanCloudListName, CLOUD_SWATCHES, cloudSetupProgress, otherOwnClouds, ownCloud, signedInServers, stepProgress, swatchColor } from "./cloud-list.mjs";
 import { machineSetup } from "./cloud-home.mjs";
 
 export const RAIL_MIN_PLACES = 2;
 const PENDING = "pending:";
+const SIGNED_IN = "signed-in:";
+
+/** A server or computer of the person's own that signed in with their account, as its circle says it: online while the
+ * Admin heard from it in the last few minutes, else offline since when it was last seen. */
+const serverState = listed => ({ server: true, ...(listed.status !== "ready" ? { offline: true } : {}), ...(listed.lastSeenAt ? { lastSeenAt: listed.lastSeenAt } : {}) });
 
 /** A Cloud's address is one MausBot runs for this person: My Cloud (`mine`), or a Cloud the verified session lists on
  * MausBot Cloud. Without the session's list of Clouds (an older Admin), a team's Cloud it lists, all of which MausBot runs. */
@@ -40,14 +45,16 @@ function circle(entry, { activeId, mine, state }) {
   const problem = listed ? listed.status === "payment_problem" && listed.role === "owner" : entry.origin === mine && machine?.status === "payment-problem";
   const color = environments.ENTRY_COLORS.includes(entry.color) ? entry.color : listed ? swatchColor(listed.color) : null;
   return { id: entry.id, name: entry.name, color, kind, opens: true, ...(entry.id === activeId ? { active: true } : {}),
-    ...(progress !== null ? { progress } : {}), ...(problem ? { attention: true } : {}) };
+    ...(progress !== null ? { progress } : {}), ...(problem ? { attention: true } : {}), ...(listed?.managed === false ? serverState(listed) : {}) };
 }
 
 /**
  * The circles, in the Server menu's order: This computer while it is a place (before the move made My Cloud home, `home`
  * null), My Cloud, the person's other Clouds and their teams' Clouds in the session's order, then servers saved by hand.
- * A Cloud of theirs the Admin is still making (no address yet) is there too, not yet to open. Fewer than RAIL_MIN_PLACES
- * places besides this computer: no rail at all, the window as it was.
+ * A server of theirs that signed in with their account comes next: one saved here already is that saved place (online
+ * or not), one not connected to this app yet shows how to connect it, and one only reachable on its own network has
+ * nothing to open. A Cloud of theirs the Admin is still making (no address yet) is there too, not yet to open. Fewer
+ * than RAIL_MIN_PLACES places besides this computer: no rail at all, the window as it was.
  * @param {{ saved: { environments: any[], activeId: string }, home?: string | null, mine?: string | null, state?: any }} input
  */
 export function railPlaces({ saved, home = null, mine = null, state = null }) {
@@ -62,7 +69,11 @@ export function railPlaces({ saved, home = null, mine = null, state = null }) {
   const making = otherOwnClouds(clouds).filter(cloud => !cloud.origin && ["checkout", "setting_up"].includes(cloud.status))
     .map(cloud => ({ id: `${PENDING}${cloud.id}`, name: cloud.name, color: swatchColor(cloud.color), kind: "cloud", opens: false, progress: cloudSetupProgress(cloud) ?? 0,
       ...(cloud.status === "checkout" ? { waiting: true } : {}) }));
-  const places = [...remote, ...making];
+  const savedOrigins = new Set(saved.environments.map(entry => entry.origin).filter(Boolean));
+  const servers = signedInServers(clouds).filter(cloud => !cloud.origin || !savedOrigins.has(cloud.origin))
+    .map(cloud => ({ id: `${SIGNED_IN}${cloud.id}`, name: cloud.name, color: swatchColor(cloud.color), kind: "server", opens: false,
+      ...(cloud.origin ? { pairs: true } : { ownNetwork: true }), ...serverState(cloud) }));
+  const places = [...remote, ...servers, ...making];
   if (places.length < RAIL_MIN_PLACES) return [];
   return home ? places : [{ id: environments.LOCAL_ID, name: "This computer", color: null, kind: "computer", opens: true, ...(saved.activeId === environments.LOCAL_ID ? { active: true } : {}) }, ...places];
 }

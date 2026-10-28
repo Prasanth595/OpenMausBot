@@ -18,7 +18,7 @@ const grant = (origin) => ({ cloudContractVersion: 1, origin, code: "ABCD-EFGH-J
 async function admin(t) {
   const f = { requests: [], browsers: [], timer: null, delay: null,
     session: { cloud: { state: "ready", origin: HOME, pairingAvailable: true } },
-    pairing: () => [200, grant(HOME)], add: () => [404, { error: "not_found" }] };
+    pairing: () => [200, grant(HOME)], add: () => [404, { error: "not_found" }], patch: () => [404, { error: "not_found" }] };
   const server = createServer(async (req, res) => {
     let body = ""; for await (const chunk of req) body += chunk;
     const parsed = body ? JSON.parse(body) : undefined;
@@ -29,6 +29,7 @@ async function admin(t) {
       account: { id: "acct-1", email: "person@example.test" }, entitlement: paid, ...f.session }]);
     if (req.url === "/api/cloud/desktop/pairing" && req.method === "POST") return send(f.pairing(parsed));
     if (req.url === "/api/cloud/desktop/clouds" && req.method === "POST") return send(f.add(parsed));
+    if (req.url.startsWith("/api/cloud/desktop/clouds/") && req.method === "PATCH") return send(f.patch(decodeURIComponent(req.url.slice("/api/cloud/desktop/clouds/".length)), parsed));
     if (req.url === "/api/public/config") return send([200, { plans: [{ tier: "pro", price: { currency: "USD", interval: "month", amount: 4900 } }], trial: { days: 7 } }]);
     send([404, { error: "not_found" }]);
   });
@@ -140,4 +141,37 @@ test("a Cloud waiting at checkout that this app did not open (it restarted mid-c
   assert.deepEqual(state.adding, { cloudId: "c-b", name: "Client B", color: "violet", tier: "pro", startedAt: NOW });
   assert.equal(f.delay, 60_000, "a checkout this app did not open is not polled every few seconds");
   assert.equal(await f.client.reopenAdd(), false, "no page kept here to reopen");
+});
+
+test("a Cloud's colour is the Admin's: PATCH with the swatch, then the session read again; someone else's say, an older Admin and a signed-in server are said plainly", async t => {
+  const f = await admin(t);
+  const MINI = entry({ id: "s-mini", name: "Mac mini", runsOn: "server", managed: false, status: "ready", origin: "https://mini.example.ts.net" });
+  f.session = { ...f.session, clouds: [PRIMARY, entry(), MINI] };
+  await f.client.start();
+  assert.equal(f.client.isOwnCloud("https://mini.example.ts.net"), false, "a server that only signed in is no Cloud of theirs");
+  f.patch = (id, body) => {
+    f.session = { ...f.session, clouds: [PRIMARY, entry({ color: body.color }), MINI] };
+    return [200, { cloudContractVersion: 1, cloud: entry({ color: body.color }) }];
+  };
+  const reads = () => f.requests.filter(row => row.route === "/api/cloud/desktop/session").length, before = reads();
+  assert.deepEqual(await f.client.setCloudColor("c-a", "rose"), { outcome: "saved" });
+  assert.deepEqual(f.requests.find(row => row.method === "PATCH"), { route: "/api/cloud/desktop/clouds/c-a", method: "PATCH", body: { color: "rose" } });
+  assert.equal(reads(), before + 1, "the session is read again, so every place follows the Admin");
+  assert.equal(f.client.state().clouds.find(cloud => cloud.id === "c-a").color, "rose");
+  await f.client.setCloudColor("c-home", null);
+  assert.deepEqual(f.requests.at(-2).body, { color: null }, "none: the plain look");
+  f.patch = () => [403, { error: "forbidden" }];
+  assert.deepEqual(await f.client.setCloudColor("c-a", "blue"), { outcome: "refused" });
+  for (const status of [404, 405, 501]) {
+    f.patch = () => [status, { error: "not_found" }];
+    assert.deepEqual(await f.client.setCloudColor("c-a", "blue"), { outcome: "unsupported" }, String(status));
+  }
+  f.patch = () => [500, { error: "server_error" }];
+  assert.deepEqual(await f.client.setCloudColor("c-a", "blue"), { outcome: "failed" });
+  const patches = f.requests.filter(row => row.method === "PATCH").length;
+  assert.deepEqual(await f.client.setCloudColor("s-mini", "blue"), { outcome: "unsupported" }, "a server that only signed in has no Cloud colour to change");
+  assert.deepEqual(await f.client.setCloudColor("c-gone", "blue"), { outcome: "unsupported" });
+  assert.equal(f.requests.filter(row => row.method === "PATCH").length, patches, "neither was asked");
+  await assert.rejects(f.client.setCloudColor("c-a", "chartreuse"), /Invalid Cloud color/);
+  await assert.rejects(f.client.setCloudColor("../c-a", "blue"), /Invalid Cloud color/);
 });

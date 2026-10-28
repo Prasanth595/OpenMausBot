@@ -2481,5 +2481,19 @@
   "rail.address": "Stattdessen Adresse eingeben",
   "rail.copy": "Kopieren",
   "rail.copied": "Kopiert",
-  "rail.back": "Zurück"
+  "rail.back": "Zurück",
+  "rail.ownServer": "{name}, dein eigener Server",
+  "rail.offline": "{name}: offline",
+  "rail.lastSeen": "{name}: offline, zuletzt gesehen {when}",
+  "rail.notConnected": "{name}: mit dieser App verbinden",
+  "rail.ownNetwork": "Nur im eigenen Netzwerk erreichbar",
+  "rail.connectTitle": "{name} verbinden",
+  "rail.connectLede": "Er ist schon mit deinem Konto angemeldet. Öffne darauf ein Kopplungsfenster und füge den Link, den es ausgibt, hier ein.",
+  "placeLook.title": "Farbe",
+  "placeLook.sub": "{name} erscheint in dieser Farbe oben in der Seitenleiste und auf dem Kreis am linken Fensterrand.",
+  "placeLook.aria": "Farbe von {name}",
+  "placeLook.member": "Nur die Admins können die Farbe ändern.",
+  "placeLook.signedOut": "Melde dich bei MausBot Cloud an, um die Farbe zu ändern.",
+  "placeLook.unsupported": "Die Farbe dieser Cloud lässt sich in der App noch nicht ändern.",
+  "placeLook.failed": "Die Farbe wurde nicht gespeichert. Versuche es noch einmal."
 }

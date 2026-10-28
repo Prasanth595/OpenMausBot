@@ -14,6 +14,7 @@ export const CLOUD_NAME_LIMIT = 40;
 const TEAM_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const TIER = /^[a-z][a-z0-9-]{0,23}$/;
 const RUNS_ON = Object.freeze(["cloud", "server"]);
+const VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/;
 /** Each status as the app's machine summary (cloud-home.mjs CLOUD_MACHINE_STATUSES) reads it; a Cloud still at checkout
  * has none yet, and one offline is opened, so its own screen says it does not answer. */
 const MACHINE_STATUS = Object.freeze({ setting_up: "provisioning", ready: "ready", stopped: "stopped", payment_problem: "payment-problem", ended: "stopped", offline: "ready" });
@@ -36,24 +37,35 @@ function setupOf(input) {
   return step || progress !== null ? { ...(step ? { step } : {}), ...(progress !== null ? { progress } : {}) } : null;
 }
 
-/** One Cloud, or null when anything the app acts on is malformed (never trusted in part); a malformed colour, tier or
- * setup is simply left out. */
+/** One Cloud, or null when anything the app acts on is malformed (never trusted in part); a malformed colour, tier,
+ * setup, last-seen time or version is simply left out, and a field this app doesn't know is ignored. `managed: false`
+ * (absent means MausBot runs or manages it) is a server or computer of the person's own that signed in with their
+ * account: always on a server of theirs, and with no address while it is only reachable on its own network. */
 function parseCloudEntry(input) {
   if (!record(input) || typeof input.id !== "string" || !CLOUD_ID.test(input.id)) return null;
   const name = cleanCloudListName(input.name);
   if (!name || !environments.TEAM_ROLES.includes(input.role) || !CLOUD_LIST_STATUSES.includes(input.status) || !RUNS_ON.includes(input.runsOn) || typeof input.primary !== "boolean") return null;
+  if (input.managed !== undefined && typeof input.managed !== "boolean") return null;
+  const managed = input.managed !== false;
+  if (!managed && input.runsOn !== "server") return null;
   const origin = input.origin === null || input.origin === undefined ? null : homeOrigin(input.origin);
-  if ((input.origin !== null && input.origin !== undefined && !origin) || (["ready", "offline"].includes(input.status) && !origin)) return null;
+  if ((input.origin !== null && input.origin !== undefined && !origin) || (managed && ["ready", "offline"].includes(input.status) && !origin)) return null;
   const teamId = input.teamId === null || input.teamId === undefined ? null : typeof input.teamId === "string" && TEAM_ID.test(input.teamId) ? input.teamId : undefined;
   if (teamId === undefined) return null;
   const setup = input.status === "setting_up" ? setupOf(input.setup) : null;
+  const lastSeenAt = typeof input.lastSeenAt === "number" && Number.isSafeInteger(input.lastSeenAt) && input.lastSeenAt > 0 ? input.lastSeenAt : null;
+  const version = typeof input.version === "string" && VERSION.test(input.version) ? input.version : null;
   return { id: input.id, name, color: Object.hasOwn(CLOUD_SWATCH_COLORS, input.color) ? input.color : null, role: input.role,
     tier: typeof input.tier === "string" && TIER.test(input.tier) ? input.tier : null, runsOn: input.runsOn, status: input.status, origin, teamId,
-    primary: input.primary, ...(setup ? { setup } : {}) };
+    primary: input.primary, managed, ...(setup ? { setup } : {}), ...(lastSeenAt ? { lastSeenAt } : {}), ...(version ? { version } : {}) };
 }
 
-/** A Cloud this person owns that is no team's: a world of their own. */
-export const ownCloud = cloud => Boolean(cloud) && cloud.teamId === null && cloud.role === "owner";
+/** A Cloud this person owns that is no team's: a world of their own. Never a server that only signed in with their
+ * account (`managed: false`): MausBot neither runs nor vouches for it, so it is no Cloud of theirs to pair or lend to. */
+export const ownCloud = cloud => Boolean(cloud) && cloud.teamId === null && cloud.role === "owner" && cloud.managed !== false;
+
+/** The person's own servers and computers that signed in with their account: in the rail, each one theirs to connect. */
+export const signedInServers = clouds => (Array.isArray(clouds) ? clouds.filter(cloud => cloud.managed === false) : []);
 
 /**
  * The session's list, at most MAX_CLOUDS, each Cloud once; null when the Admin sends none (it predates many Clouds, and
@@ -99,6 +111,13 @@ export function cloudSetupProgress(cloud) {
 
 /** The colour a Cloud is shown in here: its swatch's, or none (slate, or no colour chosen). */
 export const swatchColor = swatch => (Object.hasOwn(CLOUD_SWATCH_COLORS, swatch) ? CLOUD_SWATCH_COLORS[swatch] : null);
+
+/** The colour the Admin keeps for My Cloud (`home`) and each team's Cloud, where one was chosen there (environments.cjs
+ * withListedColors): the person's other Clouds take theirs with the rest of their saved place. */
+export function listedColors(clouds) {
+  return Array.isArray(clouds) ? clouds.filter(cloud => cloud.color !== null && cloud.managed !== false && (cloud.primary || cloud.teamId !== null))
+    .map(cloud => ({ ...(cloud.primary ? { home: true } : { teamId: cloud.teamId }), color: swatchColor(cloud.color) })) : [];
+}
 
 /** A Cloud of the person's own besides My Cloud, as a saved place (environments.cjs withOwnCloud): its id, name, colour and address. */
 export function ownCloudPlaces(clouds) {

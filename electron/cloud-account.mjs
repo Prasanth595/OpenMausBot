@@ -619,6 +619,23 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       schedule(refresh, WATCH_REFRESH_MS);
       return { outcome: "opened", state: state() };
     },
+    /** A Cloud's colour (PATCH clouds/:id, contract v1), which only its owner or its team's Super admin and Admins
+     * change: `saved` once the Admin keeps it (the session is read again, so every place follows); `refused` when the
+     * Admin says it is someone else's to change; `unsupported` from an Admin without the route or the list. */
+    async setCloudColor(cloudId, color) {
+      if (typeof cloudId !== "string" || !CLOUD_ID.test(cloudId) || !(color === null || CLOUD_SWATCHES.includes(color))) throw new Error("Invalid Cloud color.");
+      const signedIn = grant;
+      if (!signedIn || state().status !== "connected") return { outcome: "failed" };
+      if (!value.clouds?.some(cloud => cloud.id === cloudId && cloud.managed !== false)) return { outcome: "unsupported" };
+      try { await request(`clouds/${encodeURIComponent(cloudId)}`, { method: "PATCH", body: { color }, token: signedIn.token }); } catch (error) {
+        if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
+        if (!error?.opaque && error?.status === 403) return { outcome: "refused" };
+        if ([404, 405, 501].includes(error?.status)) return { outcome: "unsupported" };
+        return { outcome: "failed" };
+      }
+      if (grant === signedIn) await refresh().catch(() => {});
+      return { outcome: "saved" };
+    },
     /** The Cloud being bought's checkout, again: the same page while it is kept here; false when there is none. */
     async reopenAdd() {
       const kept = adding;

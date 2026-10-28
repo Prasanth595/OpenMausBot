@@ -4934,5 +4934,19 @@
   "rail.address": "Nhập địa chỉ thay vào đó",
   "rail.copy": "Sao chép",
   "rail.copied": "Đã sao chép",
-  "rail.back": "Quay lại"
+  "rail.back": "Quay lại",
+  "rail.ownServer": "{name}, máy chủ của riêng bạn",
+  "rail.offline": "{name}: ngoại tuyến",
+  "rail.lastSeen": "{name}: ngoại tuyến, thấy lần cuối {when}",
+  "rail.notConnected": "{name}: kết nối nó với ứng dụng này",
+  "rail.ownNetwork": "Chỉ truy cập được từ mạng riêng của nó",
+  "rail.connectTitle": "Kết nối {name}",
+  "rail.connectLede": "Nó đã đăng nhập bằng tài khoản của bạn. Hãy mở cửa sổ ghép nối trên đó, rồi dán liên kết nó in ra vào đây.",
+  "placeLook.title": "Màu",
+  "placeLook.sub": "{name} hiện màu này ở đầu thanh bên và trên vòng tròn của nó ở cạnh trái cửa sổ.",
+  "placeLook.aria": "Màu của {name}",
+  "placeLook.member": "Chỉ quản trị viên mới đổi được màu này.",
+  "placeLook.signedOut": "Đăng nhập MausBot Cloud để đổi màu này.",
+  "placeLook.unsupported": "Chưa thể đổi màu của Cloud này từ ứng dụng.",
+  "placeLook.failed": "Chưa lưu được màu. Hãy thử lại."
 }

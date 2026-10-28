@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cloudMachine, cloudSetupProgress, MAX_CLOUDS, otherOwnClouds, ownCloudPlaces, parseCloudList, swatchColor } from "./cloud-list.mjs";
+import { cloudMachine, cloudSetupProgress, listedColors, MAX_CLOUDS, otherOwnClouds, ownCloudPlaces, parseCloudList, signedInServers, swatchColor } from "./cloud-list.mjs";
 import environments from "./environments.cjs";
 import { createHomePlaces } from "./home-places.mjs";
 
@@ -15,8 +15,8 @@ test("the session's Clouds are read strictly: a malformed one is left out whole,
   for (const none of [null, {}, "x", 3]) assert.equal(parseCloudList(none), null, String(none));
   assert.deepEqual(parseCloudList([]), []);
   assert.deepEqual(parseCloudList([primary, cloud()]), [
-    { id: "c-home", name: "My Cloud", color: null, role: "owner", tier: "pro", runsOn: "cloud", status: "ready", origin: HOME, teamId: null, primary: true },
-    { id: "c-a", name: "Client A", color: "green", role: "owner", tier: "pro", runsOn: "cloud", status: "ready", origin: CLIENT_A, teamId: null, primary: false },
+    { id: "c-home", name: "My Cloud", color: null, role: "owner", tier: "pro", runsOn: "cloud", status: "ready", origin: HOME, teamId: null, primary: true, managed: true },
+    { id: "c-a", name: "Client A", color: "green", role: "owner", tier: "pro", runsOn: "cloud", status: "ready", origin: CLIENT_A, teamId: null, primary: false, managed: true },
   ]);
   for (const bad of [
     { id: "" }, { id: "../x" }, { name: "" }, { name: "x".repeat(41) }, { name: "<b>" }, { role: "boss" }, { status: "sleeping" }, { runsOn: "moon" },
@@ -28,6 +28,33 @@ test("the session's Clouds are read strictly: a malformed one is left out whole,
   assert.deepEqual(parseCloudList([cloud({ status: "setting_up", origin: null, setup: { step: "storage", progress: 2 } })])[0].setup, { step: "storage", progress: 1 });
   assert.equal(parseCloudList([cloud({ status: "setting_up", origin: null, setup: { step: "dreaming" } })])[0].setup, undefined);
   assert.equal(parseCloudList([cloud({ status: "ready", setup: { step: "storage" } })])[0].setup, undefined, "only while it is set up");
+});
+
+test("a server or computer of the person's own that signed in with their account: read with or without an address, and never a Cloud of theirs", () => {
+  const mini = cloud({ id: "s-mini", name: "Mac mini", color: null, tier: null, runsOn: "server", managed: false, status: "offline", origin: null,
+    lastSeenAt: 1_761_000_000_000, version: "0.1.118", kind: "desktop", reachable: { via: "tailscale" } });
+  assert.deepEqual(parseCloudList([mini]), [{ id: "s-mini", name: "Mac mini", color: null, role: "owner", tier: null, runsOn: "server", status: "offline", origin: null,
+    teamId: null, primary: false, managed: false, lastSeenAt: 1_761_000_000_000, version: "0.1.118" }], "only reachable on its own network; fields this app doesn't know are ignored");
+  assert.equal(parseCloudList([{ ...mini, status: "ready", origin: "https://mini.example.ts.net" }])[0].origin, "https://mini.example.ts.net");
+  for (const bad of [{ managed: "false" }, { managed: 0 }, { managed: null }, { managed: false, runsOn: "cloud" }]) {
+    assert.deepEqual(parseCloudList([cloud(bad)]), [], `${JSON.stringify(bad)}: whether MausBot vouches for it is never guessed`);
+  }
+  const [loose] = parseCloudList([{ ...mini, lastSeenAt: "yesterday", version: "<b>1</b>" }]);
+  assert.deepEqual([loose.lastSeenAt, loose.version], [undefined, undefined], "a malformed last-seen time or version is left out");
+  assert.deepEqual(parseCloudList([{ ...mini, lastSeenAt: null, version: null }])[0], parseCloudList([{ ...mini, lastSeenAt: undefined, version: undefined }])[0]);
+  assert.equal(parseCloudList([cloud({ managed: true })])[0].managed, true);
+  assert.equal(parseCloudList([cloud({ status: "offline", origin: null })]).length, 0, "a Cloud MausBot runs still needs its address");
+  const list = parseCloudList([primary, mini, { ...mini, id: "s-vps", name: "VPS", status: "ready", origin: "https://vps.example.com", primary: true }]);
+  assert.deepEqual(list.map(entry => entry.primary), [true, false, false], "never My Cloud");
+  assert.deepEqual([otherOwnClouds(list), ownCloudPlaces(list)], [[], []], "nor another Cloud of theirs: nothing pairs with it by id or lends to it");
+  assert.deepEqual(signedInServers(list).map(entry => entry.id), ["s-mini", "s-vps"]);
+});
+
+test("the Admin's colour for My Cloud and each team's Cloud, once one was chosen there; the person's other Clouds take theirs with their place", () => {
+  const list = parseCloudList([{ ...primary, color: "rose" }, cloud({ color: "amber" }), cloud({ id: "c-team", name: "Acme", teamId: "team-acme", role: "member", origin: TEAM, color: "slate" }),
+    cloud({ id: "c-t2", name: "Beta", teamId: "team-beta", role: "admin", origin: "https://omb-t-beta.fly.dev", color: null })]);
+  assert.deepEqual(listedColors(list), [{ home: true, color: "red" }, { teamId: "team-acme", color: null }], "slate is none; a team's Cloud with no colour chosen is not listed");
+  assert.deepEqual(listedColors(null), []);
 });
 
 test("at most twenty Clouds, each once, and one primary only, of the person's own", () => {

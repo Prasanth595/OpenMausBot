@@ -5,7 +5,7 @@
 // Admin's session's, read by main. Who can see a team's private chats is said by the team's own page, in the chat (T2's
 // TeamPrivateChatsLine), not here.
 import environments from "./environments.cjs";
-import { ownCloudPlaces } from "./cloud-list.mjs";
+import { listedColors, ownCloudPlaces } from "./cloud-list.mjs";
 
 const idOf = (value) => (typeof value === "string" && value ? value : null);
 
@@ -68,14 +68,15 @@ export function createHomePlaces({ store, environments: read, persist, makeId, h
       if (current()[key] === place?.id) places.remember(null);
     },
     /** The MausBot Cloud sign-in changed: a connected session's teams and other Clouds are the saved places of theirs
-     * (one it no longer lists is gone; a team with its name for the line); anything else changes nothing. An Admin that
-     * lists no Clouds leaves the Cloud places as they were. */
+     * (one it no longer lists is gone; a team with its name for the line), in the colours the Admin keeps for them;
+     * anything else changes nothing. An Admin that lists no Clouds leaves the Cloud places as they were. */
     sync(state) {
       if (state?.status !== "connected") return;
       const teams = Array.isArray(state.teams) ? state.teams : [];
       const { state: withTeams, left } = environments.reconcileTeams(read(), teams, makeId, homeOrigin());
       const clouds = Array.isArray(state.clouds) ? ownCloudPlaces(state.clouds) : null;
-      const next = environments.reconcileOwnClouds(withTeams, clouds, makeId, homeOrigin());
+      const owned = environments.reconcileOwnClouds(withTeams, clouds, makeId, homeOrigin());
+      const next = clouds ? environments.withListedColors(owned, listedColors(state.clouds), homeOrigin()) : owned;
       if (next !== read()) persist(next);
       for (const name of left) places.left(name);
       if (current().team && !teams.some((team) => team?.id === current().team)) places.remember(null);

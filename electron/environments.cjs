@@ -375,6 +375,29 @@ function withEnvironment(state, input, makeId) {
   return { ...state, environments };
 }
 
+/** One saved place's colour as the person chose it, or none (`color` null); a colour this app doesn't draw changes
+ * nothing, and neither does this computer. The same state when it is that colour already. */
+function withPlaceColor(state, id, color) {
+  const existing = state.environments.find((entry) => entry.id === id);
+  if (!existing || existing.kind === "local" || (color !== null && !cleanColor(color)) || (cleanColor(existing.color) ?? null) === color) return state;
+  const { color: _old, ...rest } = existing;
+  const next = color ? { ...rest, color } : rest;
+  return { ...state, environments: state.environments.map((entry) => (entry === existing ? next : entry)) };
+}
+
+/** The colours the Admin keeps for My Cloud (`home`) and team Clouds (`teamId`), on their saved places: once a colour
+ * was chosen there it is the one everywhere (none for slate); before that, what this app saved stays. */
+function withListedColors(state, looks, homeOrigin = null) {
+  let next = state;
+  for (const look of Array.isArray(looks) ? looks : []) {
+    const entry = next.environments.find((candidate) => (look?.home === true
+      ? candidate.kind !== "local" && (candidate.home === true || (homeOrigin !== null && candidate.origin === homeOrigin))
+      : typeof look?.teamId === "string" && candidate.team?.id === look.teamId));
+    if (entry) next = withPlaceColor(next, entry.id, cleanColor(look.color));
+  }
+  return next;
+}
+
 /** A saved server's name and colour, as its owner chose them (the Cloud's own setup); an invalid colour is left as it was. */
 function withEnvironmentLook(state, origin, { name, color } = {}) {
   const key = normalizeOrigin(origin);
@@ -473,6 +496,8 @@ module.exports = {
   withActive,
   withEnvironment,
   withEnvironmentLook,
+  withListedColors,
+  withPlaceColor,
   withLocalEnvironment,
   withMicrophone,
   withoutEnvironment,

@@ -4934,5 +4934,19 @@
   "rail.address": "Bunun yerine adresini girin",
   "rail.copy": "Kopyala",
   "rail.copied": "Kopyalandı",
-  "rail.back": "Geri"
+  "rail.back": "Geri",
+  "rail.ownServer": "{name}, kendi sunucunuz",
+  "rail.offline": "{name}: çevrimdışı",
+  "rail.lastSeen": "{name}: çevrimdışı, en son {when} görüldü",
+  "rail.notConnected": "{name}: bu uygulamaya bağlayın",
+  "rail.ownNetwork": "Yalnızca kendi ağından erişilebilir",
+  "rail.connectTitle": "Bağla: {name}",
+  "rail.connectLede": "Hesabınızla zaten oturum açmış durumda. Üzerinde bir eşleştirme penceresi açın, sonra yazdırdığı bağlantıyı buraya yapıştırın.",
+  "placeLook.title": "Renk",
+  "placeLook.sub": "{name}, kenar çubuğunun üstünde ve pencerenin sol kenarındaki dairesinde bu renkte görünür.",
+  "placeLook.aria": "{name} rengi",
+  "placeLook.member": "Rengi yalnızca yöneticileri değiştirebilir.",
+  "placeLook.signedOut": "Rengini değiştirmek için MausBot Cloud'da oturum açın.",
+  "placeLook.unsupported": "Bu Cloud'un rengi henüz uygulamadan değiştirilemez.",
+  "placeLook.failed": "Renk kaydedilmedi. Yeniden deneyin."
 }

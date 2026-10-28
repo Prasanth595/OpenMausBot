@@ -15,6 +15,16 @@ export interface RailPlace {
   waiting?: true;
   /** Something needs the person there (a payment problem on a Cloud they own). */
   attention?: true;
+  /** A server or computer of the person's own that signed in with their account. */
+  server?: true;
+  /** Not heard from in the last few minutes. */
+  offline?: true;
+  /** When the Admin last heard from it (ms). */
+  lastSeenAt?: number;
+  /** Signed in, but only reachable on its own network: nothing to open from here. */
+  ownNetwork?: true;
+  /** Signed in and reachable, but not connected to this app yet: a click shows how to connect it. */
+  pairs?: true;
 }
 /** ＋'s choices here: buying a Cloud, pasting a server's pairing link, typing its address on this computer's Settings. */
 export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean }

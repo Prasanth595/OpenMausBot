@@ -8,10 +8,11 @@ import type { CloudSwatch } from "../../../electron/cloud-list.mjs";
 import type { AddCloudView } from "../../../electron/cloud-rail.mjs";
 import { track } from "@/lib/analytics";
 import { cn } from "@/lib/cn";
-import { addCloudScreen, addCloudStop, CLOUD_LIST_NAME_LIMIT, CLOUD_SWATCH_LABEL, CLOUD_SWATCH_ORDER, DEFAULT_SWATCH, swatchFill, type AddCloudScreen, type AddCloudStop } from "@/lib/cloud-extra";
+import { addCloudScreen, addCloudStop, CLOUD_LIST_NAME_LIMIT, DEFAULT_SWATCH, swatchFill, type AddCloudScreen, type AddCloudStop } from "@/lib/cloud-extra";
 import { offerPlanLabel, usd } from "@/lib/cloud-plan";
 import { t } from "@/lib/i18n";
 import { placeInitials } from "@/lib/places";
+import { SwatchRadios } from "../SwatchRadios";
 import { ChooseScreen } from "./ChooseScreen";
 import { BackLink, Checklist, FIELD, Heading, PRIMARY_WIDE, ProgressBar } from "./parts";
 
@@ -31,23 +32,9 @@ function NameScreen({ plan, name, color, busy, suggested, onName, onColor, onBac
     <label className="flex flex-col gap-1.5 text-[13px] font-medium text-ink">{t("cloudBuy.setup.name")}
       <input data-autofocus value={name} maxLength={CLOUD_LIST_NAME_LIMIT} placeholder={suggested} disabled={busy} onChange={(event) => onName(event.target.value)} className={FIELD} />
     </label>
-    <div role="radiogroup" aria-label={t("cloudBuy.setup.color")} className="flex flex-col gap-1.5">
-      <span className="text-[13px] font-medium text-ink">{t("cloudBuy.setup.color")}</span>
-      <div className="flex flex-wrap gap-2.5">
-        {CLOUD_SWATCH_ORDER.map((option) => <button key={option} type="button" role="radio" aria-checked={option === color} aria-label={t(CLOUD_SWATCH_LABEL[option])}
-          data-swatch={option} disabled={busy} onClick={() => onColor(option)}
-          onKeyDown={(event) => {
-            const delta = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
-            if (!delta) return;
-            event.preventDefault();
-            const next = CLOUD_SWATCH_ORDER[(CLOUD_SWATCH_ORDER.indexOf(option) + delta + CLOUD_SWATCH_ORDER.length) % CLOUD_SWATCH_ORDER.length]!;
-            onColor(next);
-            (event.currentTarget.parentElement?.querySelector(`[data-swatch="${next}"]`) as HTMLElement | null)?.focus();
-          }}
-          tabIndex={option === color ? 0 : -1}
-          className={cn("size-8 rounded-full border border-ink/10 transition-[box-shadow] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-            option === color && "ring-2 ring-ink/70 ring-offset-2 ring-offset-panel")} style={{ background: swatchFill(option) }} />)}
-      </div>
+    <div className="flex flex-col gap-1.5">
+      <span aria-hidden="true" className="text-[13px] font-medium text-ink">{t("cloudBuy.setup.color")}</span>
+      <SwatchRadios value={color} onChange={onColor} label={t("cloudBuy.setup.color")} disabled={busy} />
     </div>
     <div className="flex items-center gap-3 rounded-xl border border-hairline/70 bg-card/70 px-4 py-3">
       <span aria-hidden="true" className={cn("grid size-10 shrink-0 place-items-center rounded-full text-[14px] font-semibold", color === "slate" ? "bg-raised text-ink" : "text-white")}

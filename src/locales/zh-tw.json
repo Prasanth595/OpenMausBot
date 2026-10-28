@@ -4318,5 +4318,19 @@
   "rail.address": "改為輸入位址",
   "rail.copy": "複製",
   "rail.copied": "已複製",
-  "rail.back": "返回"
+  "rail.back": "返回",
+  "rail.ownServer": "{name}（你自己的伺服器）",
+  "rail.offline": "{name}：離線",
+  "rail.lastSeen": "{name}：離線，上次在線於{when}",
+  "rail.notConnected": "{name}：將它連線到這個 App",
+  "rail.ownNetwork": "只能從它自己的網路連線",
+  "rail.connectTitle": "連線 {name}",
+  "rail.connectLede": "它已經用你的帳號登入。在它上面開啟配對視窗，再把它顯示的連結貼到這裡。",
+  "placeLook.title": "顏色",
+  "placeLook.sub": "{name} 會以這個顏色顯示在側邊欄頂端，以及視窗左側它的圓圈上。",
+  "placeLook.aria": "{name} 的顏色",
+  "placeLook.member": "只有管理員可以更改顏色。",
+  "placeLook.signedOut": "登入 MausBot Cloud 才能更改顏色。",
+  "placeLook.unsupported": "目前還無法在 App 中更改這個 Cloud 的顏色。",
+  "placeLook.failed": "顏色沒有儲存。請再試一次。"
 }

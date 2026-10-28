@@ -112,6 +112,10 @@ const bridge = {
       ? ipcRenderer.invoke("workspaces:open", String(id)) : Promise.reject(new Error("Choose a place to open it.")),
     add: (choice) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:add", String(choice)) : Promise.reject(new Error("Choose what to add.")),
+    // The colour of the place this page is (never another's): read, and changed only from the person's click.
+    look: () => ipcRenderer.invoke("workspaces:look"),
+    color: (swatch) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("workspaces:color", swatch === null ? null : String(swatch)) : Promise.reject(new Error("Choose a color.")),
     onChanged: (cb) => {
       const handler = () => cb();
       ipcRenderer.on("workspaces:changed", handler);

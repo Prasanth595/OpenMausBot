@@ -1,5 +1,7 @@
 import { createRoot } from "react-dom/client";
+import type { CloudSwatch } from "../../electron/cloud-list.mjs";
 import type { AddCloudView, RailPlace, RailState } from "../../electron/cloud-rail.mjs";
+import type { PlaceLook } from "../../electron/place-look.mjs";
 import App from "../../src/App";
 import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
 import { setAdvancedMode } from "../../src/lib/interface-mode";
@@ -9,8 +11,10 @@ import "../../src/styles.css";
 
 // Served only by scripts/verify-cloud-rail.ts: the real app, as a Cloud's page in the desktop window sees it, with the
 // desktop bridge a hosted Cloud's page gets (its rail and add-a-Cloud sheet answered here). ?skin= picks the skin,
-// ?mode=simple Simple mode, ?sheet=add|server|cloud|name opens ＋'s sheet there (?adding=setting_up: a Cloud being
-// bought), ?places=many the list past eight (?more opens it).
+// ?mode=simple Simple mode, ?sheet=add|server|cloud|name|connect opens ＋'s sheet there (?adding=setting_up: a Cloud
+// being bought; connect: a signed-in server's), ?places=many the list past eight (?more opens it), ?places=servers the
+// person's own servers that signed in. ?look=<colour>|none is the place's colour (its tint), ?member a team's Cloud
+// its member is on, ?settings=look Settings → Appearance at the place's colour.
 const params = new URLSearchParams(location.search);
 setAnalyticsEnabled(false);
 setEmailGateDone("skipped");
@@ -27,8 +31,27 @@ const FEW: RailPlace[] = [
   place("pending:c", "Client C", { color: "red", opens: false, progress: 0.55 }),
   place("mini", "Mac mini", { kind: "server" }),
 ];
+const SERVERS: RailPlace[] = [
+  place("home", "My Cloud", { color: "blue", active: true }),
+  place("a", "Client A", { color: "teal" }),
+  place("acme", "Acme team", { kind: "team", color: "purple" }),
+  place("vps", "Office", { kind: "server", server: true }),
+  place("signed-in:s-mini", "Mac mini", { kind: "server", opens: false, ownNetwork: true, server: true, offline: true, lastSeenAt: Date.now() - 2 * 3_600_000 }),
+  place("signed-in:s-render", "Render VPS", { kind: "server", color: "red", opens: false, pairs: true, server: true }),
+];
 const MANY = [...FEW, ...["Delta", "Echo Studio", "Fable", "Gamma Ltd", "Harbor"].map((name, n) => place(`x${n}`, name, { color: (["teal", "yellow", "red", "purple", "blue"] as const)[n] }))];
-const rail: RailState = { places: params.get("places") === "many" ? MANY : FEW, add: { cloud: true, link: true, address: false } };
+const member = params.has("member");
+const SWATCH: Record<string, CloudSwatch> = { blue: "blue", teal: "green", yellow: "amber", red: "rose", purple: "violet" };
+const COLOR: Record<CloudSwatch, PlaceLook["color"]> = { blue: "blue", green: "teal", amber: "yellow", rose: "red", violet: "purple", slate: null };
+const tint = params.get("look") ?? (member ? "purple" : "blue");
+const color = tint === "none" ? null : (tint as PlaceLook["color"]);
+const listed = params.get("places") === "many" ? MANY : params.get("places") === "servers" ? SERVERS : FEW;
+// The place on screen wears the colour its tint is drawn in.
+const rail: RailState = { places: listed.map(({ active: _active, ...entry }) => (entry.id === (member ? "acme" : "home") ? { ...entry, color, active: true as const } : entry)),
+  add: { cloud: true, link: true, address: false } };
+let look: PlaceLook = { name: member ? "Acme team" : "My Cloud", color, swatch: color ? SWATCH[color] ?? null : null,
+  change: member ? null : "admin", ...(member ? { reason: "member" as const } : {}) };
+let openSettings: ((section?: string) => void) | null = null;
 const offer = { recommended: "pro", refundDays: 14, plans: [
   { tier: "starter", label: "Starter", amount: 1500, allowances: { cpus: 2, cpuKind: "shared" as const, memoryMb: 2048, diskGb: 10, maxDiskGb: 20, computers: 15, computerHours: 100, voiceCharacters: 30_000, sleeps: true as const } },
   { tier: "pro", label: "Pro", amount: 4900, allowances: { cpus: 4, cpuKind: "shared" as const, memoryMb: 4096, diskGb: 10, maxDiskGb: 100, computers: 15, computerHours: 300, voiceCharacters: 60_000 } },
@@ -45,10 +68,13 @@ Object.assign(window, { ogb: {
     screenPreview: { available: false, interaction: "none" }, dictation: { available: false, engine: "none", onDevice: false },
     localComputer: { available: false, support: "unsupported", enabled: false, status: "unavailable" } }),
   onCapabilitiesChanged: () => () => {},
+  onOpenAppSettings: (callback: (section?: string) => void) => { openSettings = callback; return () => {}; },
   applySkin: ok, setUnreadCount: () => {}, permStatus: async () => ({}),
   workspaces: {
     state: async () => ({ local: false, name: "My Cloud", origin: "https://omb-u-1.fly.dev", color: "blue" }),
     menu: ok, line: async () => null, places: async () => rail, open: ok, add: ok, onChanged: () => () => {},
+    look: async () => look,
+    color: async (swatch: CloudSwatch) => { look = { ...look, swatch, color: COLOR[swatch] }; return { outcome: "saved", look }; },
   },
   cloudAdd: { state: async () => addView, start: async () => ({ outcome: "opened" }), reopen: async () => true, copyLink: async () => true, open: ok, interest: ok, sheet: ok },
 } });
@@ -71,6 +97,13 @@ const click = (selector: string) => new Promise<void>((resolve) => {
   tick();
 });
 const sheet = params.get("sheet");
-if (sheet) void click("[data-rail-add]").then(() => (sheet === "server" ? click('[data-place-add-choice="server"]') : sheet === "add" ? undefined : click('[data-place-add-choice="cloud"]')))
+if (sheet === "connect") void click('[data-rail-place="signed-in:s-render"]');
+else if (sheet) void click("[data-rail-add]").then(() => (sheet === "server" ? click('[data-place-add-choice="server"]') : sheet === "add" ? undefined : click('[data-place-add-choice="cloud"]')))
   .then(() => (sheet === "name" ? click("[data-plan-buy='pro']") : undefined));
+if (params.get("settings") === "look") {
+  const opened = () => new Promise<void>((resolve) => { const tick = () => { if (openSettings) { openSettings(); resolve(); } else setTimeout(tick, 100); }; tick(); });
+  void opened().then(() => click('[data-settings-section="appearance"]'))
+    .then(() => new Promise<void>((resolve) => setTimeout(resolve, 300)))
+    .then(() => document.querySelector("[data-place-look]")?.closest(".rounded-xl")?.scrollIntoView({ block: "center" }));
+}
 if (params.has("more")) void click("[data-rail-more-button]");

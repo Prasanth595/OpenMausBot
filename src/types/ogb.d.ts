@@ -170,6 +170,11 @@ const __APP_VERSION__: string;
         open?: (id: string) => Promise<unknown>;
         /** ＋'s fixed choices: buy a Cloud (this computer's own sheet), paste a server's pairing link, or type its address. */
         add?: (choice: "cloud" | "link" | "address") => Promise<unknown>;
+        /** The colour of the place this page is, and whether it can be changed here (null on this computer's page).
+         * Absent on an older app. */
+        look?: () => Promise<import("../../electron/place-look.mjs").PlaceLook | null>;
+        /** That place's colour, from the person's click: one of the six swatches, or null for none. */
+        color?: (swatch: import("../../electron/cloud-list.mjs").CloudSwatch | null) => Promise<{ outcome: import("../../electron/place-look.mjs").PlaceColorOutcome; look: import("../../electron/place-look.mjs").PlaceLook | null }>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
       };

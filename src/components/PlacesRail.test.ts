@@ -132,3 +132,46 @@ it("a circle's letters and words", () => {
   expect(placeLabel(place("local", "This computer", { kind: "computer" }))).toBe("This computer");
   expect(placeLabel(place("x", "Acme", { attention: true }))).toBe("Acme: needs you");
 });
+
+it("a server of the person's own that signed in: a small server mark, the offline look with when it was last seen, and nothing to open when only its own network reaches it", async () => {
+  const now = Date.UTC(2026, 9, 28, 12);
+  const servers = [
+    place("home", "My Cloud", { active: true }),
+    place("vps", "Office", { kind: "server", server: true }),
+    place("signed-in:s-mini", "Mac mini", { kind: "server", opens: false, ownNetwork: true, server: true, offline: true, lastSeenAt: now - 2 * 3_600_000 }),
+    place("signed-in:s-render", "Render VPS", { kind: "server", opens: false, pairs: true, server: true }),
+  ];
+  expect(placeLabel(servers[1]!)).toBe("Office, your own server");
+  expect(placeLabel(servers[2]!, now)).toBe("Mac mini, your own server: offline, last seen 2 hours ago · Only reachable on its own network");
+  expect(placeLabel({ ...servers[2]!, lastSeenAt: undefined, ownNetwork: undefined })).toBe("Mac mini, your own server: offline");
+  expect(placeLabel(servers[3]!)).toBe("Render VPS, your own server: connect it to this app");
+  rail = { places: servers, add: { cloud: true, link: true, address: false } };
+  await mount(createElement(PlacesRail));
+  expect(host.querySelector('[data-rail-place="vps"] [data-rail-server]')).toBeTruthy();
+  expect(host.querySelector('[data-rail-place="home"] [data-rail-server]')).toBeNull();
+  const mini = host.querySelector('[data-rail-place="signed-in:s-mini"]')!;
+  expect(mini.querySelector("[data-rail-offline]")?.className).toContain("grayscale");
+  expect(mini.getAttribute("aria-disabled")).toBe("true");
+  expect(mini.getAttribute("title")).toContain("Only reachable on its own network");
+  await click(mini);
+  expect(document.querySelector("[data-place-add-sheet]")).toBeNull();
+  await click(host.querySelector('[data-rail-place="vps"]'));
+  expect(workspaces.open.mock.calls, "one saved by hand opens as it always did").toEqual([["vps"]]);
+  await click(host.querySelector('[data-rail-place="signed-in:s-render"]'));
+  expect(workspaces.open.mock.calls).toHaveLength(1);
+  const connect = document.querySelector('[data-place-add="connect-server"]')!;
+  expect(connect.textContent).toContain("Connect Render VPS");
+  expect([...connect.querySelectorAll("[data-own-server-command]")].map((code) => code.textContent), "it runs OpenMausBot already: only its pairing link is left").toEqual(['npx openmausbot pair --label "My desktop"']);
+  await click([...connect.querySelectorAll("button")].find((button) => button.textContent === "Paste pairing link"));
+  expect(workspaces.add.mock.calls).toEqual([["link"]]);
+});
+
+it("where no pairing link can be pasted here, a signed-in server not connected yet opens nothing", async () => {
+  rail = { places: [place("home", "My Cloud", { active: true }), place("signed-in:s-render", "Render VPS", { kind: "server", opens: false, pairs: true, server: true })],
+    add: { cloud: true, link: false, address: false } };
+  await mount(createElement(PlacesRail));
+  const render = host.querySelector('[data-rail-place="signed-in:s-render"]')!;
+  expect(render.getAttribute("aria-disabled")).toBe("true");
+  await click(render);
+  expect(document.querySelector("[data-place-add-sheet]")).toBeNull();
+});

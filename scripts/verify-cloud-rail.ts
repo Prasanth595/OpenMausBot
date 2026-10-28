@@ -1,6 +1,6 @@
 // The rail of Clouds and its ＋ sheet in the real app, as a Cloud's page in the desktop window shows them, against a
 // disposable fake-engine server; the desktop bridge's rail and add-a-Cloud answers are the preview's own fixtures.
-// Run: node --experimental-strip-types scripts/verify-cloud-rail.ts [--shots <dir>]
+// Run: node --experimental-strip-types scripts/verify-cloud-rail.ts [--shots <dir> [--only <view,view>]]
 // With --shots it photographs each view in a light and a dark skin with a headless Chrome in a throwaway profile
 // (OMB_CDP_CHROME, else the installed Google Chrome) and exits; without, it prints the preview's address and waits.
 import { spawn } from "node:child_process";
@@ -13,6 +13,8 @@ import { mountPreview, parkUntilSignal, type MountedPreview } from "./testing/pr
 
 const at = process.argv.indexOf("--shots");
 const shots = at === -1 ? null : resolve(process.argv[at + 1] ?? "");
+const onlyAt = process.argv.indexOf("--only");
+const only = onlyAt === -1 ? null : new Set((process.argv[onlyAt + 1] ?? "").split(",").filter(Boolean));
 const CHROME = process.env.OMB_CDP_CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 /** Each view: its query, what must be on screen before the picture, and the window's height. */
 const VIEWS: Array<{ name: string; query: string; ready: string; height?: number }> = [
@@ -24,6 +26,10 @@ const VIEWS: Array<{ name: string; query: string; ready: string; height?: number
   { name: "add-buy-cloud", query: "sheet=cloud", ready: "[data-plan-buy]", height: 900 },
   { name: "add-name-colour", query: "sheet=name", ready: "[data-cloud-add='extra-name']" },
   { name: "add-setting-up", query: "sheet=cloud&adding=setting_up", ready: "[data-cloud-add='extra-starting']" },
+  { name: "rail-servers", query: "places=servers&look=teal", ready: "[data-rail-server]" },
+  { name: "connect-server", query: "places=servers&sheet=connect", ready: "[data-place-add='connect-server']" },
+  { name: "look-settings", query: "look=teal&settings=look", ready: "[data-place-look='admin']" },
+  { name: "look-member", query: "member=1&settings=look", ready: "[data-place-look='locked']" },
 ];
 const SKINS = [{ id: "daylight", look: "light" }, { id: "midnight", look: "dark" }];
 
@@ -86,7 +92,7 @@ try {
     const profile = mkdtempSync(join(tmpdir(), "omb-rail-chrome-"));
     const chrome = await openChrome(profile);
     try {
-      for (const view of VIEWS) for (const skin of SKINS) {
+      for (const view of VIEWS.filter((entry) => !only || only.has(entry.name))) for (const skin of SKINS) {
         const file = join(shots, `${view.name}-${skin.look}.png`);
         await chrome.shoot(`${ui.previewUrl}?skin=${skin.id}${view.query ? `&${view.query}` : ""}`, view.ready, file, view.height);
         console.log(file);

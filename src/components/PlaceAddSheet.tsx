@@ -17,14 +17,16 @@ export const OWN_SERVER_PAIR = "npx openmausbot pair --label \"My desktop\"";
 
 export interface OwnServerStep { key: string; title: LocaleKey; detail: LocaleKey; command?: string }
 /** What a server of the person's own takes, step by step. `managed`: one command from MausBot Cloud that installs and
- * connects it by itself; without it, today's install, then its pairing link pasted here. */
-export function ownServerSteps(managed: { command: string } | null = null): OwnServerStep[] {
+ * connects it by itself; without it, today's install, then its pairing link pasted here. `installed`: it runs
+ * OpenMausBot already (it signed in with the person's account), so only its pairing link is left. */
+export function ownServerSteps(managed: { command: string } | null = null, { installed = false }: { installed?: boolean } = {}): OwnServerStep[] {
   if (managed) return [{ key: "install", title: "rail.step1", detail: "rail.step1Sub", command: managed.command }];
-  return [
+  const steps: OwnServerStep[] = [
     { key: "install", title: "rail.step1", detail: "rail.step1Sub", command: OWN_SERVER_INSTALL },
     { key: "pair", title: "rail.step2", detail: "rail.step2Sub", command: OWN_SERVER_PAIR },
     { key: "connect", title: "rail.step3", detail: "rail.step3Sub" },
   ];
+  return installed ? steps.filter((step) => step.key !== "install") : steps;
 }
 
 function Command({ text }: { text: string }) {
@@ -39,14 +41,15 @@ function Command({ text }: { text: string }) {
 }
 
 /** Install OpenMausBot there, open its pairing window, paste its link: the pasted link and the typed address are main's
- * own Connect dialogs, as the Server menu opens them. */
-export function OwnServerSteps({ choices, onBack, onChoose, managed = null }: {
-  choices: RailAddChoices; onBack: (() => void) | null; onChoose: (choice: "link" | "address") => void; managed?: { command: string } | null;
+ * own Connect dialogs, as the Server menu opens them. `connect`: a server of theirs that signed in with their account,
+ * not connected to this app yet. */
+export function OwnServerSteps({ choices, onBack, onChoose, managed = null, connect = null }: {
+  choices: RailAddChoices; onBack: (() => void) | null; onChoose: (choice: "link" | "address") => void; managed?: { command: string } | null; connect?: { name: string } | null;
 }) {
-  const steps = ownServerSteps(managed);
-  return <div data-place-add="own-server" className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
+  const steps = ownServerSteps(managed, { installed: Boolean(connect) });
+  return <div data-place-add={connect ? "connect-server" : "own-server"} className="flex flex-col gap-4 px-[30px] pb-[26px] pt-7">
     {onBack && <div><BackLink label={t("rail.back")} onClick={onBack} /></div>}
-    <Heading title={t("rail.own")} sub={t("rail.ownLede")} />
+    <Heading title={connect ? t("rail.connectTitle", { name: connect.name }) : t("rail.own")} sub={t(connect ? "rail.connectLede" : "rail.ownLede")} />
     <ol className="flex flex-col gap-3">
       {steps.map((step, index) => <li key={step.key} className="grid grid-cols-[26px_minmax(0,1fr)] gap-3">
         <span aria-hidden="true" className="grid size-[26px] place-items-center rounded-full bg-accent/12 text-[13px] font-semibold text-accent-text">{index + 1}</span>
@@ -105,9 +108,9 @@ export function RailSheet({ wide = false, focusKey, onClose, children }: { wide?
   </div>;
 }
 
-export function PlaceAddSheet({ choices, onClose }: { choices: RailAddChoices; onClose: () => void }) {
+export function PlaceAddSheet({ choices, connect = null, onClose }: { choices: RailAddChoices; connect?: { name: string } | null; onClose: () => void }) {
   const server = choices.link || choices.address;
-  const [view, setView] = useState<"choose" | "cloud" | "server">(choices.cloud && server ? "choose" : choices.cloud ? "cloud" : "server");
+  const [view, setView] = useState<"choose" | "cloud" | "server">(connect ? "server" : choices.cloud && server ? "choose" : choices.cloud ? "cloud" : "server");
   const [wide, setWide] = useState(false);
   const workspaces = window.ogb?.workspaces;
   const choose = (choice: "cloud" | "link" | "address") => {
@@ -123,7 +126,7 @@ export function PlaceAddSheet({ choices, onClose }: { choices: RailAddChoices; o
         <Choice kind="server" icon={<Server size={19} />} title={t("rail.own")} sub={t("rail.ownSub")} onClick={() => setView("server")} />
       </div>
     </div>}
-    {view === "server" && <OwnServerSteps choices={choices} onBack={choices.cloud ? () => setView("choose") : null} onChoose={choose} />}
+    {view === "server" && <OwnServerSteps choices={choices} onBack={choices.cloud && !connect ? () => setView("choose") : null} onChoose={choose} connect={connect} />}
     {view === "cloud" && <AddCloudFlow onClose={onClose} onFirstCloud={() => choose("cloud")} onWide={setWide} onBack={server ? () => setView("choose") : null} />}
   </RailSheet>;
 }

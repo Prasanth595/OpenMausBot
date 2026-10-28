@@ -2908,5 +2908,19 @@
   "rail.address": "Натомість ввести адресу",
   "rail.copy": "Копіювати",
   "rail.copied": "Скопійовано",
-  "rail.back": "Назад"
+  "rail.back": "Назад",
+  "rail.ownServer": "{name}, ваш власний сервер",
+  "rail.offline": "{name}: не в мережі",
+  "rail.lastSeen": "{name}: не в мережі, востаннє в мережі {when}",
+  "rail.notConnected": "{name}: під’єднайте його до цього застосунку",
+  "rail.ownNetwork": "Доступний лише з власної мережі",
+  "rail.connectTitle": "Під’єднати {name}",
+  "rail.connectLede": "Він уже ввійшов у ваш обліковий запис. Відкрийте на ньому вікно прив'язки й вставте сюди посилання, яке він виведе.",
+  "placeLook.title": "Колір",
+  "placeLook.sub": "{name} показується цим кольором угорі бічної панелі та у своєму кружечку біля лівого краю вікна.",
+  "placeLook.aria": "Колір: {name}",
+  "placeLook.member": "Колір можуть змінювати лише адміністратори.",
+  "placeLook.signedOut": "Увійдіть у MausBot Cloud, щоб змінити колір.",
+  "placeLook.unsupported": "Колір цього Cloud поки не можна змінити в застосунку.",
+  "placeLook.failed": "Колір не збережено. Спробуйте ще раз."
 }

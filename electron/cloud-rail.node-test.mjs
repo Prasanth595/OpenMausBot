@@ -65,6 +65,30 @@ test("a Cloud being set up shows how far it is, one at checkout waits, one the A
   assert.equal(settingUp.find(place => place.id === "acme").progress, 0.65);
 });
 
+test("a server of the person's own that signed in with their account: one saved here is that place, online or not; one not connected yet shows how; one only on its own network opens nothing", () => {
+  const RENDER = "https://render.example.test";
+  const clouds = parseCloudList([PRIMARY, entry(),
+    entry({ id: "s-mini", name: "Mac mini", color: null, tier: null, runsOn: "server", managed: false, status: "offline", origin: null, lastSeenAt: 1_761_000_000_000 }),
+    entry({ id: "s-office", name: "Office box", color: null, tier: null, runsOn: "server", managed: false, status: "ready", origin: VPS }),
+    entry({ id: "s-render", name: "Render VPS", color: "rose", tier: null, runsOn: "server", managed: false, status: "offline", origin: RENDER, lastSeenAt: 1_761_000_100_000 })]);
+  const state = session({ clouds });
+  const places = railPlaces({ saved: saved(), home: HOME, mine: HOME, state });
+  assert.deepEqual(places.find(place => place.id === "vps"), { id: "vps", name: "Office", color: null, kind: "server", opens: true, server: true },
+    "saved by hand at its address: the same circle, marked as theirs, online, opening as it always did");
+  assert.deepEqual(places.slice(-2), [
+    { id: "signed-in:s-mini", name: "Mac mini", color: null, kind: "server", opens: false, ownNetwork: true, server: true, offline: true, lastSeenAt: 1_761_000_000_000 },
+    { id: "signed-in:s-render", name: "Render VPS", color: "red", kind: "server", opens: false, pairs: true, server: true, offline: true, lastSeenAt: 1_761_000_100_000 },
+  ]);
+  assert.equal(places.length, 6, "one circle per server");
+  for (const origin of [VPS, RENDER]) assert.equal(JSON.stringify(places).includes(origin), false, origin);
+  assert.deepEqual([VPS, RENDER].map(origin => hostedCloudOrigin(origin, { state, mine: HOME })), [false, false], "its page never reads the rail");
+  const alone = { activeId: "home", environments: [{ id: "home", kind: "remote", name: "My Cloud", origin: HOME, home: true }] };
+  assert.equal(railPlaces({ saved: alone, home: HOME, mine: HOME, state: session({ teams: [], clouds: parseCloudList([PRIMARY, clouds[2]]) }) }).length, 2, "it counts as a place");
+  const r = rail({ places: () => places });
+  assert.throws(() => r.call("workspaces:open", "signed-in:s-render"), /isn't here/, "nothing opens one main can't pair with yet");
+  assert.throws(() => r.call("workspaces:open", "signed-in:s-mini"), /isn't here/);
+});
+
 test("only Clouds MausBot runs for this person may read the rail: My Cloud, their Clouds and their teams' on MausBot Cloud; never a server of their own or one typed in", () => {
   const state = session({ clouds: parseCloudList([PRIMARY, entry(), entry({ id: "c-own", name: "Mini", origin: OWN, runsOn: "server" }),
     entry({ id: "c-team", name: "Acme", teamId: "team-acme", role: "member", origin: TEAM })]) });
@@ -181,7 +205,7 @@ function preload(origin, { activation = false } = {}) {
 
 test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle, ＋ and checkout open only from the person's click", async () => {
   const page = preload(HOME);
-  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "onChanged"]);
+  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "look", "color", "onChanged"]);
   assert.deepEqual(Object.keys(page.bridge.cloudAdd), ["state", "start", "reopen", "copyLink", "open", "interest", "sheet"]);
   await page.bridge.workspaces.places();
   await page.bridge.cloudAdd.state();
@@ -191,11 +215,16 @@ test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle,
   await assert.rejects(page.bridge.cloudAdd.reopen(), /Reopen checkout/);
   await assert.rejects(page.bridge.cloudAdd.copyLink(), /Copy link/);
   await assert.rejects(page.bridge.cloudAdd.open(), /Open/);
+  await assert.rejects(page.bridge.workspaces.color("rose"), /Choose a color/, "a page changes its place's colour only from the person's click");
+  await page.bridge.workspaces.look();
+  assert.deepEqual(page.invoked.at(-1), ["workspaces:look"]);
   const clicked = preload(HOME, { activation: true });
   await clicked.bridge.workspaces.open({ toString: () => "a" });
   await clicked.bridge.workspaces.add("link");
   await clicked.bridge.cloudAdd.start("pro", "Client B", null);
-  assert.deepEqual(clicked.invoked, [["workspaces:open", "a"], ["workspaces:add", "link"], ["cloud-add:start", "pro", "Client B", null]]);
+  await clicked.bridge.workspaces.color("rose");
+  await clicked.bridge.workspaces.color(null);
+  assert.deepEqual(clicked.invoked, [["workspaces:open", "a"], ["workspaces:add", "link"], ["cloud-add:start", "pro", "Client B", null], ["workspaces:color", "rose"], ["workspaces:color", null]]);
   assert.equal(page.bridge.cloudAccount, undefined, "never the account bridge");
   const local = preload(LOCAL);
   await local.bridge.workspaces.open("a");

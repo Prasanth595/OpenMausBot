@@ -2463,5 +2463,19 @@
   "rail.address": "इसके बजाय पता डालें",
   "rail.copy": "कॉपी",
   "rail.copied": "कॉपी हुआ",
-  "rail.back": "वापस"
+  "rail.back": "वापस",
+  "rail.ownServer": "{name}, आपका अपना सर्वर",
+  "rail.offline": "{name}: ऑफ़लाइन",
+  "rail.lastSeen": "{name}: ऑफ़लाइन, आखिरी बार {when} देखा गया",
+  "rail.notConnected": "{name}: इसे इस ऐप से जोड़ें",
+  "rail.ownNetwork": "सिर्फ़ उसके अपने नेटवर्क पर पहुँचा जा सकता है",
+  "rail.connectTitle": "{name} जोड़ें",
+  "rail.connectLede": "यह आपके खाते से पहले ही साइन इन है। उस पर पेयरिंग विंडो खोलें, फिर उसका दिखाया गया लिंक यहाँ पेस्ट करें।",
+  "placeLook.title": "रंग",
+  "placeLook.sub": "{name} साइडबार के ऊपर और विंडो के बाएँ किनारे पर अपने गोले में इसी रंग में दिखता है।",
+  "placeLook.aria": "{name} का रंग",
+  "placeLook.member": "इसका रंग सिर्फ़ इसके एडमिन बदल सकते हैं।",
+  "placeLook.signedOut": "इसका रंग बदलने के लिए MausBot Cloud में साइन इन करें।",
+  "placeLook.unsupported": "इस Cloud का रंग अभी ऐप से नहीं बदला जा सकता।",
+  "placeLook.failed": "रंग सेव नहीं हुआ। फिर कोशिश करें।"
 }

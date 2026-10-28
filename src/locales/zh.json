@@ -3306,5 +3306,19 @@
   "rail.address": "改为输入地址",
   "rail.copy": "复制",
   "rail.copied": "已复制",
-  "rail.back": "返回"
+  "rail.back": "返回",
+  "rail.ownServer": "{name}（你自己的服务器）",
+  "rail.offline": "{name}：离线",
+  "rail.lastSeen": "{name}：离线，上次在线于{when}",
+  "rail.notConnected": "{name}：将它连接到这个应用",
+  "rail.ownNetwork": "只能从它自己的网络访问",
+  "rail.connectTitle": "连接 {name}",
+  "rail.connectLede": "它已经用你的账号登录。在它上面打开配对窗口，再把它显示的链接粘贴到这里。",
+  "placeLook.title": "颜色",
+  "placeLook.sub": "{name} 会以这个颜色显示在侧边栏顶部，以及窗口左侧它的圆圈上。",
+  "placeLook.aria": "{name} 的颜色",
+  "placeLook.member": "只有管理员可以更改颜色。",
+  "placeLook.signedOut": "登录 MausBot Cloud 才能更改颜色。",
+  "placeLook.unsupported": "暂时还无法在应用中更改这个 Cloud 的颜色。",
+  "placeLook.failed": "颜色没有保存。请重试。"
 }
