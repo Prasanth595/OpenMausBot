@@ -17,7 +17,6 @@ const text = (value: unknown) => (typeof value === "string" ? value : undefined)
 const keyList = (value: unknown) => (Array.isArray(value) && value.every((key) => typeof key === "string") ? value : undefined);
 
 function typedOrPressed({ tool, args }: RecipeStep): string | undefined {
-  if (tool === "type_text") return text(args.text);
   if (tool === "set_value") return text(args.value);
   if (tool === "hotkey") return keyList(args.keys)?.join("+");
   if (tool !== "press_key") return undefined;

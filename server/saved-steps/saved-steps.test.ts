@@ -20,7 +20,7 @@ const TARGET: Pick<RecipeStep, "app" | "window" | "element"> = {
 };
 const RECIPE: Recipe = {
   id: "r1", key: requestKey(REQUEST), request: REQUEST, reply: "Typed hello world into TextEdit.", createdAt: Date.now(), lastUsedAt: Date.now(),
-  steps: [{ tool: "click", args: {}, ...TARGET }, { tool: "type_text", args: { text: "hello world" }, ...TARGET }],
+  steps: [{ tool: "click", args: {}, ...TARGET }, { tool: "set_value", args: { value: "hello world" }, ...TARGET }],
 };
 
 const dirs: string[] = [];
@@ -151,7 +151,7 @@ describe("SavedSteps.requestSettled", () => {
     steps.requestSettled(settled());
     const recipe = steps.recipes.find("b1", "open textedit and type hello world")!;
     expect(recipe).toMatchObject({ request: REQUEST, reply: "Typed hello world into TextEdit.", createdAt: NOW, lastUsedAt: NOW });
-    expect(recipe.steps.map((step) => step.tool)).toEqual(["click", "type_text"]);
+    expect(recipe.steps.map((step) => step.tool)).toEqual(["click", "set_value"]);
     expect(patches).toEqual([["t1", "reply-1", { savedSteps: { recipeId: recipe.id, learned: true } }]]);
   });
 
@@ -250,7 +250,7 @@ describe("SavedSteps.requestSettled", () => {
   });
 
   const toolLine = (name: string, at: number): Message => ({ id: `tool-${at}`, at, role: "bot", kind: "activity", tool: { name, ok: true, itemId: `item-${at}` } });
-  const COMPUTER_LINES = [toolLine("mcp__computer__get_window_state", 10), toolLine("mcp__computer__click", 11), toolLine("mcp__computer__type_text", 12)];
+  const COMPUTER_LINES = [toolLine("mcp__computer__get_window_state", 10), toolLine("mcp__computer__click", 11), toolLine("mcp__computer__set_value", 12)];
 
   it.each(["Read", "Glob", "Grep", "LS", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch", "mcp__agents__select_computer", "select_computer", "web_search"])(
     "saves a computer run that also used %s", (tool) => {
@@ -271,7 +271,7 @@ describe("SavedSteps.requestSettled", () => {
     ["with a single-underscore server prefix", "computer_"],
   ])("saves a run whose engine names the computer's tools %s", (_, prefix) => {
     record(textEditJournal().calls);
-    const named = ["list_apps", "list_windows", "get_window_state", "click", "type_text"].map((name, index) => toolLine(`${prefix}${name}`, 20 + index));
+    const named = ["list_apps", "list_windows", "get_window_state", "click", "set_value"].map((name, index) => toolLine(`${prefix}${name}`, 20 + index));
     steps.requestSettled(settled({ after: [...named, REPLY] }));
     expect(saved()?.steps).toHaveLength(2);
   });

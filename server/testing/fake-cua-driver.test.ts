@@ -75,7 +75,7 @@ describe("the fake cua-driver", () => {
   it("hands out fresh tokens per snapshot and refuses stale ones", async () => {
     const { rpc, call } = start();
     expect((await rpc("initialize", { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } })).result.serverInfo.name).toBe("cua-driver");
-    expect((await rpc("tools/list")).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["list_apps", "list_windows", "get_window_state", "click", "type_text"]);
+    expect((await rpc("tools/list")).result.tools.map((tool: { name: string }) => tool.name)).toEqual(["list_apps", "list_windows", "get_window_state", "click", "set_value"]);
     expect((await call("get_window_state", { pid: 4242, window_id: 7 })).structuredContent.elements[2].element_token).toBe("s1-e2");
     expect((await call("get_window_state", { pid: 4242, window_id: 7 })).structuredContent.elements[2].element_token).toBe("s2-e2");
     const stale = await call("click", { element_token: "s1-e2" });
@@ -106,17 +106,19 @@ describe("the fake cua-driver", () => {
     expect((await start().call("get_window_state", { pid: 4242, window_id: 7 })).structuredContent.elements[2].element_token).toBe("s1-e2");
     const second = start();
     expect((await second.call("get_window_state", { pid: 4242, window_id: 7 })).structuredContent.elements[2].element_token).toBe("s2-e2");
-    expect((await second.call("type_text", { element_token: "s1-e2", text: "hello" })).isError).toBe(true);
+    expect((await second.call("set_value", { element_token: "s1-e2", value: "hello" })).isError).toBe(true);
   });
 
-  it("fails one type_text per touch of the fail file", async () => {
+  it("fails one set_value on a live element per touch of the fail file", async () => {
     const { call } = start();
     await call("get_window_state", { pid: 4242, window_id: 7 });
     writeFileSync(fail, "");
-    expect(await call("type_text", { element_token: "s1-e2", text: "hello world" })).toEqual({ content: [{ type: "text", text: "Fixture failure." }], isError: true });
-    expect(existsSync(fail)).toBe(false);
-    expect((await call("type_text", { element_token: "s1-e2", text: "hello world" })).isError).toBeUndefined();
     expect((await call("click", { element_token: "s1-e2" })).isError).toBeUndefined();
+    expect((await call("set_value", { element_token: "s0-e2", value: "hello world" })).content[0].text).toContain("unknown element token");
+    expect(existsSync(fail)).toBe(true);
+    expect(await call("set_value", { element_token: "s1-e2", value: "hello world" })).toEqual({ content: [{ type: "text", text: "Fixture failure." }], isError: true });
+    expect(existsSync(fail)).toBe(false);
+    expect((await call("set_value", { element_token: "s1-e2", value: "hello world" })).isError).toBeUndefined();
   });
 
   it("holds an action while the hold file exists", async () => {
@@ -142,6 +144,6 @@ describe("the fake cua-driver", () => {
     const caller: ComputerCaller = { call: async (tool, args) => callOutcome(await call(tool, args)) };
     const signal = new AbortController().signal;
     expect(await resolveStep(built.recipe.steps[0]!, caller, signal)).toEqual({ ok: true, args: { pid: 4242, window_id: 7, element_token: "s1-e2" } });
-    expect(await resolveStep(built.recipe.steps[1]!, caller, signal)).toEqual({ ok: true, args: { text: "hello world", pid: 4242, window_id: 7, element_token: "s2-e2" } });
+    expect(await resolveStep(built.recipe.steps[1]!, caller, signal)).toEqual({ ok: true, args: { value: "hello world", pid: 4242, window_id: 7, element_token: "s2-e2" } });
   });
 });

@@ -34,7 +34,7 @@ describe("buildRecipe", () => {
     const target = { app: { bundleId: "com.apple.TextEdit", name: "TextEdit" }, window: { title: "Untitled" },
       element: { role: "AXTextArea", label: "Document", path: ["AXScrollArea:"] } };
     expect(out.recipe).toEqual({ id: "r1", key: "open textedit and type hello world", request: REQUEST, reply: "Typed hello world into TextEdit.",
-      createdAt: 1_000, lastUsedAt: 1_000, steps: [{ tool: "click", args: {}, ...target }, { tool: "type_text", args: { text: "hello world" }, ...target }] });
+      createdAt: 1_000, lastUsedAt: 1_000, steps: [{ tool: "click", args: {}, ...target }, { tool: "set_value", args: { value: "hello world" }, ...target }] });
     expect(JSON.stringify(out.recipe)).not.toMatch(/s1-e2|4242|"window_id"/);
   });
 
@@ -53,10 +53,11 @@ describe("buildRecipe", () => {
     ["pixel-or-drag", () => build(withCall(action("browser_click", {})))],
     ["extra-arguments", () => build(withCall(action("launch_app", { name: "TextEdit", additional_arguments: ["--x"] })))],
     ["unknown-target", () => build(withCall(action("click", { element_token: "never-seen" })))],
-    ["unknown-target", () => build(withCall(action("type_text", { text: "hello world", pid: 4242 })))],
+    ["unknown-target", () => build(withCall(action("set_value", { value: "hello world", pid: 4242 })))],
     ["stale-element", () => build(snapshotThenClick({ refreshBeforeClick: true, token: "s1-e2" }))],
     ["unlabelled-element", () => build(withCall(action("click", { element_token: "s1-e1" })))],
-    ["typed-text-not-in-request", () => build(withCall(action("type_text", { element_token: "s1-e2", text: "goodbye" })))],
+    ["typed-text-not-in-request", () => build(withCall(action("set_value", { element_token: "s1-e2", value: "goodbye" })))],
+    ["typing-appends", () => build(withCall(action("type_text", { element_token: "s1-e2", text: "hello world" })))],
     ["url-not-in-request", () => build(withCall(action("launch_app", { name: "Safari", urls: ["https://example.com"] })))],
     ["no-steps", () => build(observationsOnly())],
     ["no-steps", () => build(textEditJournal({ calls: [] }))],
@@ -125,7 +126,6 @@ describe("buildRecipe", () => {
   ])("refuses a %s with a window target but no app", (_name, call) => expect(build(withCall(call))).toEqual({ ok: false, reason: "unknown-target" }));
 
   it.each(["hello world\n", "\r\n hello world \n\n", " hello world", "hello\tworld"])("refuses typed text with whitespace or control characters %#", (text) => {
-    expect(build(withCall(action("type_text", { element_token: "s1-e2", text })))).toEqual({ ok: false, reason: "typed-text-not-in-request" });
     expect(build(withCall(action("set_value", { element_token: "s1-e2", value: text })))).toEqual({ ok: false, reason: "typed-text-not-in-request" });
   });
 
@@ -148,7 +148,6 @@ describe("buildRecipe", () => {
     ["press_key", { key: "return", pid: 4242 }],
     ["press_key", { key: "return", element_token: "s1-e2" }],
     ["click", { element_token: "s1-e2" }],
-    ["type_text", { element_token: "s1-e2", text: "hello world" }],
   ])("keeps a %s only when it is scoped to its window", (tool, args) => {
     expect(build(withCall(action(tool, { ...args, scope: "desktop" })))).toEqual({ ok: false, reason: "unknown-target" });
     expect(build(withCall(action(tool, { ...args, scope: "screen" })))).toEqual({ ok: false, reason: "unknown-target" });
@@ -166,6 +165,22 @@ describe("buildRecipe", () => {
     expect(bare([stateCall(windowState(1)), action("click", { element_token: "s1-e2" })]).ok).toBe(true);
   });
 
+  const TOGGLES = ["AXCheckBox", "AXSwitch", "AXToggle", "AXRadioButton", "AXDisclosureTriangle", "AXMenuItemCheckbox"];
+  const withToggle = (role: string) => {
+    const rows = windowState(1).elements!;
+    return stateCall({ ...windowState(1), elements: [...rows, { element_index: 4, element_token: "s1-e4", role, label: "Bold", parent_index: 0, depth: 1 }] });
+  };
+
+  it.each(TOGGLES.flatMap((role) => ["click", "double_click", "press_key"].map((tool) => [role, tool])))("refuses a %s that a %s flips", (role, tool) => {
+    const args = tool === "press_key" ? { element_token: "s1-e4", key: "space" } : { element_token: "s1-e4" };
+    expect(bare([withToggle(role), action(tool, args)])).toEqual({ ok: false, reason: "toggle-element" });
+  });
+
+  it("keeps a toggle step that does not flip it", () => {
+    expect(bare([withToggle("AXCheckBox"), action("right_click", { element_token: "s1-e4" })]).ok).toBe(true);
+    expect(bare([withToggle("AXButton"), action("click", { element_token: "s1-e4" })]).ok).toBe(true);
+  });
+
   it("never lets a later source overwrite a known app field", () => {
     const calls = [...textEditJournal().calls, observation("launch_app", { structured: { pid: 4242, name: "Other", bundle_id: "x.other" } }), action("bring_to_front", { pid: 4242 })];
     const out = build({ ...textEditJournal(), calls });
@@ -179,7 +194,7 @@ describe("recipeFitsRequest", () => {
     expect(recipeFitsRequest(recipe, REQUEST)).toBe(true);
     expect(recipeFitsRequest(recipe, "open textedit and type hello, world")).toBe(false);
     for (const text of ["hello world\n", "\r\n hello world \n\n"]) {
-      expect(recipeFitsRequest({ ...recipe, steps: [{ tool: "type_text", args: { text } }] }, REQUEST)).toBe(false);
+      expect(recipeFitsRequest({ ...recipe, steps: [{ tool: "set_value", args: { value: text } }] }, REQUEST)).toBe(false);
     }
   });
 

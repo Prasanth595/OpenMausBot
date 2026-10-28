@@ -62,9 +62,9 @@ describe("resolveStep", () => {
   });
 
   it("keeps the saved arguments beside the fresh target", async () => {
-    const step: RecipeStep = { ...CLICK_DOCUMENT, tool: "type_text", args: { text: "hello world" } };
+    const step: RecipeStep = { ...CLICK_DOCUMENT, tool: "set_value", args: { value: "hello world" } };
     expect(await resolveStep(step, caller(completeWindowState(windowState(3))), signal))
-      .toEqual({ ok: true, args: { text: "hello world", pid: 4242, window_id: 7, element_token: "s3-e2" } });
+      .toEqual({ ok: true, args: { value: "hello world", pid: 4242, window_id: 7, element_token: "s3-e2" } });
   });
 
   it("refuses an answer that does not say it is complete", async () => {

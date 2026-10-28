@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "../atomic.ts";
 import { exactRequest } from "./key.ts";
-import { ELEMENT_TOOLS, KEPT_ARGS, holdsPersonWords, recipeFitsRequest, windowScoped, type Recipe } from "./rules.ts";
+import { ELEMENT_TOOLS, KEPT_ARGS, flipsToggle, holdsPersonWords, recipeFitsRequest, windowScoped, type Recipe } from "./rules.ts";
 
 export const MAX_RECIPES = 200;
 export const UNUSED_MS = 60 * 24 * 60 * 60 * 1000;
@@ -13,7 +13,7 @@ const VERSION = 1;
 
 const identity = z.object({ bundleId: z.string().optional(), name: z.string().optional() });
 const step = z.object({
-  tool: z.enum(["click", "double_click", "right_click", "type_text", "set_value", "press_key", "scroll", "launch_app", "bring_to_front", "hotkey"]),
+  tool: z.enum(["click", "double_click", "right_click", "set_value", "press_key", "scroll", "launch_app", "bring_to_front", "hotkey"]),
   args: z.record(z.string(), z.unknown()),
   app: identity.optional(),
   window: z.object({ title: z.string() }).optional(),
@@ -22,7 +22,8 @@ const step = z.object({
 const ADDRESSING_KEYS = new Set(["x", "y", "element_token", "element_index", "pid", "window_id", "session"]);
 const argsFitTool = (tool: keyof typeof KEPT_ARGS, args: Record<string, unknown>) =>
   Object.keys(args).every((name) => !ADDRESSING_KEYS.has(name) && KEPT_ARGS[tool].includes(name));
-const targetsFitTool = (entry: z.infer<typeof step>) => !ELEMENT_TOOLS.has(entry.tool) || (entry.element !== undefined && entry.app !== undefined);
+const targetsFitTool = (entry: z.infer<typeof step>) => (!ELEMENT_TOOLS.has(entry.tool) || (entry.element !== undefined && entry.app !== undefined))
+  && !(entry.element && flipsToggle(entry.tool, entry.element.role));
 const safeBotId = (botId: string) => botId !== "" && botId !== "." && botId !== ".." && basename(botId) === botId && !/[\\/]/.test(botId);
 
 const recipeSchema = z.object({

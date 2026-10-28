@@ -5,8 +5,8 @@
 // Env knobs:
 //   FAKE_CUA_STATE  JSON file holding the snapshot count, so the fixture's many driver processes agree on it
 //   FAKE_CUA_LOG    JSON-lines file each tools/call is appended to as {name, arguments} when it arrives
-//   FAKE_CUA_FAIL   path: the next type_text while it exists removes it and answers isError "Fixture failure."
-//   FAKE_CUA_HOLD   path: click and type_text wait while it exists before answering
+//   FAKE_CUA_FAIL   path: the next set_value on a live element while it exists removes it and answers isError "Fixture failure."
+//   FAKE_CUA_HOLD   path: click and set_value wait while it exists before answering
 import { appendFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
@@ -56,12 +56,12 @@ const TOOLS = [
     inputSchema: { type: "object", properties: { element_token: { type: "string" }, pid: { type: "integer" }, window_id: { type: "integer" } } },
   },
   {
-    name: "type_text",
-    description: "Type text into an element by its token.",
+    name: "set_value",
+    description: "Replace an element's value by its token.",
     inputSchema: {
       type: "object",
-      properties: { element_token: { type: "string" }, pid: { type: "integer" }, window_id: { type: "integer" }, text: { type: "string" } },
-      required: ["text"],
+      properties: { element_token: { type: "string" }, pid: { type: "integer" }, window_id: { type: "integer" }, value: { type: "string" } },
+      required: ["value"],
     },
   },
 ];
@@ -126,18 +126,18 @@ async function held(): Promise<void> {
   while (holdFile && existsSync(holdFile) && !inputClosed) await new Promise((resolve) => setTimeout(resolve, 25));
 }
 
-async function act(name: "click" | "type_text", args: Args): Promise<ToolResult> {
+async function act(name: "click" | "set_value", args: Args): Promise<ToolResult> {
   await held();
-  if (name === "type_text" && failFile && existsSync(failFile)) {
-    rmSync(failFile, { force: true });
-    return refused("Fixture failure.");
-  }
   const element = target(args);
   if ("content" in element) return element;
   const described = `${element.role} "${"label" in element ? element.label : ""}"`;
   if (name === "click") return text(`Clicked ${described}.`);
-  if (typeof args.text !== "string") return refused("type_text needs text");
-  return text(`Typed ${args.text.length} characters into ${described}.`);
+  if (typeof args.value !== "string") return refused("set_value needs a value");
+  if (failFile && existsSync(failFile)) {
+    rmSync(failFile, { force: true });
+    return refused("Fixture failure.");
+  }
+  return text(`Set ${described} to ${args.value.length} characters.`);
 }
 
 async function callTool(name: unknown, args: Args): Promise<ToolResult> {
@@ -148,7 +148,7 @@ async function callTool(name: unknown, args: Args): Promise<ToolResult> {
     return text(windows.map((window) => `${window.window_id} ${window.title}`).join("\n"), { windows });
   }
   if (name === "get_window_state") return windowState(args);
-  if (name === "click" || name === "type_text") return act(name, args);
+  if (name === "click" || name === "set_value") return act(name, args);
   return refused(`unknown tool ${String(name)}`);
 }
 

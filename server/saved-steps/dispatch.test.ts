@@ -23,10 +23,10 @@ const TARGET: Pick<RecipeStep, "app" | "window" | "element"> = {
 };
 const RECIPE: Recipe = {
   id: "r1", key: requestKey(REQUEST), request: REQUEST, reply: "Typed hello world into TextEdit.", createdAt: 1_000, lastUsedAt: 1_000,
-  steps: [{ tool: "click", args: {}, ...TARGET }, { tool: "type_text", args: { text: "hello world" }, ...TARGET }],
+  steps: [{ tool: "click", args: {}, ...TARGET }, { tool: "set_value", args: { value: "hello world" }, ...TARGET }],
 };
 const LABEL = '"Document" in TextEdit';
-const FAILED = { kind: "failed", done: 1, total: 2, tool: "type_text", label: LABEL, error: "Fixture failure." } as const;
+const FAILED = { kind: "failed", done: 1, total: 2, tool: "set_value", label: LABEL, error: "Fixture failure." } as const;
 const COMPUTER = { command: "gated-computer", args: ["--turn"], env: { OMB_CONTROL_TOKEN: "turn-token" }, platform: "darwin" as const, scope: "local-computer" as const };
 const INPUT: SendTurnInput = { threadId: "t1", botId: "b1", text: REQUEST, approvalMode: "full", integrations: { localComputer: COMPUTER } };
 const MESSAGE: Message = { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST };
@@ -206,14 +206,14 @@ describe("SavedStepsDispatch.sendTurn", () => {
     await settled();
     expect(start).not.toHaveBeenCalled();
     expect(engine.adapter.sendTurn).not.toHaveBeenCalled();
-    expect(acted).toEqual(["click", "type_text"]);
+    expect(acted).toEqual(["click", "set_value"]);
     expect(types()).toEqual(["turn.started", "request.opened", "request.resolved", "item.started", "item.completed", "request.opened",
       "request.resolved", "item.started", "item.completed", "item.completed", "turn.completed"]);
     expect(events.every((event) => event.turnId === turnId && event.threadId === "t1")).toBe(true);
     expect(events.find((e) => e.type === "request.opened")).toMatchObject({
       requestType: "permission", tool: "mcp__computer__click", summary: `click on ${LABEL}`, approvalScope: "local-computer", allowSession: false, turnId,
     });
-    expect(events.filter((e) => e.type === "request.opened")[1]).toMatchObject({ tool: "mcp__computer__type_text", summary: `type_text "hello world" on ${LABEL}` });
+    expect(events.filter((e) => e.type === "request.opened")[1]).toMatchObject({ tool: "mcp__computer__set_value", summary: `set_value "hello world" on ${LABEL}` });
     expect(events.find((e) => e.type === "request.resolved")).toMatchObject({ behavior: "allow", source: "user", approvalScope: "local-computer" });
     expect(events.at(-2)).toMatchObject({ itemType: "assistant_text", text: RECIPE.reply });
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, stopReason: "end_turn", provider: "claudeAgent", providerInstanceId: "claude" });
@@ -272,12 +272,12 @@ describe("SavedStepsDispatch.sendTurn", () => {
   });
 
   it("a declined step ends the turn without the AI and keeps the recipe", async () => {
-    answer = (event) => (event.tool === "mcp__computer__type_text" ? "deny" : "allow");
+    answer = (event) => (event.tool === "mcp__computer__set_value" ? "deny" : "allow");
     const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
     await settled();
     expect(acted).toEqual(["click"]);
-    expect(events.at(-2)).toMatchObject({ type: "item.completed", itemType: "assistant_text", turnId, text: declinedReply({ kind: "declined", tool: "type_text", label: LABEL }) });
-    expect(events.at(-1)).toMatchObject({ type: "turn.completed", turnId, ok: true, stopReason: "end_turn", denials: ["mcp__computer__type_text"] });
+    expect(events.at(-2)).toMatchObject({ type: "item.completed", itemType: "assistant_text", turnId, text: declinedReply({ kind: "declined", tool: "set_value", label: LABEL }) });
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", turnId, ok: true, stopReason: "end_turn", denials: ["mcp__computer__set_value"] });
     expect(events.filter((e) => e.type === "request.resolved").at(-1)).toMatchObject({ behavior: "deny", source: "user" });
     expect(start).not.toHaveBeenCalled();
     expect(recipes.forget).not.toHaveBeenCalled();
@@ -285,7 +285,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
   });
 
   it("a failed step forgets the recipe and hands the request to the AI under the replay's turn id", async () => {
-    failAt = "type_text";
+    failAt = "set_value";
     const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
     await settled();
     expect(recipes.forget).toHaveBeenCalledWith("b1", RECIPE.id);
@@ -308,19 +308,19 @@ describe("SavedStepsDispatch.sendTurn", () => {
   });
 
   it("a control-gate refusal keeps the recipe and hands the request to the AI with the note", async () => {
-    gateAt = "type_text";
+    gateAt = "set_value";
     const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
     await settled();
     expect(recipes.forget).not.toHaveBeenCalled();
     expect(start).toHaveBeenCalledTimes(1);
-    expect(start.mock.calls[0]![0].text).toBe(`${INPUT.text}\n\n${fallbackNote({ kind: "failed", done: 1, total: 2, tool: "type_text", label: LABEL, error: CONTROL_BUSY })}`);
+    expect(start.mock.calls[0]![0].text).toBe(`${INPUT.text}\n\n${fallbackNote({ kind: "failed", done: 1, total: 2, tool: "set_value", label: LABEL, error: CONTROL_BUSY })}`);
     expect(engines()).toBe(engine);
     expect(dispatch.take(ev("turn.completed", "e1"))).toBe(true);
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", turnId });
   });
 
   it("appends the note to recoveryText too", async () => {
-    failAt = "type_text";
+    failAt = "set_value";
     await dispatch.sendTurn(engine, REQ, { ...INPUT, recoveryText: "The conversation so far." }, start);
     await settled();
     expect(start.mock.calls[0]![0]).toMatchObject({
@@ -340,7 +340,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
   });
 
   it("leaves other threads' and turns' events alone", async () => {
-    failAt = "type_text";
+    failAt = "set_value";
     const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
     await settled();
     expect(dispatch.take(ev("item.completed", "e1", "t2"))).toBe(false);
@@ -350,7 +350,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
   });
 
   it("follows the AI turn that reports before its sendTurn answers", async () => {
-    failAt = "type_text";
+    failAt = "set_value";
     let answerStart!: (result: TurnStartResult) => void;
     start.mockImplementationOnce(() => new Promise((resolve) => { answerStart = resolve; }));
     const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
@@ -364,7 +364,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
   });
 
   it("a fallback that cannot start ends the turn with its error", async () => {
-    failAt = "type_text";
+    failAt = "set_value";
     start.mockRejectedValueOnce(new Error("Claude could not start"));
     const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
     await vi.waitFor(() => expect(turnCompleted()).toHaveLength(1));
@@ -376,7 +376,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
   });
 
   it("interrupts the AI when the person stopped while it was starting", async () => {
-    failAt = "type_text";
+    failAt = "set_value";
     start.mockImplementationOnce(async () => {
       stopped = true;
       return { turnId: "e1" };
@@ -386,9 +386,9 @@ describe("SavedStepsDispatch.sendTurn", () => {
   });
 
   it("does not start the AI for a request the person already stopped", async () => {
-    failAt = "type_text";
+    failAt = "set_value";
     answer = (event) => {
-      if (event.tool === "mcp__computer__type_text") stopped = true;
+      if (event.tool === "mcp__computer__set_value") stopped = true;
       return "allow";
     };
     await dispatch.sendTurn(engine, REQ, INPUT, start);
@@ -426,7 +426,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
   });
 
   it("hands Stop to the engine once the AI has taken over", async () => {
-    failAt = "type_text";
+    failAt = "set_value";
     answer = () => undefined;
     await dispatch.sendTurn(engine, REQ, INPUT, start);
     await asked();
@@ -477,7 +477,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
 
   it("ends the turn when handing the request to the AI breaks before the AI starts", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    failAt = "type_text";
+    failAt = "set_value";
     dispatch = new SavedStepsDispatch({ ...deps, engines: { get: (threadId) => slots.get(threadId), set: (threadId, instance) => {
       if (instance === engine) throw new Error("the engine slot is gone");
       slots.set(threadId, instance);
@@ -494,7 +494,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
 
   it("leaves the AI's turn alone when the replay breaks after the AI started", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    failAt = "type_text";
+    failAt = "set_value";
     dispatch = new SavedStepsDispatch({ ...deps, stopped: () => {
       if (start.mock.calls.length > 0) throw new Error("the request owner is gone");
       return false;
@@ -509,7 +509,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
   });
 
   it("forgets an earlier turn's fallback when the next turn starts", async () => {
-    failAt = "type_text";
+    failAt = "set_value";
     start.mockImplementationOnce(() => new Promise(() => {}));
     await dispatch.sendTurn(engine, REQ, INPUT, start);
     await settled();

@@ -128,7 +128,7 @@ describe("RecipeStore", () => {
       version: 1,
       recipes: [
         withStep("no element", { tool: "click", args: {}, app }),
-        withStep("no app", { tool: "type_text", args: { text: "hi" }, element }),
+        withStep("no app", { tool: "click", args: {}, element }),
         withStep("neither", { tool: "set_value", args: { value: "hi" } }),
         withStep("both", { tool: "click", args: {}, app, element }),
         withStep("key alone", { tool: "press_key", args: { key: "return" } }),
@@ -150,7 +150,7 @@ describe("RecipeStore", () => {
       version: 1,
       recipes: [
         withStep("desktop click", { tool: "click", args: { scope: "desktop" }, app, element }),
-        withStep("screen typing", { tool: "type_text", args: { text: "hi", scope: "screen" }, app, element }),
+        withStep("screen scroll", { tool: "scroll", args: { direction: "down", scope: "screen" }, app, element }),
         withStep("null scope", { tool: "click", args: { scope: null }, app, element }),
         withStep("desktop hotkey", { tool: "hotkey", args: { keys: ["cmd", "s"], scope: "desktop" }, app }),
         withStep("desktop key", { tool: "press_key", args: { key: "return", scope: "desktop" }, app }),
@@ -159,7 +159,7 @@ describe("RecipeStore", () => {
         withStep("unscoped key", { tool: "press_key", args: { key: "return" }, app }),
       ],
     }));
-    for (const dropped of ["desktop click", "screen typing", "null scope", "desktop hotkey", "desktop key"]) expect(store.find("b1", dropped)).toBeUndefined();
+    for (const dropped of ["desktop click", "screen scroll", "null scope", "desktop hotkey", "desktop key"]) expect(store.find("b1", dropped)).toBeUndefined();
     for (const kept of ["window click", "window hotkey", "unscoped key"]) expect(store.find("b1", kept)!.id).toBe(kept);
   });
 
@@ -178,6 +178,23 @@ describe("RecipeStore", () => {
     }));
     for (const dropped of ["no request", "loose spacing", "other words", "link elsewhere"]) expect(store.find("b1", dropped)).toBeUndefined();
     for (const kept of ["fits", "link"]) expect(store.find("b1", kept)!.id).toBe(kept);
+  });
+
+  it("drops typing and steps that flip a toggle", () => {
+    mkdirSync(join(dir, "b1"));
+    const app = { name: "TextEdit" };
+    const withStep = (id: string, step: unknown): Recipe => ({ ...recipe(id, id), request: id, steps: [step as Recipe["steps"][number]] });
+    writeFileSync(file(), JSON.stringify({
+      version: 1,
+      recipes: [
+        withStep("type hi", { tool: "type_text", args: { text: "hi" }, app, element: { role: "AXTextArea", label: "Body", path: [] } }),
+        withStep("tick", { tool: "click", args: {}, app, element: { role: "AXCheckBox", label: "Bold", path: [] } }),
+        withStep("menu", { tool: "right_click", args: {}, app, element: { role: "AXCheckBox", label: "Bold", path: [] } }),
+      ],
+    }));
+    expect(store.find("b1", "type hi")).toBeUndefined();
+    expect(store.find("b1", "tick")).toBeUndefined();
+    expect(store.find("b1", "menu")!.id).toBe("menu");
   });
 
   it("refuses a bot id that is not a single folder name", () => {

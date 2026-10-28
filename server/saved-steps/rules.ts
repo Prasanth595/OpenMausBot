@@ -18,7 +18,8 @@ export interface Recipe { id: string; key: string; request: string; reply: strin
 
 export type Refusal =
   | "moment-words" | "several-turns" | "incomplete-journal" | "denied" | "tool-error" | "unknown-tool" | "pixel-or-drag" | "extra-arguments"
-  | "unknown-target" | "stale-element" | "unlabelled-element" | "ambiguous-element" | "typed-text-not-in-request" | "url-not-in-request" | "no-steps" | "too-many-steps" | "no-reply";
+  | "unknown-target" | "stale-element" | "unlabelled-element" | "ambiguous-element" | "typed-text-not-in-request" | "url-not-in-request" | "no-steps" | "too-many-steps" | "no-reply"
+  | "typing-appends" | "toggle-element";
 
 const MAX_STEPS = 40;
 const ADDRESSING = new Set(["element_token", "element_index", "pid", "window_id", "session"]);
@@ -43,6 +44,12 @@ const isActionTool = (tool: string): tool is ActionTool => Object.hasOwn(KEPT_AR
 export const windowScoped = (tool: ActionTool, args: Record<string, unknown>): boolean =>
   !(KEY_TOOLS.has(tool) || ELEMENT_TOOLS.has(tool)) || args.scope === undefined || args.scope === "window";
 
+const TOGGLE_ROLE = /check ?box|switch|toggle|radio|disclosure/i;
+const FLIPPING_TOOLS: ReadonlySet<ActionTool> = new Set<ActionTool>(["click", "double_click", "press_key"]);
+
+/** A click flips a toggle from whatever state it is in, and element values never leave the bridge, so that state is unknown. */
+export const flipsToggle = (tool: ActionTool, role: string): boolean => FLIPPING_TOOLS.has(tool) && TOGGLE_ROLE.test(role);
+
 const CONTROL_CHARACTERS = /\p{Cc}/u;
 const CONTEXT_TOOLS = new Set(["get_accessibility_tree", "get_desktop_state"]);
 
@@ -52,7 +59,6 @@ function wordsOutsideRequest(steps: readonly Pick<RecipeStep, "tool" | "args">[]
   const fromPerson = (value: unknown) => typeof value === "string" && inRequest(value, request);
   const typedFromPerson = (value: unknown) => typeof value === "string" && value === value.trim() && !CONTROL_CHARACTERS.test(value) && inRequest(value, request);
   for (const { tool, args } of steps) {
-    if (tool === "type_text" && !typedFromPerson(args.text)) return "typed-text-not-in-request";
     if (tool === "set_value" && !typedFromPerson(args.value)) return "typed-text-not-in-request";
     if (tool === "launch_app" && args.urls !== undefined && !(Array.isArray(args.urls) && args.urls.every(fromPerson))) return "url-not-in-request";
   }
@@ -61,7 +67,7 @@ function wordsOutsideRequest(steps: readonly Pick<RecipeStep, "tool" | "args">[]
 
 /** Steps that type the person's words or open their links: only the request they came from, word for word, may repeat them. */
 export function holdsPersonWords(steps: readonly Pick<RecipeStep, "tool" | "args">[]): boolean {
-  return steps.some(({ tool, args }) => tool === "type_text" || tool === "set_value" || (tool === "launch_app" && args.urls !== undefined));
+  return steps.some(({ tool, args }) => tool === "set_value" || (tool === "launch_app" && args.urls !== undefined));
 }
 
 export function recipeFitsRequest(recipe: Pick<Recipe, "steps" | "request">, request: string): boolean {
@@ -189,6 +195,8 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
     }
     if (PIXEL_TOOLS.has(tool) || tool.startsWith("browser_") || "x" in args || "y" in args) return refuse("pixel-or-drag");
     if (!isActionTool(tool)) return refuse("unknown-tool");
+    // cua-driver 0.28.2's contract (TypeTextInput) does not say whether type_text replaces a field's value or adds to it.
+    if (tool === "type_text") return refuse("typing-appends");
     if (tool === "launch_app") learnLaunch(call);
 
     const kept: Record<string, unknown> = {};
@@ -213,6 +221,7 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
       if (typeof found === "string") return refuse(found);
       const { element, snapshot } = found;
       if (!element.label) return refuse("unlabelled-element");
+      if (flipsToggle(tool, element.role)) return refuse("toggle-element");
       const path = elementPath(snapshot.elements, element);
       if (!path) return refuse("unknown-target");
       const twins = matchElement(snapshot.elements, { role: element.role, label: element.label, path });

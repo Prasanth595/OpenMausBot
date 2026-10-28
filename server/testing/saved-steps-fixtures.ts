@@ -25,7 +25,7 @@ export function textEditJournal(overrides: { calls?: RecordedCall[]; complete?: 
     { tool: "list_windows", arguments: { pid: 4242 }, result: ok({ windows: [{ window_id: 7, pid: 4242, title: "Untitled", app_name: "TextEdit" }] }), generation: "g1" },
     { tool: "get_window_state", arguments: { pid: 4242, window_id: 7 }, result: ok(windowState(1)), generation: "g1" },
     { tool: "click", arguments: { element_token: "s1-e2" }, result: ok(), generation: "g1" },
-    { tool: "type_text", arguments: { element_token: "s1-e2", text: "hello world" }, result: ok(), generation: "g1" },
+    { tool: "set_value", arguments: { element_token: "s1-e2", value: "hello world" }, result: ok(), generation: "g1" },
   ];
   return { calls, complete: overrides.complete ?? true, tainted: overrides.tainted ?? false };
 }
