@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 // The Simple mode popup: a switch that changes the app behind it as it is flipped, closed for good by Done, ×, Escape or
 // a click outside.
-import { act, createElement } from "react";
+import { act, createElement, Fragment } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setLocale } from "@/lib/i18n";
-import { ADVANCED_MODE_KEY, readAdvancedMode, setAdvancedMode } from "@/lib/interface-mode";
+import { ADVANCED_MODE_KEY, readAdvancedMode, setAdvancedMode, useAdvancedMode } from "@/lib/interface-mode";
 import { SIMPLE_MODE_PROMPT_KEY, simpleModePromptSeen } from "@/lib/simple-mode-prompt";
 
 const analytics = vi.hoisted(() => ({ track: vi.fn() }));
@@ -71,16 +71,18 @@ describe("the Simple mode popup", () => {
 
   it("changes the app the moment it is flipped, both ways, and keeps its words while it does", async () => {
     setAdvancedMode(true);
-    await show();
+    const App = () => createElement("div", { "data-app": useAdvancedMode() ? "advanced" : "simple" });
+    const app = () => host.querySelector<HTMLElement>("[data-app]")?.dataset.app;
+    await act(async () => { root.render(createElement(Fragment, null, createElement(App), createElement(SimpleModePrompt, { onClose }))); });
     await act(async () => { toggle().click(); });
     expect(readAdvancedMode()).toBe(false);
     expect(localStorage.getItem(ADVANCED_MODE_KEY)).toBe("0");
-    expect(document.documentElement.dataset.interface).toBe("simple");
+    expect(app(), "the app behind it switches as it is flipped").toBe("simple");
     expect(toggle().getAttribute("aria-checked")).toBe("true");
     expect(host.querySelector("h2")?.textContent).toBe("Try the new Simple mode");
     await act(async () => { toggle().click(); });
     expect(readAdvancedMode()).toBe(true);
-    expect(document.documentElement.dataset.interface).toBe("advanced");
+    expect(app()).toBe("advanced");
     expect(toggle().getAttribute("aria-checked")).toBe("false");
     expect(events()).toEqual([{ action: "toggled", mode: "simple" }, { action: "toggled", mode: "advanced" }]);
     expect(onClose, "flipping never closes it").not.toHaveBeenCalled();
