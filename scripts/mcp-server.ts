@@ -692,8 +692,7 @@ function projectMessage(message: Record<string, any>) {
         reason: message.signIn.reason,
         done: message.signIn.done,
         cancelled: message.signIn.cancelled,
-        superseded: message.signIn.superseded,
-        answeredInChat: message.signIn.answeredInChat,
+        superseded: message.signIn.superseded, answeredInChat: message.signIn.answeredInChat,
         resumed: message.signIn.resumed,
       }
     : undefined;
