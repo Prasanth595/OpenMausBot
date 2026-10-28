@@ -5,7 +5,7 @@ import {
   BROWSER_SIGN_IN_FAILED, previewBrowserSignIn, readSessionState, SERVICE_TRUST_REASON, takeBrowserSignInFromLocation, takePairingCodeFromLocation, takeInvitedEmailFromLocation,
 } from "./lib/session";
 import { bootstrapBrand } from "./lib/brand";
-import { applySkin, readSkin } from "./lib/skins";
+import { applySkinChoice, readSkinChoice } from "./lib/skins";
 import { applyChatWidth, readChatWidth } from "./lib/chat-width";
 import { applyFont, readFont } from "./lib/fonts";
 import { settleAdvancedModeDefault } from "./lib/interface-mode";
@@ -16,13 +16,19 @@ import "./styles.css";
 
 // Before first paint; settleAdvancedModeDefault must run before applySkin writes omb-skin.
 settleAdvancedModeDefault();
-applySkin(readSkin());
+applySkinChoice(readSkinChoice());
 applyFont(readFont());
 applyChatWidth(readChatWidth());
 
 async function chooseRoot(): Promise<React.ReactNode> {
   const home = window.ogb?.home;
   if (location.pathname === "/home" && home) return <HomeScreen bridge={home} manage={window.ogb?.cloudPlan?.manage} />;
+  // The window's own rail of places (electron/chrome-rail.mjs): see-through but for the rail and its open sheets.
+  if (location.pathname === "/rail" && window.ogb?.rail) {
+    document.documentElement.style.background = document.body.style.background = "transparent";
+    const { ChromeRail } = await import("./components/ChromeRail");
+    return <ChromeRail />;
+  }
   if (location.pathname === "/pair") {
     const signIn = takeBrowserSignInFromLocation();
     if (signIn) {
