@@ -118,7 +118,7 @@ from the menu (new engine) still shows bands on purpose.
 
 | Maximized, before | Maximized, after | A wider Advanced panel | Tablet preset (new engine) |
 | --- | --- | --- | --- |
-| ![Before](images/browser-fill/before-midnight-maximized.png) | ![After](images/browser-fill/after-midnight-maximized.png) | ![Wide](images/browser-fill/after-midnight-advanced-wide.png) | ![Tablet](images/browser-fill/after-chrome-engine-tablet-preset.png) |
+| ![Before](images/browser-fill/before-midnight-maximized.png) | ![After](images/browser-fill/after-midnight-maximized.png) | ![Wide](images/browser-fill/after-midnight-advanced-wide.png) | ![Tablet](images/browser-fill/after-new-engine-tablet-preset.png) |
 
 `scripts/testing/browser-fill.e2e.test.ts` runs the agent-browser side against the pinned engine and
 `server/browser/viewers/viewers.e2e.test.ts` the new engine's (`OMB_CDP_CHROME`).
