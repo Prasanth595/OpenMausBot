@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Message } from "../store.ts";
 import { createWhatsAppChannel, isPublicHttps, POLL_BACKOFF_MS, POLL_MS, WHATSAPP_PATH, WHATSAPP_PROMPT } from "./channel.ts";
@@ -30,6 +30,7 @@ let inbox: Array<Record<string, string>>;
 let listFails: boolean;
 let listGate: Promise<void> | null;
 let endlessPages: boolean;
+let lists = 0;
 let claimRefused: boolean;
 let released: number;
 let channel: ReturnType<typeof createWhatsAppChannel>;
@@ -62,6 +63,7 @@ function makeChannel() {
         return token === "bad" ? new Response("{}", { status: 401 }) : new Response(JSON.stringify({ friendly_name: "Azad" }), { status: 200 });
       }
       if (!init.method) {
+        lists += 1;
         if (listGate) await listGate;
         if (listFails) return new Response(JSON.stringify({ message: "Service unavailable" }), { status: 503 });
         return new Response(JSON.stringify({ messages: inbox, ...(endlessPages ? { next_page_uri: "/2010-04-01/x/Messages.json?Page=n" } : {}) }), { status: 200 });
@@ -421,3 +423,56 @@ describe("second review fixes", () => {
     expect(delivered).toHaveLength(2);
   });
 });
+
+describe("third review fixes", () => {
+  it("cancels a link code after five wrong tries, so it can't be guessed", async () => {
+    const { code } = channel.startLink();
+    const wrong = (i: number) => String((Number(code) + 1 + i) % 1_000_000).padStart(6, "0");
+    for (let i = 0; i < 5; i += 1) await post(incoming(`link ${wrong(i)}`, `SMw${i}`, NEW));
+    expect(settings.publicSettings().linkExpiresAt).toBeUndefined();
+    await post(incoming(`link ${code}`, "SMok", NEW));
+    expect(settings.publicSettings().allowed).toEqual([ME]);
+  });
+
+  it("reads a second message from the same second as the last one it read", async () => {
+    reachable = false;
+    settings.setAccountName("Azad", clock - 60_000);
+    const second = Math.floor((clock + 5_000) / 1_000) * 1_000;
+    inbox = [row("SMa", "first", second)];
+    await channel.poll();
+    await channel.idle();
+    inbox = [row("SMb", "second", second), row("SMa", "first", second)];
+    await channel.poll();
+    await channel.idle();
+    expect(delivered.map((entry) => entry.text)).toEqual(["first", "second"]);
+  });
+
+  it("runs one timer chain when restarted during a check, and none after stopping", async () => {
+    reachable = false;
+    settings.setAccountName("Azad", clock - 60_000);
+    let release!: () => void;
+    listGate = new Promise((resolve) => { release = resolve; });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      channel.start();
+      await vi.advanceTimersByTimeAsync(POLL_MS);
+      const first = lists;
+      expect(first).toBeGreaterThan(0);
+      channel.stop();
+      channel.start();
+      release();
+      listGate = null;
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(POLL_MS);
+      expect(lists - first).toBe(1);
+      channel.stop();
+      const stopped = lists;
+      await vi.advanceTimersByTimeAsync(POLL_MS * 3);
+      expect(lists).toBe(stopped);
+    } finally {
+      channel.stop();
+      vi.useRealTimers();
+    }
+  });
+});
+

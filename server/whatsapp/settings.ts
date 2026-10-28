@@ -15,6 +15,8 @@ export const MAX_ALLOWED_NUMBERS = 5;
 export const LINK_TTL_MS = 10 * 60_000;
 const JOIN_PHRASE = /^join [a-z]+(?:-[a-z]+)+$/;
 const SEEN_MAX = 500;
+/** Wrong link codes allowed before the code is cancelled, so a 6-digit code can't be guessed while it is open. */
+export const LINK_MAX_FAILURES = 5;
 
 const contactSchema = z.object({
   threadId: z.string().optional(),
@@ -35,7 +37,7 @@ const stateSchema = z.object({
   accountName: z.string().optional(),
   /** The sandbox's "join two-words" phrase, shown in Twilio's console; there is no API for it. */
   joinPhrase: z.string().optional(),
-  link: z.object({ codeHash: z.string(), expiresAt: z.number() }).optional(),
+  link: z.object({ codeHash: z.string(), expiresAt: z.number(), failures: z.number().default(0) }).optional(),
   /** Messages before this are never read when checking Twilio for new ones. */
   pollSince: z.number().optional(),
   /** Changes whenever `pollSince` is reset, so a check that started before the reset delivers nothing. */
@@ -217,7 +219,7 @@ export function createWhatsAppSettings(dataDir: string) {
   function startLink(now: number): { code: string; expiresAt: number } {
     const state = load();
     const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-    state.link = { codeHash: hashCode(code), expiresAt: now + LINK_TTL_MS };
+    state.link = { codeHash: hashCode(code), expiresAt: now + LINK_TTL_MS, failures: 0 };
     if (!state.enabled || state.pollSince === undefined) {
       state.pollSince = now;
       state.generation += 1;
@@ -236,7 +238,12 @@ export function createWhatsAppSettings(dataDir: string) {
     if (!state.link || state.link.expiresAt <= now || !number) return false;
     const expected = Buffer.from(state.link.codeHash, "hex");
     const actual = Buffer.from(hashCode(code), "hex");
-    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return false;
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+      state.link.failures += 1;
+      if (state.link.failures >= LINK_MAX_FAILURES) delete state.link;
+      save(state);
+      return false;
+    }
     delete state.link;
     if (!state.allowed.includes(number)) state.allowed = [...state.allowed, number].slice(-MAX_ALLOWED_NUMBERS);
     state.enabled = Boolean(state.accountSid && authToken(state));

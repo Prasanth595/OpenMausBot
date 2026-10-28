@@ -215,7 +215,8 @@ export async function listInbound(
     const messages = rows.flatMap((row): PolledMessage[] => {
       if (row.direction !== "inbound") return [];
       const at = Date.parse(String(row.date_created ?? ""));
-      if (!Number.isFinite(at) || at <= since) return [];
+      // Twilio's times are whole seconds, so a message from the cursor's own second is read again; its SID de-duplicates it.
+      if (!Number.isFinite(at) || at < since) return [];
       const parsed = parseInbound({ From: String(row.from ?? ""), To: String(row.to ?? ""), Body: String(row.body ?? ""), MessageSid: String(row.sid ?? ""), NumMedia: String(row.num_media ?? "0") });
       return parsed ? [{ ...parsed, at }] : [];
     });

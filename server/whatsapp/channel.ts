@@ -258,8 +258,10 @@ export function createWhatsAppChannel(deps: WhatsAppChannelDeps) {
 
   function schedule(delay: number): void {
     if (stopped) return;
+    if (pollTimer) clearTimeout(pollTimer);
     pollTimer = setTimeout(() => {
       pollTimer = null;
+      if (stopped) return;
       if (polling) return schedule(POLL_MS);
       polling = true;
       void poll()
