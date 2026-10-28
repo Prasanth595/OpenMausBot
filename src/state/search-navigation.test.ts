@@ -3,7 +3,9 @@ import { createElement, type Dispatch } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ChatFindBar } from "@/components/ChatFindBar";
 import { landOnSearchHit } from "@/lib/focus-message";
+import { t } from "@/lib/i18n";
 import type { SearchHit } from "@/lib/search-hit";
 import { initialState, StoreProvider, useStore, type Action, type AppState, type Bot, type Group, type Message } from "./store";
 
@@ -50,6 +52,15 @@ const answer = async (path: string, body: unknown, messageId?: string) => {
 };
 const shownBot = () => seen.bots.find((candidate) => candidate.id === "scout")!;
 const shownRoom = () => seen.groups.find((candidate) => candidate.id === "room")!;
+const findPath = "/api/search?q=first&limit=100&threadId=one";
+const startFind = async () => {
+  flushSync(() => root.render(createElement(StoreProvider, null,
+    createElement(Probe), createElement(ChatFindBar, { threadId: "one", onClose: () => {} }))));
+  const input = host.querySelector("input")!;
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "first");
+  flushSync(() => input.dispatchEvent(new Event("input", { bubbles: true })));
+  await vi.waitFor(() => expect(held.some((request) => request.path === findPath)).toBe(true));
+};
 
 beforeEach(() => {
   Object.assign(initialState, { bots: [structuredClone(bot)], groups: [structuredClone(room)], selectedId: "scout", activeView: "chat" });
@@ -71,6 +82,57 @@ afterEach(() => {
 });
 
 describe("search-hit navigation replies", () => {
+  it.each([false, true])("keeps a manual bot switch made during Find before its automatic landing (switch settled: %s)", async (settled) => {
+    await startFind();
+    flushSync(() => dispatch({ type: "switchTask", botId: "scout", threadId: "two" }));
+    const switched = { bot: { ...bot, threadId: "two", messages: [line("manual-choice")], activeLeafId: "manual-choice" } };
+    if (settled) await answer("/api/bots/scout/tasks/two?messages=200", switched);
+    await answer(findPath, { hits: [hit] });
+
+    const switchingAfterFind = shownBot().switchingTo;
+    if (!settled) await answer("/api/bots/scout/tasks/two?messages=200", switched);
+    expect(shownBot().threadId).toBe("two");
+    expect(shownBot().messages.map((message) => message.id)).toEqual(["manual-choice"]);
+    expect(shownBot().activeLeafId).toBe("manual-choice");
+    expect(switchingAfterFind).toBe(settled ? undefined : "two");
+    expect(held.some((request) => request.path.startsWith("/api/bots/scout/tasks/one"))).toBe(false);
+  });
+
+  it("lets an explicit Find result click supersede a pending ordinary bot switch", async () => {
+    await startFind();
+    await answer(findPath, { hits: [hit] });
+    flushSync(() => dispatch({ type: "switchTask", botId: "scout", threadId: "two" }));
+    const next = host.querySelector<HTMLButtonElement>(`button[aria-label="${t("chat.find.next")}"]`)!;
+    flushSync(() => next.click());
+    await settle();
+    expect(shownBot().switchingTo).toBeUndefined();
+
+    await answer("/api/bots/scout/tasks/two?messages=200", { bot: { ...bot, threadId: "two", messages: [line("stale")] } });
+    expect(shownBot().threadId).toBe("one");
+    expect(shownBot().messages.map((message) => message.id)).toEqual(["first", "second"]);
+    expect(seen.focusMessage).toMatchObject({ threadId: "one", messageId: "first" });
+  });
+
+  it("keeps a newer explicit search choice with threads hidden when Find automatically lands", async () => {
+    await startFind();
+    const landing = landOnSearchHit({ ...hit, threadId: "two", messageId: "explicit-choice", onActivePath: false }, seen, dispatch, false, navigationRevision);
+    await vi.waitFor(() => expect(held.some((request) => request.path === "/api/bots/scout/active-branch")).toBe(true));
+    await answer(findPath, { hits: [hit] });
+    await answer("/api/bots/scout/active-branch", { activeLeafId: "explicit-choice" }, "explicit-choice");
+    await landing;
+    await answer("/api/bots/scout/tasks/two", { bot: { ...bot, threadId: "two", messages: [line("explicit-choice")], activeLeafId: "explicit-choice" } });
+    expect(shownBot().threadId).toBe("two");
+    expect(shownBot().messages.map((message) => message.id)).toEqual(["explicit-choice"]);
+    expect(seen.focusMessage).toMatchObject({ threadId: "two", messageId: "explicit-choice" });
+  });
+
+  it("automatically lands the first Find hit without intervening navigation", async () => {
+    await startFind();
+    await answer(findPath, { hits: [{ ...hit, messageId: "second" }] });
+    expect(shownBot().threadId).toBe("one");
+    expect(seen.focusMessage).toMatchObject({ threadId: "one", messageId: "second" });
+  });
+
   it("keeps a newer bot search hit when an older ordinary switch replies last", async () => {
     flushSync(() => dispatch({ type: "switchTask", botId: "scout", threadId: "two" }));
     await vi.waitFor(() => expect(held.some((request) => request.path === "/api/bots/scout/tasks/two?messages=200")).toBe(true));

@@ -12,6 +12,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
   const showThreads = useShowThreads();
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef(0);
+  const hitsRevision = useRef(navigationRevision.current);
   const [query, setQuery] = useState("");
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [index, setIndex] = useState(0);
@@ -33,9 +34,11 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
     }
     setLoading(true);
     const timer = window.setTimeout(() => {
+      const revision = navigationRevision.current;
       void api(`/api/search?q=${encodeURIComponent(trimmed)}&limit=100&threadId=${encodeURIComponent(threadId)}`)
         .then((body) => {
           if (request !== requestRef.current) return;
+          hitsRevision.current = revision;
           setHits(Array.isArray(body?.hits) ? body.hits : []);
           setIndex(0);
         })
@@ -49,7 +52,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
         });
     }, 180);
     return () => window.clearTimeout(timer);
-  }, [dispatch, query, threadId]);
+  }, [dispatch, navigationRevision, query, threadId]);
 
   const land = (next: number) => {
     const hit = hits[next];
@@ -65,7 +68,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
   };
 
   useEffect(() => {
-    if (hits[0]) land(0);
+    if (hits[0] && navigationRevision.current === hitsRevision.current) land(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hits]);
 

@@ -126,7 +126,10 @@ describe("navigation while a reconnect snapshot is in flight", () => {
       owner === "bot" ? ["a", "optimistic-next"] : ["snapshot", "optimistic-next"],
     );
     expect(owner === "bot" ? state.groups[0]?.threadId : shown().threadId).toBe(owner === "bot" ? "room-b" : "b");
-    if (owner === "bot") expect(shown().activeLeafId).toBe("optimistic-next");
+    if (owner === "bot") {
+      expect(shown().activeLeafId).toBe("optimistic-next");
+      expect(current.messages.find(message => message.id === "a")?.text).toBe("Refreshed snapshot");
+    }
   });
 
   it.each(["bot", "group"])("keeps a new %s task entry without restoring tasks omitted by the server", async owner => {

@@ -127,6 +127,7 @@ export function advanceNavigation(
   const selects = advancesNavigation(action, state);
   if (selects) selection.current++;
   if (selects || [
+    "searchNavigationStarted",
     "toggleSettings", "toggleComputer", "toggleActivity", "toggleInspector", "toggleAppSettings", "togglePlugins",
     "toggleShortcuts", "toggleNotifications", "toggleWelcome", "toggleTour", "openCloudAdd", "closeCloudAdd", "cloudHowTo",
   ].includes(action.type)) presence.current++;
