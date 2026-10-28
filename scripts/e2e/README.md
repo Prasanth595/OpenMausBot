@@ -1,10 +1,16 @@
 # The rail of places, end to end
 
-`cloud-rail.e2e.mjs` drives the real desktop app (PR #3725) with Playwright under Xvfb. The app runs in its installed
-layout (Electron renamed `openmausbot`, `resources/{app,ui,server,skills}`), so it starts its own server child, and it
-uses temporary HOME, user-data and data folders. The test pairs two servers through Settings → Servers → Connect, then
-covers the rail, ＋ (Buy a Cloud is checked signed out and buys nothing), the place colour, a narrow window, restarts
-and forgetting. Screenshots and `report.json` go to `/tmp/e2e-out`.
+`cloud-rail.e2e.mjs` drives the real desktop app (PRs #3725 and #3739) with Playwright under Xvfb. The app runs in its
+installed layout (Electron renamed `openmausbot`, `resources/{app,ui,server,skills}`), so it starts its own server
+child, and it uses temporary HOME, user-data and data folders. The test pairs two servers through Settings → Servers →
+Connect, then covers the rail, ＋ (Buy a Cloud is checked signed out and buys nothing), a place's colour from its
+circle's menu, a narrow and zoomed window, restarts and forgetting. The rail is the window's own: this app's page
+`/rail` in a view at the window's left edge, which the test reads and clicks there, beside every place's page. Its
+screenshots are the window as the person sees it (the place's page with the rail over its left edge), taken from main.
+Screenshots and `report.json` go to `/tmp/e2e-out`.
+
+The test checks the sidebar's tint only on servers it starts itself (built from the branch); a server of the caller's
+may run an older release, whose page draws no tint. Its colour is still set from the rail.
 
 `run-on-linux.sh` runs the same test on a Linux box of yours. The image is `node:24.21.0-bookworm`;
 `mcr.microsoft.com/playwright:v1.63.0-noble` also works, because the script adds Node 24 when it is missing. The box

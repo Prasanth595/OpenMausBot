@@ -1,5 +1,7 @@
 #!/usr/bin/env node
-// E1: the rail of places (PR #3725) end to end, in the real desktop app driven by Playwright.
+// E1: the rail of places (PRs #3725 and #3739) end to end, in the real desktop app driven by Playwright. Since #3739 the
+// rail is the window's own chrome: this app's page /rail in a view of its own at the window's left edge, beside whichever
+// place's page the window shows. The harness reads and clicks it there, and checks that no place's page reads the list.
 //
 // Linux only (GitHub Actions, or a disposable Linux box): it launches Electron, which never runs on a developer's Mac.
 //   xvfb-run -a --server-args="-screen 0 1600x1000x24" node scripts/e2e/cloud-rail.e2e.mjs
@@ -39,8 +41,9 @@ const PKG = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8"));
 const PRODUCT = "OpenMausBot";
 const DEVICE_LABEL = "E1 rail e2e";
 const SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
-/** The rail shows at this width and up (Tailwind md); below it the switcher stays. */
+/** The page's own narrow layout starts below this width (Tailwind md). The window's rail stays at every width. */
 const RAIL_BREAKPOINT = 768;
+const RAIL_WIDTH = 64;
 /** Analytics never leaves the app: its own switch is off, and these hosts do not resolve for Chromium either. */
 const BLOCKED_HOSTS = ["us.i.posthog.com", "us-assets.i.posthog.com", "app.posthog.com", "*.posthog.com"];
 const FIRST_RUN_DONE = {
@@ -336,14 +339,51 @@ async function collectMainRecords() {
   } catch {}
 }
 
-/** The window that shows a place (the startup screen is a data: page). */
+const isRailPage = (url) => { try { return new URL(url).pathname === "/rail"; } catch { return false; } };
+/** Every page Playwright sees in the app: the window's own and the rail's view. */
+const allPages = (electronApp) => [...new Set([...electronApp.windows(), ...electronApp.context().pages()])];
+
+/** The window that shows a place (the startup screen is a data: page; the rail's own page is not a place). */
 async function mainPage(electronApp, timeoutMs = 180_000) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) {
-    for (const page of electronApp.windows()) if (!page.isClosed() && /^https?:\/\//.test(page.url())) return page;
+    for (const page of allPages(electronApp)) if (!page.isClosed() && /^https?:\/\//.test(page.url()) && !isRailPage(page.url())) return page;
     await delay(250);
   }
-  throw new Error(`no app window showed a page (windows: ${electronApp.windows().map((page) => page.url()).join(", ")})`);
+  throw new Error(`no app window showed a page (windows: ${allPages(electronApp).map((page) => page.url()).join(", ")})`);
+}
+
+/** The window's own rail: this app's page at /rail in its view, or null while there is none. */
+async function railPage(timeoutMs = 10_000) {
+  const end = Date.now() + timeoutMs;
+  do {
+    const found = allPages(current.electronApp).find((page) => !page.isClosed() && isRailPage(page.url()));
+    if (found) return found;
+    await delay(200);
+  } while (Date.now() < end);
+  return null;
+}
+
+/** Where main has put the rail's view in the window, or null when the window has none. */
+async function railView() {
+  return current.electronApp.evaluate(({ BrowserWindow }, id) => {
+    const view = BrowserWindow.fromId(id)?.contentView.children.find((child) => {
+      try { return new URL(child.webContents?.getURL() ?? "").pathname === "/rail"; } catch { return false; }
+    });
+    return view ? view.getBounds() : null;
+  }, current.windowId);
+}
+
+/** The rail is on screen with its circles drawn. */
+async function waitForRail(timeoutMs = 20_000) {
+  const end = Date.now() + timeoutMs;
+  let seen = null;
+  while (Date.now() < end) {
+    seen = await railOnScreen();
+    if (seen.visible && seen.circles.length) return seen;
+    await delay(250);
+  }
+  throw new Error(`the window's rail never showed: ${JSON.stringify(seen)}`);
 }
 
 /** The app is drawn: its sidebar is on screen. */
@@ -393,19 +433,30 @@ async function setWindow(change) {
   }, { id: current.windowId, change });
 }
 
-const railPlacesFromMain = () => current.page.evaluate(async () => (window.ogb?.workspaces?.places ? window.ogb.workspaces.places() : null));
+/** What main lists for the rail, as the rail's own page reads it (null while there is no rail page). */
+const railPlacesFromMain = async () => {
+  const rail = await railPage(1_000);
+  return rail ? rail.evaluate(async () => (window.ogb?.workspaces?.places ? window.ogb.workspaces.places() : null)) : { places: [], add: null, page: "none" };
+};
+/** What the place's page itself is told: never the list, only whether the rail stands beside it. */
+const placesForPage = () => current.page.evaluate(async () => (window.ogb?.workspaces?.places ? window.ogb.workspaces.places() : null));
 const savedPlaces = () => current.page.evaluate(async () => (window.ogb?.environments?.state ? window.ogb.environments.state() : null));
 
-/** What the rail draws: each circle's id, kind, label, letters, whether it is the place on screen, its fill and ring. */
+/** What the window's rail draws: its view's place in the window, and each circle's id, kind, label, letters, whether it is
+ * the place on screen, its fill and ring, and the caption naming the place on screen. */
 async function railOnScreen() {
-  return current.page.evaluate(() => {
+  const bounds = await railView();
+  if (!bounds) return { present: false, visible: false, circles: [], add: false };
+  const rail = await railPage();
+  if (!rail) return { present: true, visible: false, circles: [], add: false, bounds };
+  const drawn = await rail.evaluate(() => {
     const rail = document.querySelector("[data-places-rail]");
-    if (!rail) return { present: false, visible: false, circles: [], add: false };
+    if (!rail) return { visible: false, circles: [], add: false, caption: null };
     const box = rail.getBoundingClientRect();
     return {
-      present: true,
       visible: getComputedStyle(rail).display !== "none" && box.width > 0,
       width: Math.round(box.width),
+      caption: document.querySelector("[data-rail-caption]")?.textContent?.trim() ?? null,
       circles: [...rail.querySelectorAll("[data-rail-place]")].map((button) => {
         const mark = button.querySelector("span");
         return {
@@ -418,6 +469,7 @@ async function railOnScreen() {
       add: Boolean(rail.querySelector("[data-rail-add]")),
     };
   });
+  return { present: true, ...drawn, visible: drawn.visible && bounds.width >= RAIL_WIDTH, bounds };
 }
 
 /** The sidebar's own switcher (the place on screen, and the native Server menu behind it): every one drawn. */
@@ -466,6 +518,24 @@ async function pageIdentity() {
   });
 }
 
+/** How far the place's page leaves room for the rail: its padding in CSS px, its zoom, and the points that makes on screen. */
+async function pageRoom() {
+  const css = await current.page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).paddingLeft) || 0);
+  const zoom = await current.electronApp.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.webContents.getZoomFactor() ?? 1, current.windowId);
+  return { css, zoom, points: Math.round(css * zoom * 10) / 10 };
+}
+
+/** The rail names the place on screen: its circle is the marked one, and the caption under it is the place's name. */
+async function railNames(label, timeoutMs = 15_000) {
+  const end = Date.now() + timeoutMs;
+  let seen = await railOnScreen();
+  while (Date.now() < end && !(seen.caption === label && seen.circles.find((circle) => circle.active)?.title?.startsWith(label))) {
+    await delay(250);
+    seen = await railOnScreen();
+  }
+  return seen;
+}
+
 async function sidebarTint() {
   return current.page.evaluate(() => {
     const element = document.querySelector("[data-place-tint]");
@@ -481,17 +551,33 @@ async function shot(entry, name) {
   shots += 1;
   const file = `${String(shots).padStart(2, "0")}-${name}.png`;
   await current.page.waitForTimeout(400);
-  // Zoomed in, Playwright clips the page's picture to its CSS size and cuts off its right side: take what the window
-  // shows from main instead.
-  const zoomed = await current.electronApp.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.webContents.getZoomLevel() ?? 0, current.windowId);
-  if (zoomed) {
-    const png = await current.electronApp.evaluate(async ({ BrowserWindow }, id) => (await BrowserWindow.fromId(id).webContents.capturePage()).toPNG().toString("base64"), current.windowId);
-    writeFileSync(join(OUT, file), Buffer.from(png, "base64"));
-  } else {
-    await current.page.screenshot({ path: join(OUT, file) });
-  }
+  writeFileSync(join(OUT, file), Buffer.from(await windowPicture(), "base64"));
   entry.screenshots.push(file);
   return file;
+}
+
+/** The window as the person sees it, taken from main: the place's page, with the window's rail (its own page in a view at
+ * the left edge, covering the window while a sheet of its is open) drawn over it. */
+function windowPicture() {
+  return current.electronApp.evaluate(async ({ BrowserWindow, nativeImage }, id) => {
+    const win = BrowserWindow.fromId(id);
+    const page = await win.webContents.capturePage();
+    const view = win.contentView.children.find((child) => { try { return new URL(child.webContents?.getURL() ?? "").pathname === "/rail"; } catch { return false; } });
+    if (!view || page.isEmpty()) return page.toPNG().toString("base64");
+    const rail = await view.webContents.capturePage();
+    const size = page.getSize(), over = rail.getSize(), scale = size.width / Math.max(1, win.getContentSize()[0]);
+    const base = Buffer.from(page.toBitmap()), top = rail.toBitmap(), at = view.getBounds();
+    const left = Math.round(at.x * scale), down = Math.round(at.y * scale);
+    // Both are BGRA with premultiplied alpha: the rail's pixels over the page's.
+    for (let row = 0; row < over.height && row + down < size.height; row++) {
+      for (let col = 0; col < over.width && col + left < size.width; col++) {
+        const from = (row * over.width + col) * 4, to = ((row + down) * size.width + col + left) * 4, keep = 1 - top[from + 3] / 255;
+        for (let channel = 0; channel < 3; channel++) base[to + channel] = Math.min(255, Math.round(top[from + channel] + base[to + channel] * keep));
+        base[to + 3] = 255;
+      }
+    }
+    return nativeImage.createFromBitmap(base, { width: size.width, height: size.height }).toPNG().toString("base64");
+  }, current.windowId);
 }
 
 /** Back to this computer's page through the native Server menu, as the person would from a server's page. */
@@ -523,28 +609,29 @@ async function closeSettings() {
   }
 }
 
-/** Nothing a step before left open over the window: Settings, ＋'s sheet, the buying sheet. */
+/** Nothing a step before left open over the window: Settings, the buying sheet, and the rail's own sheets and menus. */
 async function dismissOverlays() {
   const { page } = current;
-  for (const selector of [SETTINGS, "[data-place-add-sheet]", "[data-cloud-add-dialog]"]) {
-    const overlay = page.locator(selector).first();
+  const rail = await railPage(500);
+  for (const [where, selector] of [[page, SETTINGS], [page, "[data-cloud-add-dialog]"], [rail, "[data-place-add-sheet]"], [rail, "[data-rail-menu]"], [rail, "[data-rail-more]"]]) {
+    if (!where) continue;
+    const overlay = where.locator(selector).first();
     for (let i = 0; i < 3 && await overlay.isVisible().catch(() => false); i++) {
-      await page.keyboard.press("Escape");
+      await where.keyboard.press("Escape");
       await overlay.waitFor({ state: "hidden", timeout: 1_500 }).catch(() => {});
     }
   }
 }
 
-/** The narrow layout as the person reaches it: the window at its minimum, then View → Zoom In until the page is below the
- * rail's breakpoint; the sidebar is a drawer there, opened with Open bot list. Measures the switcher in the drawer, then
- * puts the window back. `before()` reads what to check before the drawer opens. */
+/** The narrow layout as the person reaches it: the window at its minimum, then View → Zoom In until the page is below its
+ * own narrow breakpoint; the sidebar is a drawer there, opened with Open bot list. Measures the switcher in the drawer,
+ * then puts the window back. `before()` reads what to check before the drawer opens. */
 async function narrowLayout(entry, name, before) {
   const { page } = current;
   const sized = await setWindow({ size: [700, 900] });
   await page.waitForTimeout(800);
   const asked = await page.evaluate(() => window.innerWidth);
   entry.notes.push(`asked for a 700 px window: ${sized.bounds.width} px, page ${asked} CSS px (minimum ${sized.minimum.join("×")})`);
-  if (asked >= RAIL_BREAKPOINT) finding("narrow-unreachable", `The window cannot be narrower than its minimum width (${sized.minimum[0]} px), which is wider than the ${RAIL_BREAKPOINT} px below which the rail hides: at 100% zoom the rail never hides. Only zooming in (View → Zoom In) reaches the narrow layout.`, { askedFor: 700, window: sized.bounds.width, page: asked, minimum: sized.minimum });
   let width = asked;
   for (let i = 0; i < 6 && width >= RAIL_BREAKPOINT; i++) {
     await chooseMenuItem({ role: "zoomin" }).catch(async (error) => {
@@ -580,18 +667,6 @@ async function narrowLayout(entry, name, before) {
   return { width, before: seen, switcher };
 }
 
-/** The place's colour in its own Settings: the profile menu's Settings, then Appearance (Advanced) or More looks (Simple). */
-async function openPlaceLookSettings() {
-  const { page } = current;
-  await page.locator("[data-sidebar-account]").first().click();
-  await page.locator("[data-menu-key='settings']").first().click();
-  await page.locator(SETTINGS).first().waitFor({ state: "visible" });
-  const appearance = page.locator("[data-settings-section='appearance']");
-  if (await appearance.isVisible().catch(() => false)) await appearance.click();
-  else await page.locator("xpath=//*[normalize-space(text())='More looks']/ancestor::*[.//button][1]//button[normalize-space(.)='Change']").first().click();
-  await page.locator("[data-place-look]").waitFor({ state: "visible", timeout: 15_000 });
-}
-
 /** The app's own Connect flow: Settings → Servers → Connect to a server, with the server's pairing link and a name. */
 async function pairThroughConnect(entry, server) {
   const { page } = current;
@@ -605,9 +680,12 @@ async function pairThroughConnect(entry, server) {
   await waitForApp(page, `${server.label}'s page`);
 }
 
+/** A click on a circle of the window's rail opens its place in the window. */
 async function openCircle(server, id) {
   const { page } = current;
-  await page.locator(`[data-rail-place="${id}"]`).click();
+  const rail = await railPage();
+  if (!rail) throw new Error(`the window has no rail to open ${server.label} from`);
+  await rail.locator(`[data-rail-place="${id}"]`).click();
   await page.waitForURL((url) => url.origin === server.origin, { timeout: 60_000 });
   await waitForApp(page, `${server.label}'s page`);
 }
@@ -617,14 +695,15 @@ async function expectShowing(entry, server, menuShot = null) {
   const seen = await pageIdentity();
   const menu = await serverMenu();
   const title = await windowTitle();
-  const named = await current.page.getByText(server.label, { exact: true }).first().isVisible().catch(() => false);
-  if (!named) finding("place-unnamed", "In Simple mode (a new install's default) a server's own page names it nowhere on screen: no rail there, and the switcher is the profile menu, whose first row names the place only once it is opened. The window title (OpenMausBot — Hosted: …) does name it.", { page: server.origin });
+  const rail = await railNames(server.label);
   const switcher = await switcherPlace(entry, menuShot);
   check(entry, `the window shows ${server.label}'s address`, seen.origin === server.origin, { shown: seen.origin, expected: server.origin });
   check(entry, `the page is ${server.label} itself (the environment id it answers)`, seen.environmentId === server.environmentId, { shown: seen.environmentId, expected: server.environmentId });
   check(entry, `signed in to ${server.label}, not its sign-in page`, seen.session?.kind === "session" && seen.path !== "/pair", seen.session);
   check(entry, `the Server menu ticks ${server.label}`, ticked(menu).length === 1 && ticked(menu)[0].startsWith(`${server.label} — `), ticked(menu));
   check(entry, `the window's title names ${server.label}`, typeof title === "string" && title.includes(server.label), title);
+  check(entry, `the window's rail is beside ${server.label}'s page, its circle marked and named under it`, rail.visible && rail.caption === server.label && Boolean(rail.circles.find((circle) => circle.active)?.title?.startsWith(server.label)),
+    { visible: rail.visible, caption: rail.caption, marked: rail.circles.filter((circle) => circle.active).map((circle) => circle.title) });
   check(entry, `the sidebar's switcher names ${server.label}`, switcher.place === server.label, switcher);
   return seen;
 }
@@ -692,6 +771,8 @@ async function main() {
     const menu = await serverMenu();
     check(entry, "no rail on screen", !rail.present, rail);
     check(entry, "main lists no places for the rail", Array.isArray(listed?.places) && listed.places.length === 0, listed);
+    const told = await placesForPage();
+    check(entry, "the page is told of no rail beside it", Array.isArray(told?.places) && told.places.length === 0 && told.beside !== true, told);
     await shot(entry, "fresh");
     const switcher = await switcherPlace(entry, "fresh-switcher");
     check(entry, "the sidebar keeps its switcher, on This computer", switcher.place === "This computer" && (switcher.mode === "advanced" || switcher.keys.includes("switch-place")), switcher);
@@ -707,22 +788,22 @@ async function main() {
     const place = (await savedPlaces())?.environments.find((item) => item.origin === A.origin);
     ids.a = place?.id;
     check(entry, `${A.label} is saved under the name it was given`, place?.name === A.label, place);
-    const rail = await railOnScreen();
-    const listed = await railPlacesFromMain();
-    // PR #3725 (railPlaces, RAIL_MIN_PLACES = 2): two places besides this computer before there is a rail at all.
-    check(entry, "one server besides this computer: no rail yet (the PR's rule)", !rail.present && listed?.places?.length === 0, { rail, listed });
-    if (!rail.present) finding("rail-threshold", "This computer + one server shows no rail: PR #3725 counts places besides this computer (RAIL_MIN_PLACES = 2), so the rail starts with two servers or Clouds, as three circles with This computer. The brief expected two circles at this point.", { listed: listed?.places ?? null });
-    await shot(entry, "one-server-no-rail");
+    // Two places, This computer counted: the window's rail, with two circles.
+    await waitForRail();
+    const rail = await railNames("This computer");
+    check(entry, `two circles: This computer, then ${A.label}`, rail.circles.map((circle) => circle.label).join(" | ") === ["This computer", A.label].join(" | "), rail.circles.map((circle) => circle.label));
+    check(entry, "This computer is the marked circle, named under it", rail.circles[0]?.active === true && rail.caption === "This computer", { circles: rail.circles.map(({ label, active }) => ({ label, active })), caption: rail.caption });
+    check(entry, "the rail stands at the window's left edge, 64 points wide", rail.bounds?.x === 0 && rail.bounds?.width === RAIL_WIDTH, rail.bounds);
+    await shot(entry, "one-server-two-circles");
   });
 
   await scenario("pair-b", `Pair ${B.label}: three circles, This computer, ${A.label}, ${B.label}`, async (entry) => {
-    const { page } = current;
     await pairThroughConnect(entry, B);
     sessionIds.b = (await expectShowing(entry, B)).session?.id ?? null;
     await backToThisComputer();
     ids.b = (await savedPlaces())?.environments.find((item) => item.origin === B.origin)?.id;
-    await page.locator("[data-places-rail]").waitFor({ state: "visible", timeout: 15_000 });
-    const rail = await railOnScreen();
+    await waitForRail();
+    const rail = await railNames("This computer");
     const order = rail.circles.map((circle) => circle.label);
     check(entry, "the rail is on screen", rail.visible, { visible: rail.visible, width: rail.width });
     check(entry, "three circles: This computer, then the servers in the order they were added", order.join(" | ") === ["This computer", A.label, B.label].join(" | "), order);
@@ -734,34 +815,43 @@ async function main() {
     check(entry, "This computer, the place on screen, is marked and ringed", computer?.active && computer.ring && !first?.active && !second?.active, rail.circles.map(({ label, active, ring }) => ({ label, active, ring })));
     check(entry, "＋ comes last", rail.add);
     const aside = await switcherBesideRail();
-    check(entry, "beside the rail (wide window) the sidebar's switcher is not drawn", aside.drawn === 0, aside);
+    check(entry, "beside the rail the sidebar's switcher is not drawn", aside.drawn === 0, aside);
+    const room = await pageRoom();
+    check(entry, "the page moves over by the rail's width", Math.abs(room.points - RAIL_WIDTH) <= 1, room);
+    const told = await placesForPage();
+    check(entry, "the page itself reads no list, only that the rail stands beside it", Array.isArray(told?.places) && told.places.length === 0 && told.beside === true, told);
     if (first && second && first.letters === second.letters) finding("same-initials", `Two servers whose names start alike get the same letters (${first.letters}): only the tooltip tells them apart.`, { a: first.label, b: second.label });
     if (first && second && first.fill === second.fill) finding("no-colour", "A server connected by hand has no colour (until it gets one), so every such server is the same plain circle in the rail.", { fill: first.fill });
     await shot(entry, "rail-three-circles");
     const menu = await switcherPlace(entry, "rail-and-profile-menu");
     entry.notes.push(`switcher beside the rail: ${JSON.stringify(menu)}`);
-    if (menu.mode === "simple" && menu.keys.includes("switch-place")) finding("simple-switch-stays", "In Simple mode the profile menu keeps its place row and Switch to… (the native Server menu) beside the rail: two ways to switch on screen at once. The PR's step-aside applies to Advanced mode's switcher only.", { keys: menu.keys });
+    check(entry, "one switcher: beside the rail the profile menu names the place and has no Switch to…", menu.mode === "advanced" || (menu.place === "This computer" && !menu.keys.includes("switch-place")), menu);
   });
 
-  await scenario("switch", "Each circle opens its place: the window, the menu tick and the marked circle agree", async (entry) => {
+  await scenario("switch", "Each circle opens its place, the rail stays beside every one, and This computer's circle comes back", async (entry) => {
     const { page, localOrigin } = current;
     for (const server of [A, B]) {
       await backToThisComputer();
-      await page.locator("[data-places-rail]").waitFor({ state: "visible", timeout: 15_000 });
-      const before = await railOnScreen();
+      await waitForRail();
+      const before = await railNames("This computer");
       check(entry, `before ${server.label}: This computer is the marked circle`, before.circles[0]?.active === true && before.circles.filter((circle) => circle.active).length === 1, before.circles.map(({ label, active }) => ({ label, active })));
       check(entry, `before ${server.label}: the Server menu ticks This computer`, ticked(await serverMenu()).join() === "This computer", ticked(await serverMenu()));
       await openCircle(server, ids[server.key]);
       await expectShowing(entry, server, `on-${server.key}-switcher`);
       const rail = await railOnScreen();
-      const listed = await railPlacesFromMain();
-      // PR #3725's trust rule: a server's own page gets no list, so it draws no rail; the native menu is its switcher.
-      check(entry, `${server.label}'s own page gets no rail (the PR's trust rule)`, !rail.present && listed?.places?.length === 0, { rail, listed });
-      if (!rail.present) finding("rail-one-way", "Once a circle opens a server connected by hand, that server's page has no rail (by design: its page could otherwise read the names of the other places). So the circle just clicked is never seen marked, and the way back is the sidebar's switcher or the Server menu, not the rail.", { page: server.origin });
+      check(entry, `beside ${server.label}'s page: the same circles, ${server.label}'s marked`, rail.circles.map((circle) => circle.id).join() === ["local", ids.a, ids.b].join()
+        && rail.circles.filter((circle) => circle.active).map((circle) => circle.id).join() === ids[server.key], rail.circles.map(({ id, active }) => ({ id, active })));
+      const told = await placesForPage();
+      check(entry, `${server.label}'s page reads no list (the rail is this app's own)`, Array.isArray(told?.places) && told.places.length === 0 && told.beside === true, told);
+      const room = await pageRoom();
+      check(entry, `${server.label}'s page moves over by the rail's width`, Math.abs(room.points - RAIL_WIDTH) <= 1, room);
       await shot(entry, `on-${server.key}`);
     }
-    await backToThisComputer();
-    check(entry, "back on this computer's page", new URL(page.url()).origin === localOrigin, page.url());
+    // The way back is the rail too: This computer's circle, from the server's page.
+    await openCircle({ origin: localOrigin, label: "This computer" }, "local");
+    check(entry, "This computer's circle opens this computer's page again", new URL(page.url()).origin === localOrigin, page.url());
+    const back = await railNames("This computer");
+    check(entry, "This computer is marked and named again", back.caption === "This computer" && back.circles[0]?.active === true, { caption: back.caption, circles: back.circles.map(({ id, active }) => ({ id, active })) });
   });
 
   await scenario("advanced", "Advanced mode: beside the rail, the sidebar's switcher steps aside", async (entry) => {
@@ -771,9 +861,9 @@ async function main() {
     await page.evaluate(() => localStorage.setItem("omb-advanced-mode", "1"));
     await page.reload();
     await waitForApp(page, "this computer's page in Advanced mode");
-    await page.locator("[data-places-rail]").waitFor({ state: "visible", timeout: 15_000 });
+    await waitForRail();
     const aside = await switcherBesideRail();
-    check(entry, "the switcher is kept beside the rail, not drawn on a wide window", aside.kept > 0 && aside.drawn === 0, aside);
+    check(entry, "the switcher is kept beside the rail, not drawn", aside.kept > 0 && aside.drawn === 0, aside);
     const rail = await railOnScreen();
     check(entry, "the same three circles, This computer marked", rail.circles.map((circle) => circle.id).join() === ["local", ids.a, ids.b].join() && rail.circles[0]?.active === true, rail.circles.map(({ id, active }) => ({ id, active })));
     await shot(entry, "rail-advanced");
@@ -785,17 +875,20 @@ async function main() {
   await scenario("add-own-server", "＋ → Add your own server shows its steps", async (entry) => {
     const { page } = current;
     await backToThisComputer();
-    await page.locator("[data-rail-add]").click();
-    await page.locator("[data-place-add-sheet]").waitFor({ state: "visible" });
+    const rail = await railPage();
+    await rail.locator("[data-rail-add]").click();
+    await rail.locator("[data-place-add-sheet]").waitFor({ state: "visible" });
     entry.notes.push(`＋ choices: ${JSON.stringify((await railPlacesFromMain())?.add)}`);
-    if (await page.locator("[data-place-add='choose']").isVisible()) {
-      check(entry, "＋ offers both: Buy a Cloud, Add your own server", await page.locator("[data-place-add-choice='cloud']").isVisible() && await page.locator("[data-place-add-choice='server']").isVisible());
+    const covering = await railView();
+    check(entry, "＋'s sheet covers the whole window while open", covering?.width > RAIL_WIDTH, covering);
+    if (await rail.locator("[data-place-add='choose']").isVisible()) {
+      check(entry, "＋ offers both: Buy a Cloud, Add your own server", await rail.locator("[data-place-add-choice='cloud']").isVisible() && await rail.locator("[data-place-add-choice='server']").isVisible());
       await shot(entry, "add-sheet");
-      await page.locator("[data-place-add-choice='server']").click();
+      await rail.locator("[data-place-add-choice='server']").click();
     } else {
       check(entry, "＋ offers both: Buy a Cloud, Add your own server", false, "＋ went straight to one of them");
     }
-    const steps = page.locator("[data-place-add='own-server']");
+    const steps = rail.locator("[data-place-add='own-server']");
     await steps.waitFor({ state: "visible" });
     const titles = await steps.locator("ol > li p.font-semibold").allTextContents();
     const commands = await steps.locator("[data-own-server-command]").allTextContents();
@@ -805,7 +898,10 @@ async function main() {
     await shot(entry, "add-own-server");
     // Enter its address instead: the sheet makes way for Settings → Servers, where an address is typed.
     await steps.getByRole("button", { name: "Enter its address instead" }).click();
-    await page.locator("[data-place-add-sheet]").waitFor({ state: "hidden" });
+    await rail.locator("[data-place-add-sheet]").waitFor({ state: "hidden" });
+    await delay(300);
+    const back = await railView();
+    check(entry, "closed, the rail is its strip again", back?.width === RAIL_WIDTH, back);
     const opened = await page.getByLabel(ADDRESS, { exact: true }).waitFor({ state: "visible", timeout: 15_000 }).then(() => true, () => false);
     check(entry, "Enter its address instead opens Settings → Servers, at Connect to a server", opened);
     await closeSettings();
@@ -816,16 +912,17 @@ async function main() {
     const { electronApp, page } = current;
     await backToThisComputer();
     await electronApp.evaluate(({ clipboard }, text) => clipboard.writeText(text), A.pairLink());
-    await page.locator("[data-rail-add]").click();
-    await page.locator("[data-place-add-choice='server']").click();
-    await page.locator("[data-place-add='own-server']").getByRole("button", { name: "Paste pairing link" }).click();
+    const sheet = await railPage();
+    await sheet.locator("[data-rail-add]").click();
+    await sheet.locator("[data-place-add-choice='server']").click();
+    await sheet.locator("[data-place-add='own-server']").getByRole("button", { name: "Paste pairing link" }).click();
     await page.waitForURL((url) => url.origin === A.origin && url.pathname !== "/pair", { timeout: 60_000 });
     await waitForApp(page, `${A.label}'s page`);
     await expectShowing(entry, A);
     await backToThisComputer();
     const saved = (await savedPlaces())?.environments.filter((item) => item.origin === A.origin) ?? [];
     check(entry, `still one saved place for ${A.label}, with its name and id`, saved.length === 1 && saved[0].id === ids.a && saved[0].name === A.label, saved);
-    const rail = await railOnScreen();
+    const rail = await railNames("This computer");
     check(entry, "the rail is as it was: three circles", rail.circles.map((circle) => circle.id).join() === ["local", ids.a, ids.b].join(), rail.circles.map(({ id, label }) => ({ id, label })));
     await shot(entry, "after-paste");
   });
@@ -835,8 +932,9 @@ async function main() {
     await backToThisComputer();
     const listed = await railPlacesFromMain();
     if (!check(entry, "＋ offers Buy a Cloud in the installed app", listed?.add?.cloud === true, listed?.add)) return;
-    await page.locator("[data-rail-add]").click();
-    await page.locator("[data-place-add-choice='cloud']").click();
+    const rail = await railPage();
+    await rail.locator("[data-rail-add]").click();
+    await rail.locator("[data-place-add-choice='cloud']").click();
     // Signed out, ＋'s own flow hands over to this computer's buying sheet, which signs in and shows the plans.
     const sheet = page.locator("[data-cloud-add-dialog]");
     await sheet.waitFor({ state: "visible", timeout: 30_000 });
@@ -848,7 +946,7 @@ async function main() {
     const signIn = await sheet.getByRole("button", { name: "Already have a plan? Sign in" }).isVisible().catch(() => false);
     const account = await page.evaluate(async () => (window.ogb?.cloudAccount?.state ? window.ogb.cloudAccount.state() : null));
     entry.notes.push(`sheet: ${kind}; plans: ${plans}; account: ${account?.status ?? "?"}`);
-    check(entry, "the rail's sheet handed over to the buying sheet", await sheet.isVisible() && !await page.locator("[data-place-add-sheet]").isVisible());
+    check(entry, "the rail's sheet handed over to the buying sheet", await sheet.isVisible() && !await rail.locator("[data-place-add-sheet]").isVisible());
     check(entry, "the signed-out offer: plans from the catalog and Sign in", (kind ?? "").startsWith("offer") && plans > 0 && signIn, { kind, plans, signIn });
     check(entry, "still signed out of MausBot Cloud", account?.status === "signed-out", account?.status ?? account);
     await shot(entry, "buy-cloud-signed-out");
@@ -859,29 +957,34 @@ async function main() {
     check(entry, "no checkout, nor any other page, was opened in a browser", report.externalOpens.length === 0, report.externalOpens);
   });
 
-  await scenario("tint", `A colour for ${A.label}, set in its own Settings: its sidebar and circle follow`, async (entry) => {
+  await scenario("tint", `A colour for ${A.label} from its circle on the window's rail: its circle follows, and its sidebar where its server draws the tint`, async (entry) => {
     const { page } = current;
     await backToThisComputer();
     await openCircle(A, ids.a);
-    const supported = await page.evaluate(() => typeof window.ogb?.workspaces?.look === "function" && typeof window.ogb?.workspaces?.color === "function");
-    if (!supported) throw new Skip("The place colour (workspaces.look / workspaces.color) is not in this build of feat/cloud-rail yet.");
-    entry.notes.push(`${A.label}'s look before: ${JSON.stringify(await page.evaluate(() => window.ogb.workspaces.look()))}`);
-    await openPlaceLookSettings();
-    const card = page.locator("[data-place-look]");
-    check(entry, `${A.label}'s colour can be changed here (this app keeps it)`, await card.getAttribute("data-place-look") === "local", await card.getAttribute("data-place-look"));
-    await card.locator("[data-swatch='violet']").click();
-    await card.locator("[data-swatch='violet'][aria-checked='true']").waitFor({ state: "visible", timeout: 10_000 });
-    await shot(entry, "tint-chosen");
-    await closeSettings();
-    const look = await page.evaluate(() => window.ogb.workspaces.look());
-    check(entry, "main keeps the colour for this place", look?.color === "purple" && look?.swatch === "violet", look);
+    // A server built from this branch draws the tint at the top of its sidebar; one on an older release has no tint (nor
+    // a colour setting of its own), and the rail's menu is how its colour is set.
+    const drawsTint = A.source === "local";
+    entry.notes.push(`${A.label} (${A.version ?? A.source}): look before ${JSON.stringify(await page.evaluate(() => window.ogb?.workspaces?.look?.() ?? null))}`);
+    const rail = await railPage();
+    await rail.locator(`[data-rail-place="${ids.a}"]`).click({ button: "right" });
+    const menu = rail.locator(`[data-rail-menu="${ids.a}"]`);
+    await menu.waitFor({ state: "visible", timeout: 10_000 });
+    check(entry, `a right-click on ${A.label}'s circle opens its menu`, await menu.getAttribute("aria-label") === A.label, await menu.getAttribute("aria-label"));
+    check(entry, "its six colours can be chosen there", await menu.locator("[data-swatch]:not([disabled])").count() === 6, await menu.locator("[data-swatch]").count());
+    await shot(entry, "colour-menu");
+    await menu.locator("[data-swatch='violet']").click();
+    await menu.waitFor({ state: "hidden", timeout: 15_000 });
+    const look = await page.evaluate(() => window.ogb?.workspaces?.look?.() ?? null);
+    check(entry, "main keeps the colour for this place, on this computer", look?.color === "purple" && look?.swatch === "violet" && look?.change === "local", look);
+    let circles = await railOnScreen();
+    for (let i = 0; i < 20 && circles.circles.find((item) => item.id === ids.a)?.fill === circles.circles.find((item) => item.id === ids.b)?.fill; i++) { await delay(250); circles = await railOnScreen(); }
+    const circleA = circles.circles.find((item) => item.id === ids.a), circleB = circles.circles.find((item) => item.id === ids.b);
+    check(entry, `${A.label}'s circle takes the colour at once; ${B.label}'s stays plain`, Boolean(circleA?.fill) && circleA.fill !== circleB?.fill, { a: circleA?.fill, b: circleB?.fill });
     const tint = await sidebarTint();
-    check(entry, `${A.label}'s sidebar takes the tint`, Boolean(tint?.value?.includes("purple")), tint);
+    if (drawsTint) check(entry, `${A.label}'s sidebar takes the tint`, Boolean(tint?.value?.includes("purple")), tint);
+    else entry.notes.push(`${A.label}'s own page ${tint ? "draws" : "does not draw"} the tint: ${JSON.stringify(tint)}`);
     await shot(entry, "tint-on-a");
     await backToThisComputer();
-    const rail = await railOnScreen();
-    const circleA = rail.circles.find((item) => item.id === ids.a), circleB = rail.circles.find((item) => item.id === ids.b);
-    check(entry, `${A.label}'s circle takes the colour; ${B.label}'s stays plain`, Boolean(circleA?.fill) && circleA.fill !== circleB?.fill, { a: circleA?.fill, b: circleB?.fill });
     check(entry, "this computer's own page has no tint", !(await sidebarTint()), await sidebarTint());
     await shot(entry, "tint-in-rail");
     await openCircle(B, ids.b);
@@ -889,19 +992,21 @@ async function main() {
     await backToThisComputer();
     await openCircle(A, ids.a);
     const again = await sidebarTint();
-    check(entry, `back on ${A.label}, its tint is still there`, Boolean(again?.value?.includes("purple")), again);
+    if (drawsTint) check(entry, `back on ${A.label}, its tint is still there`, Boolean(again?.value?.includes("purple")), again);
     await shot(entry, "tint-on-a-again");
   });
 
-  await scenario("narrow", "Narrow window: the rail hides and the switcher stays", async (entry) => {
-    const { page } = current;
+  await scenario("narrow", "Narrow and zoomed in: the window's rail stays beside the page's narrow layout", async (entry) => {
     await backToThisComputer();
-    await page.locator("[data-places-rail]").waitFor({ state: "visible", timeout: 15_000 });
-    const narrow = await narrowLayout(entry, "narrow", () => railOnScreen());
-    check(entry, `below ${RAIL_BREAKPOINT} CSS px the rail hides`, narrow.width < RAIL_BREAKPOINT && narrow.before.present && !narrow.before.visible, { width: narrow.width, present: narrow.before.present, visible: narrow.before.visible });
-    check(entry, "the switcher stays: in the sidebar drawer, in the rail's place, naming This computer", narrow.switcher.some((item) => item.beside && item.text.includes("This computer")), narrow.switcher);
+    await waitForRail();
+    const narrow = await narrowLayout(entry, "narrow", async () => ({ rail: await railOnScreen(), room: await pageRoom() }));
+    const { rail, room } = narrow.before;
+    check(entry, `below ${RAIL_BREAKPOINT} CSS px (zoomed in) the rail is still there, This computer named`, narrow.width < RAIL_BREAKPOINT && rail.visible && rail.caption === "This computer", { width: narrow.width, visible: rail.visible, caption: rail.caption, bounds: rail.bounds });
+    check(entry, "zoomed in, the page still leaves the rail its 64 points", Math.abs(room.points - RAIL_WIDTH) <= 1, room);
+    check(entry, "one switcher: the sidebar's drawer draws none beside the rail", narrow.switcher.length === 0, narrow.switcher);
     report.narrowSwitcher = { withRail: narrow.switcher };
-    check(entry, "wide again: the rail is back", (await railOnScreen()).visible);
+    const wide = await railOnScreen();
+    check(entry, "wide again: the rail as it was", wide.visible && wide.bounds?.width === RAIL_WIDTH, wide.bounds);
   });
 
   await scenario("restart", "Restart the app: the places and the rail are still there", async (entry) => {
@@ -909,9 +1014,8 @@ async function main() {
     await collectMainRecords();
     await current.electronApp.close();
     current = await launchApp(binary, brokerPort, current.localOrigin);
-    const { page } = current;
-    await page.locator("[data-places-rail]").waitFor({ state: "visible", timeout: 30_000 });
-    const rail = await railOnScreen();
+    await waitForRail(30_000);
+    const rail = await railNames("This computer");
     check(entry, "the same three circles", rail.circles.map((circle) => circle.id).join() === ["local", ids.a, ids.b].join(), rail.circles.map(({ id, label }) => ({ id, label })));
     const menu = await serverMenu();
     check(entry, "the Server menu still lists both servers", [A, B].every((server) => radios(menu).some((label) => label.startsWith(`${server.label} — `))), radios(menu));
@@ -932,11 +1036,11 @@ async function main() {
     current = await launchApp(binary, brokerPort, current.localOrigin);
     check(entry, `quit on ${A.label}, reopened on ${A.label}`, new URL(current.page.url()).origin === A.origin, current.page.url());
     await expectShowing(entry, A);
-    if (tinted) check(entry, `${A.label}'s tint is there from the start`, Boolean((await sidebarTint())?.value?.includes("purple")), await sidebarTint());
+    if (tinted && A.source === "local") check(entry, `${A.label}'s tint is there from the start`, Boolean((await sidebarTint())?.value?.includes("purple")), await sidebarTint());
     await shot(entry, "reopened-on-a");
     await backToThisComputer();
-    const railBack = await current.page.locator("[data-places-rail]").waitFor({ state: "visible", timeout: 15_000 }).then(() => true, () => false);
-    check(entry, "back on this computer, the rail is there", railBack, await railOnScreen());
+    const railBack = await railNames("This computer");
+    check(entry, "back on this computer, the rail is there, This computer marked", railBack.visible && railBack.caption === "This computer", { visible: railBack.visible, caption: railBack.caption });
   });
 
   async function forget(server) {
@@ -949,16 +1053,16 @@ async function main() {
     await page.waitForTimeout(1_000);
   }
 
-  await scenario("forget-b", `Forget ${B.label}: one server left`, async (entry) => {
+  await scenario("forget-b", `Forget ${B.label}: one server left, two circles`, async (entry) => {
     const before = B.sessions ? await B.sessions() : null;
     await forget(B);
-    const rail = await railOnScreen();
+    let rail = await railOnScreen();
+    for (let i = 0; i < 40 && rail.circles.length !== 2; i++) { await delay(250); rail = await railOnScreen(); }
     const menu = await serverMenu();
     check(entry, `${B.label} is gone from the Server menu, ${A.label} stays`, !radios(menu).some((label) => label.startsWith(`${B.label} — `)) && radios(menu).some((label) => label.startsWith(`${A.label} — `)), radios(menu));
-    // The brief expected two circles here; under PR #3725's rule one server besides this computer is no rail.
-    check(entry, "one server besides this computer: no rail (the PR's rule)", !rail.present, rail);
+    check(entry, `two circles: This computer and ${A.label}`, rail.visible && rail.circles.map((circle) => circle.id).join() === ["local", ids.a].join(), rail.circles.map(({ id, label }) => ({ id, label })));
     const back = await switcherPlace();
-    check(entry, "the switcher is back in the sidebar, on This computer", back.place === "This computer", back);
+    check(entry, "the profile menu still names This computer, with no Switch to… beside the rail", back.place === "This computer" && (back.mode === "advanced" || !back.keys.includes("switch-place")), back);
     if (B.sessions) {
       const after = await B.sessions();
       check(entry, `${B.label} signed this desktop out (its session is gone there)`, before.some((session) => session.id === sessionIds.b) && !after.some((session) => session.id === sessionIds.b), { session: sessionIds.b, before: before.map((session) => session.id), after: after.map((session) => session.id) });
@@ -969,7 +1073,7 @@ async function main() {
   await scenario("forget-a", `Forget ${A.label} from the Server menu, on its own page: only this computer, no rail`, async (entry) => {
     const { page, localOrigin } = current;
     await backToThisComputer();
-    // No rail with one server: the Server menu opens it, and its Forget “…” item forgets the place on screen.
+    // The Server menu opens it here (the rail would too), and its Forget “…” item forgets the place on screen.
     await chooseMenuItem({ label: A.label });
     await page.waitForURL((url) => url.origin === A.origin, { timeout: 60_000 });
     await waitForApp(page, `${A.label}'s page`);
@@ -982,9 +1086,12 @@ async function main() {
       const after = await A.sessions();
       check(entry, `${A.label} signed this desktop out (its session is gone there)`, Boolean(session) && !after.some((item) => item.id === session), { session, after: after.map((item) => item.id) });
     }
-    const rail = await railOnScreen();
+    let rail = await railOnScreen();
+    for (let i = 0; i < 40 && rail.present; i++) { await delay(250); rail = await railOnScreen(); }
     const menu = await serverMenu();
     check(entry, "no rail", !rail.present, rail);
+    const room = await pageRoom();
+    check(entry, "the page has the whole window again", room.css === 0, room);
     check(entry, "the Server menu is This computer alone, ticked", ticked(menu).join() === "This computer" && radios(menu).length === 1, radios(menu));
     const back = await switcherPlace();
     check(entry, "the switcher is there, on This computer, as on a fresh app", back.place === "This computer", back);
