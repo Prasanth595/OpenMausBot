@@ -1035,7 +1035,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
       >
         <div data-chathead-row className={cn("flex items-center justify-between", phone ? "gap-2" : "@max-[30rem]/chathead:flex-wrap @max-[30rem]/chathead:gap-y-1 @min-[30rem]/chathead:grid @min-[30rem]/chathead:grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(max-content,1fr)]")}>
         {threadTabsVisible && (
-          <div data-chathead-tabbar className="flex min-w-0 @min-[30rem]/chathead:col-start-1 @min-[30rem]/chathead:justify-self-end">
+          <div data-chathead-tabbar className="flex min-w-0 @min-[30rem]/chathead:col-start-1 @min-[30rem]/chathead:justify-self-start">
             <ThreadTabs bot={profile} dispatch={dispatch} onMeasuredWidthChange={setThreadTabWidth} />
           </div>
         )}
