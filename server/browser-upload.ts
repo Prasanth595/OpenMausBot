@@ -13,6 +13,8 @@ const readChunk = promisify(read), writeChunk = promisify(write);
 const O_NOFOLLOW_ANY = 0x20000000;
 const NAMED_COPY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
+export class BrowserUploadRefusal extends Error {}
+
 function realRoot(root: string): string | null {
   try { return realpathSync.native(root); } catch { return null; }
 }
@@ -58,7 +60,7 @@ export async function namedUploadPaths(files: ReadonlyArray<{ file: string; name
       const source = openUpload(file);
       opened.push(source);
       total += source.size;
-      if (total > BROWSER_UPLOAD_MAX_BYTES) throw new Error("Uploads are limited to 100 MiB per batch.");
+      if (total > BROWSER_UPLOAD_MAX_BYTES) throw new BrowserUploadRefusal("Uploads are limited to 100 MiB per batch.");
       return { file, name, source };
     });
     const paths: string[] = [];
@@ -81,13 +83,13 @@ export async function namedUploadPaths(files: ReadonlyArray<{ file: string; name
 }
 
 function openUpload(source: string): { input: number; size: number } {
-  if (process.platform === "win32") throw new Error("Uploads of workspace files through the browser are not supported on Windows yet.");
+  if (process.platform === "win32") throw new BrowserUploadRefusal("Uploads of workspace files through the browser are not supported on Windows yet.");
   const input = openSync(source, constants.O_RDONLY | constants.O_NONBLOCK | (process.platform === "darwin" ? O_NOFOLLOW_ANY : constants.O_NOFOLLOW));
   try {
-    if (process.platform === "linux" && readlinkSync(`/proc/self/fd/${input}`) !== source) throw new Error(`${source} changed while staging the upload.`);
+    if (process.platform === "linux" && readlinkSync(`/proc/self/fd/${input}`) !== source) throw new BrowserUploadRefusal(`${source} changed while staging the upload.`);
     const file = fstatSync(input, { bigint: true });
-    if (!file.isFile()) throw new Error(`${source} is not a file.`);
-    if (file.size > BigInt(FILE_MAX_BYTES)) throw new Error("Uploads are limited to 25 MiB per file.");
+    if (!file.isFile()) throw new BrowserUploadRefusal(`${source} is not a file.`);
+    if (file.size > BigInt(FILE_MAX_BYTES)) throw new BrowserUploadRefusal("Uploads are limited to 25 MiB per file.");
     return { input, size: Number(file.size) };
   } catch (error) {
     closeSync(input);
@@ -101,7 +103,7 @@ async function copyUpload({ input, size }: { input: number; size: number }, dest
     const chunk = Buffer.allocUnsafe(1024 * 1024);
     for (let remaining = size; remaining > 0;) {
       const { bytesRead: count } = await readChunk(input, chunk, 0, Math.min(chunk.length, remaining), null);
-      if (!count) throw new Error(`${source} changed while staging the upload.`);
+      if (!count) throw new BrowserUploadRefusal(`${source} changed while staging the upload.`);
       let offset = 0;
       while (offset < count) {
         const { bytesWritten } = await writeChunk(output, chunk, offset, count - offset, null);
