@@ -83,11 +83,42 @@ describe("computer journal", () => {
     expect(taken.complete).toBe(true);
   });
 
-  it("evicts the oldest thread past the thread cap", () => {
+  it("evicts the oldest thread past the thread cap and taints what it lost", () => {
     const j = new ComputerJournal({ threads: 2 });
     for (const threadId of ["t1", "t2", "t3"]) j.record({ ...scope, threadId }, CLICK);
+    expect(j.take("t1", new Set(["g1"]))).toEqual({ calls: [], complete: false, tainted: true });
+    expect(j.take("t3", new Set(["g1"]))).toMatchObject({ calls: [{ tool: "click" }], tainted: false });
+  });
+
+  it("taints a request whose thread was evicted mid-request, so its later calls never look complete", () => {
+    const j = new ComputerJournal();
+    j.gateChecked(scope); j.record(scope, CLICK);
+    for (let i = 0; i < 64; i++) {
+      const other = { botId: "b2", threadId: `other-${i}`, generation: `o${i}` };
+      j.gateChecked(other); j.record(other, TYPE);
+    }
+    j.gateChecked(scope); j.record(scope, TYPE);
+    const taken = j.take("t1", new Set(["g1"]))!;
+    expect(taken.calls.map((c) => c.tool)).toEqual(["type_text"]);
+    expect(taken.complete).toBe(false);
+    expect(taken.tainted).toBe(true);
+  });
+
+  it("taints only the generations an eviction lost, and forgets the eviction once taken", () => {
+    const j = new ComputerJournal({ threads: 1 });
+    j.taint({ threadId: "t1", generation: "g0" });
+    j.record({ ...scope, threadId: "t2" }, CLICK);
+    const g1 = { ...scope, generation: "g1" };
+    j.gateChecked(g1); j.record(g1, CLICK);
+    expect(j.take("t1", new Set(["g1"]))).toMatchObject({ complete: true, tainted: false });
+    expect(j.take("t1", new Set(["g0"]))).toBeNull();
+  });
+
+  it("remembers a bounded number of evicted threads", () => {
+    const j = new ComputerJournal({ threads: 1, evictedThreads: 1 });
+    for (const threadId of ["t1", "t2", "t3"]) j.record({ ...scope, threadId }, CLICK);
     expect(j.take("t1", new Set(["g1"]))).toBeNull();
-    expect(j.take("t3", new Set(["g1"]))).not.toBeNull();
+    expect(j.take("t2", new Set(["g1"]))).toMatchObject({ calls: [], tainted: true });
   });
 
   it("journals only this computer's turns", () => {

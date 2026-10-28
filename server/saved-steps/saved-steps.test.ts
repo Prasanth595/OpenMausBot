@@ -224,6 +224,20 @@ describe("SavedSteps.requestSettled", () => {
     expect(saved()?.steps).toHaveLength(2);
   });
 
+  it("never saves a request whose thread was evicted from the journal mid-request", () => {
+    const [first] = textEditJournal().calls;
+    record([first!]);
+    for (let i = 0; i < 64; i++) {
+      const other = { botId: "b2", threadId: `other-${i}`, generation: `o${i}` };
+      steps.journal.gateChecked(other);
+      steps.journal.record(other, { tool: "click", arguments: {}, result: { isError: false } });
+    }
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
+    expect(saved()).toBeUndefined();
+    expect(patches).toEqual([]);
+  });
+
   it("frees the journal even when it saves nothing", () => {
     enabled = false;
     record(textEditJournal().calls);
