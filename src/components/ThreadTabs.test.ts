@@ -207,14 +207,16 @@ describe("a bot's threads in the chat header", () => {
     expect(document.querySelector('[data-sidebar-popover-menu="anchored"]')).not.toBeNull();
   });
 
-  it("offers every thread action and New conversation from a tab's menu", () => {
+  it("offers the same actions, in the same order, as the side panel's conversation menu", () => {
     render(bot({ projects: [{ id: "p1", name: "Launch" }] }));
     const sheet = menu("launch");
     const labels = [...sheet.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent);
-    expect(labels).toEqual(expect.arrayContaining([
-      "New conversation", "Rename thread", "Move to folder", "Pin", "Copy link", "Archive", "Snooze", "Delete thread",
-    ]));
-    expect(labels).not.toContain("Regenerate title");
+    expect(labels).toEqual([
+      "Copy link", "Rename thread", "No folder", "Launch", "Pin", "Archive", "Until new activity", "Until 6 PM", "Until 9 AM tomorrow", "Delete thread",
+    ]);
+    expect(sheet.textContent).toContain("Move to folder");
+    expect(sheet.textContent).toContain("Snooze");
+    expect(labels).not.toContain("New conversation");
   });
 
   it("pins, archives and snoozes through the sidebar's own actions", () => {
@@ -225,9 +227,7 @@ describe("a bot's threads in the chat header", () => {
     click(menuItem(menu("deck"), "Archive"));
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "deck", patch: { archivedAt: expect.any(Number) } }]]);
     fixture.dispatch.mockReset();
-    click(menuItem(menu("deck"), "Snooze"));
-    const submenu = document.querySelector<HTMLElement>("[data-sidebar-popover-submenu]")!;
-    click(menuItem(submenu, "Until new activity"));
+    click(menuItem(menu("deck"), "Until new activity"));
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "updateTask", botId: "research", threadId: "deck", patch: { snoozedUntil: 0 } }]]);
   });
 
@@ -250,12 +250,6 @@ describe("a bot's threads in the chat header", () => {
     expect(dialog.textContent).toContain("Delete thread?");
     click([...dialog.querySelectorAll("button")].find((button) => button.textContent === "Delete thread"));
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "deleteTask", botId: "research", threadId: "deck" }]]);
-  });
-
-  it("starts a new conversation in the open thread's folder", () => {
-    render(bot({ projects: [{ id: "p1", name: "Launch" }], tasks: tasks.map((entry) => entry.threadId === "who" ? { ...entry, projectId: "p1" } : entry) }));
-    click(menuItem(menu("who"), "New conversation"));
-    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "newTask", botId: "research", projectId: "p1" }]]);
   });
 
   it("keeps a long strip scrolling rather than growing the header, and scrolls the whole active row into view", () => {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   Archive, ArchiveRestore, BellOff, ChevronLeft, ChevronRight, Clock, FolderInput, Link2, Link2Off, Loader2,
-  MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, SquarePen, Trash2,
+  MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, Trash2,
 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -47,7 +47,7 @@ function tabStatus(task: TabTask): string {
   return task.unread ? t("task.unread") : "";
 }
 
-function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, onNew, onFocus, register, registerRow }: {
+function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, onFocus, register, registerRow }: {
   task: TabTask;
   ownerId: string;
   active: boolean;
@@ -56,7 +56,6 @@ function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, 
   folders: Bot["projects"];
   actions: ThreadActions;
   onOpen: (task: TabTask, fromKeyboard: boolean) => void;
-  onNew: () => void;
   onFocus: (threadId: string) => void;
   register: (threadId: string, element: HTMLButtonElement | null) => void;
   registerRow: (threadId: string, element: HTMLDivElement | null) => void;
@@ -88,67 +87,45 @@ function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, 
   const copyLink = () => { void copyText(threadRefUrl({ botId: ownerId, threadId: task.threadId })); };
   const moveTo = (folderId: string | null) => actions.onMove(task, folderId);
   const items: SidebarMenuItem[] = [
-    {
-      key: "new",
-      heading: t("botPanel.conversations.title"),
-      label: t("botPanel.conversations.new"),
-      icon: <SquarePen size={16} />,
-      onSelect: onNew,
-    },
-    { key: "rename", label: t("task.renameAria"), icon: <Pencil size={16} />, onSelect: startRename },
+    { key: "link", label: t("task.copyLink"), icon: <Link2 size={12} />, onSelect: copyLink },
+    { key: "rename", label: t("task.renameAria"), icon: <Pencil size={12} />, onSelect: startRename },
     ...(actions.onRegenerateTitle ? [{
       key: "regenerate",
       label: t("task.regenerateTitle"),
-      icon: <RefreshCw size={16} />,
+      icon: <RefreshCw size={12} />,
       onSelect: () => actions.onRegenerateTitle?.(task, () => {}),
     } satisfies SidebarMenuItem] : []),
-    ...(folders?.length ? [{
-      key: "move",
-      label: t("folder.move"),
-      icon: <FolderInput size={16} />,
-      submenu: [
-        { key: "folder:none", label: t("folder.none"), active: !task.projectId, onSelect: () => moveTo(null) },
-        ...folders.map((folder) => ({
-          key: `folder:${folder.id}`,
-          label: `${folder.emoji ? `${folder.emoji} ` : ""}${folder.name}`,
-          active: task.projectId === folder.id,
-          onSelect: () => moveTo(folder.id),
-        })),
-      ],
-      onSelect: () => {},
-    } satisfies SidebarMenuItem] : []),
+    ...(folders?.length ? [
+      { key: "move", heading: t("folder.move"), label: t("folder.none"), active: !task.projectId, icon: <FolderInput size={12} />, onSelect: () => moveTo(null) } satisfies SidebarMenuItem,
+      ...folders.map((folder) => ({
+        key: `folder:${folder.id}`,
+        label: `${folder.emoji ? `${folder.emoji} ` : ""}${folder.name}`,
+        active: task.projectId === folder.id,
+        onSelect: () => moveTo(folder.id),
+      } satisfies SidebarMenuItem)),
+    ] : []),
     {
       key: "pin",
       label: task.pinned === true ? t("sidebar.bot.unpin") : t("sidebar.bot.pin"),
-      icon: task.pinned === true ? <PinOff size={16} /> : <Pin size={16} />,
+      icon: task.pinned === true ? <PinOff size={12} /> : <Pin size={12} />,
       onSelect: () => actions.onPin(task, task.pinned !== true),
     },
-    { key: "link", label: t("task.copyLink"), icon: <Link2 size={16} />, onSelect: copyLink },
-    ...(task.link ? [{ key: "unlink", label: t("task.removeLink"), icon: <Link2Off size={16} />, onSelect: () => actions.onLink(task, null) } satisfies SidebarMenuItem] : []),
+    ...(task.link ? [{ key: "unlink", label: t("task.removeLink"), icon: <Link2Off size={12} />, onSelect: () => actions.onLink(task, null) } satisfies SidebarMenuItem] : []),
     {
       key: "archive",
       label: archived ? t("task.unarchive") : t("task.archive"),
-      icon: archived ? <ArchiveRestore size={16} /> : <Archive size={16} />,
+      icon: archived ? <ArchiveRestore size={12} /> : <Archive size={12} />,
       disabled: working,
       onSelect: () => actions.onArchive(task, archived ? null : Date.now()),
     },
-    {
-      key: "snooze",
-      label: t("task.snooze"),
-      icon: <Clock size={16} />,
-      disabled: working,
-      submenu: [
-        { key: "snooze:activity", label: t("task.snoozeUntilActivity"), onSelect: () => actions.onSnooze(task, 0) },
-        { key: "snooze:tonight", label: t("task.snoozeTonight"), onSelect: () => actions.onSnooze(task, nextSixPm()) },
-        { key: "snooze:tomorrow", label: t("task.snoozeTomorrow"), onSelect: () => actions.onSnooze(task, tomorrowNineAm()) },
-      ],
-      onSelect: () => {},
-    },
-    ...(snoozed ? [{ key: "unsnooze", label: t("task.stopSnoozing"), icon: <BellOff size={16} />, onSelect: () => actions.onSnooze(task, null) } satisfies SidebarMenuItem] : []),
+    { key: "snooze:activity", heading: t("task.snooze"), label: t("task.snoozeUntilActivity"), icon: <Clock size={12} />, disabled: working, onSelect: () => actions.onSnooze(task, 0) },
+    { key: "snooze:tonight", label: t("task.snoozeTonight"), disabled: working, onSelect: () => actions.onSnooze(task, nextSixPm()) },
+    { key: "snooze:tomorrow", label: t("task.snoozeTomorrow"), disabled: working, onSelect: () => actions.onSnooze(task, tomorrowNineAm()) },
+    ...(snoozed ? [{ key: "unsnooze", label: t("task.stopSnoozing"), icon: <BellOff size={12} />, onSelect: () => actions.onSnooze(task, null) } satisfies SidebarMenuItem] : []),
     {
       key: "delete",
       label: t("task.deleteAria"),
-      icon: <Trash2 size={16} />,
+      icon: <Trash2 size={12} />,
       separatorBefore: true,
       disabled: working,
       onSelect: () => setDeleting(true),
@@ -207,12 +184,13 @@ function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, 
       )}
       <SidebarPopoverMenu
         items={items}
+        compact
         ariaLabel={t("task.actions", { title })}
         triggerLabel={t("task.actions", { title })}
         triggerTitle={t("task.actions", { title })}
         triggerClassName={cn(
           "flex size-6 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-opacity hover:bg-raised hover:text-ink focus-visible:opacity-100",
-          active ? "opacity-100" : "opacity-0 group-hover/tab:opacity-100 group-focus-within/tab:opacity-100",
+          active ? "opacity-100" : "pointer-events-none opacity-0 group-hover/tab:pointer-events-auto group-hover/tab:opacity-100 group-focus-within/tab:pointer-events-auto group-focus-within/tab:opacity-100",
         )}
         renderTrigger={({ open }) => <MoreHorizontal size={13} className={cn(open && "text-ink")} />}
       />
@@ -374,13 +352,11 @@ export function ThreadTabs({ bot, dispatch, onMeasuredWidthChange }: {
     });
   };
   const focusable = threads.some((task) => task.threadId === focusId) ? focusId : active;
-  const project = bot.projects?.find((folder) => folder.id === (bot.tasks ?? []).find((task) => task.threadId === active)?.projectId);
-  const startNew = () => dispatch({ type: "newTask", botId: bot.id, ...(project ? { projectId: project.id } : {}) });
 
   const edgeClass = "flex size-6 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:pointer-events-none disabled:opacity-30";
 
   return (
-    <div data-chathead-tabs className="flex min-w-0 items-center @max-[30rem]/chathead:hidden">
+    <div data-chathead-tabs className="flex min-w-0 items-center rounded-full bg-composer px-0.5 ring-[0.5px] ring-hairline/60 @max-[30rem]/chathead:hidden">
       {edges.overflow && (
         <button
           type="button"
@@ -416,7 +392,6 @@ export function ThreadTabs({ bot, dispatch, onMeasuredWidthChange }: {
             folders={bot.projects}
             actions={actions}
             onOpen={open}
-            onNew={startNew}
             onFocus={setFocusId}
             register={register}
             registerRow={registerRow}
