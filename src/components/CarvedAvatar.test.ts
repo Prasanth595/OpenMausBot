@@ -36,15 +36,28 @@ describe("CarvedAvatar", () => {
     expect(carvedFills(HALLOWEEN_BODIES.skull, "purple").body).toBe(HALLOWEEN_BODIES.skull.bone);
   });
 
-  it("opens round eyes and an open mouth when startled", () => {
+  it("opens taller pill eyes and an open oval mouth when startled", () => {
     const body = HALLOWEEN_BODIES.pumpkin;
     const rest = carvedGeometry(body, REST_POSE);
     const wide = carvedGeometry(body, { ...REST_POSE, wide: 1 });
     expect(rest.eyes[0].height).toBeGreaterThan(rest.eyes[0].width * 1.5);
-    expect(Math.abs(wide.eyes[0].height - wide.eyes[0].width)).toBeLessThan(body.eyes.round * 0.1);
+    expect(wide.eyes[0].height).toBeGreaterThan(rest.eyes[0].height * 1.15);
+    expect(wide.eyes[0].height).toBeGreaterThan(wide.eyes[0].width * 1.5);
+    expect(wide.open.ry).toBeGreaterThan(wide.open.rx);
     expect(rest.smile.opacity).toBe(1);
     expect(wide.smile.opacity).toBe(0);
     expect(wide.open.opacity).toBe(1);
+  });
+
+  it("spins the face in as one piece and squashes the body as it lands", () => {
+    const body = HALLOWEEN_BODIES.pumpkin;
+    const rest = carvedGeometry(body, REST_POSE);
+    expect(rest.face).toEqual({ transform: "", opacity: 1 });
+    expect(carvedGeometry(body, REST_POSE, 0.1).face.opacity).toBe(0);
+    const turning = carvedGeometry(body, REST_POSE, 0.4);
+    expect(turning.face.transform).toMatch(/scale\(0\.\d+ 1\)/);
+    expect(turning.eyes).toEqual(rest.eyes);
+    expect(carvedGeometry(body, REST_POSE, 0.86).body).not.toBe(rest.body);
   });
 
   it("closes the eyes and follows the gaze", () => {

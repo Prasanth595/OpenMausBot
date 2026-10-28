@@ -1105,7 +1105,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     useEffect(() => {
       const drawFace = (e: typeof engine.current, now: number, spinTurn: number) => {
         const p = e.props
-        if (p.face === 'carved') return paintCarvedFace(carved, p.carvedEyes, e.carved.pose, p.eyeScale ?? 1, bodyContent.current)
+        if (p.face === 'carved') return paintCarvedFace(carved, p.carvedEyes, e.carved.pose, p.eyeScale ?? 1, bodyContent.current, spinTurn / 360)
         bodyContent.current?.removeAttribute('transform')
         const g = displayedGaze(e)
         const look = p.lookAround ?? 0.35

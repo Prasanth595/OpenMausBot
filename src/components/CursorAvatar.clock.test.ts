@@ -171,18 +171,28 @@ describe("CursorAvatar on the shared clock", () => {
     expect(rested).toBeGreaterThan(50);
   });
 
-  it("startles a spinning carved mascot instead of turning its eyes around the body", () => {
+  it("spins a carved face in as one piece, then settles it to the front", () => {
+    const ref = createRef<MausAvatarHandle>();
+    render([{ state: "idle", size: 48, ref }]);
+    run(200);
+    const face = () => host.querySelector("g[clip-path] rect")!.parentElement!;
+    act(() => ref.current!.spin(900));
+    run(360);
+    expect(face().getAttribute("transform")).toMatch(/scale\(0\.\d+ 1\)/);
+    expect(face().getAttribute("opacity")).toBe("1");
+    for (const eye of host.querySelectorAll("g[clip-path] rect")) expect(eye.getAttribute("transform")).not.toContain("scale");
+    run(800);
+    expect(face().getAttribute("transform")).toBe("");
+  });
+
+  it("does not spin a carved face when motion is reduced", () => {
+    reducedMotion = true;
     const ref = createRef<MausAvatarHandle>();
     render([{ state: "idle", size: 48, ref }]);
     run(200);
     act(() => ref.current!.spin(900));
-    run(400);
-    const face = host.querySelector("g[clip-path]")!;
-    expect(face.parentElement!.getAttribute("transform")).toContain("scale(0.94 1.09)");
-    for (const eye of face.querySelectorAll("rect")) {
-      expect(Math.abs(Number(eye.getAttribute("transform")!.match(/^rotate\((\S+) /)![1]))).toBeLessThan(0.5);
-      expect((eye as SVGRectElement).style.opacity).not.toBe("0");
-    }
+    run(360);
+    expect(host.querySelector("g[clip-path] rect")!.parentElement!.getAttribute("transform") ?? "").toBe("");
   });
 
   it("calms an animating mascot when reduced motion is switched on", () => {

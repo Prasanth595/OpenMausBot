@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { MausAvatar } from "./Avatar";
-import { CARVED_INK, REST_POSE, carvedLean, moodPose, stepPose, wantedPose, type CarvedPose } from "./carved-face";
+import { CARVED_INK, REST_POSE, carvedLean, carvedSpin, moodPose, stepPose, wantedPose, type CarvedPose } from "./carved-face";
 import { carvedEyesFor, fitPose, paintCarvedFace, type CarvedParts } from "./cursor-carved-face";
 import { FACE_BOX } from "./cursor-face-data";
 import { MASCOT_BODY_IDS, type MascotBodyId } from "../../shared/mascot-bodies";
@@ -48,11 +48,11 @@ const fakeElement = () => {
   return { attrs, el: { setAttribute: (k: string, v: string) => { attrs[k] = v; } } };
 };
 
-function paint(body: MascotBodyId, pose: CarvedPose) {
-  const [left, right, smile, open, lean] = [fakeElement(), fakeElement(), fakeElement(), fakeElement(), fakeElement()];
-  const parts = { eyes: [left.el, right.el], smile: smile.el, open: open.el } as unknown as CarvedParts;
-  paintCarvedFace(parts, carvedEyesFor(body), pose, 1, lean.el as unknown as SVGGElement);
-  return { eyes: [left.attrs, right.attrs], lean: lean.attrs.transform };
+function paint(body: MascotBodyId, pose: CarvedPose, spin = 0) {
+  const [face, left, right, smile, open, lean] = [fakeElement(), fakeElement(), fakeElement(), fakeElement(), fakeElement(), fakeElement()];
+  const parts = { face: face.el, eyes: [left.el, right.el], smile: smile.el, open: open.el } as unknown as CarvedParts;
+  paintCarvedFace(parts, carvedEyesFor(body), pose, 1, lean.el as unknown as SVGGElement, spin);
+  return { face: face.attrs, eyes: [left.attrs, right.attrs], lean: lean.attrs.transform };
 }
 
 const POSES: CarvedPose[] = [-1, -0.5, 0, 0.5, 1].flatMap((gx) =>
@@ -75,6 +75,24 @@ describe("the carved face as a body turns its gaze", () => {
         expect(Math.abs(a.aspect / b.aspect - 1), at).toBeLessThan(0.01);
       }
     }
+  });
+
+  it("spins the face in as one flat piece, hidden while it faces away, and squashes the body as it lands", () => {
+    let hidden = 0;
+    for (let t = 0.01; t < 1; t += 0.01) {
+      const { turn, squash } = carvedSpin(t);
+      const painted = paint("circle", { ...REST_POSE, gx: 1, wide: 1 }, t);
+      const at = `t=${t.toFixed(2)}`;
+      expect(painted.face.transform, at).toMatch(/^translate\(-?[\d.]+ 0\) scale\([\d.]+ 1\) translate\(-?[\d.]+ 0\)$/);
+      expect(Number(painted.face.transform.match(/scale\(([\d.]+) /)![1]), at).toBeCloseTo(Math.max(Math.cos(turn), 0.001), 3);
+      for (const eye of painted.eyes) expect(eye.transform, at).toMatch(/^rotate\(-?0 /);
+      expect(painted.lean, at).toBe(carvedLean({ ...REST_POSE, gx: 0, wide: 1 }, FACE_BOX / 2, FACE_BOX * 0.625, squash));
+      if (painted.face.opacity === "0") hidden++;
+    }
+    expect(hidden).toBeGreaterThan(5);
+    expect(carvedSpin(1).turn).toBe(0);
+    expect(carvedSpin(1).squash).toBeCloseTo(0);
+    expect(paint("circle", REST_POSE).face).toEqual({ transform: "", opacity: "1" });
   });
 
   it("leans the whole body into the glance, as a carved Halloween body does", () => {

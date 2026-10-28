@@ -2,10 +2,10 @@ import { useEffect, useRef } from "react";
 import type { MausState } from "@/lib/mascot";
 import type { MascotBodyId } from "../../shared/mascot-bodies";
 import { FACE_BOX } from "./cursor-face-data";
-import { GLANCES, carvedFace, carvedLean, moodFor, moodPose, nextGlanceDelay, stepPose, wantedPose, type CarvedEyes, type CarvedPose } from "./carved-face";
+import { GLANCES, SPIN_RADIUS, carvedFace, carvedLean, carvedSpin, moodFor, moodPose, nextGlanceDelay, stepPose, turnedFace, wantedPose, type CarvedEyes, type CarvedPose } from "./carved-face";
 
 /** The carved face in face-space units, before a body's fit sizes and places it. */
-export const CARVED_EYES: CarvedEyes = { cx: 120, cy: 114, dx: 43, w: 34, h: 66, round: 56, mouthY: null };
+export const CARVED_EYES: CarvedEyes = { cx: 120, cy: 114, dx: 43, w: 34, h: 66, mouthY: null };
 
 /** A body's carved face: where it sits, and how far a sideways glance may carry it. */
 export type BodyCarvedEyes = CarvedEyes & { reach: number };
@@ -28,7 +28,7 @@ const CARVED_FIT: Record<MascotBodyId, CarvedFit> = {
 export function carvedEyesFor(body: MascotBodyId): BodyCarvedEyes {
   const { size, x, y, reach } = CARVED_FIT[body];
   const e = CARVED_EYES;
-  return { cx: e.cx + x, cy: e.cy + y, dx: e.dx * size, w: e.w * size, h: e.h * size, round: e.round * size, mouthY: null, reach };
+  return { cx: e.cx + x, cy: e.cy + y, dx: e.dx * size, w: e.w * size, h: e.h * size, mouthY: null, reach };
 }
 
 const EASE_PER_S = 9;
@@ -70,25 +70,25 @@ export function useCarvedGlances(active: boolean, state: MausState, onGlance: (g
   }, [active, state]);
 }
 
-export type CarvedParts = { eyes: [SVGRectElement | null, SVGRectElement | null]; smile: SVGPathElement | null; open: SVGEllipseElement | null };
+export type CarvedParts = { face: SVGGElement | null; eyes: [SVGRectElement | null, SVGRectElement | null]; smile: SVGPathElement | null; open: SVGEllipseElement | null };
 
-export const useCarvedParts = (): CarvedParts => useRef<CarvedParts>({ eyes: [null, null], smile: null, open: null }).current;
+export const useCarvedParts = (): CarvedParts => useRef<CarvedParts>({ face: null, eyes: [null, null], smile: null, open: null }).current;
 
 const GAZE_Y = 0.6;
 
-/** Keeps a pose's gaze where the body has room: a narrower glance, and a startle that looks straight out. */
-export const fitPose = (eyes: BodyCarvedEyes, pose: CarvedPose): CarvedPose => ({
+/** Keeps a pose's gaze where the body has room: a narrower glance, and a startle or spin (`centred` 1) that looks straight out. */
+export const fitPose = (eyes: BodyCarvedEyes, pose: CarvedPose, centred = pose.wide): CarvedPose => ({
   ...pose,
-  gx: pose.gx * eyes.reach * (1 - pose.wide),
-  gy: Math.max(-GAZE_Y, Math.min(GAZE_Y, pose.gy)) * (1 - pose.wide),
+  gx: pose.gx * eyes.reach * (1 - centred),
+  gy: Math.max(-GAZE_Y, Math.min(GAZE_Y, pose.gy)) * (1 - centred),
 });
 
 const LEAN_PIVOT = [FACE_BOX / 2, FACE_BOX * 0.625] as const;
 
-/** Paints the face for a pose, and leans `body` with it the way a carved Halloween body leans. */
-export function paintCarvedFace(parts: CarvedParts, eyes: BodyCarvedEyes, pose: CarvedPose, eyeScale: number, body: SVGGElement | null) {
-  const spec = eyeScale === 1 ? eyes : { ...eyes, w: eyes.w * eyeScale, h: eyes.h * eyeScale, round: eyes.round * eyeScale };
-  const reached = fitPose(eyes, pose);
+/** Paints the face for a pose and the progress of a spin (0 when not spinning), and leans `body` with it the way a carved Halloween body leans. */
+export function paintCarvedFace(parts: CarvedParts, eyes: BodyCarvedEyes, pose: CarvedPose, eyeScale: number, body: SVGGElement | null, spin: number) {
+  const spec = eyeScale === 1 ? eyes : { ...eyes, w: eyes.w * eyeScale, h: eyes.h * eyeScale };
+  const reached = fitPose(eyes, pose, spin > 0 ? 1 : pose.wide);
   const face = carvedFace(spec, reached);
   face.eyes.forEach((rect, index) => {
     const el = parts.eyes[index];
@@ -100,12 +100,16 @@ export function paintCarvedFace(parts: CarvedParts, eyes: BodyCarvedEyes, pose: 
     parts.smile.setAttribute("opacity", String(face.smile.opacity));
   }
   if (parts.open) for (const [key, value] of Object.entries(face.open)) parts.open.setAttribute(key, String(value));
-  body?.setAttribute("transform", carvedLean(reached, ...LEAN_PIVOT));
+  const { turn, squash } = spin > 0 ? carvedSpin(spin) : { turn: 0, squash: 0 };
+  const turned = turnedFace(turn, eyes.cx, eyes.dx * eyes.reach * SPIN_RADIUS);
+  parts.face?.setAttribute("transform", turned.transform);
+  parts.face?.setAttribute("opacity", turned.shown ? "1" : "0");
+  body?.setAttribute("transform", carvedLean(reached, ...LEAN_PIVOT, squash));
 }
 
 export function CarvedFaceParts({ parts, eyes, ink, showMouth }: { parts: CarvedParts; eyes: CarvedEyes; ink: string; showMouth: boolean }) {
   return (
-    <>
+    <g ref={(el) => { parts.face = el; }}>
       <rect ref={(el) => { parts.eyes[0] = el; }} fill={ink} />
       <rect ref={(el) => { parts.eyes[1] = el; }} fill={ink} />
       {showMouth && (
@@ -114,6 +118,6 @@ export function CarvedFaceParts({ parts, eyes, ink, showMouth }: { parts: Carved
           <ellipse ref={(el) => { parts.open = el; }} fill={ink} />
         </>
       )}
-    </>
+    </g>
   );
 }

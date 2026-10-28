@@ -6,7 +6,7 @@ export type CarvedPose = {
   /** Gaze, -1..1 each way. */
   gx: number;
   gy: number;
-  /** Startle, 0..1: round eyes, open mouth, stretched body. */
+  /** Startle, 0..1: taller eyes, open mouth, stretched body. */
   wide: number;
   /** Eyelids, 0 open .. 1 shut. */
   shut: number;
@@ -18,7 +18,7 @@ export const REST_POSE: CarvedPose = { gx: 0, gy: 0, wide: 0, shut: 0, smile: 1 
 
 export const CARVED_INK = "#0d0a10";
 
-export type CarvedEyes = Pick<HalloweenEyes, "cx" | "cy" | "dx" | "w" | "h" | "round" | "mouthY">;
+export type CarvedEyes = Pick<HalloweenEyes, "cx" | "cy" | "dx" | "w" | "h" | "mouthY">;
 
 export type CarvedRect = { x: number; y: number; width: number; height: number; rx: number; transform: string };
 export type CarvedFace = {
@@ -33,14 +33,11 @@ export const r2 = (n: number) => Math.round(n * 100) / 100;
 
 export function carvedFace(e: CarvedEyes, p: CarvedPose): CarvedFace {
   const ax = Math.abs(p.gx);
-  const spread = e.dx * (1 - 0.1 * ax) * (1 + 0.14 * p.wide);
+  const spread = e.dx * (1 - 0.1 * ax) * (1 + 0.04 * p.wide);
   const cx = e.cx + p.gx * e.dx * 1.05;
-  const cy = e.cy + p.gy * 16 - p.wide * e.h * 0.42;
-  let w = e.w * (1 + 0.05 * ax);
-  let h = e.h * (1 - 0.3 * ax);
-  w += (e.round - w) * p.wide;
-  h += (e.round * 1.08 - h) * p.wide;
-  h *= 1 - 0.9 * p.shut;
+  const cy = e.cy + p.gy * 16 - p.wide * e.h * 0.12;
+  const w = e.w * (1 + 0.05 * ax) * (1 + 0.12 * p.wide);
+  const h = e.h * (1 - 0.3 * ax) * (1 + 0.2 * p.wide) * (1 - 0.9 * p.shut);
   const tilt = -p.gx * 18 * (1 - p.wide);
   const eye = (side: -1 | 1): CarvedRect => {
     const k = 1 - 0.1 * Math.max(0, side * -p.gx);
@@ -56,6 +53,7 @@ export function carvedFace(e: CarvedEyes, p: CarvedPose): CarvedFace {
   const half = mw * (1 - 0.25 * ax);
   const depth = mw * 0.5 * p.smile;
   const my = (e.mouthY ?? e.cy + e.h * 0.5 + e.dx * 0.42) + p.gy * 10;
+  const openRy = mw * p.wide;
   return {
     eyes: [eye(-1), eye(1)],
     smile: {
@@ -63,16 +61,38 @@ export function carvedFace(e: CarvedEyes, p: CarvedPose): CarvedFace {
       transform: `rotate(${r2(tilt * 0.6)} ${r2(cx)} ${r2(my)})`,
       opacity: r2(1 - p.wide),
     },
-    open: { cx: r2(cx), cy: r2(my + mw * 0.1), rx: r2(mw * 0.5 * p.wide), ry: r2(mw * 0.62 * p.wide), opacity: r2(p.wide) },
+    open: { cx: r2(cx), cy: r2(my + mw * 0.1 - openRy * 0.45), rx: r2(mw * 0.72 * p.wide), ry: r2(openRy), opacity: r2(p.wide) },
     centre: { x: cx, eyeY: cy, mouthY: my },
   };
 }
 
-/** Leans a carved body into its glance about (x, y) and stretches it when startled. */
-export function carvedLean(p: CarvedPose, x: number, y: number): string {
-  const sx = 1 - 0.06 * p.wide;
-  const sy = 1 + 0.09 * p.wide;
+/** Leans a carved body into its glance about (x, y), stretches it when startled and squashes it as a spin lands. */
+export function carvedLean(p: CarvedPose, x: number, y: number, squash = 0): string {
+  const sx = (1 - 0.06 * p.wide) * (1 + squash);
+  const sy = (1 + 0.09 * p.wide) * (1 - squash);
   return `translate(${x} ${y}) rotate(${r2(-p.gx * 9)}) scale(${r2(sx * 1000) / 1000} ${r2(sy * 1000) / 1000}) translate(${-x} ${-y})`;
+}
+
+/** How far behind a carved face its turning axis sits, in eye spacings. */
+export const SPIN_RADIUS = 0.6;
+const SPIN_OVERSHOOT = 1.1;
+
+/** A spin-in at progress `t` (0..1): the face's turn in radians, eased past the front and back, and the body's landing squash. */
+export function carvedSpin(t: number): { turn: number; squash: number } {
+  const u = Math.max(0, Math.min(1, t)) - 1;
+  const eased = 1 + (SPIN_OVERSHOOT + 1) * u ** 3 + SPIN_OVERSHOOT * u ** 2;
+  const landing = Math.max(0, Math.min(1, (t - 0.72) / 0.28));
+  return { turn: 2 * Math.PI * (1 - eased), squash: 0.07 * Math.sin(Math.PI * landing) };
+}
+
+/** Turns the whole face as one flat piece about a vertical axis `radius` behind it, centred on `cx`; hidden while it faces away. */
+export function turnedFace(turn: number, cx: number, radius: number): { transform: string; shown: boolean } {
+  if (turn === 0) return { transform: "", shown: true };
+  const facing = Math.cos(turn);
+  return {
+    transform: `translate(${r2(cx + radius * Math.sin(turn))} 0) scale(${Math.max(facing, 0.001).toFixed(4)} 1) translate(${r2(-cx)} 0)`,
+    shown: facing > 0.02,
+  };
 }
 
 export type CarvedMood = Partial<CarvedPose> & { glance?: number };

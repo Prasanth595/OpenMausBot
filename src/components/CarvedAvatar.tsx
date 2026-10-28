@@ -12,24 +12,28 @@ import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/
 import { HALLOWEEN_BODIES, type HalloweenBody, type HalloweenBodyId } from "../../shared/halloween-bodies";
 import type { CursorAvatarHandle } from "./CursorAvatar";
 import { usePrefersReducedMotion } from "./mascot-clock";
-import { GLANCES, carvedFace, carvedLean, moodFor, moodPose, nextGlanceDelay, stepPose, wantedPose, type CarvedFace, type CarvedPose } from "./carved-face";
+import { GLANCES, SPIN_RADIUS, carvedFace, carvedLean, carvedSpin, moodFor, moodPose, nextGlanceDelay, stepPose, turnedFace, wantedPose, type CarvedFace, type CarvedPose } from "./carved-face";
 
 const PIVOT = 150;
 
-export type CarvedGeometry = Omit<CarvedFace, "centre"> & { body: string };
+export type CarvedGeometry = Omit<CarvedFace, "centre"> & { body: string; face: { transform: string; opacity: number } };
 
-/** Every attribute the face needs for a pose. */
-export function carvedGeometry(body: HalloweenBody, p: CarvedPose): CarvedGeometry {
+/** Every attribute the face needs for a pose and the progress of a spin (0 when not spinning). */
+export function carvedGeometry(body: HalloweenBody, p: CarvedPose, spin = 0): CarvedGeometry {
   const { eyes, smile, open } = carvedFace(body.eyes, p);
+  const { turn, squash } = spin > 0 ? carvedSpin(spin) : { turn: 0, squash: 0 };
+  const turned = turnedFace(turn, body.eyes.cx, body.eyes.dx * SPIN_RADIUS);
   return {
-    body: carvedLean(p, 120, PIVOT),
+    body: carvedLean(p, 120, PIVOT, squash),
+    face: { transform: turned.transform, opacity: turned.shown ? 1 : 0 },
     eyes,
     smile,
     open,
   };
 }
 
-const STARTLE: ReadonlySet<MausMotion> = new Set(["arrive", "switch", "customize", "alert", "launch", "success", "celebrate", "surprise"]);
+const STARTLE: ReadonlySet<MausMotion> = new Set(["customize", "alert", "launch", "success", "surprise"]);
+const SPIN_MS: Partial<Record<MausMotion, number>> = { arrive: 900, switch: 620, celebrate: 700 };
 
 function mix(hex: string, toward: string, t: number): string {
   const a = Number.parseInt(hex.slice(1), 16);
@@ -87,8 +91,9 @@ function CarvedAvatarComponent(
   const eyes = [useRef<SVGRectElement>(null), useRef<SVGRectElement>(null)] as const;
   const smile = useRef<SVGPathElement>(null);
   const open = useRef<SVGEllipseElement>(null);
+  const turning = [useRef<SVGGElement>(null), useRef<SVGGElement>(null)] as const;
   const pose = useRef<CarvedPose>(moodPose(state));
-  const cue = useRef({ blinkAt: -1, startleUntil: 0, pointer: null as null | { x: number; y: number } });
+  const cue = useRef({ blinkAt: -1, startleUntil: 0, spinAt: -1, spinMs: 900, pointer: null as null | { x: number; y: number } });
   const props = useRef({ state, gaze });
   props.current = { state, gaze };
   const [initial] = useState(() => carvedGeometry(body, pose.current));
@@ -97,21 +102,32 @@ function CarvedAvatarComponent(
     cue.current.startleUntil = performance.now() + 1100;
     cue.current.blinkAt = performance.now();
   };
+  const spinIn = (ms = 900) => {
+    startle();
+    if (!live) return;
+    cue.current.spinAt = performance.now();
+    cue.current.spinMs = ms;
+  };
   useImperativeHandle(ref, () => ({
     blink: () => { cue.current.blinkAt = performance.now(); },
-    spin: () => startle(),
+    spin: (ms?: number) => spinIn(ms),
     setExpression: () => {},
   }));
 
   useEffect(() => {
     if (!live || motion === "none") return;
     if (motion === "blink") cue.current.blinkAt = performance.now();
+    else if (SPIN_MS[motion]) spinIn(SPIN_MS[motion]);
     else if (STARTLE.has(motion)) startle();
   }, [motion, motionKey, live]);
 
-  const paint = (p: CarvedPose) => {
-    const g = carvedGeometry(body, p);
+  const paint = (p: CarvedPose, spin = 0) => {
+    const g = carvedGeometry(body, p, spin);
     group.current?.setAttribute("transform", g.body);
+    for (const turned of turning) {
+      turned.current?.setAttribute("transform", g.face.transform);
+      turned.current?.setAttribute("opacity", String(g.face.opacity));
+    }
     g.eyes.forEach((rect, i) => {
       const el = eyes[i].current;
       if (!el) return;
@@ -160,7 +176,9 @@ function CarvedAvatarComponent(
       const since = cue.current.blinkAt < 0 ? 1 : (now - cue.current.blinkAt) / 200;
       const blink = since >= 1 ? 0 : since < 0.45 ? since / 0.45 : 1 - (since - 0.45) / 0.55;
       stepPose(p, want, dt, blink);
-      paint(p);
+      const spun = cue.current.spinAt < 0 ? 1 : (now - cue.current.spinAt) / cue.current.spinMs;
+      if (spun >= 1) cue.current.spinAt = -1;
+      paint(p, spun < 1 ? Math.max(spun, 1e-6) : 0);
       frame = requestAnimationFrame(step);
     };
     frame = requestAnimationFrame(step);
@@ -200,10 +218,12 @@ function CarvedAvatarComponent(
         <g ref={group} transform={initial.body}>
           {body.parts.map((part, i) => <path key={i} d={part.d} fill={resolve(part.fill)} />)}
           <g clipPath={`url(#carved-${uid})`}>
-            {initial.eyes.map((rect, i) => <rect key={i} ref={eyes[i]} {...rect} fill={body.eyes.ink} />)}
+            <g ref={turning[0]}>
+              {initial.eyes.map((rect, i) => <rect key={i} ref={eyes[i]} {...rect} fill={body.eyes.ink} />)}
+            </g>
           </g>
           {body.eyes.mouth && (
-            <g>
+            <g ref={turning[1]}>
               <path ref={smile} d={initial.smile.d} transform={initial.smile.transform} opacity={initial.smile.opacity}
                 fill="none" stroke={body.eyes.mouthInk} strokeWidth={body.eyes.w * 0.36} strokeLinecap="round" />
               <ellipse ref={open} {...initial.open} fill={body.eyes.mouthInk} />

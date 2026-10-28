@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { carvedFace } from "../../src/components/carved-face.ts";
+import { SPIN_RADIUS, carvedFace, carvedSpin } from "../../src/components/carved-face.ts";
 import { carvedEyesFor, fitPose } from "../../src/components/cursor-carved-face.tsx";
 import { FACE_CENTRE } from "../../src/components/cursor-face-data.ts";
 import { HALLOWEEN_BODIES } from "../../shared/halloween-bodies.ts";
@@ -37,10 +37,19 @@ function pill(x: number, y: number, w: number, h: number, r: number): Point[] {
     }));
 }
 
-/** Every inked point of the face with the half-width of ink around it, in face-space units. */
-function inkedPoints(id: MascotBodyId, pose: { gx: number; gy: number; wide: number; smile: number }): Array<[Point, number]> {
+/** The inked points as they turn with a spin at `turn` radians; none while the face is turned away. */
+function turnedPoints(id: MascotBodyId, pose: { gx: number; gy: number; wide: number; smile: number }, turn: number): Array<[Point, number]> {
   const eyes = carvedEyesFor(id);
-  const face = carvedFace(eyes, fitPose(eyes, { ...pose, shut: 0 }));
+  const facing = Math.cos(turn);
+  if (facing <= 0.02) return [];
+  const shift = eyes.dx * eyes.reach * SPIN_RADIUS * Math.sin(turn);
+  return inkedPoints(id, pose, 1).map(([[x, y], ink]): [Point, number] => [[eyes.cx + shift + (x - eyes.cx) * facing, y], ink * facing]);
+}
+
+/** Every inked point of the face with the half-width of ink around it, in face-space units. */
+function inkedPoints(id: MascotBodyId, pose: { gx: number; gy: number; wide: number; smile: number }, centred = pose.wide): Array<[Point, number]> {
+  const eyes = carvedEyesFor(id);
+  const face = carvedFace(eyes, fitPose(eyes, { ...pose, shut: 0 }, centred));
   const points: Array<[Point, number]> = face.eyes.flatMap((e) => pill(e.x, e.y, e.width, e.height, e.rx).map((p): [Point, number] => [rotate(p, e.transform), 0]));
   const [x0, y0, qx, qy, x1, y1] = face.smile.d.match(/-?[\d.]+/g)!.map(Number);
   if (face.smile.opacity > 0) {
@@ -57,17 +66,40 @@ function inkedPoints(id: MascotBodyId, pose: { gx: number; gy: number; wide: num
 
 const GAZE = [-1, -0.75, -0.5, -0.25, 0, 0.25, 0.5, 0.75, 1];
 
+const sdfOf = (id: MascotBodyId) => fieldFromMask(maskFromPolylines(outline(id), RASTER), RASTER);
+
+function worstClearance(id: MascotBodyId, sdf: ReturnType<typeof sdfOf>, faces: Iterable<[string, Array<[Point, number]>]>) {
+  const { x, y, scale } = MASCOT_BODIES[id].anchor;
+  let worst = { clearance: Infinity, pose: "" };
+  for (const [pose, points] of faces) {
+    for (const [[fx, fy], ink] of points) {
+      const clearance = sampleSdf(sdf, x + scale * (fx - FACE_CENTRE[0]), y + scale * (fy - FACE_CENTRE[1])) - ink * scale;
+      if (clearance < worst.clearance) worst = { clearance, pose };
+    }
+  }
+  return worst;
+}
+
 describe("the carved face on each mascot body", () => {
   it.each(MASCOT_BODY_IDS)("stays inside the %s through every glance, pointer gaze, startle and smile", (id) => {
-    const sdf = fieldFromMask(maskFromPolylines(outline(id), RASTER), RASTER);
-    const { x, y, scale } = MASCOT_BODIES[id].anchor;
-    let worst = { clearance: Infinity, pose: "" };
-    for (const gx of GAZE) for (const gy of GAZE) for (const wide of [0, 0.25, 0.5, 0.75, 1]) for (const smile of [1.5, -0.8]) {
-      for (const [[fx, fy], ink] of inkedPoints(id, { gx, gy, wide, smile })) {
-        const clearance = sampleSdf(sdf, x + scale * (fx - FACE_CENTRE[0]), y + scale * (fy - FACE_CENTRE[1])) - ink * scale;
-        if (clearance < worst.clearance) worst = { clearance, pose: JSON.stringify({ gx, gy, wide, smile }) };
+    function* faces(): Generator<[string, Array<[Point, number]>]> {
+      for (const gx of GAZE) for (const gy of GAZE) for (const wide of [0, 0.25, 0.5, 0.75, 1]) for (const smile of [1.5, -0.8]) {
+        const pose = { gx, gy, wide, smile };
+        yield [JSON.stringify(pose), inkedPoints(id, pose)];
       }
     }
+    const worst = worstClearance(id, sdfOf(id), faces());
+    expect(worst.clearance, worst.pose).toBeGreaterThanOrEqual(CLEARANCE);
+  });
+
+  it.each(MASCOT_BODY_IDS)("stays inside the %s as the face spins in", (id) => {
+    function* faces(): Generator<[string, Array<[Point, number]>]> {
+      for (let t = 0; t <= 1; t += 0.01) for (const gx of [-1, 0, 1]) for (const gy of [-1, 0, 1]) for (const wide of [0, 0.5, 1]) {
+        const pose = { gx, gy, wide, smile: 1.5 };
+        yield [JSON.stringify({ t, ...pose }), turnedPoints(id, pose, carvedSpin(t).turn)];
+      }
+    }
+    const worst = worstClearance(id, sdfOf(id), faces());
     expect(worst.clearance, worst.pose).toBeGreaterThanOrEqual(CLEARANCE);
   });
 
