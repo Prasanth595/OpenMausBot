@@ -6,7 +6,6 @@ import { afterEach, expect, it, vi } from "vitest";
 const hooks = vi.hoisted(() => ({
   beforeRead: null as ((input: number) => void) | null,
   afterOpen: null as ((path: fs.PathLike) => void) | null,
-  redirect: null as { source: string; target: string } | null,
   openFlags: null as ((path: fs.PathLike, flags: fs.OpenMode) => fs.OpenMode) | null,
   readlink: null as ((path: fs.PathLike) => string) | null,
 }));
@@ -15,8 +14,7 @@ vi.mock("node:fs", async (importOriginal) => {
   return {
     ...original,
     openSync: (...args: Parameters<typeof original.openSync>) => {
-      const redirected = hooks.redirect && args[0] === hooks.redirect.source ? hooks.redirect.target : args[0];
-      const input = original.openSync(redirected, hooks.openFlags?.(args[0], args[1]) ?? args[1], args[2]);
+      const input = original.openSync(args[0], hooks.openFlags?.(args[0], args[1]) ?? args[1], args[2]);
       hooks.afterOpen?.(args[0]);
       return input;
     },
@@ -37,14 +35,13 @@ const dirs: string[] = [];
 afterEach(() => {
   hooks.beforeRead = null;
   hooks.afterOpen = null;
-  hooks.redirect = null;
   hooks.openFlags = null;
   hooks.readlink = null;
   vi.unstubAllGlobals();
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-it.each(["darwin", "linux", "win32"])("stages a regular file with valid %s open flags", async (platform) => {
+it.each(["darwin", "linux"])("stages a regular file with valid %s open flags", async (platform) => {
   const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-flags-")));
   dirs.push(base);
   const source = join(base, "report.txt");
@@ -63,8 +60,22 @@ it.each(["darwin", "linux", "win32"])("stages a regular file with valid %s open 
   };
   const [staged] = await namedUploadPaths([{ file: source, name: "Report.txt" }], join(base, "uploads"));
   expect(flags).toEqual([platform === "darwin" ? fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | 0x20000000
-    : platform === "linux" ? fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW : fs.constants.O_RDONLY]);
+    : fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW]);
   expect(fs.readFileSync(staged!, "utf8")).toBe("report");
+});
+
+it.each([false, true])("refuses workspace-file staging on Windows before opening the source (everyFile: %s)", async (everyFile) => {
+  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-windows-refusal-")));
+  dirs.push(base);
+  const source = join(base, "report.txt"), folder = join(base, "uploads");
+  fs.writeFileSync(source, "report");
+  vi.stubGlobal("process", { ...process, platform: "win32" });
+  let opened = false;
+  hooks.afterOpen = () => { opened = true; };
+  await expect(namedUploadPaths([{ file: source, name: everyFile ? null : "Report.txt" }], folder, Date.now(), { everyFile }))
+    .rejects.toThrow("Uploads of workspace files through the browser are not supported on Windows yet.");
+  expect(opened).toBe(false);
+  expect(fs.existsSync(folder)).toBe(false);
 });
 
 it.skipIf(process.platform === "win32")("pins both sources before a directory is swapped while the first file copies", async () => {
@@ -87,50 +98,7 @@ it.skipIf(process.platform === "win32")("pins both sources before a directory is
   expect(fs.readFileSync(staged[1]!, "utf8")).toBe("report");
 });
 
-it("rejects a Windows open redirected to a different file identity", async () => {
-  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-windows-")));
-  dirs.push(base);
-  const source = join(base, "report.txt"), secret = join(base, "secret.txt");
-  fs.writeFileSync(source, "report");
-  fs.writeFileSync(secret, "outside secret");
-  vi.stubGlobal("process", { ...process, platform: "win32" });
-  hooks.redirect = { source, target: secret };
-  await expect(async () => namedUploadPaths([{ file: source, name: "Report.txt" }], join(base, "uploads"))).rejects.toThrow(/changed/);
-});
-
-it.each(["before open", "after open", "before open then restored"])("rejects a Windows directory junction swapped %s", async (when) => {
-  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-junction-")));
-  dirs.push(base);
-  const workspace = join(base, "workspace"), sub = join(workspace, "sub"), saved = join(workspace, "saved"), outside = join(base, "outside");
-  fs.mkdirSync(sub, { recursive: true });
-  fs.mkdirSync(outside);
-  const source = join(sub, "report.txt");
-  fs.writeFileSync(source, "report");
-  fs.writeFileSync(join(outside, "report.txt"), "outside secret");
-  const checked = uploadableFiles([source], [workspace]);
-  expect(checked).toEqual({ files: [source] });
-  if ("error" in checked) throw new Error(checked.error);
-  const swap = () => {
-    fs.renameSync(sub, saved);
-    fs.symlinkSync(outside, sub, "junction");
-  };
-  vi.stubGlobal("process", { ...process, platform: "win32" });
-  if (when !== "after open") swap();
-  hooks.afterOpen = (path) => {
-    if (path !== source) return;
-    hooks.afterOpen = null;
-    if (when === "after open") swap();
-    if (when === "before open then restored") {
-      fs.unlinkSync(sub);
-      fs.renameSync(saved, sub);
-    }
-  };
-  const folder = join(base, "uploads");
-  await expect(namedUploadPaths(checked.files.map((file) => ({ file, name: null })), folder, Date.now(), { everyFile: true })).rejects.toThrow(/changed/);
-  expect(fs.existsSync(folder)).toBe(false);
-});
-
-it("removes every directory from a batch when its second file fails", async () => {
+it.skipIf(process.platform === "win32")("removes every directory from a batch when its second file fails", async () => {
   const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-cleanup-")));
   dirs.push(base);
   const first = join(base, "first.txt"), second = join(base, "second.txt"), folder = join(base, "uploads");
@@ -146,7 +114,7 @@ it("removes every directory from a batch when its second file fails", async () =
   expect(fs.readdirSync(folder)).toEqual([]);
 });
 
-it("rejects an oversized sparse file before reading it", async () => {
+it.skipIf(process.platform === "win32")("rejects an oversized sparse file before reading it", async () => {
   const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-size-")));
   dirs.push(base);
   const source = join(base, "large.bin");
@@ -158,7 +126,7 @@ it("rejects an oversized sparse file before reading it", async () => {
   expect(read).toBe(false);
 });
 
-it("rejects a batch over 100 MiB before reading any file", async () => {
+it.skipIf(process.platform === "win32")("rejects a batch over 100 MiB before reading any file", async () => {
   const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-batch-")));
   dirs.push(base);
   const files = Array.from({ length: 5 }, (_, i) => {
@@ -173,7 +141,7 @@ it("rejects a batch over 100 MiB before reading any file", async () => {
   expect(read).toBe(false);
 });
 
-it("lets the event loop run while an accepted upload copies", async () => {
+it.skipIf(process.platform === "win32")("lets the event loop run while an accepted upload copies", async () => {
   const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-async-")));
   dirs.push(base);
   const source = join(base, "large.bin");

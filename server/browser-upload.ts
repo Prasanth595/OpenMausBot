@@ -81,15 +81,11 @@ export async function namedUploadPaths(files: ReadonlyArray<{ file: string; name
 }
 
 function openUpload(source: string): { input: number; size: number } {
-  const input = openSync(source, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NONBLOCK | (process.platform === "darwin" ? O_NOFOLLOW_ANY : constants.O_NOFOLLOW)));
+  if (process.platform === "win32") throw new Error("Uploads of workspace files through the browser are not supported on Windows yet.");
+  const input = openSync(source, constants.O_RDONLY | constants.O_NONBLOCK | (process.platform === "darwin" ? O_NOFOLLOW_ANY : constants.O_NOFOLLOW));
   try {
     if (process.platform === "linux" && readlinkSync(`/proc/self/fd/${input}`) !== source) throw new Error(`${source} changed while staging the upload.`);
     const file = fstatSync(input, { bigint: true });
-    if (process.platform === "win32") {
-      const real = realpathSync.native(source);
-      const checked = statSync(real, { bigint: true });
-      if (real !== source || checked.dev !== file.dev || checked.ino !== file.ino) throw new Error(`${source} changed while staging the upload.`);
-    }
     if (!file.isFile()) throw new Error(`${source} is not a file.`);
     if (file.size > BigInt(FILE_MAX_BYTES)) throw new Error("Uploads are limited to 25 MiB per file.");
     return { input, size: Number(file.size) };
