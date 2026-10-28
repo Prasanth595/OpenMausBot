@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { BotBox, BoxRunner } from "./box.ts";
 import { launcherScript } from "../browser/chrome/wrapper.ts";
 import { detectBox } from "./detect.ts";
-import { bwrapArgs, planBox, type BoxRequest } from "./plan.ts";
+import { bwrapArgs, planBox, visibleInBox, type BoxRequest } from "./plan.ts";
 import { closeMountFds } from "./pin.ts";
 
 const detection = detectBox({ env: { ...process.env, OMB_BOT_BOX: "1" } });
@@ -38,6 +38,33 @@ function probe(args: string[], fds: number[], script: string): string[] {
   return result.stdout.trim().split("\n");
 }
 
+describe.skipIf(process.platform !== "linux")("read-only alias planning", () => {
+  it.each(["alias", "canonical"])("protects both socket views through relative TMPDIR for a %s grant", (grant) => {
+    const f = fixture("home"), home = join(f.source, "..", "alias-home"), scratch = join(f.source, "scratch");
+    mkdirSync(scratch);
+    symlinkSync("scratch", join(f.source, "tmp"));
+    symlinkSync(f.source, home);
+    const socket = join(scratch, "omb-perm-X.sock"), target = join(home, "tmp", "omb-perm-X.sock");
+    writeFileSync(socket, "socket fixture");
+    const plan = planBox({ ...f.setup, home }, { ...f.request, env: { HOME: home, TMPDIR: join(home, "tmp") }, ro: [grant === "alias" ? target : socket] });
+    expect(visibleInBox(plan, socket)).toBe("ro");
+    expect(visibleInBox(plan, join(home, "scratch", "omb-perm-X.sock"))).toBe("ro");
+  });
+
+  it.each(["different", "unresolvable"])("refuses a read-only alias whose covering source is %s", (mapping) => {
+    const f = fixture("home"), home = join(f.source, "..", "alias-home"), covering = join(f.source, "..", "covering");
+    symlinkSync(f.source, home);
+    mkdirSync(covering);
+    if (mapping === "different") writeFileSync(join(covering, "allowed.txt"), "different fixture");
+    else symlinkSync("allowed.txt", join(covering, "allowed.txt"));
+    expect(() => planBox({ ...f.setup, home }, {
+      ...f.request, home, env: { HOME: home }, shared: [{ source: covering, target: home }], ro: [join(home, "allowed.txt")],
+    })).toThrow();
+    expect(readFileSync(join(f.source, "allowed.txt"), "utf8")).toBe("allowed fixture");
+    if (mapping === "different") expect(readFileSync(join(covering, "allowed.txt"), "utf8")).toBe("different fixture");
+  });
+});
+
 describe.skipIf(detection.box !== "bwrap")("mount source pinning in real bubblewrap", () => {
   it.each(["home", "cwd", "rw", "ro"])("keeps the approved %s directory after a swap between wrap and launch", (grant) => {
     const f = fixture(grant);
@@ -66,12 +93,12 @@ describe.skipIf(detection.box !== "bwrap")("mount source pinning in real bubblew
     expect(readFileSync(join(f.dataDir, "messages.db"), "utf8")).toBe("private fixture");
   });
 
-  it.each(["file", "directory"])("keeps an explicit read-only file protected through a writable %s alias", (grant) => {
+  it.each(["file", "directory"].flatMap((grant) => ["alias", "canonical"].map((name) => ({ grant, name }))))("keeps an explicit read-only file protected through a writable alias (%j)", ({ grant, name }) => {
     const f = fixture("rw"), file = join(f.source, "allowed.txt"), alias = join(f.source, "..", "alias");
     symlinkSync(grant === "file" ? file : f.source, alias);
     const target = grant === "file" ? alias : join(alias, "allowed.txt");
     const runner = new BoxRunner({ bwrap: detection.tools!.bwrap, bridge: { socat: null, node: process.execPath, bridgeScript: "unused" }, setup: f.setup, denyEnv: new Set() });
-    const wrapped = runner.wrap({ ...f.request, rw: [alias], ro: [target] });
+    const wrapped = runner.wrap({ ...f.request, rw: [alias], ro: [name === "alias" ? target : file] });
     try {
       expect(probe(wrapped.args.slice(0, wrapped.args.indexOf("--")), wrapped.extraFds, "if (echo changed > " + target + ") 2>/dev/null; then echo writable; else echo read-only; fi; cat " + target)).toEqual(["read-only", "allowed fixture"]);
       expect(readFileSync(file, "utf8")).toBe("allowed fixture");

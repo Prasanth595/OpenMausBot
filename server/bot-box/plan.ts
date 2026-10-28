@@ -245,11 +245,24 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     const source = optionalSource(path);
     if (!source) continue;
     if (under(dataDir, source) || (under(source, dataDir) && !under(source, approvedPath(path)))) continue;
-    for (const target of new Set([source, resolve(path)])) {
+    const targets = new Set([source, resolve(path)]);
+    if (explicitReadOnly.has(path)) for (const mount of mounts) {
+      if (mount.kind === "bind" && under(source, mount.source)) targets.add(join(mount.target, relative(mount.source, source)));
+    }
+    for (const target of targets) {
       if (mountAccess(mounts, target) !== "none") {
         if (!explicitReadOnly.has(path)) continue;
         const covering = mounts.findLast((mount) => mount.kind !== "symlink" && under(target, mount.target));
-        if (target !== source && covering && "source" in covering && join(covering.source, relative(covering.target, target)) !== source) continue;
+        if (covering && "source" in covering) {
+          if (physicalPath(join(covering.source, relative(covering.target, target))) !== source) {
+            throw new Error("The bot box refuses a read-only alias that names a different source.");
+          }
+          const physicalTarget = under(source, covering.source) ? join(covering.target, relative(covering.source, source)) : source;
+          if (physicalTarget !== target) {
+            targets.add(physicalTarget);
+            continue;
+          }
+        }
       }
       mounts.push({ kind: "ro", source, target, optional: true });
       for (let i = writable.length - 1; i >= 0; i--) if (under(writable[i]!, target)) writable.splice(i, 1);

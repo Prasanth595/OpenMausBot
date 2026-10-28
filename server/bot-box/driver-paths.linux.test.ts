@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,17 +11,22 @@ const detection = detectBox({ env: { ...process.env, OMB_BOT_BOX: "1" } });
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-async function fixture(engine: string, location: string, fallback = false, tempInHome = false): Promise<any> {
+async function fixture(engine: string, location: string, fallback = false, tempInHome = false, aliasedHome = false): Promise<any> {
   const root = mkdtempSync(join(tmpdir(), "omb-driver-paths-"));
   roots.push(root);
   for (const path of ["home", "var-lib"]) mkdirSync(join(root, path));
-  const home = "/home/fixture", data = location === "home" ? `${home}/data` : "/var/lib/data";
+  const home = aliasedHome ? "/alias-home" : "/home/fixture", data = location === "home" ? `${home}/data` : "/var/lib/data";
+  if (aliasedHome) {
+    mkdirSync(join(root, "home", "scratch"));
+    symlinkSync("scratch", join(root, "home", "tmp"));
+  }
   const repo = fileURLToPath(new URL("../../", import.meta.url));
   const child = spawn(detection.tools!.bwrap, [
     "--unshare-user", "--unshare-pid", "--unshare-net", "--die-with-parent",
     "--ro-bind", "/usr", "/usr", "--symlink", "usr/bin", "/bin", "--symlink", "usr/lib", "/lib",
     "--symlink", "usr/lib64", "/lib64", "--ro-bind", "/etc", "/etc", "--proc", "/proc", "--dev", "/dev",
-    "--tmpfs", "/tmp", "--tmpfs", "/run", "--bind", join(root, "var-lib"), "/var/lib", "--bind", join(root, "home"), home,
+    "--tmpfs", "/tmp", "--tmpfs", "/run", "--bind", join(root, "var-lib"), "/var/lib", "--bind", join(root, "home"), aliasedHome ? "/real-home" : home,
+    ...(aliasedHome ? ["--symlink", "/real-home", home] : []),
     "--ro-bind", repo, repo, "--ro-bind", dirname(dirname(process.execPath)), dirname(dirname(process.execPath)),
     "--chdir", repo, "--", process.execPath, "--experimental-strip-types", fileURLToPath(new URL("../testing/boxed-turn-fixture.ts", import.meta.url)), engine, String(fallback),
   ], {
@@ -39,6 +44,16 @@ async function fixture(engine: string, location: string, fallback = false, tempI
 }
 
 describe.skipIf(detection.box !== "bwrap")("boxed driver paths in real bubblewrap", () => {
+  it.each(["home", "outside"])("keeps Claude's fallback socket read-only through relative TMPDIR below an aliased HOME (%s)", async (location) => {
+    const result = await fixture("claude", location, true, true, true);
+    expect(result.asks, JSON.stringify(result)).toBe(2);
+    expect(result.socket).toContain("/alias-home/tmp/omb-perm-");
+    expect(result.probes).toMatchObject([
+      { permission: "allow", socketChmodError: "EROFS" },
+      { permission: "allow", socketChmodError: "EROFS" },
+    ]);
+  }, 25_000);
+
   it.each(["home", "outside"].flatMap((location) => [false, true].map((fallback) => ({ location, fallback }))))(
     "routes Claude permissions through the selected socket (%j)", async ({ location, fallback }) => {
       const result = await fixture("claude", location, fallback);
