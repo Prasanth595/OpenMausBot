@@ -2487,6 +2487,7 @@
   "rail.lastSeen": "{name}: offline, zuletzt gesehen {when}",
   "rail.notConnected": "{name}: mit dieser App verbinden",
   "rail.ownNetwork": "Nur im eigenen Netzwerk erreichbar",
+  "rail.update": "auf {version}, {latest} ist erschienen",
   "rail.connectTitle": "{name} verbinden",
   "rail.connectLede": "Er ist schon mit deinem Konto angemeldet. Öffne darauf ein Kopplungsfenster und füge den Link, den es ausgibt, hier ein.",
   "placeLook.title": "Farbe",

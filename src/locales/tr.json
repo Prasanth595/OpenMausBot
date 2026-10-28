@@ -4940,6 +4940,7 @@
   "rail.lastSeen": "{name}: çevrimdışı, en son {when} görüldü",
   "rail.notConnected": "{name}: bu uygulamaya bağlayın",
   "rail.ownNetwork": "Yalnızca kendi ağından erişilebilir",
+  "rail.update": "{version} sürümünde, {latest} çıktı",
   "rail.connectTitle": "Bağla: {name}",
   "rail.connectLede": "Hesabınızla zaten oturum açmış durumda. Üzerinde bir eşleştirme penceresi açın, sonra yazdırdığı bağlantıyı buraya yapıştırın.",
   "placeLook.title": "Renk",

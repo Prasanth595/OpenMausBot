@@ -29,7 +29,7 @@ export function placeLabel(place: RailPlace, now = Date.now()): string {
   const status = place.offline
     ? place.lastSeenAt ? t("rail.lastSeen", { name, when: localizedRelativeTime(place.lastSeenAt, activeLocale(), now) }) : t("rail.offline", { name })
     : place.pairs ? t("rail.notConnected", { name }) : name;
-  return place.ownNetwork ? `${status} · ${t("rail.ownNetwork")}` : status;
+  return [status, place.update && t("rail.update", place.update), place.ownNetwork && t("rail.ownNetwork")].filter(Boolean).join(" · ");
 }
 
 /** Whether a circle does anything: opens its place, or, for a server of the person's own not connected yet, shows how
@@ -82,6 +82,7 @@ function PlaceCircle({ place, calm, canPair, onOpen }: { place: RailPlace; calm:
     <PlaceMark place={place} />
     {place.progress !== undefined && <ProgressRing value={place.progress} waiting={place.waiting === true} />}
     {place.attention && <span aria-hidden="true" data-rail-dot className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-panel bg-danger" />}
+    {place.update && !place.attention && <span aria-hidden="true" data-rail-update className="absolute -right-0.5 -top-0.5 size-3 rounded-full border-2 border-panel bg-accent" />}
     {place.server && <span aria-hidden="true" data-rail-server className="absolute -bottom-0.5 -right-0.5 grid size-4 place-items-center rounded-full border border-hairline bg-panel text-ink-secondary">
       <Server size={9} strokeWidth={2.25} />
     </span>}

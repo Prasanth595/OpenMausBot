@@ -84,6 +84,13 @@ test("a server of the person's own that signed in with their account: one saved 
   assert.deepEqual([VPS, RENDER].map(origin => hostedCloudOrigin(origin, { state, mine: HOME })), [false, false], "its page never reads the rail");
   const alone = { activeId: "home", environments: [{ id: "home", kind: "remote", name: "My Cloud", origin: HOME, home: true }] };
   assert.equal(railPlaces({ saved: alone, home: HOME, mine: HOME, state: session({ teams: [], clouds: parseCloudList([PRIMARY, clouds[2]]) }) }).length, 2, "it counts as a place");
+  assert.equal(places.some(place => place.update), false, "no newest release named (the Admin doesn't follow releases): no reminder");
+  const behind = parseCloudList([PRIMARY, entry({ id: "s-mini", name: "Mac mini", runsOn: "server", managed: false, status: "ready", origin: null, version: "0.1.118" }),
+    entry({ id: "s-new", name: "New box", runsOn: "server", managed: false, status: "ready", origin: null, version: "0.1.130" }),
+    entry({ id: "s-dev", name: "Dev box", runsOn: "server", managed: false, status: "ready", origin: null, version: "0.1.118-dev" })]);
+  const reminded = railPlaces({ saved: saved(), home: HOME, mine: HOME, state: session({ clouds: behind, latestVersion: "0.1.130" }) });
+  assert.deepEqual(reminded.filter(place => place.update).map(place => [place.id, place.update]), [["signed-in:s-mini", { version: "0.1.118", latest: "0.1.130" }]],
+    "only one on an older numbered release");
   const r = rail({ places: () => places });
   assert.throws(() => r.call("workspaces:open", "signed-in:s-render"), /isn't here/, "nothing opens one main can't pair with yet");
   assert.throws(() => r.call("workspaces:open", "signed-in:s-mini"), /isn't here/);

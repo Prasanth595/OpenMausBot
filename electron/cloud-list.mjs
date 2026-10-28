@@ -60,6 +60,19 @@ function parseCloudEntry(input) {
     primary: input.primary, managed, ...(setup ? { setup } : {}), ...(lastSeenAt ? { lastSeenAt } : {}), ...(version ? { version } : {}) };
 }
 
+/** An OpenMausBot release as the Admin names it ("0.1.130"), or null: anything else is no version at all. */
+export const releaseVersion = value => (typeof value === "string" && VERSION.test(value) ? value : null);
+
+/** Whether `version` is an older release than `latest`, compared number by number; false when either isn't plain
+ * numbers (a build of its own), so no reminder is ever guessed. */
+export function olderRelease(version, latest) {
+  const parts = text => (typeof text === "string" && /^\d+(?:\.\d+){1,3}$/.test(text) ? text.split(".").map(Number) : null);
+  const a = parts(version), b = parts(latest);
+  if (!a || !b) return false;
+  for (let at = 0; at < Math.max(a.length, b.length); at++) if ((a[at] ?? 0) !== (b[at] ?? 0)) return (a[at] ?? 0) < (b[at] ?? 0);
+  return false;
+}
+
 /** A Cloud this person owns that is no team's: a world of their own. Never a server that only signed in with their
  * account (`managed: false`): MausBot neither runs nor vouches for it, so it is no Cloud of theirs to pair or lend to. */
 export const ownCloud = cloud => Boolean(cloud) && cloud.teamId === null && cloud.role === "owner" && cloud.managed !== false;

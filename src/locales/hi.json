@@ -2469,6 +2469,7 @@
   "rail.lastSeen": "{name}: ऑफ़लाइन, आखिरी बार {when} देखा गया",
   "rail.notConnected": "{name}: इसे इस ऐप से जोड़ें",
   "rail.ownNetwork": "सिर्फ़ उसके अपने नेटवर्क पर पहुँचा जा सकता है",
+  "rail.update": "{version} पर है, {latest} आ गया है",
   "rail.connectTitle": "{name} जोड़ें",
   "rail.connectLede": "यह आपके खाते से पहले ही साइन इन है। उस पर पेयरिंग विंडो खोलें, फिर उसका दिखाया गया लिंक यहाँ पेस्ट करें।",
   "placeLook.title": "रंग",

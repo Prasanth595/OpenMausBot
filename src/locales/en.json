@@ -302,6 +302,7 @@
   "rail.lastSeen": "{name}: offline, last seen {when}",
   "rail.notConnected": "{name}: connect it to this app",
   "rail.ownNetwork": "Only reachable on its own network",
+  "rail.update": "on {version}, {latest} is out",
   "rail.connectTitle": "Connect {name}",
   "rail.connectLede": "It's signed in to your account already. Open a pairing window on it, then paste the link it prints here.",
   "placeLook.title": "Color",

@@ -87,6 +87,24 @@ it("a plan, then its name and colour, then the Admin's checkout; the sheet then 
   expect(bridge.copyLink).toHaveBeenCalledTimes(1);
 });
 
+it("another Cloud's checkout still open: the sheet follows that one, with its page to reopen, and sign-ups closed is said calmly", async () => {
+  await mount();
+  await click(host.querySelector("[data-plan-buy='pro']"));
+  bridge.start.mockImplementationOnce(async () => { view = base({ adding: adding("checkout", { name: "Client B" }) }); return { outcome: "blocked", blocked: "checkout_open" } as never; });
+  await click(buttonNamed("Continue to checkout"));
+  await flush();
+  expect(host.querySelector("[data-cloud-add='extra-waiting']")?.textContent).toContain("Waiting for your payment");
+  await click(buttonNamed("Reopen checkout"));
+  expect(bridge.reopen).toHaveBeenCalledTimes(1);
+  await act(async () => root?.unmount()); root = null;
+  view = base();
+  bridge.start.mockResolvedValueOnce({ outcome: "blocked", blocked: "signups_closed" } as never);
+  await mount();
+  await click(host.querySelector("[data-plan-buy='pro']"));
+  await click(buttonNamed("Continue to checkout"));
+  expect(host.querySelector("[data-cloud-add='extra-signups_closed']")?.textContent).toContain("New Clouds can't be bought right now.");
+});
+
 it("the Cloud bought is ready: Open opens it and closes the sheet", async () => {
   view = base({ adding: adding("ready") });
   const done = await mount();

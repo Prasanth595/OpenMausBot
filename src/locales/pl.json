@@ -280,6 +280,7 @@
   "rail.lastSeen": "{name}: offline, ostatnio widziany {when}",
   "rail.notConnected": "{name}: połącz go z tą aplikacją",
   "rail.ownNetwork": "Dostępny tylko w swojej sieci",
+  "rail.update": "na {version}, dostępna jest {latest}",
   "rail.connectTitle": "Połącz {name}",
   "rail.connectLede": "Jest już zalogowany na Twoje konto. Otwórz na nim okno parowania, a potem wklej tutaj link, który wyświetli.",
   "placeLook.title": "Kolor",

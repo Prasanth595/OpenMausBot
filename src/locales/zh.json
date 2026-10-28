@@ -3312,6 +3312,7 @@
   "rail.lastSeen": "{name}：离线，上次在线于{when}",
   "rail.notConnected": "{name}：将它连接到这个应用",
   "rail.ownNetwork": "只能从它自己的网络访问",
+  "rail.update": "当前为 {version}，{latest} 已发布",
   "rail.connectTitle": "连接 {name}",
   "rail.connectLede": "它已经用你的账号登录。在它上面打开配对窗口，再把它显示的链接粘贴到这里。",
   "placeLook.title": "颜色",

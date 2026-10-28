@@ -4940,6 +4940,7 @@
   "rail.lastSeen": "{name}: ngoại tuyến, thấy lần cuối {when}",
   "rail.notConnected": "{name}: kết nối nó với ứng dụng này",
   "rail.ownNetwork": "Chỉ truy cập được từ mạng riêng của nó",
+  "rail.update": "đang ở {version}, đã có {latest}",
   "rail.connectTitle": "Kết nối {name}",
   "rail.connectLede": "Nó đã đăng nhập bằng tài khoản của bạn. Hãy mở cửa sổ ghép nối trên đó, rồi dán liên kết nó in ra vào đây.",
   "placeLook.title": "Màu",

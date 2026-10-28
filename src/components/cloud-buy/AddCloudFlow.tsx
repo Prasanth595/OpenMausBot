@@ -119,7 +119,8 @@ export function AddCloudFlow({ onClose, onFirstCloud, onWide = () => {}, onBack 
     if (screen.kind !== "name" || !bridge) return;
     const result = await bridge.start(screen.plan.tier, name.trim().replace(/\s+/g, " ") || suggested, color);
     if (result.outcome === "opened") { track("cloud_add_another", { step: "checkout_opened", plan: screen.plan.tier }); setTier(null); await read(); return; }
-    if (result.outcome === "blocked") setStop(addCloudStop(result.blocked));
+    // Another Cloud's checkout still open: main keeps its page, and the sheet follows that one (Reopen, Copy link).
+    if (result.outcome === "blocked") { setStop(addCloudStop(result.blocked)); if (result.blocked === "checkout_open") await read(); }
     else if (result.outcome === "unsupported") setStop("one");
     else setFailed(true);
   }, () => setFailed(true));

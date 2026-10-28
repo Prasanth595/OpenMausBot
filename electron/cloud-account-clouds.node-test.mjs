@@ -64,6 +64,11 @@ test("the session's Clouds: each other own Cloud pairs with its id, and only a g
   const state = await f.client.start();
   assert.deepEqual(state.clouds.map(cloud => cloud.id), ["c-home", "c-a", "c-team"]);
   assert.deepEqual(state.addCloud, { canAdd: true });
+  assert.equal(state.latestVersion, undefined, "no newest release named: none");
+  f.session = { ...f.session, latestVersion: "0.1.130" };
+  assert.equal((await f.client.refresh()).latestVersion, "0.1.130");
+  f.session = { ...f.session, latestVersion: "<script>" };
+  assert.equal((await f.client.refresh()).latestVersion, undefined);
   assert.deepEqual([HOME, CLIENT_A, TEAM, "https://evil.example.test", null].map(origin => f.client.isOwnCloud(origin)), [true, true, false, false, false], "a team's Cloud is not the person's own");
   f.pairing = body => [200, grant(body?.cloudId === "c-a" ? CLIENT_A : HOME)];
   assert.deepEqual(await f.client.pairHome("c-a"), { origin: CLIENT_A, code: "ABCD-EFGH-JK23", expiresAt: NOW + 60_000 });
@@ -122,9 +127,12 @@ test("the Admin's word on adding: a cap or another open checkout, too many at on
   f.session = { ...f.session, canAdd: undefined, addBlocked: undefined };
   await f.client.refresh();
   for (const [answer, outcome] of [
-    [[409, { error: "blocked", addBlocked: "signups_closed" }], { outcome: "blocked", blocked: "signups_closed" }],
+    [[409, { error: "checkout_conflict", addBlocked: "cap" }], { outcome: "blocked", blocked: "cap" }],
+    [[503, { error: "temporarily_unavailable", addBlocked: "signups_closed", interval: 60 }], { outcome: "blocked", blocked: "signups_closed" }],
+    [[429, { error: "rate_limited", addBlocked: "rate", interval: 600 }], { outcome: "blocked", blocked: "rate" }],
     [[409, { error: "blocked", addBlocked: "mystery" }], { outcome: "blocked", blocked: "cap" }],
     [[429, { error: "rate_limited" }], { outcome: "blocked", blocked: "rate" }],
+    [[503, { error: "temporarily_unavailable" }], { outcome: "failed" }],
     [[404, { error: "not_found" }], { outcome: "unsupported" }],
     [[500, { error: "oops" }], { outcome: "failed" }],
   ]) {
@@ -132,6 +140,27 @@ test("the Admin's word on adding: a cap or another open checkout, too many at on
     assert.deepEqual(await f.client.addCloud({ tier: "pro", name: "Client B" }), outcome, JSON.stringify(answer));
   }
   assert.deepEqual(f.browsers, []);
+  assert.equal(f.client.state().adding, undefined, "no checkout kept from a refusal that names none");
+});
+
+test("another Cloud's checkout still open: the Admin's page for it is kept here to reopen or copy, never opened by itself", async t => {
+  const f = await admin(t);
+  f.session = { ...f.session, clouds: [PRIMARY, entry({ id: "c-b", name: "Client B", status: "checkout", origin: null, color: "violet" })] };
+  await f.client.start();
+  assert.equal(await f.client.reopenAdd(), false, "watched, with no page of its own yet");
+  f.add = () => [409, { error: "checkout_conflict", addBlocked: "checkout_open", checkoutUrl: CHECKOUT }];
+  assert.deepEqual(await f.client.addCloud({ tier: "max", name: "Client C" }), { outcome: "blocked", blocked: "checkout_open" });
+  assert.deepEqual(f.browsers, [], "the person asked for another Cloud, not this one: nothing opens by itself");
+  assert.deepEqual(f.client.state().adding, { cloudId: "c-b", name: "Client B", color: "violet", tier: "pro", startedAt: NOW, link: true });
+  assert.equal(f.client.addLink(), CHECKOUT);
+  assert.equal(await f.client.reopenAdd(), true);
+  assert.deepEqual(f.browsers, [CHECKOUT]);
+  const fresh = await admin(t);
+  fresh.session = { ...fresh.session, clouds: [PRIMARY] };
+  await fresh.client.start();
+  fresh.add = () => [409, { error: "checkout_conflict", addBlocked: "checkout_open", checkoutUrl: "https://evil.example.test/pay" }];
+  assert.deepEqual(await fresh.client.addCloud({ tier: "pro", name: "Client B" }), { outcome: "blocked", blocked: "checkout_open" });
+  assert.equal(fresh.client.state().adding, undefined, "only Dodo's own checkout page is ever kept");
 });
 
 test("a Cloud waiting at checkout that this app did not open (it restarted mid-checkout) is followed as its own, at the usual pace", async t => {

@@ -1,6 +1,6 @@
 import { createManagedDesktopStore, retryDelay, unreadableRecord } from "./managed-desktop.mjs";
 import { CLOUD_MACHINE_CONNECTABLE, cloudUnreachableText, parseCloudCredit, parseCloudOffer, parseCloudPurchase, parseCloudSummary, parseCloudTeams, parseCloudTrial, parseCloudUsage, parsePairingGrant, parsePublicOffer, withoutTrial } from "./cloud-home.mjs";
-import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, otherOwnClouds, ownCloud, parseCloudList } from "./cloud-list.mjs";
+import { CLOUD_ID, CLOUD_SWATCHES, cleanCloudListName, otherOwnClouds, ownCloud, parseCloudList, releaseVersion } from "./cloud-list.mjs";
 import { planTeam, teamPlan } from "./cloud-team-plan.mjs";
 import { cleanCode, cleanEmail, parseSignInStart, SIGN_IN_START, SIGN_IN_TRIES, SIGN_IN_VERIFY, signInIdentity, startFailure, verifyFailure } from "./cloud-signin.mjs";
 
@@ -147,7 +147,8 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, opaque: true });
       throw new Error("Invalid Cloud response.");
     }
-    if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, code: data?.error, interval: data?.interval, blocked: data?.addBlocked });
+    if (!response.ok) throw Object.assign(new Error("Cloud request failed."), { status: response.status, code: data?.error, interval: data?.interval, blocked: data?.addBlocked,
+      ...(typeof data?.checkoutUrl === "string" ? { checkoutUrl: data.checkoutUrl } : {}) });
     return data;
   }
   function identity(result) {
@@ -227,7 +228,7 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       const purchase = parseCloudPurchase(result.cloud?.purchase);
       const trial = parseCloudTrial(result.cloud?.trial), credit = parseCloudCredit(result.cloud?.credit), offer = parseCloudOffer(result.offer);
       const usage = access.status === "active" ? parseCloudUsage(result.cloud?.usage) : null;
-      const clouds = parseCloudList(result.clouds), more = clouds ? addOffer(result) : null;
+      const clouds = parseCloudList(result.clouds), more = clouds ? addOffer(result) : null, latest = clouds ? releaseVersion(result.latestVersion) : null;
       const hint = access.plan === "pro" ? { ...(access.tier ? { tier: access.tier } : {}), active: access.status === "active" } : null;
       if (next.expiresAt !== previous.expiresAt) {
         const replacement = { ...previous, expiresAt: next.expiresAt };
@@ -249,11 +250,13 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       // as this app's own, so "ready" is said for it too.
       const waitingCloud = otherOwnClouds(clouds).find(cloud => cloud.status === "checkout");
       if (!adding && waitingCloud) adding = { cloudId: waitingCloud.id, name: waitingCloud.name, color: waitingCloud.color, tier: waitingCloud.tier, startedAt: now(), url: null };
+      // A checkout kept from the Admin's "one is still open" answer, before the session listed its Cloud: that Cloud now.
+      else if (adding && adding.cloudId === null && waitingCloud) adding = { ...adding, cloudId: waitingCloud.id, name: waitingCloud.name, color: waitingCloud.color, tier: waitingCloud.tier ?? adding.tier };
       verifiedUntil = Math.min(grant.expiresAt, now() + STEADY_MS,
         access.status === "active" && access.expiresAt !== null ? access.expiresAt : Infinity);
       publish({ ...view("connected"), entitlement: access, ...(machine ? { machine } : {}), ...(teams.length ? { teams } : {}), ...(purchase ? { purchase } : {}),
         ...(trial ? { trial } : {}), ...(credit ? { credit } : {}), ...(offer ? { offer } : {}), ...(usage ? { usage } : {}),
-        ...(clouds ? { clouds, addCloud: more } : {}), verifiedAt: now(), verifiedUntil });
+        ...(clouds ? { clouds, addCloud: more } : {}), ...(latest ? { latestVersion: latest } : {}), verifiedAt: now(), verifiedUntil });
       const planCloud = teamPlan(value) ? planTeam(value)?.machine ?? null : machine;
       const settingUp = planCloud?.status === "provisioning" || (access.status === "active" && !planCloud) || Boolean(purchase) || otherOwnClouds(clouds).some(cloud => cloud.status === "setting_up");
       const added = adding ? clouds?.find(cloud => cloud.id === adding.cloudId) ?? null : null;
@@ -605,7 +608,20 @@ export function createCloudAccountClient({ store, openBrowser, platform, deviceN
       let result;
       try { result = await request("clouds", { method: "POST", body: { tier, interval, name: cleanName, ...(color ? { color } : {}) }, token: signedIn.token }); } catch (error) {
         if (signInEnded(error)) { await refresh().catch(() => {}); return { outcome: "failed" }; }
-        if (!error?.opaque && error?.status === 409) return { outcome: "blocked", blocked: ADD_BLOCKS.includes(error.blocked) ? error.blocked : "cap" };
+        // The Admin's own reason wins, whatever the status (409 cap or open checkout, 429 rate, 503 sign-ups closed).
+        const blocked = !error?.opaque && ADD_BLOCKS.includes(error?.blocked) ? error.blocked : null;
+        if (blocked === "checkout_open") {
+          // Another Cloud's checkout is still open: its page is kept here, as one this app opened, to reopen or copy.
+          const open = checkoutDestination(error.checkoutUrl, { fixture, staging });
+          const listed = otherOwnClouds(value.clouds).find(cloud => cloud.status === "checkout") ?? null;
+          if (open && grant === signedIn) {
+            adding = { cloudId: listed?.id ?? null, name: listed?.name ?? cleanName, color: listed ? listed.color : color, tier: listed?.tier ?? tier, startedAt: now(), url: open };
+            publish(value);
+            schedule(refresh, WATCH_REFRESH_MS);
+          }
+        }
+        if (blocked) return { outcome: "blocked", blocked };
+        if (!error?.opaque && error?.status === 409) return { outcome: "blocked", blocked: "cap" };
         if (!error?.opaque && error?.status === 429) return { outcome: "blocked", blocked: "rate" };
         if ([404, 405, 501].includes(error?.status)) return { outcome: "unsupported" };
         return { outcome: "failed" };

@@ -145,9 +145,12 @@ it("a server of the person's own that signed in: a small server mark, the offlin
   expect(placeLabel(servers[2]!, now)).toBe("Mac mini, your own server: offline, last seen 2 hours ago · Only reachable on its own network");
   expect(placeLabel({ ...servers[2]!, lastSeenAt: undefined, ownNetwork: undefined })).toBe("Mac mini, your own server: offline");
   expect(placeLabel(servers[3]!)).toBe("Render VPS, your own server: connect it to this app");
+  expect(placeLabel(place("s", "Mac mini", { kind: "server", server: true, update: { version: "0.1.118", latest: "0.1.130" } })))
+    .toBe("Mac mini, your own server · on 0.1.118, 0.1.130 is out");
   rail = { places: servers, add: { cloud: true, link: true, address: false } };
   await mount(createElement(PlacesRail));
   expect(host.querySelector('[data-rail-place="vps"] [data-rail-server]')).toBeTruthy();
+  expect(host.querySelector("[data-rail-update]"), "no reminder without a newer release").toBeNull();
   expect(host.querySelector('[data-rail-place="home"] [data-rail-server]')).toBeNull();
   const mini = host.querySelector('[data-rail-place="signed-in:s-mini"]')!;
   expect(mini.querySelector("[data-rail-offline]")?.className).toContain("grayscale");
@@ -174,4 +177,15 @@ it("where no pairing link can be pasted here, a signed-in server not connected y
   expect(render.getAttribute("aria-disabled")).toBe("true");
   await click(render);
   expect(document.querySelector("[data-place-add-sheet]")).toBeNull();
+});
+
+it("a server of the person's own on an older release than the newest has a quiet reminder; a payment problem's dot comes first", async () => {
+  rail = { places: [place("home", "My Cloud", { active: true }),
+    place("s-mini", "Mac mini", { kind: "server", server: true, update: { version: "0.1.118", latest: "0.1.130" } }),
+    place("s-old", "Old box", { kind: "server", server: true, attention: true, update: { version: "0.1.100", latest: "0.1.130" } })], add: { cloud: true, link: true, address: false } };
+  await mount(createElement(PlacesRail));
+  expect(host.querySelector('[data-rail-place="s-mini"] [data-rail-update]')).toBeTruthy();
+  expect(host.querySelector('[data-rail-place="s-mini"]')?.getAttribute("title")).toContain("on 0.1.118, 0.1.130 is out");
+  expect(host.querySelector('[data-rail-place="s-old"] [data-rail-update]')).toBeNull();
+  expect(host.querySelector('[data-rail-place="s-old"] [data-rail-dot]')).toBeTruthy();
 });

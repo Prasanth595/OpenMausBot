@@ -2469,6 +2469,7 @@
   "rail.lastSeen": "{name} : hors ligne, vu pour la dernière fois {when}",
   "rail.notConnected": "{name} : connectez-le à cette app",
   "rail.ownNetwork": "Accessible uniquement depuis son propre réseau",
+  "rail.update": "en {version}, {latest} est disponible",
   "rail.connectTitle": "Connecter {name}",
   "rail.connectLede": "Il est déjà connecté à votre compte. Ouvrez-y une fenêtre d'appairage, puis collez ici le lien qu'il affiche.",
   "placeLook.title": "Couleur",

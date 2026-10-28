@@ -4324,6 +4324,7 @@
   "rail.lastSeen": "{name}：離線，上次在線於{when}",
   "rail.notConnected": "{name}：將它連線到這個 App",
   "rail.ownNetwork": "只能從它自己的網路連線",
+  "rail.update": "目前是 {version}，{latest} 已推出",
   "rail.connectTitle": "連線 {name}",
   "rail.connectLede": "它已經用你的帳號登入。在它上面開啟配對視窗，再把它顯示的連結貼到這裡。",
   "placeLook.title": "顏色",

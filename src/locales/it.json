@@ -274,6 +274,7 @@
   "rail.lastSeen": "{name}: offline, visto l'ultima volta {when}",
   "rail.notConnected": "{name}: collegalo a questa app",
   "rail.ownNetwork": "Raggiungibile solo dalla sua rete",
+  "rail.update": "su {version}, è uscita la {latest}",
   "rail.connectTitle": "Collega {name}",
   "rail.connectLede": "Ha già effettuato l'accesso con il tuo account. Aprici una finestra di abbinamento, poi incolla qui il link che mostra.",
   "placeLook.title": "Colore",

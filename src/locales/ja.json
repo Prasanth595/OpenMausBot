@@ -280,6 +280,7 @@
   "rail.lastSeen": "{name}: オフライン（最終確認 {when}）",
   "rail.notConnected": "{name}: このアプリに接続する",
   "rail.ownNetwork": "そのネットワーク内からのみ接続できます",
+  "rail.update": "{version} を実行中、{latest} が公開されています",
   "rail.connectTitle": "{name} を接続",
   "rail.connectLede": "すでにあなたのアカウントでサインインしています。そこでペアリング画面を開き、表示されたリンクをここに貼り付けてください。",
   "placeLook.title": "色",

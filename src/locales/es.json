@@ -270,6 +270,7 @@
   "rail.lastSeen": "{name}: sin conexión, visto por última vez {when}",
   "rail.notConnected": "{name}: conéctalo a esta app",
   "rail.ownNetwork": "Solo accesible desde su propia red",
+  "rail.update": "en {version}, ya salió {latest}",
   "rail.connectTitle": "Conectar {name}",
   "rail.connectLede": "Ya inició sesión con tu cuenta. Abre una ventana de vinculación en él y pega aquí el enlace que muestre.",
   "placeLook.title": "Color",

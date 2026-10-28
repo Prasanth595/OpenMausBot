@@ -2914,6 +2914,7 @@
   "rail.lastSeen": "{name}: не в мережі, востаннє в мережі {when}",
   "rail.notConnected": "{name}: під’єднайте його до цього застосунку",
   "rail.ownNetwork": "Доступний лише з власної мережі",
+  "rail.update": "версія {version}, вийшла {latest}",
   "rail.connectTitle": "Під’єднати {name}",
   "rail.connectLede": "Він уже ввійшов у ваш обліковий запис. Відкрийте на ньому вікно прив'язки й вставте сюди посилання, яке він виведе.",
   "placeLook.title": "Колір",

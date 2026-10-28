@@ -35,6 +35,8 @@ export declare const CLOUD_NAME_LIMIT: number;
 export declare function cleanCloudListName(value: unknown): string | null;
 export declare function ownCloud(cloud: CloudListEntry | null | undefined): boolean;
 export declare function signedInServers(clouds: CloudListEntry[] | null | undefined): CloudListEntry[];
+export declare function releaseVersion(value: unknown): string | null;
+export declare function olderRelease(version: unknown, latest: unknown): boolean;
 export declare function parseCloudList(input: unknown): CloudListEntry[] | null;
 export declare function otherOwnClouds(clouds: CloudListEntry[] | null | undefined): CloudListEntry[];
 export declare function cloudMachine(cloud: CloudListEntry | null | undefined): import("./cloud-home.mjs").CloudMachine | null;

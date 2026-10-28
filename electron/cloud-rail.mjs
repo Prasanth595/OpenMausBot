@@ -7,7 +7,7 @@
 // would learn the names of the person's other places; it gets none, and the native Server menu stays its switcher. A
 // circle names a saved place by its id; main opens only an id it listed itself.
 import environments from "./environments.cjs";
-import { cleanCloudListName, CLOUD_SWATCHES, cloudSetupProgress, otherOwnClouds, ownCloud, signedInServers, stepProgress, swatchColor } from "./cloud-list.mjs";
+import { cleanCloudListName, CLOUD_SWATCHES, cloudSetupProgress, olderRelease, otherOwnClouds, ownCloud, signedInServers, stepProgress, swatchColor } from "./cloud-list.mjs";
 import { machineSetup } from "./cloud-home.mjs";
 
 export const RAIL_MIN_PLACES = 2;
@@ -15,8 +15,10 @@ const PENDING = "pending:";
 const SIGNED_IN = "signed-in:";
 
 /** A server or computer of the person's own that signed in with their account, as its circle says it: online while the
- * Admin heard from it in the last few minutes, else offline since when it was last seen. */
-const serverState = listed => ({ server: true, ...(listed.status !== "ready" ? { offline: true } : {}), ...(listed.lastSeenAt ? { lastSeenAt: listed.lastSeenAt } : {}) });
+ * Admin heard from it in the last few minutes, else offline since when it was last seen; and an older release than the
+ * newest one, while the Admin names that (`latest`; none while it doesn't follow releases). */
+const serverState = (listed, latest = null) => ({ server: true, ...(listed.status !== "ready" ? { offline: true } : {}), ...(listed.lastSeenAt ? { lastSeenAt: listed.lastSeenAt } : {}),
+  ...(listed.version && latest && olderRelease(listed.version, latest) ? { update: { version: listed.version, latest } } : {}) });
 
 /** A Cloud's address is one MausBot runs for this person: My Cloud (`mine`), or a Cloud the verified session lists on
  * MausBot Cloud. Without the session's list of Clouds (an older Admin), a team's Cloud it lists, all of which MausBot runs. */
@@ -45,7 +47,7 @@ function circle(entry, { activeId, mine, state }) {
   const problem = listed ? listed.status === "payment_problem" && listed.role === "owner" : entry.origin === mine && machine?.status === "payment-problem";
   const color = environments.ENTRY_COLORS.includes(entry.color) ? entry.color : listed ? swatchColor(listed.color) : null;
   return { id: entry.id, name: entry.name, color, kind, opens: true, ...(entry.id === activeId ? { active: true } : {}),
-    ...(progress !== null ? { progress } : {}), ...(problem ? { attention: true } : {}), ...(listed?.managed === false ? serverState(listed) : {}) };
+    ...(progress !== null ? { progress } : {}), ...(problem ? { attention: true } : {}), ...(listed?.managed === false ? serverState(listed, connected?.latestVersion ?? null) : {}) };
 }
 
 /**
@@ -72,7 +74,7 @@ export function railPlaces({ saved, home = null, mine = null, state = null }) {
   const savedOrigins = new Set(saved.environments.map(entry => entry.origin).filter(Boolean));
   const servers = signedInServers(clouds).filter(cloud => !cloud.origin || !savedOrigins.has(cloud.origin))
     .map(cloud => ({ id: `${SIGNED_IN}${cloud.id}`, name: cloud.name, color: swatchColor(cloud.color), kind: "server", opens: false,
-      ...(cloud.origin ? { pairs: true } : { ownNetwork: true }), ...serverState(cloud) }));
+      ...(cloud.origin ? { pairs: true } : { ownNetwork: true }), ...serverState(cloud, connected?.latestVersion ?? null) }));
   const places = [...remote, ...servers, ...making];
   if (places.length < RAIL_MIN_PLACES) return [];
   return home ? places : [{ id: environments.LOCAL_ID, name: "This computer", color: null, kind: "computer", opens: true, ...(saved.activeId === environments.LOCAL_ID ? { active: true } : {}) }, ...places];

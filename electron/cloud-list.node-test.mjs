@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cloudMachine, cloudSetupProgress, listedColors, MAX_CLOUDS, otherOwnClouds, ownCloudPlaces, parseCloudList, signedInServers, swatchColor } from "./cloud-list.mjs";
+import { cloudMachine, cloudSetupProgress, listedColors, MAX_CLOUDS, olderRelease, otherOwnClouds, ownCloudPlaces, parseCloudList, releaseVersion, signedInServers, swatchColor } from "./cloud-list.mjs";
 import environments from "./environments.cjs";
 import { createHomePlaces } from "./home-places.mjs";
 
@@ -145,4 +145,10 @@ test("home places: the session's other Clouds become saved places, one remembere
   places.sync(session([primary]));
   assert.equal(places.remembered(), null, "listed no more: forgotten");
   assert.deepEqual(w.state.environments.map(entry => entry.name), ["My Cloud"]);
+});
+
+test("a release older than the newest one, compared number by number; nothing is guessed for a build of its own", () => {
+  assert.deepEqual([["0.1.118", "0.1.130"], ["0.1.130", "0.1.130"], ["0.2.0", "0.1.130"], ["0.1", "0.1.1"], ["0.1.9", "0.1.10"]].map(([a, b]) => olderRelease(a, b)), [true, false, false, true, true]);
+  for (const [a, b] of [["0.1.118-dev", "0.1.130"], ["0.1.118", null], [null, "0.1.130"], ["main", "0.1.130"], ["0.1.118", "latest"]]) assert.equal(olderRelease(a, b), false, `${a} ${b}`);
+  assert.deepEqual(["0.1.130", null, "", "<b>", 7].map(releaseVersion), ["0.1.130", null, null, null, null]);
 });

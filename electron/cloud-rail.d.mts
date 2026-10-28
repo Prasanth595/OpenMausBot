@@ -25,6 +25,8 @@ export interface RailPlace {
   ownNetwork?: true;
   /** Signed in and reachable, but not connected to this app yet: a click shows how to connect it. */
   pairs?: true;
+  /** It runs an older release than the newest the Admin names: time to update it. */
+  update?: { version: string; latest: string };
 }
 /** ＋'s choices here: buying a Cloud, pasting a server's pairing link, typing its address on this computer's Settings. */
 export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean }

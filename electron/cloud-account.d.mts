@@ -26,9 +26,12 @@ export interface CloudAccountState {
   clouds?: import("./cloud-list.mjs").CloudListEntry[];
   /** With `clouds`: whether the Admin opens another Cloud's checkout now, and why not. */
   addCloud?: { canAdd: true } | { canAdd: false; blocked: CloudAddBlock };
+  /** The newest OpenMausBot release the Admin knows, while it follows releases (with `clouds`); absent otherwise. */
+  latestVersion?: string;
   /** Another Cloud this app is buying (in the last 24 hours): its id, name, swatch and plan, when its checkout opened,
    * whether main keeps that page (`link`), and `done` once it was opened or announced. */
-  adding?: { cloudId: string; name: string; color: import("./cloud-list.mjs").CloudSwatch | null; tier: string | null; startedAt: number; link?: true; done?: true };
+  /** `cloudId` null: a checkout the Admin said is still open, before the session lists its Cloud. */
+  adding?: { cloudId: string | null; name: string; color: import("./cloud-list.mjs").CloudSwatch | null; tier: string | null; startedAt: number; link?: true; done?: true };
   /** A payment OMB Cloud received and is still linking to this account. */
   purchase?: import("./cloud-home.mjs").CloudPurchase;
   /** Connected: the free trial on this account's Cloud, when the Admin says (display only). */
