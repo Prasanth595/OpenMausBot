@@ -2438,7 +2438,7 @@ function shouldIgnoreProviderEvent(event: RuntimeEvent): boolean {
 
 function directTurnClaimIsCurrent(botId: string, claimId: string, threadId: string): boolean {
   const claim = directTurnDispatchClaims.get(threadId);
-  return claim?.id === claimId && claim.botId === botId && store.taskByThread(botId, threadId)?.busy === true;
+  return !companyShutdown && claim?.id === claimId && claim.botId === botId && store.taskByThread(botId, threadId)?.busy === true;
 }
 
 function directTurnClaimExists(botId: string, claimId: string, threadId: string): boolean {
@@ -6608,7 +6608,7 @@ bus.subscribe((event: RuntimeEvent) => {
         const message = pushMessage({
           role: "bot",
           kind: "activity",
-          tool: { name, spoken: narrateTool(name) ?? undefined, summary: event.summary, input: event.input, itemId: event.itemId ?? event.eventId },
+          tool: { name, spoken: narrateTool(name) ?? undefined, ...(event.step ? { step: event.step } : {}), summary: event.summary, input: event.input, itemId: event.itemId ?? event.eventId },
           turnId: liveTurnId,
         });
         if (event.itemId) toolMessageByItem.set(`${event.threadId}:${event.itemId}`, message.id);
@@ -8502,9 +8502,6 @@ async function startTurn(
         forgetTurnCheckpoint(threadId);
         if (before) turnCheckpoints.set(threadId, { botId: bot.id, cwd: checkpointCwd, hash: before, pin: dispatchClaimId });
       }
-      if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
-        throw new DirectTurnSetupCancelled("turn stopped before dispatch");
-      }
       // One bot snapshot for the browser bearer, setupModeActive and the prompt's soul, so a soul saved mid-dispatch cannot split them.
       const liveBot = store.bot(bot.id);
       const setupMode =
@@ -8622,6 +8619,9 @@ async function startTurn(
         conversations: commsDepth === 0 && !coordinationNode && !opts?.automationSource && !opts?.unattended,
         userName: userNameFor(threadId),
       });
+      if (!directTurnClaimIsCurrent(bot.id, dispatchClaimId, threadId)) {
+        throw new DirectTurnSetupCancelled("turn stopped before dispatch");
+      }
       runningTurnEngines.set(threadId, instance);
       // Re-decide from the soul actually sent, except on an unattended continuation wake, so a session started under an old soul never survives a soul change by laundering its record.
       const dispatchedConfig = sessionConfig(liveBot?.soul ?? bot.soul);
@@ -8659,7 +8659,7 @@ async function startTurn(
         ...(integrations.browser && browserIsThePlace(plan) ? { preloadBrowserTools: true } : {}),
         ...settingsTurnFields(cfg, DATA_DIR, managedPolicy.restrictsMcp()),
         cwd,
-      }, route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined)), () => !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
+      }, route.quickModel ? { model, own: bot.modelSelection, onFallback: () => store.patchMessage(threadId, userMessage.id, { quickModel: undefined }) } : undefined)), () => companyShutdown || !directTurnClaimExists(bot.id, dispatchClaimId, threadId), async () => {
         await instance.adapter.interruptTurn(threadId).catch(() => {});
       });
       if (dispatch.cancelled) {
@@ -9032,7 +9032,7 @@ routines = new RoutineManager({
     }
   },
   startTurn: async (botId, threadId, prompt, runOn, triggerSource, onDispatchError) => {
-    await startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError });
+    if (!companyShutdown) await startTurn(botId, prompt, { threadId, runOn, automationSource: triggerSource, onDispatchError });
   },
   startGoal: async (groupId, threadId, prompt, coordinatorBotId, runId, _onDispatchError) => {
     if (!groupId) {
@@ -12518,7 +12518,7 @@ ROUTES.push(createBotMessageRoutes({
     { emoji, name: person.name ?? person.email, at: Date.now() }),
 }));
 const chatApps = createChatApps({ store, dataDir: DATA_DIR });
-const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, oauth: mcpOAuth });
+const chatAppsMcp = createChatAppsMcp({ store, apps: chatApps, dataDir: DATA_DIR, storedServers: () => cfg.mcpServers ?? {}, mountedServers: engineMcpServers, personMcp: teamConnections.personMcp, oauth: mcpOAuth });
 ROUTES.push(createChatAppRoutes({ store, apps: chatApps, threadRefusal: cloudThreadRefusal, mcpRpc: chatAppsMcp.rpc }));
 const { react } = createReactions({
   store, reply: (input) => personReplies.deliver({ ...input, about: "message" }),
@@ -12780,7 +12780,7 @@ ROUTES.push(createInstanceRoutes({
   cliProbeEnvironment, threadBusy, botForThread, activeGroupTurnForBot, checkInstance: testedAi.check,
 }));
 ROUTES.push(createMcpServerRoutes({
-  cfg, sessions, mcpOAuth,
+  cfg, sessions, mcpOAuth, teamConnections,
   cloudHome: CLOUD_HOME,
   fallbackPublicUrl: FALLBACK_PUBLIC_URL,
   mcpConfigBusy: { get: () => mcpConfigBusy, set: (busy) => { mcpConfigBusy = busy; } },

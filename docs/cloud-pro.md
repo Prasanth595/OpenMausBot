@@ -1123,9 +1123,15 @@ differs from the previous one only in those (a few MB) unless Chrome, an
 engine, Grok's pin, or the Node base image changed in between.
 
 At boot the launcher, running as root, hands the volume's mount point to the
-`maus` user, binds the volume to this machine as `maus`
-(`/data/.omb-cloud-home.json`; another machine's volume, or an unmarked
-volume with data on it, is refused), and runs two children as `maus`: the
+`maus` user, locks the volume for as long as it runs (`flock` on the volume's
+root: a second home on a volume a live home holds refuses to start, which
+Docker on your own server does not prevent by itself), binds the volume to
+this machine as `maus` (`/data/.omb-cloud-home.json`; another machine's
+volume, or an unmarked volume with data on it, is refused), clears the
+data-directory lease records another machine or container left on it (a home
+killed uncleanly leaves one, and on one Docker host every container shares the
+boot id while its pids start again from 1, so the lease names its pid
+namespace and its process's start time too), and runs two children as `maus`: the
 server on `127.0.0.1:8799` (webhooks on `127.0.0.1:8800`) and Caddy on
 `:8080`. It stays a small root supervisor: if either child exits, both stop
 and Fly restarts the machine. The one exception: after a restore commits
@@ -1226,10 +1232,14 @@ home as a service, never the owner (see above), and the server never binds
 a public interface. Caddy
 (`deploy/fly/Caddyfile`) forwards every request with `X-Forwarded-Proto:
 https` and `X-Forwarded-For`, so the server sees each one as remote: it needs
-a paired session, whatever `Host` it claims. Caddy trusts `Fly-Client-IP`
-only from Fly's private ranges; that address feeds the pairing lockout, never
-authorization. Apart from `/api/health`, Caddy answers only for the machine's
-own name (`OMB_PUBLIC_URL`) and refuses any other `Host`.
+a paired session, whatever `Host` it claims. On Fly (`FLY_APP_NAME` is set),
+Caddy trusts `Fly-Client-IP` only from Fly's private ranges. On your own
+server, where any local process can reach the published port, it trusts
+`Cf-Connecting-IP` only from the home's own loopback, where the Cloudflare
+tunnel connects from, and ignores a client-address header from any other peer
+(the launcher sets both: `edgeClientAddress`). That address feeds the pairing
+lockout, never authorization. Apart from `/api/health`, Caddy answers only for
+the machine's own name (`OMB_PUBLIC_URL`) and refuses any other `Host`.
 
 ### Fly
 
@@ -2023,23 +2033,29 @@ screen's note.
   the menu is.
 - **The dialog** (`components/CloudAddDialog.tsx`, one state→view function,
   `lib/cloud-plan` `cloudAddView`) covers the buying journey only: the offer
-  (one card per plan the Admin sells, side by side on a wide sheet and
-  stacked in a narrow window, from `lib/cloud-plan` `planCards`: its name,
-  "Most popular" on the Admin's recommended plan only, the price per month,
-  its promise, its own button (Start free trial, or Get {plan} without a
-  trial) with its terms in one line under it, then the same rows in the same
-  order on every card in the website's words (with the app's "cloud
+  (the night card: MausBot Cloud's name and one line over a linocut night sky
+  where the three bots ride a cloud while this computer's laptop sleeps, with
+  Compare plans in the card; then one card
+  per plan the Admin sells, side by side on a wide sheet and stacked in a
+  narrow window, from `lib/cloud-plan` `planCards`: its name, "Most popular"
+  as a quiet tag on the Admin's recommended plan only, the price per month,
+  its promise, and only what sets the plans apart (`cardRows`): the month's
+  cloud desktop hours, storage and what it grows to, voice, and sleeping
+  when the plans differ there; then its own button (Start free trial, or
+  Get {plan} without a trial; the recommended plan's is the one primary
+  pill) with its terms in one line under it. **Compare plans** opens the
+  rest of every card's rows, in the website's words (with the app's "cloud
   desktop" for the website's "cloud computer"), every number from the
   Admin's `allowances`: always on (or sleeping), cloud desktops as many as
-  the bots need (how many at once only as small print), the month's hours,
-  CPUs and memory (swap as small print), storage and what it grows to,
-  voice, and daily backups' days. The card of the plan the account already
-  has says **Your plan** instead of a button (`current`, from the verified
-  entitlement's tier); a plan no longer on sale, such as a Personal
-  subscriber's, shows only for that subscriber when the screen is given it
-  (`own`). Under the cards, when every plan has the same trial, the trial's
-  timeline with the reminder line only while the Admin sends one, and the
-  Claude credit; money-back; prices plus tax. No launch or struck-through
+  the bots need (how many at once only as small print), CPUs and memory
+  (swap as small print), and daily backups' days. The card of the plan the
+  account already has says **Your plan** instead of a button (`current`,
+  from the verified entitlement's tier); a plan no longer on sale, such as a
+  Personal subscriber's, shows only for that subscriber when the screen is
+  given it (`own`). Under the cards, when every plan has the same trial, the
+  trial's timeline with the reminder line only while the Admin sends one,
+  and the Claude credit; money-back; what every plan includes, once; prices
+  plus tax. No launch or struck-through
   price: the Admin's `regularAmount` is not read), the sign-in (its last step
   names the checkout only when the sign-in is on the way to one), the next
   step in the browser (the checkout open there, or, signed in on the way to
