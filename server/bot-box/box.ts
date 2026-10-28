@@ -45,6 +45,7 @@ export interface BoxBroker {
   port: number;
   mintForThread: CredentialBroker["mintForThread"];
   touchThread: CredentialBroker["touchThread"];
+  revoke: CredentialBroker["revoke"];
   revokeThread: CredentialBroker["revokeThread"];
   lookup: CredentialBroker["lookup"];
 }
@@ -228,7 +229,7 @@ export class BotBox {
   /** The broker for callers that mint conversation-bound grants, or null when the box (and so the broker) is off. */
   broker(): BoxBroker | null {
     const credentials = this.credentials;
-    return credentials ? { port: BOX_BROKER_PORT, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revokeThread: credentials.revokeThread, lookup: credentials.lookup } : null;
+    return credentials ? { port: BOX_BROKER_PORT, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revoke: credentials.revoke, revokeThread: credentials.revokeThread, lookup: credentials.lookup } : null;
   }
 
   /** The broker's socket, for a self-check that bridges it. */

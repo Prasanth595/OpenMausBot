@@ -104,16 +104,26 @@ linuxBox("the credential broker", () => {
     await start();
     const grants = { g: { upstream: "http://127.0.0.1:9", headers: {} } };
     const forThread = broker.mintForThread({ threadId: "t9", grants });
+    const unused = broker.mintForThread({ threadId: "t9", grants });
     const forProcess = broker.mintForProcess({ threadId: "t9", grants });
     expect(forThread.expiresAt).toBe(clock + BROKER_THREAD_TTL_MS);
     expect(forProcess.expiresAt).toBe(clock + BROKER_PROCESS_TTL_MS);
     clock += BROKER_THREAD_TTL_MS - 1_000;
-    broker.touchThread("t9");
+    broker.touchThread("t9", forThread.token);
     clock += 2_000;
     expect(broker.lookup(forThread.token, "g").ok).toBe(true);
+    expect(broker.lookup(unused.token, "g").ok).toBe(false);
     expect(broker.lookup(forProcess.token, "g")).toMatchObject({ ok: false, error: "expired_token" });
     broker.revokeThread("t9");
     expect(broker.lookup(forThread.token, "g")).toMatchObject({ ok: false, error: "unknown_token" });
+  });
+
+  it("does not revive an expired thread token when another turn starts", async () => {
+    await start();
+    const minted = broker.mintForThread({ threadId: "t9", grants: { g: { upstream: "http://127.0.0.1:9", headers: {} } } });
+    clock += BROKER_THREAD_TTL_MS + 1;
+    broker.touchThread("t9", minted.token);
+    expect(broker.lookup(minted.token, "g").ok).toBe(false);
   });
 
   it("refuses a grant name it cannot put in a URL", async () => {

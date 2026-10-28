@@ -22,8 +22,9 @@ export function attachCustomMcp(
   /** The turn, so a URL server's secret headers stay with the credential broker on a boxed Cloud home (server/bot-box). */
   turn?: BrokerTurn,
 ): void {
-  if (!Object.keys(custom).length) return;
-  integrations.custom = turn ? brokerRemoteMcp(custom, turn) : custom;
+  const servers = turn ? brokerRemoteMcp(custom, turn) : custom;
+  if (!Object.keys(servers).length) return;
+  integrations.custom = servers;
   const budgets = customMcpResultBudgets(cfg, Object.keys(custom));
   if (Object.keys(budgets).length) integrations.customResultBudgets = budgets;
 }

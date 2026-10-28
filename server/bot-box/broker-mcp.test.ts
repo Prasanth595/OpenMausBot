@@ -1,14 +1,17 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { createServer as createHttpServer, request } from "node:http";
 import { connect, createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { RemoteMcpSpec } from "../contracts.ts";
+import { saveConfig } from "../config.ts";
+import type { McpServerSpec, RemoteMcpSpec } from "../contracts.ts";
+import { attachCustomMcp } from "../mcp-result-budget.ts";
 import { RemoteMcpClient } from "../mcp-http.ts";
 import { probeMcpServer } from "../mcp-probe.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
-import { BOX_BROKER_PORT, type BoxBroker } from "./box.ts";
+import { botBox, BOX_BROKER_PORT, type BoxBroker } from "./box.ts";
 import { brokerRemoteMcp, forgetBrokeredMcp, mcpGrantName } from "./broker-mcp.ts";
 import { openCredentialBroker, type CredentialBroker } from "./broker.ts";
 
@@ -19,15 +22,78 @@ const custom = {
 
 describe("remote MCP servers through the broker", () => {
   let dir: string, credentials: CredentialBroker;
-  afterEach(async () => { await credentials?.close(); if (dir) rmSync(dir, { recursive: true, force: true }); forgetBrokeredMcp(); });
+  afterEach(async () => { vi.restoreAllMocks(); await credentials?.close(); if (dir) rmSync(dir, { recursive: true, force: true }); forgetBrokeredMcp(); });
   // The broker listens on a unix socket, which Windows refuses at a file path; the box runs only on a Linux Cloud home
   // (detect.ts says "not-linux" anywhere else), so Windows gets "off" below.
   const withBroker = it.skipIf(process.platform === "win32");
-  const broker = async (): Promise<BoxBroker> => {
+  const broker = async (now?: () => number): Promise<BoxBroker> => {
     dir = mkdtempSync(join(tmpdir(), "omb-bmcp-"));
-    credentials = await openCredentialBroker({ socketPath: join(dir, "b.sock") });
-    return { port: BOX_BROKER_PORT, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revokeThread: credentials.revokeThread, lookup: credentials.lookup };
+    credentials = await openCredentialBroker({ socketPath: join(dir, "b.sock"), now });
+    return { port: BOX_BROKER_PORT, mintForThread: credentials.mintForThread, touchThread: credentials.touchThread, revoke: credentials.revoke, revokeThread: credentials.revokeThread, lookup: credentials.lookup };
   };
+
+  const call = (url: string) => new Promise<number>((resolve, reject) => {
+    const req = request({ socketPath: credentials.socketPath, path: new URL(url).pathname }, (res) => {
+      res.resume();
+      res.on("end", () => resolve(res.statusCode ?? 0));
+    });
+    req.on("error", reject);
+    req.end();
+  });
+
+  withBroker.each(["headers", "url", "removed", "stdio", "empty"])("revokes the old grant when the turn's MCP configuration is %s", async (change) => {
+    let clock = 1_800_000_000_000;
+    const b = await broker(() => clock);
+    const upstream = createHttpServer((req, res) => { res.writeHead(req.headers.authorization === "Bearer notion-secret" ? 200 : 403).end(); });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    try {
+      const servers = { ...custom, notion: { ...custom.notion, url: `http://127.0.0.1:${(upstream.address() as AddressInfo).port}/mcp` } };
+      const turn = { botId: "b1", threadId: "t1" };
+      const first = (brokerRemoteMcp(servers, turn, b).notion as RemoteMcpSpec).url;
+      const other = (brokerRemoteMcp(servers, { ...turn, threadId: "t2" }, b).notion as RemoteMcpSpec).url;
+      expect(await call(first)).toBe(200);
+      const changed: Record<string, McpServerSpec> = change === "empty" ? {} : change === "removed" ? { files: custom.files }
+        : { ...servers, notion: change === "stdio" ? custom.files : { ...servers.notion, ...(change === "url" ? { url: `${servers.notion.url}-new` } : { headers: { authorization: "Bearer rotated" } }) } };
+      brokerRemoteMcp(changed, turn, b);
+      const statusAtChange = await call(first);
+      expect(await call(other)).toBe(200);
+      clock += 13 * 60 * 60_000;
+      brokerRemoteMcp(changed, turn, b);
+      clock += 12 * 60 * 60_000;
+      brokerRemoteMcp(changed, turn, b);
+      expect(await call(first)).toBe(401);
+      expect(statusAtChange).toBe(401);
+    } finally {
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
+  });
+
+  withBroker.each(["headers", "url", "disabled", "removed", "empty"])("revokes affected conversations immediately when saved MCP configuration is %s", async (change) => {
+    const b = await broker();
+    const turn = { botId: "b1", threadId: "t1" };
+    const notion = { ...custom.notion, enabled: true };
+    saveConfig({ mcpServers: { notion, files: custom.files } });
+    const first = (brokerRemoteMcp(custom, turn, b).notion as RemoteMcpSpec).url;
+    const token = new URL(first).pathname.split("/")[2]!;
+    expect(credentials.lookup(token, "mcp-notion").ok).toBe(true);
+    const other = (brokerRemoteMcp({ docs: custom.notion }, { ...turn, threadId: "t2" }, b).docs as RemoteMcpSpec).url;
+    const next = change === "empty" ? {} : change === "removed" ? { files: custom.files }
+      : { notion: { ...notion, ...(change === "url" ? { url: "https://new.example/mcp" } : change === "disabled" ? { enabled: false } : { headers: { authorization: "Bearer rotated" } }) }, files: custom.files };
+    saveConfig({ mcpServers: next });
+    expect(credentials.lookup(token, "mcp-notion").ok).toBe(false);
+    expect(credentials.lookup(new URL(other).pathname.split("/")[2]!, "mcp-docs").ok).toBe(true);
+  });
+
+  withBroker("reconciles an empty server list through the turn integration caller", async () => {
+    const b = await broker();
+    vi.spyOn(botBox, "broker").mockReturnValue(b);
+    const turn = { botId: "b1", threadId: "t1" };
+    const first = (brokerRemoteMcp(custom, turn, b).notion as RemoteMcpSpec).url;
+    const integrations = {};
+    attachCustomMcp(integrations, {}, {}, turn);
+    expect(integrations).toEqual({});
+    expect(credentials.lookup(new URL(first).pathname.split("/")[2]!, "mcp-notion").ok).toBe(false);
+  });
 
   withBroker("moves a URL server's headers to the broker and leaves stdio servers alone", async () => {
     const out = brokerRemoteMcp(custom, { botId: "b1", threadId: "t1" }, await broker());
