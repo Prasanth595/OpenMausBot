@@ -108,7 +108,7 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
         keep({ status: remote.status, version: remote.textVersion, at: now(), account: who.id, ...(local?.email ? { email: local.email } : {}), replacedReceipts: local?.replacedReceipts });
       return;
     }
-    if (!local) return;
+    if (!local || (local.account && local.account !== who.id)) return;
     await client().recordUpdatesConsent(local.status, local.version);
     keep({ ...rest, account: who.id, pending: false });
   }
@@ -126,7 +126,8 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
   const sync = () => running ??= settle().finally(() => { running = null; });
 
   const snapshot = () => {
-    const local = prefs.updatesConsent(), who = signedIn();
+    const saved = prefs.updatesConsent(), who = signedIn();
+    const local = who && saved?.account && saved.account !== who.id ? null : saved;
     return { available: true, due: !local, status: local?.status ?? null, signedIn: Boolean(who),
       email: who?.email ?? (local?.status === "opted_in" ? local.email ?? null : null), version: UPDATES_CONSENT_VERSION };
   };

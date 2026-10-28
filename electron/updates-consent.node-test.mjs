@@ -344,6 +344,36 @@ test("signing in while an email opt-in is on its way: an answer given on the acc
   assert.equal(f.saved.updatesConsent.pending, undefined);
 });
 
+test("an account without a choice never inherits another account's answer", async t => {
+  for (const status of ["opted_in", "declined", "withdrawn"]) for (const pending of [false, true])
+    await t.test(`${status}, pending=${pending}`, async t => {
+      const f = await world(t);
+      await f.signInNow();
+      f.down = pending;
+      await f.consent.choose({ status });
+      f.down = false;
+      const accountAnswer = structuredClone(f.saved.updatesConsent);
+      await f.client.signOut();
+      f.accountId = "account-2";
+      f.accessToken = `omc_${"B".repeat(43)}`;
+      f.account = null;
+      await f.signInNow();
+      const first = f.requests.length;
+      for (const restart of [false, true]) {
+        if (restart) f.launch();
+        const state = await f.consent.state();
+        assert.equal(f.account, null, "no answer is posted on behalf of the new account");
+        assert.equal(state.due, true);
+        assert.equal(state.status, null);
+        assert.deepEqual(f.saved.updatesConsent, accountAnswer, "the other account's answer is preserved");
+      }
+      assert.deepEqual(f.requests.slice(first).map(({ method }) => method), ["GET", "GET"]);
+      await f.consent.choose({ status: "withdrawn" });
+      assert.equal(f.account.status, "withdrawn");
+      assert.equal(f.saved.updatesConsent.account, "account-2");
+    });
+});
+
 test("a slow account A consent read cannot overwrite account B's withdrawal", async t => {
   const f = await world(t);
   f.saved = { updatesConsent: { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now, pending: true } };
