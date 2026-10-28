@@ -16,7 +16,7 @@ function setup({ enabled = false, kept = { folders: [], screen: false }, screenA
     localOnly: (channel, handler) => (event, ...args) => { if (event.page !== "local") throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
     cloudPage: (channel, handler) => (event, ...args) => { if (!event.page) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
     snapshot: async () => ({ available: true, screenAvailable, screenReady, state }),
-    environment: () => ({ id: "cloud" }),
+    environment: () => ({ id: "cloud" }), beginSave: () => 0,
     save: async (_env, choice) => { calls.push(["save", choice]); state = { ...state, enabled: true, connected: true, folders: choice.folders, screen: choice.screen, internet: choice.internet, chrome: choice.chrome === true, terminal: choice.terminal === true }; },
     stop: () => { calls.push(["stop"]); state = { ...state, enabled: false, connected: false, stopped: { reason: "you", at: 1 } }; },
     chooseFolder: async () => null,
@@ -341,7 +341,7 @@ test("with no usual folders the internet connection is still lent; a refused fol
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     localOnly: (_channel, handler) => handler, cloudPage: (_channel, handler) => handler,
     snapshot: async () => ({ available: true, screenAvailable: false, state: { enabled: false, folders: chosen ?? [], screen: false } }),
-    environment: () => ({ id: "cloud" }),
+    environment: () => ({ id: "cloud" }), beginSave: () => 0,
     save: async (_env, choice) => { calls.push(["save", choice]); if (fail) throw fail; },
     stop: () => {},
     chooseFolder: async () => { throw Object.assign(new Error("Choose specific folders, not the entire computer or home folder"), { code: "HOME_OR_ROOT" }); },
@@ -399,7 +399,7 @@ test("each Cloud's page lends this computer to that Cloud, and this computer's S
     localOnly: (channel, handler) => (event, ...args) => { if (event.page !== "local") throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
     cloudPage: (channel, handler) => (event, ...args) => { if (!event.page) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
     snapshot: async (env) => ({ available: Boolean(env), screenAvailable: false, screenReady: false, state: states.get(env?.id) ?? { enabled: false, folders: [] } }),
-    environment: (event) => (event ? places[event.page] ?? null : places.cloud),
+    environment: (event) => (event ? places[event.page] ?? null : places.cloud), beginSave: () => 0,
     save: async (env, choice) => { saved.push([env.id, choice.internet]); states.set(env.id, { enabled: true, connected: true, folders: choice.folders, internet: choice.internet }); },
     stop: (env) => { stopped.push(env?.id ?? null); states.set(env?.id, { enabled: false, folders: [] }); },
     chooseFolder: async () => null, confirmScreen: async () => true, confirmTerminal: async () => true,
@@ -449,7 +449,7 @@ test("the lending card's place: a Cloud's own page lends to it, this computer's 
   const handlers = new Map();
   installCloudLending({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
     localOnly: (channel, handler) => (event, ...args) => { if (event.page !== "local") throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
-    cloudPage: (channel, handler) => handler, snapshot: async () => ({ available: true }), environment: places.place, save: async () => {}, stop: () => {},
+    cloudPage: (channel, handler) => handler, snapshot: async () => ({ available: true }), environment: places.place, beginSave: () => 0, save: async () => {}, stop: () => {},
     chooseFolder: async () => null, confirmScreen: async () => true, confirmTerminal: async () => true, defaults: async () => [], validate: async (folders) => folders, places });
   assert.deepEqual(await handlers.get("lending:places")({ page: "local" }), { places: places.list(), chosen: "home" });
   await handlers.get("lending:place")({ page: "local" }, "c-a");
@@ -460,10 +460,11 @@ test("the lending card's place: a Cloud's own page lends to it, this computer's 
 test("the tray's Terminal reaches every Cloud this computer is lent to, asking once; with one lent it is that one's, as before", async () => {
   const home = { id: "home", name: "My Cloud" }, other = { id: "a", name: "Client A", cloud: { id: "c-a", role: "owner" } };
   const states = new Map([["home", { enabled: true, connected: true, folders: [], internet: true }], ["a", { enabled: true, connected: true, folders: [], internet: true }]]);
-  const asked = [], saved = [];
+  const asked = [], saved = [], begun = [], versions = [];
   const lending = installCloudLending({ ipcMain: { handle: () => {} }, localOnly: (_c, handler) => handler, cloudPage: (_c, handler) => handler,
     snapshot: async (env) => ({ available: Boolean(env), state: states.get(env?.id) }), environment: () => home,
-    save: async (env, choice) => { saved.push([env.id, choice.terminal === true]); states.set(env.id, { ...states.get(env.id), enabled: true, terminal: choice.terminal === true }); },
+    beginSave: (env) => { begun.push(env.id); return begun.length; },
+    save: async (env, choice, version) => { saved.push([env.id, choice.terminal === true]); versions.push([env.id, version]); states.set(env.id, { ...states.get(env.id), enabled: true, terminal: choice.terminal === true }); },
     stop: () => {}, chooseFolder: async () => null, confirmScreen: async () => true, confirmTerminal: async () => { asked.push("terminal"); return true; },
     defaults: async () => [], validate: async (folders) => folders, places: { all: () => [home, other] } });
   await lending.lendTerminalEverywhere(true);
@@ -474,4 +475,5 @@ test("the tray's Terminal reaches every Cloud this computer is lent to, asking o
   asked.length = 0; saved.length = 0;
   await lending.lendTerminalEverywhere(true);
   assert.deepEqual([asked, saved], [["terminal"], [["a", true]]], "lent to one Cloud only: that one's Terminal");
+  assert.ok(versions.length === 5 && versions.every(([id, version]) => begun[version - 1] === id), "each save carries the version its own Cloud's change began with");
 });

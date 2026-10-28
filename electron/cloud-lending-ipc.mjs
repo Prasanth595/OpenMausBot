@@ -175,7 +175,8 @@ export function defaultGrant({ kept, usual, projects, screenAvailable, screenRea
  *   cloudPage: (channel: string, handler: (...args: any[]) => unknown) => (...args: any[]) => unknown,
  *   snapshot: (env: unknown) => Promise<{ available: boolean, screenAvailable?: boolean, screenReady?: boolean, state?: Record<string, any>, activity?: unknown[] }>,
  *   environment: (event?: unknown) => unknown,
- *   save: (env: unknown, choice: { folders: unknown, screen: boolean, internet?: boolean, chrome?: boolean, terminal?: boolean }) => Promise<unknown>,
+ *   beginSave: (env: unknown) => number,
+ *   save: (env: unknown, choice: { folders: unknown, screen: boolean, internet?: boolean, chrome?: boolean, terminal?: boolean }, version?: number) => Promise<unknown>,
  *   stop: (env: unknown) => void,
  *   chooseFolder: () => Promise<{ id: string, path: string, name: string, write: boolean } | null>,
  *   defaults: () => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
@@ -190,12 +191,22 @@ export function defaultGrant({ kept, usual, projects, screenAvailable, screenRea
  * same holds for it: from a Cloud's page it takes a real click and a Yes in main's own dialog (`confirmTerminal`).
  * `screenReady` in a snapshot: computer control works here for this computer's own bots, read from its running state,
  * never by asking macOS.
+ * Security: capture beginSave before asynchronous choice or confirmation work; persist only that version through save.
  */
-export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, save, stop, chooseFolder, defaults, validate, confirmScreen, confirmTerminal, places = null }) {
+export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, beginSave, save, stop, chooseFolder, defaults, validate, confirmScreen, confirmTerminal, places = null }) {
   const env = (event) => {
     const current = environment(event);
     if (!current) throw new Error("Open My Cloud first.");
     return current;
+  };
+  /** One change's save to `target`, its version taken at the start, before any question or folder check: a Stop of that
+   * Cloud's lending while the change waits leaves it unsaved. */
+  const prepareSave = (target) => {
+    const version = target ? beginSave(target) : undefined;
+    return input => {
+      if (!target) throw new Error("Open My Cloud first.");
+      return save(target, input, version);
+    };
   };
   /** A terminal lent now stays lent when something else changes; one that is off is never turned on here. */
   const keptTerminal = (kept) => (kept?.enabled === true && kept.terminal === true ? { terminal: true } : {});
@@ -213,7 +224,8 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
   ipcMain.handle("lending:folder", localOnly("lending:folder", plainly(async (event) => { env(event); return chooseFolder(); })));
   ipcMain.handle("lending:save", localOnly("lending:save", plainly(async (event, input) => {
     const target = env(event);
-    await save(target, await choice(input));
+    const saveChoice = prepareSave(target);
+    await saveChoice(await choice(input));
     return snapshot(target);
   })));
   ipcMain.handle("lending:stop", localOnly("lending:stop", async (event) => { const target = environment(event); stop(target); return snapshot(target); }));
@@ -226,24 +238,27 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
   ipcMain.handle("cloud-lending:set", cloudPage("cloud-lending:set", plainly(async (event, on) => {
     const target = environment(event);
     if (on !== true) { stop(target); return pageLending(await snapshot(target)); }
+    const saveChoice = prepareSave(target);
     const current = await snapshot(target);
     if (current.state?.enabled) return pageLending(current);
     const kept = current.state ?? {};
-    await save(env(event), await choice({ folders: kept.folders, screen: kept.screen === true && current.screenAvailable === true, internet: kept.internet === true, chrome: kept.chrome === true }));
+    await saveChoice(await choice({ folders: kept.folders, screen: kept.screen === true && current.screenAvailable === true, internet: kept.internet === true, chrome: kept.chrome === true }));
     return pageLending(await snapshot(target));
   })));
   ipcMain.handle("cloud-lending:screen", cloudPage("cloud-lending:screen", plainly(async (event, on) => {
     const target = environment(event);
+    const saveChoice = prepareSave(target);
     const current = await snapshot(target);
     const kept = current.state;
     if (!kept?.enabled || (kept.screen === true) === (on === true)) return pageLending(current);
     if (on === true && (!current.screenAvailable || !(await confirmScreen()))) return pageLending(current);
-    await save(env(event), await choice({ folders: kept.folders, screen: on === true, internet: kept.internet === true, chrome: kept.chrome === true, ...keptTerminal(kept) }));
+    await saveChoice(await choice({ folders: kept.folders, screen: on === true, internet: kept.internet === true, chrome: kept.chrome === true, ...keptTerminal(kept) }));
     return pageLending(await snapshot(target));
   })));
   /** The terminal on or off on top of what is lent to `target`. Turning it on asks first; a Yes never starts lending that
    * was stopped while the question was open. */
   const lendTerminal = async (on, target = environment(), { asked = false } = {}) => {
+    const saveChoice = prepareSave(target);
     const before = await snapshot(target);
     if (!before.available || !before.state?.enabled || (before.state.terminal === true) === (on === true)) return pageLending(before);
     if (on === true && !asked && !(await confirmTerminal())) return pageLending(before);
@@ -252,7 +267,7 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
     if (!current.available || !kept?.enabled) return pageLending(current);
     const screen = kept.screen === true && current.screenAvailable === true, internet = kept.internet === true, chrome = kept.chrome === true;
     if (on !== true && !kept.folders?.length && !screen && !internet && !chrome) { stop(target); return pageLending(await snapshot(target)); }
-    await save(target, await choice({ folders: kept.folders, screen, internet, chrome, ...(on === true ? { terminal: true } : {}) }));
+    await saveChoice(await choice({ folders: kept.folders, screen, internet, chrome, ...(on === true ? { terminal: true } : {}) }));
     return pageLending(await snapshot(target));
   };
   ipcMain.handle("cloud-lending:terminal", cloudPage("cloud-lending:terminal", plainly(async (event, on) => lendTerminal(on === true, environment(event)))));
@@ -269,6 +284,7 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
      * own Off is never undone: lending they turned off stays off, and so does an internet connection they unticked.
      * Answers the page's view, or null when it stayed off. */
     async lendByDefault({ projects = [], asked = false, target = environment() } = {}) {
+      const saveChoice = prepareSave(target);
       const current = await snapshot(target);
       const kept = current.state;
       if (!current.available || !target || (!asked && ownOff(kept))) return null;
@@ -276,17 +292,18 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
       const internet = asked || kept?.enabled !== true || kept.internet === true;
       const grant = defaultGrant({ kept: { folders: lentBefore, screen: kept?.screen === true, internet, chrome: kept?.chrome === true }, usual: await defaults(), projects: await editableFolders(projects, validate),
         screenAvailable: current.screenAvailable, screenReady: current.screenReady });
-      await save(target, { ...grant, ...keptTerminal(kept) });
+      await saveChoice({ ...grant, ...keptTerminal(kept) });
       return pageLending(await snapshot(target));
     },
     /** Apps and screen on top of what is lent to `target`, once computer control works here; null while lending is off or
      * computer control does not work yet. */
     async lendScreen(target = environment()) {
+      const saveChoice = prepareSave(target);
       const current = await snapshot(target);
       const kept = current.state;
       if (!current.available || !target || !kept?.enabled || current.screenAvailable !== true) return null;
       if (kept.screen === true) return pageLending(current);
-      await save(target, await choice({ folders: kept.folders, screen: true, internet: kept.internet === true, chrome: kept.chrome === true, ...keptTerminal(kept) }));
+      await saveChoice(await choice({ folders: kept.folders, screen: true, internet: kept.internet === true, chrome: kept.chrome === true, ...keptTerminal(kept) }));
       return pageLending(await snapshot(target));
     },
     lendTerminal,

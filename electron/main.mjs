@@ -1475,7 +1475,7 @@ installOpenAtLogin({ ipcMain, guard: localOrHome, loginItem, changed: refreshApp
 let hiddenStart = false;
 
 function stopLending() {
-  for (const env of environmentsState.environments) if (computerSharing?.cloudState(env).enabled) computerSharing.revoke(env);
+  for (const env of environmentsState.environments) computerSharing?.revoke(env);
 }
 
 async function openLendingSettings() {
@@ -2724,7 +2724,8 @@ async function lendingSnapshot(env = lendingTarget.environment()) {
   return { available: Boolean(env), screenAvailable: sharedCuaConnection(connection) !== null, screenReady: localComputerReady(process.platform, connection), ...(env ? { state: sharingController().cloudState(env), activity: sharingController().activity(env.id, 30) } : {}) };
 }
 // My Cloud's Off stops all lending, as it always did; another Cloud's stops lending to that Cloud only.
-const useMyMac = installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: lendingPlaces.place, places: lendingPlaces, save: (env, choice) => sharingController().saveCloud(env, choice),
+const useMyMac = installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: lendingPlaces.place, places: lendingPlaces,
+  beginSave: env => sharingController().beginCloudSave(env), save: (env, choice, version) => sharingController().saveCloud(env, choice, version),
   stop: env => { sharingController(); if (env?.cloud) computerSharing.revoke(env); else stopLending(); },
   cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event) && !ownCloudPage(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
   chooseFolder: () => lendingDialogs.chooseFolder("Choose a folder or drive My Cloud can use"),
