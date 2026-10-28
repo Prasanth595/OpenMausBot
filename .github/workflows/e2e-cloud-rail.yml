@@ -87,3 +87,32 @@ jobs:
           path: ${{ env.OMB_E2E_OUT }}
           if-no-files-found: warn
           retention-days: 14
+
+  # The coordinator's Linux box, as scripts/e2e/run-on-linux.sh sets it up: the recommended image, the script's own
+  # packages, Node and build, the test as root under Xvfb. Without OMB_E2E_SERVERS it starts the two local servers.
+  linux-box:
+    name: run-on-linux.sh in node:24.21.0-bookworm
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    container:
+      image: node:24.21.0-bookworm
+      options: --shm-size=1g
+    env:
+      OMB_E2E_OUT: /tmp/e2e-out
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Mark the checkout safe for git inside the container
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: prepare
+        run: bash scripts/e2e/run-on-linux.sh prepare
+      - name: test
+        run: bash scripts/e2e/run-on-linux.sh test
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: e2e-cloud-rail-linux-box
+          path: /tmp/e2e-out
+          if-no-files-found: warn
+          retention-days: 14
