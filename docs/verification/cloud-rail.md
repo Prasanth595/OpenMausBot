@@ -1,9 +1,18 @@
 # The rail of Clouds and its ＋
 
-Once a person has two places or more (their Clouds, their teams' Clouds,
-servers they connected by hand), a narrow rail of circles at the window's left
-edge switches between them, and ＋ buys another Cloud or adds a server of
-their own. With one place there is no rail, and the window looks as before.
+Once a person has two places or more in all (This computer counts while it is
+a place; their Clouds, their teams' Clouds, servers they connected by hand), a
+narrow rail of circles at the window's left edge switches between them, and ＋
+buys another Cloud or adds a server of their own. With one place there is no
+rail, and the window looks as before.
+
+The rail is the window's own chrome, not a page's: this app's page `/rail` in a
+view of its own at the left edge (electron/chrome-rail.mjs), beside whichever
+place's page the window shows, at every width and on every place, whatever that
+server runs. The page beside it moves over by the rail's width (the app's
+preload, at any zoom). The rail's sheets cover the window while open. The place
+on screen is named under its circle, and beside the rail the sidebar's switcher
+and the profile menu's Switch to… step aside.
 Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
 
 ## Contract
@@ -16,10 +25,10 @@ Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
   it through the Admin's `pairing` with that Cloud's id and takes only a grant
   for its own address. My Cloud stays the one home.
 - The rail's list carries names, colours and states, never an address, and goes
-  only to this app's own page and to pages of Clouds MausBot runs that the
-  verified session lists. A server's own page gets none; its switcher stays the
-  native Server menu. A circle opens only a place main listed, by its id, and
-  only from the person's click.
+  only to the rail's own page. No place's page reads it, not even this
+  computer's or a Cloud's; a page learns only that the rail stands beside it. A
+  circle opens only a place main listed, by its id, through main's own switch,
+  and only from the person's click.
 - Buying another Cloud sends the plan, a name and a swatch to the Admin, which
   answers with a checkout this app opens in the browser; the sheet then follows
   the payment and the setup. An Admin that sells one Cloud per account (no
@@ -43,8 +52,8 @@ Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
 ## Automated fixtures
 
 ```sh
-node --test electron/cloud-list.node-test.mjs electron/cloud-account-clouds.node-test.mjs electron/cloud-rail.node-test.mjs electron/home-window.node-test.mjs electron/place-look.node-test.mjs
-pnpm exec vitest run src/components/PlacesRail.test.ts src/components/cloud-buy/AddCloudFlow.test.ts src/components/PlaceLookCard.test.ts
+node --test electron/cloud-list.node-test.mjs electron/cloud-account-clouds.node-test.mjs electron/cloud-rail.node-test.mjs electron/chrome-rail.node-test.mjs electron/home-window.node-test.mjs electron/place-look.node-test.mjs
+pnpm exec vitest run src/components/PlacesRail.test.ts src/components/ChromeRail.test.ts src/components/cloud-buy/AddCloudFlow.test.ts src/components/PlaceLookCard.test.ts
 ```
 
 The account tests answer as a loopback Admin, with and without `clouds`. The
