@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, wri
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { requestKey } from "./key.ts";
 import type { Recipe } from "./rules.ts";
 import { MAX_RECIPES, RecipeStore, UNUSED_MS } from "./store.ts";
 
@@ -170,17 +171,28 @@ describe("RecipeStore", () => {
     mkdirSync(join(dir, "b1"));
     const app = { name: "Notes" };
     const element = { role: "AXTextArea", label: "Body", path: [] };
-    const typing = (id: string, request: string, value: string): Recipe => ({ ...recipe(id, id), request, steps: [{ tool: "set_value", args: { value }, app, element }] });
-    const opening = (id: string, request: string): Recipe => ({ ...recipe(id, id), request, steps: [{ tool: "launch_app", args: { name: "Safari", urls: ["https://example.com"] } }] });
-    writeFileSync(file(), JSON.stringify({
-      version: 1,
-      recipes: [
-        typing("no request", "", "hi"), typing("loose spacing", "type  hi", "hi"), typing("other words", "type hello", "hi"),
-        typing("fits", "type hi", "hi"), opening("link elsewhere", "open safari"), opening("link", "open https://example.com"),
-      ],
-    }));
-    for (const dropped of ["no request", "loose spacing", "other words", "link elsewhere"]) expect(store.find("b1", dropped)).toBeUndefined();
-    for (const kept of ["fits", "link"]) expect(store.find("b1", kept)!.id).toBe(kept);
+    const keyed = (id: string, request: string): Recipe => ({ ...recipe(id, requestKey(request) || id), request });
+    const typing = (id: string, request: string, value: string): Recipe => ({ ...keyed(id, request), steps: [{ tool: "set_value", args: { value }, app, element }] });
+    const opening = (id: string, request: string): Recipe => ({ ...keyed(id, request), steps: [{ tool: "launch_app", args: { name: "Safari", urls: ["https://example.com"] } }] });
+    const written = [
+      typing("no request", "", "hi"), typing("loose spacing", "type  hey", "hey"), typing("other words", "type hello", "hi"),
+      typing("fits", "type hi", "hi"), opening("link elsewhere", "open safari"), opening("link", "open https://example.com"),
+    ];
+    writeFileSync(file(), JSON.stringify({ version: 1, recipes: written }));
+    const found = (id: string) => store.find("b1", written.find((entry) => entry.id === id)!.key)?.id;
+    for (const dropped of ["no request", "loose spacing", "other words", "link elsewhere"]) expect(found(dropped)).toBeUndefined();
+    for (const kept of ["fits", "link"]) expect(found(kept)).toBe(kept);
+  });
+
+  it("drops a recipe whose key is not its request's key under today's normalising", () => {
+    mkdirSync(join(dir, "b1"));
+    const keyedBeforeSymbolsCounted = { ...recipe("old", "open the c tab"), request: "open the C++ tab" };
+    const keyedNow = { ...recipe("new", "open the c++ tab"), request: "open the C++ tab" };
+    writeFileSync(file(), JSON.stringify({ version: 1, recipes: [keyedBeforeSymbolsCounted, recipe("plain", "open notes")] }));
+    expect(store.find("b1", "open the c tab")).toBeUndefined();
+    expect(store.find("b1", "open notes")!.id).toBe("plain");
+    writeFileSync(file(), JSON.stringify({ version: 1, recipes: [keyedNow] }));
+    expect(store.find("b1", requestKey("open the C++ tab"))!.id).toBe("new");
   });
 
   it("drops typing and steps that flip a toggle", () => {

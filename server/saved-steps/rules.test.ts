@@ -220,6 +220,21 @@ describe("recipeFitsRequest", () => {
   it("stores the request word for word", () => expect(learned("  type   HELLO  ", "HELLO").request).toBe("type HELLO"));
 
   it.each([
+    ["a doubled inner space", "type hello  world", "hello  world"],
+    ["full-width letters", "type ＨＥＬＬＯ", "ＨＥＬＬＯ"],
+  ])("refuses typed words that the request holds only before evening out %s, so a saved recipe always reads back", (_, request, value) => {
+    const journal = { ...observationsOnly(), calls: [...observationsOnly().calls, action("set_value", { element_token: "s1-e2", value })] };
+    expect(build(journal, request)).toEqual({ ok: false, reason: "typed-text-not-in-request" });
+  });
+
+  it("saves only recipes that fit their own stored request", () => {
+    for (const [request, value] of [["type  HELLO   now", "HELLO"], ["type ＨＥＬＬＯ", "HELLO"], ["Type “hi friend”.", "hi friend"]]) {
+      const recipe = learned(request!, value!);
+      expect(recipeFitsRequest(recipe, recipe.request)).toBe(true);
+    }
+  });
+
+  it.each([
     ["a sign", "set the offset field to 5", "5", "set the offset field to -5"],
     ["a dropped filler", "type call me", "call me", "type call me now"],
     ["a filler added", "type call me", "call me", "please type call me"],

@@ -251,7 +251,7 @@ export function buildRecipe(input: { request: string; journal: RequestJournal; i
 
   if (steps.length === 0) return refuse("no-steps");
   if (steps.length > MAX_STEPS) return refuse("too-many-steps");
-  const outside = wordsOutsideRequest(steps, request);
+  const outside = wordsOutsideRequest(steps, exactRequest(request));
   if (outside) return refuse(outside);
   return { ok: true, recipe: { id: input.id, key: requestKey(request), request: exactRequest(request), steps, createdAt: input.now, lastUsedAt: input.now } };
 }
