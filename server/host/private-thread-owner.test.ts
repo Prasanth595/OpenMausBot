@@ -107,6 +107,36 @@ describe("private message ownership", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("synthetic registry save failure"));
   });
 
+  it.each([false, true])("keeps item-only legacy inboxes private across expiry and restart after a failed save (registry recovers: %s)", (recovers) => {
+    const f = legacyFixture("items");
+    const stateFile = join(DATA_DIR, "person-inbox.json");
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    state.items.push({ id: "ada-waiting", person: key(ADA.email), botId: f.botId, threadId: f.origin, kind: "message", from: "Bob", text: "Update", at: Date.now() });
+    writeFileSync(stateFile, JSON.stringify(state));
+    let failSave = true;
+    const write = atomic.writeFileAtomicIfChanged;
+    vi.spyOn(atomic, "writeFileAtomicIfChanged").mockImplementation((file, ...args) => {
+      if (file === f.botsFile && failSave) throw new Error("synthetic registry save failure");
+      return write(file, ...args);
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const restarted = f.open();
+    for (const at of f.destinations) expect(restarted.store.taskByThread(at.botId, at.threadId)?.private).toBe(true);
+    if (recovers) {
+      failSave = false;
+      restarted.store.patchTask(f.botId, f.main, { unread: true });
+    }
+    restarted.team.inbox.seen(key(ADA.email), f.origin);
+    restarted.team.stop();
+    failSave = false;
+    const again = f.open();
+    for (const at of f.destinations) {
+      expect(again.host.audienceOf(at.threadId)).toBe(`member:unowned-${at.threadId}`);
+      for (const person of [ADA, BOB, CARL]) expect(again.sees(person.email, at.threadId)).toBe(false);
+    }
+    expect(JSON.parse(readFileSync(stateFile, "utf8")).items).toHaveLength(recovers ? 1 : f.destinations.length + 1);
+  });
+
   it.each(["homes", "items"])("isolates an untouched ownerless legacy inbox from %s before engine-home migration", (records) => {
     const f = fixture();
     const shared = f.store.createTask(f.botId, "Shared work", false)!.threadId;

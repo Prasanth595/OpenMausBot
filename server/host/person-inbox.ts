@@ -85,7 +85,7 @@ export interface Delivery {
 export interface PersonInboxDeps {
   team: CloudTeam | null;
   dataDir: string;
-  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "backfillPrivateTasks" | "createTask" | "deleteTask" | "patchTask" | "patchGroup" | "appendMessage" | "patchMessage" | "messagesFor" | "groupByThread" | "onChange">;
+  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "backfillPrivateTasks" | "privateTasksSaved" | "createTask" | "deleteTask" | "patchTask" | "patchGroup" | "appendMessage" | "patchMessage" | "messagesFor" | "groupByThread" | "onChange">;
   starters: { get(threadId: string): string | undefined; set(threadId: string, person: string): void };
   audienceOf(threadId: string): Audience;
   personKeyOf(email: string): string;
@@ -128,6 +128,8 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   let { homes, items } = team ? loadPersonInboxState(deps.dataDir) : { homes: {}, items: [] };
   store.backfillPrivateTasks([...Object.values(homes), ...items]);
   const save = () => {
+    // Keep the durable classification evidence until the registry has saved the private flags.
+    if (!store.privateTasksSaved) return;
     items = items.filter((item) => now() - item.at < KEEP_MS).slice(-MAX_ITEMS);
     try {
       writeFileAtomic(file, `${JSON.stringify({ version: 1, homes, items })}\n`, { mode: 0o600 });

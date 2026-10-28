@@ -41,7 +41,7 @@ import { sameModelSelection } from "../shared/thread-model.ts";
 import { initialGreetingMessage } from "./initial-greeting.ts"; import { createDefaultBot, defaultBotRefusal, type DefaultBotIntro } from "./default-bot.ts";
 import { appsFromCreator } from "./inherited-apps.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
-import { backfillPrivateTasks, persistedPin } from "./store-tasks.ts";
+import { backfillPrivateTasks, persistedBots, persistedPin } from "./store-tasks.ts";
 export type {
   BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
   SecretRequestCardData, Surface, TaskClosedBy, TaskOpenedBy, TaskUsage,
@@ -296,6 +296,7 @@ function taskCountsAsBotUnread(task: { unread?: boolean; routineRunId?: string }
 export class Store {
   bots: BotRecord[] = [];
   groups: GroupRecord[] = [];
+  private unsavedPrivateTasks = false;
   private threads = new ThreadCache(() => this.busyThreadIds());
   private defaultSelection: () => ModelSelection;
   private completeNewBotSelection: (selection: ModelSelection) => ModelSelection;
@@ -702,10 +703,8 @@ export class Store {
 
   private saveBots(bots: BotRecord[] = this.bots, registerSections = true) {
     if (registerSections) this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
-    writeFileAtomicIfChanged(BOTS_FILE, JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
-      ...bot,
-      tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
-    })), null, 2), { mode: 0o600 });
+    writeFileAtomicIfChanged(BOTS_FILE, persistedBots(bots), { mode: 0o600 });
+    this.unsavedPrivateTasks = false;
   }
 
   private saveGroups(groups: GroupRecord[] = this.groups, registerSections = true) {
@@ -2039,8 +2038,10 @@ export class Store {
     return this.bot(botId)?.tasks?.find((t) => t.threadId === threadId);
   }
 
+  get privateTasksSaved(): boolean { return !this.unsavedPrivateTasks; }
+
   backfillPrivateTasks(destinations: readonly { botId: string; threadId: string }[]): void {
-    backfillPrivateTasks(this.bots, destinations, () => this.saveBots());
+    this.unsavedPrivateTasks = !backfillPrivateTasks(this.bots, destinations, () => this.saveBots()) || this.unsavedPrivateTasks;
   }
 
   workThread(botId: string, fromBotId: string, fromThreadId: string, roomLane = false): TaskRecord | undefined {

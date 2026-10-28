@@ -53,6 +53,7 @@ export function teamInbox(options: { team?: boolean; representative?: TeamMessag
     tasks: (botId: string) => bots.find((bot) => bot.id === botId)?.tasks ?? [],
     taskByThread: (botId: string, threadId: string) => bots.find((bot) => bot.id === botId)?.tasks.find((task) => task.threadId === threadId),
     backfillPrivateTasks: () => {},
+    privateTasksSaved: true,
     createTask: (botId: string, title: string) => {
       const task = { threadId: `made-${++made}`, title };
       bots.find((bot) => bot.id === botId)!.tasks.push(task);

@@ -337,6 +337,7 @@ Inbox conversations also keep a saved `private` flag. A flagged conversation wit
 At startup, classify saved inbox homes and item destinations as private before engine homes migrate.
 Save all new private flags in one registry write before processing messages.
 If the write fails, log it and keep the private flags in memory.
+Keep the delivery state on disk until a registry save succeeds, so cleanup cannot erase classification evidence.
 Do not reuse it for later deliveries. Refuse new owner records when the registry is full; never evict an existing owner.
 
 | What | Line | It answers back to |

@@ -7,7 +7,7 @@ export function persistedPin<T extends { pinned?: boolean }>(task: T): T {
   return rest as T;
 }
 
-export function backfillPrivateTasks(bots: readonly BotRecord[], destinations: readonly { botId: string; threadId: string }[], save: () => void): void {
+export function backfillPrivateTasks(bots: readonly BotRecord[], destinations: readonly { botId: string; threadId: string }[], save: () => void): boolean {
   const byBot = new Map<string, Set<string>>();
   for (const { botId, threadId } of destinations) {
     let threads = byBot.get(botId);
@@ -24,9 +24,17 @@ export function backfillPrivateTasks(bots: readonly BotRecord[], destinations: r
       dirty = true;
     }
   }
-  if (!dirty) return;
+  if (!dirty) return true;
   // Keep the denial in memory even when the registry cannot persist it.
-  try { save(); } catch (error) {
+  try { save(); return true; } catch (error) {
     console.warn(`private threads: could not save bots.json: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
   }
+}
+
+export function persistedBots(bots: readonly BotRecord[]): string {
+  return JSON.stringify(bots.map(({ busy: _busy, activity: _activity, ...bot }) => ({
+    ...bot,
+    tasks: bot.tasks?.map(({ busy: _taskBusy, activity: _taskActivity, turnStartedAt: _taskTurnStarted, ...task }) => persistedPin(task)),
+  })), null, 2);
 }
