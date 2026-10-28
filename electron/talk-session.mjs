@@ -8,7 +8,11 @@ export const TALK_TEXT = Object.freeze({
   serverDown: "Open MausBot to talk",
   starting: "MausBot is still starting. Try again in a moment.",
   noMausbot: "Set up MausBot first, then try again.",
-  moved: "MausBot lives on My Cloud now — talk to it there",
+  moved: "MausBot lives on My Cloud now. Try again in a moment.",
+  cloudDown: "Couldn't reach My Cloud. Try again in a moment.",
+  cloudWaking: "My Cloud is still waking. Try again in a moment.",
+  wakeFailed: "My Cloud didn't wake up. Try again in a moment.",
+  cloudSignIn: "Sign in to My Cloud again, then try again.",
   permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
   dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again.",
   unavailable: "Talking couldn't start. Try again.",
@@ -30,9 +34,13 @@ const SERVER_NOTICES = new Map([
   ["starting", TALK_TEXT.starting],
   ["no-mausbot", TALK_TEXT.noMausbot],
   ["moved", TALK_TEXT.moved],
+  ["cloud-down", TALK_TEXT.cloudDown],
+  ["cloud-waking", TALK_TEXT.cloudWaking],
+  ["wake-failed", TALK_TEXT.wakeFailed],
+  ["cloud-signin", TALK_TEXT.cloudSignIn],
 ]);
 
-const UNDER_WAY = new Set(["listening", "sending", "thinking"]);
+const UNDER_WAY = new Set(["listening", "waking", "sending", "thinking"]);
 
 export function createTalkSession({ speech, server, panel, voiceInUse, release, openChat, newSendId = randomUUID }) {
   let current = null;
@@ -40,7 +48,7 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
   const live = ask => current === ask && !ask.controller.signal.aborted;
 
   function begin(state) {
-    const ask = { state, words: "", reply: "", chat: null, sink: null, controller: new AbortController(), listenTimer: null, hideTimer: null, answerTimer: null };
+    const ask = { state, words: "", reply: "", chat: null, waking: false, sink: null, controller: new AbortController(), listenTimer: null, hideTimer: null, answerTimer: null };
     current = ask;
     return ask;
   }
@@ -122,10 +130,11 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
   }
 
   function send(ask, prepared) {
-    show(ask, "sending", ask.words);
+    show(ask, ask.waking ? "waking" : "sending", ask.words);
     ask.answerTimer = setTimeout(() => { if (live(ask)) stillWorking(ask); }, TALK_TIMING.stillWorkingMs);
     prepared.then(chat => {
       if (!live(ask)) return;
+      if (ask.state === "waking") show(ask, "sending", ask.words);
       server.ask({
         chat,
         text: ask.words,
@@ -140,7 +149,12 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     const ask = begin("listening");
     const listening = () => current === ask && ask.state === "listening";
     show(ask, "listening", "");
-    const prepared = server.prepare();
+    // A sleeping My Cloud wakes while the person talks; the box says so only once the words are let go.
+    const prepared = server.prepare(() => {
+      if (!live(ask) || ask.chat) return;
+      ask.waking = true;
+      if (ask.state === "sending") show(ask, "waking", ask.words);
+    });
     ask.sink = {
       transcript(line) {
         if (!listening() || typeof line?.text !== "string") return;
@@ -158,8 +172,8 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
         else send(ask, prepared);
       },
     };
-    prepared.then(chat => { ask.chat = chat; }, error => {
-      if (!live(ask) || !(ask.state === "listening" || ask.state === "sending")) return;
+    prepared.then(chat => { ask.chat = chat; ask.waking = false; }, error => {
+      if (!live(ask) || !(ask.state === "listening" || ask.state === "waking" || ask.state === "sending")) return;
       if (ask.state === "listening") speech.stop(ask.sink);
       failed(ask, error);
     });

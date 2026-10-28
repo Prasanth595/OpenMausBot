@@ -8,6 +8,7 @@ const LIGHT = "color-scheme:light;--panel:#f7f7f7f5;--border:#0000001a;--ink:#0d
 
 export const TALK_LABELS = Object.freeze({
   listening: "Listening…",
+  waking: "Waking My Cloud…",
   sending: "Sending to MausBot…",
   thinking: "MausBot is thinking…",
   reply: "MausBot",

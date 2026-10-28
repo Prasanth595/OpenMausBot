@@ -65,6 +65,7 @@ test("the constants are frozen and carry the spec's values", () => {
   assert.ok(Object.isFrozen(TALK_PANEL) && Object.isFrozen(TALK_LABELS));
   assert.equal(TALK_LABELS["needs-you"], "MausBot needs you · Open chat");
   assert.equal(TALK_LABELS["still-working"], "Still working · Open chat");
+  assert.equal(TALK_LABELS.waking, "Waking My Cloud…");
   assert.equal(TALK_LABELS.error, "");
 });
 

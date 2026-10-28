@@ -19,7 +19,7 @@ function harness({ busy = false, prepare = async () => CHAT, ask } = {}) {
       finish: sink => h.finishes.push(sink === h.sink),
     },
     server: {
-      prepare: () => { h.prepares += 1; return prepare(); },
+      prepare: onWaking => { h.prepares += 1; return prepare(onWaking); },
       ask: ask ?? (async input => { h.asks.push(input); input.onUpdate({ kind: "thinking" }); input.onUpdate({ kind: "reply", text: "Hi" }); input.onUpdate({ kind: "done", ok: true, text: "Hi" }); return "done"; }),
     },
     panel: {
@@ -52,7 +52,11 @@ test("the box's words and timings are fixed", () => {
     serverDown: "Open MausBot to talk",
     starting: "MausBot is still starting. Try again in a moment.",
     noMausbot: "Set up MausBot first, then try again.",
-    moved: "MausBot lives on My Cloud now — talk to it there",
+    moved: "MausBot lives on My Cloud now. Try again in a moment.",
+    cloudDown: "Couldn't reach My Cloud. Try again in a moment.",
+    cloudWaking: "My Cloud is still waking. Try again in a moment.",
+    wakeFailed: "My Cloud didn't wake up. Try again in a moment.",
+    cloudSignIn: "Sign in to My Cloud again, then try again.",
     permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
     dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again.",
     unavailable: "Talking couldn't start. Try again.",
@@ -184,7 +188,11 @@ test("a server that can't take asks says why and stops listening: down, still st
     ["server-down", "Open MausBot to talk"],
     ["starting", TALK_TEXT.starting],
     ["no-mausbot", TALK_TEXT.noMausbot],
-    ["moved", "MausBot lives on My Cloud now — talk to it there"],
+    ["moved", "MausBot lives on My Cloud now. Try again in a moment."],
+    ["cloud-down", "Couldn't reach My Cloud. Try again in a moment."],
+    ["cloud-waking", "My Cloud is still waking. Try again in a moment."],
+    ["wake-failed", "My Cloud didn't wake up. Try again in a moment."],
+    ["cloud-signin", "Sign in to My Cloud again, then try again."],
   ];
   for (const [code, text] of notices) {
     const h = harness({ prepare: async () => { throw new TalkServerError(code); } });
@@ -197,6 +205,100 @@ test("a server that can't take asks says why and stops listening: down, still st
     mock.timers.tick(3_999); assert.equal(h.closed, 0, code);
     mock.timers.tick(1); assert.equal(h.closed, 1, code);
   }
+});
+
+/** A preparation that wakes My Cloud: `wake()` says so, `done(chat)` and `fail(error)` end it. */
+const waking = () => {
+  const w = {};
+  w.prepare = onWaking => { w.onWaking = onWaking; return new Promise((resolve, reject) => { w.done = resolve; w.fail = reject; }); };
+  w.wake = () => w.onWaking();
+  return w;
+};
+
+test("a press that wakes My Cloud listens as usual, then says Waking My Cloud with the words until it answers", async () => {
+  const wake = waking();
+  const { inputs, ask } = holdAsk([]);
+  const h = harness({ prepare: wake.prepare, ask });
+  h.session.press();
+  wake.wake();
+  assert.deepEqual(h.views, [{ state: "listening", text: "" }], "the words come first while the key is held");
+  say(h, "what's on today");
+  assert.deepEqual(h.views.at(-1), { state: "listening", text: "what's on today" });
+  release(h); await flush();
+  assert.deepEqual(h.views.at(-1), { state: "waking", text: "what's on today" });
+  assert.equal(h.session.busy(), true);
+  h.session.press();
+  assert.equal(h.starts.length, 1, "a press while waking is ignored");
+  assert.equal(h.prepares, 1);
+  wake.done(CHAT); await flush();
+  assert.deepEqual(h.views.at(-1), { state: "sending", text: "what's on today" });
+  assert.equal(inputs.length, 1, "sent once");
+  assert.equal(inputs[0].text, "what's on today");
+  inputs[0].onUpdate({ kind: "thinking" });
+  assert.equal(h.views.at(-1).state, "thinking");
+});
+
+test("a wake told after the words were let go switches Sending to Waking My Cloud", async () => {
+  const wake = waking();
+  const h = harness({ prepare: wake.prepare });
+  h.session.press(); say(h, "hello"); release(h); await flush();
+  assert.deepEqual(h.views.at(-1), { state: "sending", text: "hello" });
+  wake.wake();
+  assert.deepEqual(h.views.at(-1), { state: "waking", text: "hello" });
+  wake.done(CHAT); await flush();
+  assert.deepEqual(h.views.at(-1), { state: "reply", text: "Hi" });
+  assert.equal(h.asks.length, 1);
+});
+
+test("a wake that woke before the words were let go goes straight to sending", async () => {
+  const wake = waking();
+  const h = harness({ prepare: wake.prepare });
+  h.session.press(); wake.wake(); say(h, "hello");
+  wake.done(CHAT); await flush();
+  release(h); await flush();
+  assert.equal(h.views.some(view => view.state === "waking"), false);
+  assert.deepEqual(h.views.at(-1), { state: "reply", text: "Hi" });
+});
+
+test("a wake that fails says so, while listening or once the words were let go, and nothing is sent", async () => {
+  const early = waking();
+  const listening = harness({ prepare: early.prepare });
+  listening.session.press(); early.wake(); say(listening, "hello");
+  early.fail(new TalkServerError("wake-failed")); await flush();
+  assert.deepEqual(listening.stops, [true]);
+  assert.deepEqual(listening.views.at(-1), { state: "error", text: TALK_TEXT.wakeFailed });
+  release(listening); await flush();
+  assert.equal(listening.asks.length, 0);
+
+  const late = waking();
+  const waited = harness({ prepare: late.prepare });
+  waited.session.press(); late.wake(); say(waited, "hello"); release(waited); await flush();
+  assert.equal(waited.views.at(-1).state, "waking");
+  late.fail(new TalkServerError("wake-failed")); await flush();
+  assert.deepEqual(waited.stops, []);
+  assert.equal(waited.asks.length, 0);
+  assert.deepEqual(waited.views.at(-1), { state: "error", text: TALK_TEXT.wakeFailed });
+  mock.timers.tick(TALK_TIMING.noticeHideMs); assert.equal(waited.closed, 1);
+});
+
+test("clicking the box while My Cloud wakes only brings MausBot forward; dismissing it sends nothing", async () => {
+  const wake = waking();
+  const h = harness({ prepare: wake.prepare });
+  h.session.press(); wake.wake(); say(h, "hello"); release(h); await flush();
+  h.session.open();
+  assert.deepEqual(h.opened, [null]);
+  assert.equal(h.closed, 1);
+  wake.done(CHAT); await flush();
+  assert.equal(h.asks.length, 0);
+
+  const again = waking();
+  const dismissed = harness({ prepare: again.prepare });
+  dismissed.session.press(); again.wake(); say(dismissed, "hello"); release(dismissed); await flush();
+  dismissed.session.dismiss();
+  again.wake();
+  again.done(CHAT); await flush();
+  assert.equal(dismissed.asks.length, 0);
+  assert.equal(dismissed.views.at(-1).state, "waking");
 });
 
 test("a server that goes away as the words are sent says Open MausBot to talk", async () => {

@@ -1,5 +1,5 @@
 export declare const TALK_PANEL: Readonly<{ width: 400; margin: 24; minHeight: 56; maxHeight: 240; fadeMs: 180 }>;
-export type TalkViewState = "listening" | "sending" | "thinking" | "reply" | "needs-you" | "still-working" | "error";
+export type TalkViewState = "listening" | "waking" | "sending" | "thinking" | "reply" | "needs-you" | "still-working" | "error";
 export interface TalkView {
   state: TalkViewState;
   text: string;
