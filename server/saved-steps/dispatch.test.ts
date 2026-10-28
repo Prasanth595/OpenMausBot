@@ -139,6 +139,8 @@ describe("SavedStepsDispatch.sendTurn", () => {
     ["spoken", { ...REQ, message: { ...REQ.message, via: "call" } }, INPUT],
     ["no saved steps", reworded("open notes"), INPUT],
     ["new words", reworded("open textedit and type hello, world"), INPUT],
+    ["the same key in other words, for steps that type", reworded("Please open TextEdit and type hello world."), INPUT],
+    ["the same key in other case, for steps that type", reworded("open textedit and type HELLO WORLD"), INPUT],
   ])("passes through: %s", async (_, request, input) => {
     expect(await dispatch.sendTurn(engine, request as never, input as SendTurnInput, start)).toEqual({ turnId: "e1" });
     expect(start).toHaveBeenCalledWith(input);

@@ -2,7 +2,8 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "../atomic.ts";
-import { ELEMENT_TOOLS, KEPT_ARGS, windowScoped, type Recipe } from "./rules.ts";
+import { exactRequest } from "./key.ts";
+import { ELEMENT_TOOLS, KEPT_ARGS, holdsPersonWords, recipeFitsRequest, windowScoped, type Recipe } from "./rules.ts";
 
 export const MAX_RECIPES = 200;
 export const UNUSED_MS = 60 * 24 * 60 * 60 * 1000;
@@ -32,7 +33,7 @@ const recipeSchema = z.object({
   steps: z.array(step.refine((entry) => argsFitTool(entry.tool, entry.args) && windowScoped(entry.tool, entry.args) && targetsFitTool(entry))).min(1).max(40),
   createdAt: z.number().finite(),
   lastUsedAt: z.number().finite(),
-});
+}).refine((recipe) => !holdsPersonWords(recipe.steps) || (recipe.request === exactRequest(recipe.request) && recipeFitsRequest(recipe, recipe.request)));
 
 export class RecipeStore {
   private readonly folder: (botId: string) => string;

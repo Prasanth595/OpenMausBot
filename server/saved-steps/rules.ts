@@ -1,7 +1,7 @@
 import type { Message } from "../store.ts";
 import { elementPath, type SlimStructured, type WireElement } from "./driver-wire.ts";
 import type { RecordedCall, RequestJournal } from "./journal.ts";
-import { firstSentence, hasMomentWords, inRequest, requestKey } from "./key.ts";
+import { exactRequest, firstSentence, hasMomentWords, inRequest, requestKey } from "./key.ts";
 import { matchElement } from "./resolve.ts";
 
 export type ActionTool = "click" | "double_click" | "right_click" | "type_text" | "set_value" | "press_key" | "scroll" | "launch_app" | "bring_to_front" | "hotkey";
@@ -59,8 +59,15 @@ function wordsOutsideRequest(steps: readonly Pick<RecipeStep, "tool" | "args">[]
   return null;
 }
 
-export function recipeFitsRequest(recipe: Recipe, request: string): boolean {
-  return wordsOutsideRequest(recipe.steps, request) === null;
+/** Steps that type the person's words or open their links: only the request they came from, word for word, may repeat them. */
+export function holdsPersonWords(steps: readonly Pick<RecipeStep, "tool" | "args">[]): boolean {
+  return steps.some(({ tool, args }) => tool === "type_text" || tool === "set_value" || (tool === "launch_app" && args.urls !== undefined));
+}
+
+export function recipeFitsRequest(recipe: Pick<Recipe, "steps" | "request">, request: string): boolean {
+  const exact = exactRequest(request);
+  if (holdsPersonWords(recipe.steps) && (recipe.request === "" || exact !== recipe.request)) return false;
+  return wordsOutsideRequest(recipe.steps, exact) === null;
 }
 
 export function personTextRequest(message: Message): boolean {
@@ -236,7 +243,7 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
   if (steps.length > MAX_STEPS) return refuse("too-many-steps");
   const outside = wordsOutsideRequest(steps, request);
   if (outside) return refuse(outside);
-  return { ok: true, recipe: { id: input.id, key: requestKey(request), request, reply, steps, createdAt: input.now, lastUsedAt: input.now } };
+  return { ok: true, recipe: { id: input.id, key: requestKey(request), request: exactRequest(request), reply, steps, createdAt: input.now, lastUsedAt: input.now } };
 }
 
 function stripEmpty(app: AppIdentity): AppIdentity {

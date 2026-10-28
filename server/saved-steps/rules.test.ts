@@ -176,11 +176,44 @@ describe("buildRecipe", () => {
 describe("recipeFitsRequest", () => {
   it("checks a recipe's typed text against new words", () => {
     const recipe = (build() as { ok: true; recipe: Recipe }).recipe;
-    expect(recipeFitsRequest(recipe, "PLEASE open TextEdit and type HELLO WORLD")).toBe(true);
+    expect(recipeFitsRequest(recipe, REQUEST)).toBe(true);
     expect(recipeFitsRequest(recipe, "open textedit and type hello, world")).toBe(false);
     for (const text of ["hello world\n", "\r\n hello world \n\n"]) {
       expect(recipeFitsRequest({ ...recipe, steps: [{ tool: "type_text", args: { text } }] }, REQUEST)).toBe(false);
     }
+  });
+
+  const learned = (request: string, value: string) => {
+    const out = build({ ...observationsOnly(), calls: [...observationsOnly().calls, action("set_value", { element_token: "s1-e2", value })] }, request);
+    if (!out.ok) throw new Error(out.reason);
+    return out.recipe;
+  };
+
+  it("stores the request word for word", () => expect(learned("  type   HELLO  ", "HELLO").request).toBe("type HELLO"));
+
+  it.each([
+    ["a sign", "set the offset field to 5", "5", "set the offset field to -5"],
+    ["a dropped filler", "type call me", "call me", "type call me now"],
+    ["a filler added", "type call me", "call me", "please type call me"],
+    ["case", "type HELLO", "HELLO", "type hello"],
+    ["punctuation", "type hello world", "hello world", "type hello world!"],
+  ])("repeats typed words only for the exact request, not one differing by %s", (_, request, value, other) => {
+    const recipe = learned(request, value);
+    expect(recipeFitsRequest(recipe, request)).toBe(true);
+    expect(recipeFitsRequest(recipe, ` ${request.replace(/ /g, "  ")} `)).toBe(true);
+    expect(recipeFitsRequest(recipe, other)).toBe(false);
+  });
+
+  it("repeats a link only for the exact request", () => {
+    const out = build(textEditJournal({ calls: [action("launch_app", { name: "Safari", urls: ["https://example.com"] })] }), "Open https://example.com in Safari");
+    if (!out.ok) throw new Error(out.reason);
+    expect(recipeFitsRequest(out.recipe, "Open https://example.com in Safari")).toBe(true);
+    expect(recipeFitsRequest(out.recipe, "open https://example.com in safari")).toBe(false);
+  });
+
+  it("lets clicks alone repeat for the same key", () => {
+    const recipe = (build(clicks(1)) as { ok: true; recipe: Recipe }).recipe;
+    expect(recipeFitsRequest(recipe, "please OPEN TextEdit and type hello world.")).toBe(true);
   });
 });
 
