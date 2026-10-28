@@ -110,8 +110,11 @@ export function ChooseScreen({ offer, current = null, own = null, now, busy, sig
     <section aria-labelledby="cloud-add-includes" className="flex flex-col gap-2.5">
       <h3 id="cloud-add-includes" className="text-[13px] font-medium leading-[18px] text-ink-secondary">{t("cloudBuy.includes")}</h3>
       <ul className="flex flex-wrap gap-x-5 gap-y-2">
-        {FEATURES.map(([Icon, title, body]) => <li key={title} title={t(body)} className="inline-flex items-center gap-1.5 text-[13px] leading-[18px] text-ink">
-          <Icon size={16} strokeWidth={1.5} aria-hidden="true" className="shrink-0 text-ink-tertiary" />{t(title)}<span className="sr-only">: {t(body)}</span>
+        {FEATURES.map(([Icon, title, body]) => <li key={title} className="flex text-[13px] leading-[18px] text-ink">
+          <span aria-hidden="true" title={t(body)} className="inline-flex items-center gap-1.5">
+            <Icon size={16} strokeWidth={1.5} className="shrink-0 text-ink-tertiary" />{t(title)}
+          </span>
+          <span className="sr-only">{t(title)}: {t(body)}</span>
         </li>)}
       </ul>
     </section>
