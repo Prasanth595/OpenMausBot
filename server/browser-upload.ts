@@ -1,11 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative } from "node:path";
 
 import { safeFileName } from "./browser/cdp/downloads.ts";
 
 const MAX_FILES = 10;
+// Node 24 omits Darwin's O_NOFOLLOW_ANY, which rejects symlinks in every path component.
+const O_NOFOLLOW_ANY = 0x20000000;
 const NAMED_COPY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function realRoot(root: string): string | null {
@@ -59,9 +61,10 @@ export function namedUploadPaths(files: ReadonlyArray<{ file: string; name: stri
 
 function copyUpload(source: string, destination: string): void {
   if (process.platform === "win32" && !lstatSync(source).isFile()) throw new Error(`${source} is not a file.`);
-  const input = openSync(source, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK));
+  const input = openSync(source, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK | (process.platform === "darwin" ? O_NOFOLLOW_ANY : 0)));
   let output: number | undefined;
   try {
+    if (process.platform === "linux" && readlinkSync(`/proc/self/fd/${input}`) !== source) throw new Error(`${source} changed while staging the upload.`);
     const file = fstatSync(input);
     if (!file.isFile()) throw new Error(`${source} is not a file.`);
     output = openSync(destination, "wx", 0o600);

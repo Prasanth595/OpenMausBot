@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -619,7 +619,7 @@ describe("a Team Cloud's boxed browsers and the files a turn uploads", () => {
   afterEach(() => chromeLauncher.boxWith(() => null));
 
   it.skipIf(process.platform === "win32").each([false, true])("keeps workspace bytes through a symlink swap while Chrome waits for a picker (boxed: %s)", async (boxed) => {
-    const work = mkdtempSync(join(tmpdir(), "omb-host-upload-"));
+    const work = realpathSync(mkdtempSync(join(tmpdir(), "omb-host-upload-")));
     try {
       const secret = join(work, "secret.txt");
       const workspace = join(work, "workspace");
@@ -654,7 +654,7 @@ describe("a Team Cloud's boxed browsers and the files a turn uploads", () => {
   });
 
   it("are copied into that browser's own profile, the one folder of the disk its box shows Chrome", () => {
-    const work = mkdtempSync(join(tmpdir(), "omb-host-upload-"));
+    const work = realpathSync(mkdtempSync(join(tmpdir(), "omb-host-upload-")));
     const file = join(work, "report.txt");
     writeFileSync(file, "report");
     const box = { bwrap: "/usr/bin/bwrap", options: ["--unshare-pid"], seccomp: null };

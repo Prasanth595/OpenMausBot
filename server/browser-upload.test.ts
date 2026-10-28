@@ -94,7 +94,7 @@ describe("the name a page sees", () => {
 
 describe("the files a boxed browser is given", () => {
   it("copies every file into the one folder the box shows Chrome, under the person's name or its own", () => {
-    const root = mkdtempSync(join(tmpdir(), "omb-boxed-upload-"));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "omb-boxed-upload-")));
     const source = join(root, "work", "report.txt"), stored = join(root, "attachments", "a1b2.pdf");
     mkdirSync(dirname(source), { recursive: true });
     mkdirSync(dirname(stored), { recursive: true });
