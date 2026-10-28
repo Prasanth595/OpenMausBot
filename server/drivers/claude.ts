@@ -2073,6 +2073,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeConfig> = {
           },
           localComputerMcp: true,
           hooks: true,
+          askTool: { kind: "mcp", server: "ogb", name: "ask_user" },
         },
         sendTurn: (turn) => authRecovery.send(turn, sendTurn),
         steer,

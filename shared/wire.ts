@@ -672,6 +672,8 @@ export interface OptionCardData {
    * a superseding request). Nothing can answer it; a fresh proposal is
    * needed, and clients must not offer its options. */
   expired?: boolean;
+  /** Stop ended the work that asked: nothing can answer it any more. */
+  stopped?: boolean;
   /** Catalog key for held when it is one of the fixed notes. */
   heldCode?: string;
   /** the narrow grant "always allow" remembers for a harness-native card. */

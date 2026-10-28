@@ -85,7 +85,8 @@ export interface AcpConfig {
 
 /** Per-CLI specifics plugged into the shared ACP runtime. */
 export interface AcpSupport {
-  questionRequests?: Readonly<Record<string, AcpQuestionRequest>>;
+  /** `askTool`: the native tool whose requests these are. */
+  questionRequests?: Readonly<Record<string, AcpQuestionRequest>>; askTool?: string;
   /** Verified native catalog parameters, applied before both new and restored sessions. */
   toolScopeSessionParams?(turn: SendTurnInput, initializeResult: unknown, hasMcp: boolean,
     context: { config: AcpConfig; env: Record<string, string | undefined>; cwd: string }): Record<string, unknown>;
@@ -1728,7 +1729,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             modelVariants: support.modelVariants === true,
             localComputerMcp: true,
             contextReading: "meter",
-            engineAdmission: true,
+            engineAdmission: true, ...(support.askTool ? { askTool: { kind: "native" as const, name: support.askTool } } : {}),
           },
           sendTurn,
           interruptTurn: async (threadId) => active.get(threadId)?.interrupt(),
