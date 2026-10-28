@@ -262,7 +262,7 @@ function appEnv(brokerPort) {
 }
 
 let launches = 0;
-async function launchApp(binary, brokerPort, firstOrigin = null) {
+async function launchApp(binary, brokerPort, knownLocalOrigin = null) {
   launches += 1;
   const electronApp = await electron.launch({
     executablePath: binary,
@@ -277,13 +277,13 @@ async function launchApp(binary, brokerPort, firstOrigin = null) {
   await answerNativeDialogs(electronApp);
   const page = await mainPage(electronApp);
   page.setDefaultTimeout(30_000);
-  await waitForApp(page, firstOrigin ? `${firstOrigin}'s page` : "this app's own page");
+  await waitForApp(page, "the first page");
   const windowId = await (await electronApp.browserWindow(page)).evaluate((w) => w.id);
-  // This app's own page, as main tells it to the window's preload (the window may open on a server's page).
-  const localOrigin = await electronApp.evaluate(({ BrowserWindow }, id) => {
-    const args = BrowserWindow.fromId(id)?.webContents.getLastWebPreferences()?.additionalArguments ?? [];
-    return args.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
-  }, windowId) ?? new URL(page.url()).origin;
+  // This app's own page: the one its preload calls its own. A window that reopens on a server's page keeps the address
+  // this computer's page had before.
+  const ownPage = await page.evaluate(() => window.ogb?.app?.ownPage === true);
+  const localOrigin = ownPage ? new URL(page.url()).origin : knownLocalOrigin;
+  if (!localOrigin) throw new Error(`the app opened on ${page.url()}, and this computer's own page is not known yet`);
   await electronApp.evaluate(({ BrowserWindow }, id) => { const w = BrowserWindow.fromId(id); w.setBounds({ x: 40, y: 30, width: 1440, height: 900 }); w.show(); w.focus(); }, windowId);
   await page.waitForTimeout(800);
   const paths = await electronApp.evaluate(({ app }) => ({ userData: app.getPath("userData"), home: app.getPath("home"), isPackaged: app.isPackaged, name: app.getName(), version: app.getVersion() }));
@@ -551,12 +551,19 @@ async function narrowLayout(entry, name, before) {
   await shot(entry, name);
   const opener = page.getByRole("button", { name: "Open bot list" });
   if (await opener.getAttribute("aria-expanded").catch(() => null) !== "true") await opener.click();
-  await page.waitForTimeout(700);
-  const switcher = await page.evaluate(() => [...document.querySelectorAll("[data-sidebar-top-switcher] [data-tour='server-switcher']")].map((element) => {
+  // The drawer slides in: measure once it has stopped moving.
+  const measure = () => page.evaluate(() => [...document.querySelectorAll("[data-sidebar-top-switcher] [data-tour='server-switcher']")].map((element) => {
     const box = element.getBoundingClientRect();
     return { text: element.textContent?.trim().slice(0, 60) ?? "", left: Math.round(box.left), right: Math.round(box.right), viewport: window.innerWidth,
       beside: Boolean(element.closest("[data-switcher-beside-rail]")) };
   }).filter((item) => item.right > 0 && item.left < item.viewport));
+  let switcher = await measure();
+  for (let i = 0; i < 20; i++) {
+    await page.waitForTimeout(150);
+    const again = await measure();
+    if (JSON.stringify(again) === JSON.stringify(switcher)) break;
+    switcher = again;
+  }
   await shot(entry, `${name}-drawer`);
   await page.keyboard.press("Escape");
   await chooseMenuItem({ role: "resetzoom" }).catch(() => setWindow({ zoomLevel: 0 }));
@@ -893,7 +900,7 @@ async function main() {
     await backToThisComputer();
     await collectMainRecords();
     await current.electronApp.close();
-    current = await launchApp(binary, brokerPort);
+    current = await launchApp(binary, brokerPort, current.localOrigin);
     const { page } = current;
     await page.locator("[data-places-rail]").waitFor({ state: "visible", timeout: 30_000 });
     const rail = await railOnScreen();
@@ -914,13 +921,14 @@ async function main() {
     await openCircle(A, ids.a);
     await collectMainRecords();
     await current.electronApp.close();
-    current = await launchApp(binary, brokerPort, A.origin);
+    current = await launchApp(binary, brokerPort, current.localOrigin);
     check(entry, `quit on ${A.label}, reopened on ${A.label}`, new URL(current.page.url()).origin === A.origin, current.page.url());
     await expectShowing(entry, A);
     if (tinted) check(entry, `${A.label}'s tint is there from the start`, Boolean((await sidebarTint())?.value?.includes("purple")), await sidebarTint());
     await shot(entry, "reopened-on-a");
     await backToThisComputer();
-    check(entry, "back on this computer, the rail is there", (await railOnScreen()).visible);
+    const railBack = await current.page.locator("[data-places-rail]").waitFor({ state: "visible", timeout: 15_000 }).then(() => true, () => false);
+    check(entry, "back on this computer, the rail is there", railBack, await railOnScreen());
   });
 
   async function forget(server) {
