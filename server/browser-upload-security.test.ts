@@ -5,8 +5,10 @@ import { afterEach, expect, it, vi } from "vitest";
 
 const hooks = vi.hoisted(() => ({
   beforeRead: null as ((input: number) => void) | null,
+  afterOpen: null as ((path: fs.PathLike) => void) | null,
   redirect: null as { source: string; target: string } | null,
   openFlags: null as ((path: fs.PathLike, flags: fs.OpenMode) => fs.OpenMode) | null,
+  readlink: null as ((path: fs.PathLike) => string) | null,
 }));
 vi.mock("node:fs", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:fs")>();
@@ -14,8 +16,11 @@ vi.mock("node:fs", async (importOriginal) => {
     ...original,
     openSync: (...args: Parameters<typeof original.openSync>) => {
       const redirected = hooks.redirect && args[0] === hooks.redirect.source ? hooks.redirect.target : args[0];
-      return original.openSync(redirected, hooks.openFlags?.(args[0], args[1]) ?? args[1], args[2]);
+      const input = original.openSync(redirected, hooks.openFlags?.(args[0], args[1]) ?? args[1], args[2]);
+      hooks.afterOpen?.(args[0]);
+      return input;
     },
+    readlinkSync: (...args: Parameters<typeof original.readlinkSync>) => hooks.readlink?.(args[0]) ?? original.readlinkSync(...args),
     readSync: (...args: Parameters<typeof original.readSync>) => {
       hooks.beforeRead?.(args[0]);
       return original.readSync(...args);
@@ -31,8 +36,10 @@ const { namedUploadPaths, uploadableFiles } = await import("./browser-upload.ts"
 const dirs: string[] = [];
 afterEach(() => {
   hooks.beforeRead = null;
+  hooks.afterOpen = null;
   hooks.redirect = null;
   hooks.openFlags = null;
+  hooks.readlink = null;
   vi.unstubAllGlobals();
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -44,6 +51,7 @@ it.each(["darwin", "linux", "win32"])("stages a regular file with valid %s open 
   fs.writeFileSync(source, "report");
   vi.stubGlobal("process", { ...process, platform });
   const flags: fs.OpenMode[] = [];
+  if (platform === "linux") hooks.readlink = () => source;
   hooks.openFlags = (path, mode) => {
     if (path !== source) return mode;
     flags.push(mode);
@@ -79,7 +87,7 @@ it.skipIf(process.platform === "win32")("pins both sources before a directory is
   expect(fs.readFileSync(staged[1]!, "utf8")).toBe("report");
 });
 
-it("rejects a Windows open that follows a symlink swapped in after lstat", async () => {
+it("rejects a Windows open redirected to a different file identity", async () => {
   const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-windows-")));
   dirs.push(base);
   const source = join(base, "report.txt"), secret = join(base, "secret.txt");
@@ -88,6 +96,38 @@ it("rejects a Windows open that follows a symlink swapped in after lstat", async
   vi.stubGlobal("process", { ...process, platform: "win32" });
   hooks.redirect = { source, target: secret };
   await expect(async () => namedUploadPaths([{ file: source, name: "Report.txt" }], join(base, "uploads"))).rejects.toThrow(/changed/);
+});
+
+it.each(["before open", "after open", "before open then restored"])("rejects a Windows directory junction swapped %s", async (when) => {
+  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-junction-")));
+  dirs.push(base);
+  const workspace = join(base, "workspace"), sub = join(workspace, "sub"), saved = join(workspace, "saved"), outside = join(base, "outside");
+  fs.mkdirSync(sub, { recursive: true });
+  fs.mkdirSync(outside);
+  const source = join(sub, "report.txt");
+  fs.writeFileSync(source, "report");
+  fs.writeFileSync(join(outside, "report.txt"), "outside secret");
+  const checked = uploadableFiles([source], [workspace]);
+  expect(checked).toEqual({ files: [source] });
+  if ("error" in checked) throw new Error(checked.error);
+  const swap = () => {
+    fs.renameSync(sub, saved);
+    fs.symlinkSync(outside, sub, "junction");
+  };
+  vi.stubGlobal("process", { ...process, platform: "win32" });
+  if (when !== "after open") swap();
+  hooks.afterOpen = (path) => {
+    if (path !== source) return;
+    hooks.afterOpen = null;
+    if (when === "after open") swap();
+    if (when === "before open then restored") {
+      fs.unlinkSync(sub);
+      fs.renameSync(saved, sub);
+    }
+  };
+  const folder = join(base, "uploads");
+  await expect(namedUploadPaths(checked.files.map((file) => ({ file, name: null })), folder, Date.now(), { everyFile: true })).rejects.toThrow(/changed/);
+  expect(fs.existsSync(folder)).toBe(false);
 });
 
 it("removes every directory from a batch when its second file fails", async () => {

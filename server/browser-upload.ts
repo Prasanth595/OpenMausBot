@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, read, readdirSync, readlinkSync, realpathSync, rmSync, statSync, write, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, mkdirSync, openSync, read, readdirSync, readlinkSync, realpathSync, rmSync, statSync, write, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative } from "node:path";
 import { promisify } from "node:util";
@@ -14,7 +14,7 @@ const O_NOFOLLOW_ANY = 0x20000000;
 const NAMED_COPY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function realRoot(root: string): string | null {
-  try { return realpathSync(root); } catch { return null; }
+  try { return realpathSync.native(root); } catch { return null; }
 }
 
 function inside(root: string, file: string): boolean {
@@ -33,7 +33,7 @@ export function uploadableFiles(files: unknown, roots: readonly string[]): { fil
     const path = file.startsWith("~/") ? join(homedir(), file.slice(2)) : file;
     if (!isAbsolute(path)) return { error: `${file} is not an absolute path.` };
     let real: string;
-    try { real = realpathSync(path); } catch { return { error: `${file} does not exist.` }; }
+    try { real = realpathSync.native(path); } catch { return { error: `${file} does not exist.` }; }
     if (!allowed.some((root) => inside(root, real))) {
       return { error: `${file} is not one of this conversation's attachments or in your working folder, so it cannot be uploaded. Ask the person to attach the file.` };
     }
@@ -81,13 +81,15 @@ export async function namedUploadPaths(files: ReadonlyArray<{ file: string; name
 }
 
 function openUpload(source: string): { input: number; size: number } {
-  const checked = process.platform === "win32" ? lstatSync(source, { bigint: true }) : null;
-  if (checked && !checked.isFile()) throw new Error(`${source} is not a file.`);
   const input = openSync(source, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NONBLOCK | (process.platform === "darwin" ? O_NOFOLLOW_ANY : constants.O_NOFOLLOW)));
   try {
     if (process.platform === "linux" && readlinkSync(`/proc/self/fd/${input}`) !== source) throw new Error(`${source} changed while staging the upload.`);
     const file = fstatSync(input, { bigint: true });
-    if (checked && (checked.dev !== file.dev || checked.ino !== file.ino)) throw new Error(`${source} changed while staging the upload.`);
+    if (process.platform === "win32") {
+      const real = realpathSync.native(source);
+      const checked = statSync(real, { bigint: true });
+      if (real !== source || checked.dev !== file.dev || checked.ino !== file.ino) throw new Error(`${source} changed while staging the upload.`);
+    }
     if (!file.isFile()) throw new Error(`${source} is not a file.`);
     if (file.size > BigInt(FILE_MAX_BYTES)) throw new Error("Uploads are limited to 25 MiB per file.");
     return { input, size: Number(file.size) };
