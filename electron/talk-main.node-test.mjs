@@ -17,13 +17,14 @@ const names = windows => windows.map(win => win?.name ?? null);
 
 function harness({ packaged = true, appleSpeech = true, remote = false, register, serve = () => undefined } = {}) {
   const h = { handlers: new Map(), guards: new Map(), started: [], stopped: [], finished: [], requests: [], links: [], reveals: 0, log: [],
-    registered: new Map(), windows: [], busy: false, fail: {} };
+    registered: new Map(), windows: [], busy: false, fail: {}, away: false, starting: false };
   const owners = new Map();
   class FakeBrowserWindow {
     static fromWebContents(contents) { return owners.get(contents) ?? null; }
     constructor(options = {}) {
       Object.assign(this, { options, name: options.name, destroyed: false, events: new EventEmitter() });
-      this.webContents = Object.assign(new EventEmitter(), { sent: [], setWindowOpenHandler() {}, executeJavaScript: async () => 56 });
+      this.webContents = Object.assign(new EventEmitter(), { sent: [], scripts: [], setWindowOpenHandler() {} });
+      this.webContents.executeJavaScript = async script => { this.webContents.scripts.push(script); return 56; };
       this.webContents.send = (...message) => { this.webContents.sent.push(message); };
       owners.set(this.webContents, this);
       h.windows.push(this);
@@ -54,6 +55,7 @@ function harness({ packaged = true, appleSpeech = true, remote = false, register
       busy: failing("busy", () => h.busy),
     },
     packaged, devUrl: "http://127.0.0.1:5199", iconPath: join(here, "resources", "app-icon.png"),
+    nativeImage: { createFromPath: () => ({ isEmpty: () => false, resize: () => ({ toPNG: () => Buffer.from("png") }) }) },
     openLink: link => { h.links.push(link); }, reveal: failing("reveal", () => { h.reveals += 1; }), log: line => { h.log.push(line); },
     fetch: url => { h.requests.push(["dev", String(url)]); return answer(`${url.pathname}${url.search}`); },
   });
@@ -63,12 +65,14 @@ function harness({ packaged = true, appleSpeech = true, remote = false, register
   };
   const screen = { getCursorScreenPoint: () => ({ x: 0, y: 0 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 25, width: 1440, height: 875 } }) };
   h.start = () => h.talk.start({ globalShortcut, screen, prefs: createDesktopPrefs({ read: () => null, write: () => {} }), remote: () => remote,
+    away: failing("away", () => h.away), starting: () => h.starting,
     localRequest: route => { h.requests.push(["local", route]); return answer(route); }, dataDir: () => "/Users/a/.openmausbot" });
   h.handle = (channel, event, ...args) => h.handlers.get(channel)(event, ...args);
   h.press = () => h.registered.get("Control+Alt+Space")();
   h.page = name => new FakeBrowserWindow({ name });
   h.box = () => h.windows.findLast(win => isTalkPanel(win));
   h.click = what => h.box().webContents.emit("ipc-message", {}, `talk-panel:${what}`);
+  h.painted = async () => { h.box().webContents.emit("did-finish-load"); await settle(); return h.box().webContents.scripts.filter(script => script.startsWith("render(")).map(script => JSON.parse(script.slice(7, -1))); };
   return h;
 }
 
@@ -81,10 +85,16 @@ test("every list of the app's windows leaves the talk box out", () => {
 
 test("main hands the talk wiring its speech sinks, this computer's own server and window, and closes it first on quit", () => {
   assert.match(main, /const talk = installTalk\(\{ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions\.appleSpeech,\s*speech: \{ start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy \},/);
-  assert.match(main, /packaged: app\.isPackaged, devUrl: DEV_URL, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog \}\);/);
-  assert.match(main, /talk\.start\(\{ globalShortcut, screen, prefs: desktopPrefs, remote: \(\) => Boolean\(desktopRemoteAccess\), localRequest: localServerRequest, dataDir: \(\) => runningDataDir \}\);/);
+  assert.match(main, /packaged: app\.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog \}\);/);
+  assert.match(main, /talk\.start\(\{ globalShortcut, screen, prefs: desktopPrefs, remote: \(\) => Boolean\(desktopRemoteAccess\), away: \(\) => homeWindow\.current\(\)\.kind !== "computer", starting: \(\) => !serverReady, localRequest: localServerRequest, dataDir: \(\) => runningDataDir \}\);/);
   assert.match(main, /app\.on\("before-quit", \(e\) => \{\s*talk\.close\(\);/);
   assert.doesNotMatch(main, /ipcMain\.handle\("(?:speech|talk-shortcut|call):/);
+});
+
+test("main tells the talk wiring when home changes and which skin the app painted, and counts a talk ask as busy for a quiet update", () => {
+  assert.match(main, /const homeWindow = createHomeWindow\(\{[^]*?rehomed: \(\) => talk\.homeChanged\(\),[^]*?\}\);\ninstallHomeWindowIpc/);
+  assert.match(main, /ipcMain\.handle\("desktop:skin", \(event, skin\) => \{\s*if \(!isKnownSkin\(skin\)\) return false;\s*try \{\s*talk\.skin\(skin\);/);
+  assert.match(main, /busy: \(\) => \(oneHome\.oneHome\.busy\(\) && "move"\) \|\| \(computerSharing\?\.busy\(\) && "lending"\) \|\| \(talk\.busy\(\) && "talk"\) \|\|/);
 });
 
 test("the talk bridge keys stay off other servers' pages; a call can be reported from My Cloud's page", () => {
@@ -234,4 +244,74 @@ test("clicking the box opens its chat by a link with both ids escaped, or else j
   h.click("open");
   assert.deepEqual(h.links, ["openmausbot://thread/t%201%2Fx?bot=b%3F1%26x"]);
   h.talk.close();
+});
+
+test("while home is My Cloud or this computer's copy is frozen the shortcut is unavailable and the key free; home here again takes it back", () => {
+  const h = harness();
+  h.away = true;
+  h.start();
+  assert.equal(h.handle("talk-shortcut:state", {}).available, false);
+  assert.deepEqual([...h.registered.keys()], []);
+  assert.equal(h.handle("talk-shortcut:set", {}, { enabled: false }).available, false, "a change does nothing meanwhile");
+  h.away = false;
+  h.talk.homeChanged();
+  assert.equal(h.handle("talk-shortcut:state", {}).available, true);
+  assert.deepEqual([...h.registered.keys()], ["Control+Alt+Space"]);
+  h.away = true;
+  h.talk.homeChanged();
+  assert.deepEqual([...h.registered.keys()], []);
+  h.fail.away = "home unknown";
+  assert.doesNotThrow(() => h.talk.homeChanged());
+  assert.deepEqual(h.log, ["talk home change failed: home unknown"]);
+  const early = harness();
+  assert.doesNotThrow(() => early.talk.homeChanged(), "before start");
+  h.talk.close();
+});
+
+test("a press while this computer's server is still starting says so", async () => {
+  const h = harness({ serve: route => (route === "/api/bots?messages=0" ? Promise.reject(new Error("not running")) : undefined) });
+  h.starting = true;
+  h.start();
+  h.press();
+  await settle();
+  assert.deepEqual((await h.painted()).at(-1), { state: "error", text: "MausBot is still starting. Try again in a moment." });
+  h.talk.close();
+});
+
+test("the box takes the light or dark of the skin the app painted last, before or after it opens", async () => {
+  const h = harness();
+  h.talk.skin("meadow");
+  h.start();
+  h.press();
+  assert.deepEqual((await h.painted()).at(-1), { state: "listening", text: "", theme: "light" });
+  h.talk.skin("midnight");
+  await settle();
+  assert.deepEqual((await h.painted()).at(-1), { state: "listening", text: "", theme: "dark" });
+  h.talk.skin("no-such-skin");
+  h.talk.skin(undefined);
+  await settle();
+  assert.equal((await h.painted()).at(-1).theme, "dark");
+  h.talk.close();
+});
+
+test("busy while a talk ask is under way, never before the shortcut is set up", () => {
+  const h = harness();
+  assert.equal(h.talk.busy(), false);
+  h.start();
+  assert.equal(h.talk.busy(), false);
+  h.press();
+  assert.equal(h.talk.busy(), true);
+  h.click("dismiss");
+  assert.equal(h.talk.busy(), false);
+  h.talk.close();
+});
+
+test("quitting while listening logs a failure to stop speech and still lets the key go", () => {
+  const h = harness();
+  h.start();
+  h.press();
+  h.fail.stop = "stop broke";
+  assert.doesNotThrow(() => h.talk.close());
+  assert.deepEqual(h.log, ["talk close failed: stop broke"]);
+  assert.deepEqual([...h.registered.keys()], []);
 });

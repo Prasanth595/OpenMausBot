@@ -1,7 +1,10 @@
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 export const TALK_PANEL = Object.freeze({ width: 400, margin: 24, minHeight: 56, maxHeight: 240, fadeMs: 180 });
+const MASCOT_PX = 28;
+/** Lines of 13 px text at 1.4 that fit the tallest box with its label and padding. */
+const TEXT_LINES = 10;
+const LIGHT = "color-scheme:light;--panel:#f7f7f7f5;--border:#0000001a;--ink:#0d0d0d;--ink2:#444444;--accent:#0b62c4;--warning:#8a5a00;--danger:#c02b3a;--hover:#0000000d";
 
 export const TALK_LABELS = Object.freeze({
   listening: "Listening…",
@@ -49,19 +52,21 @@ export function replyPreview(text, limit = 400) {
 
 export function talkPanelHtml(iconBase64) {
   const labels = JSON.stringify(TALK_LABELS);
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'"><title>MausBot</title><style>
-:root{color-scheme:dark light;--panel:#111111f5;--border:#ffffff16;--ink:#fcfcfc;--ink2:#fcfcfcbf;--accent:#1084fe;--warning:#ff9800;--danger:#ff5667;--hover:#ffffff14}
-@media (prefers-color-scheme: light){:root{--panel:#f7f7f7f5;--border:#0000001a;--ink:#0d0d0d;--ink2:#444444;--accent:#0b62c4;--warning:#8a5a00;--danger:#c02b3a;--hover:#0000000d}}
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>MausBot</title><style>
+:root{color-scheme:dark light}
+body{color-scheme:dark;--panel:#111111f5;--border:#ffffff16;--ink:#fcfcfc;--ink2:#fcfcfcbf;--accent:#1084fe;--warning:#ff9800;--danger:#ff5667;--hover:#ffffff14}
+body.light{${LIGHT}}
+@media (prefers-color-scheme: light){body:not(.dark){${LIGHT}}}
 *{box-sizing:border-box}html,body{margin:0;background:transparent;overflow:hidden;font:13px/1.4 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:var(--ink);-webkit-user-select:none;user-select:none}
 body{opacity:0;transition:opacity 160ms ease}body.on{opacity:1}
 #card{position:relative;display:flex;gap:12px;align-items:flex-start;min-height:56px;padding:14px 40px 14px 14px;border:1px solid var(--border);border-radius:16px;background:var(--panel);cursor:pointer}
-#mascot{position:relative;flex:none;width:28px;height:28px}#mascot img{width:28px;height:28px;object-fit:contain;display:block;-webkit-user-drag:none}
+#mascot{position:relative;flex:none;width:${MASCOT_PX}px;height:${MASCOT_PX}px}#mascot img{width:${MASCOT_PX}px;height:${MASCOT_PX}px;object-fit:contain;display:block;-webkit-user-drag:none}
 #mascot::after{content:"";position:absolute;inset:-3px;border-radius:50%;border:2px solid var(--accent);opacity:0;pointer-events:none}
 body.listening #mascot::after{animation:pulse 1.4s ease-out infinite}
 #body{flex:1;min-width:0;align-self:center}
 #label{font-weight:600}#label:empty{display:none}
 body.needs-you #label,body.still-working #label{color:var(--warning)}body.error #text{color:var(--danger)}
-#text{color:var(--ink2);overflow-wrap:anywhere}#text:empty{display:none}#label:not(:empty)+#text{margin-top:2px}
+#text{color:var(--ink2);overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${TEXT_LINES};overflow:hidden}#text:empty{display:none}#label:not(:empty)+#text{margin-top:2px}
 #close{position:absolute;top:8px;right:8px;width:24px;height:24px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:transparent;color:var(--ink2);cursor:pointer}
 #close:hover{background:var(--hover);color:var(--ink)}#close svg{pointer-events:none}
 @keyframes pulse{from{transform:scale(.9);opacity:.8}to{transform:scale(1.35);opacity:0}}
@@ -70,7 +75,7 @@ body.needs-you #label,body.still-working #label{color:var(--warning)}body.error 
 const LABELS=${labels};
 const card=document.getElementById("card"),label=document.getElementById("label"),text=document.getElementById("text");
 function render(view){
-  document.body.className="on "+view.state;
+  document.body.className=["on",view.state,view.theme].filter(Boolean).join(" ");
   label.textContent=LABELS[view.state]||"";
   text.textContent=view.text||(view.state==="listening"?"Let go to send":"");
   return Math.ceil(card.getBoundingClientRect().height);
@@ -81,22 +86,32 @@ document.getElementById("close").addEventListener("click",e=>{e.stopPropagation(
 </script></body></html>`;
 }
 
-export function createTalkPanel({ BrowserWindow, screen, iconPath, onOpen, onDismiss }) {
+/** The mascot as a PNG at twice its CSS size, for Retina displays. */
+function mascotPng(nativeImage, iconPath) {
+  const icon = nativeImage.createFromPath(iconPath);
+  if (icon.isEmpty()) throw new Error(`no talk box icon at ${iconPath}`);
+  return icon.resize({ width: 2 * MASCOT_PX, height: 2 * MASCOT_PX, quality: "best" }).toPNG().toString("base64");
+}
+
+export function createTalkPanel({ BrowserWindow, screen, nativeImage, iconPath, onOpen, onDismiss, theme: initialTheme = null }) {
   let win = null;
   let loaded = false;
   let shown = false;
   let view = null;
   let latest = 0;
   let page = null;
+  let area = null;
+  let theme = initialTheme;
 
   const workArea = () => screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
   const live = target => target && !target.isDestroyed();
 
   function create() {
-    page ??= `data:text/html;charset=utf-8,${encodeURIComponent(talkPanelHtml(fs.readFileSync(iconPath).toString("base64")))}`;
+    page ??= `data:text/html;charset=utf-8,${encodeURIComponent(talkPanelHtml(mascotPng(nativeImage, iconPath)))}`;
+    area = workArea();
     const target = new BrowserWindow({
       type: "panel",
-      ...talkPanelBounds(workArea(), TALK_PANEL.minHeight),
+      ...talkPanelBounds(area, TALK_PANEL.minHeight),
       frame: false,
       transparent: true,
       backgroundColor: "#00000000",
@@ -130,7 +145,7 @@ export function createTalkPanel({ BrowserWindow, screen, iconPath, onOpen, onDis
     target.webContents.on("did-finish-load", () => {
       if (win !== target) return;
       loaded = true;
-      if (view) paint();
+      if (view) repaint();
     });
     target.webContents.on("ipc-message", (_event, channel) => {
       if (channel === "talk-panel:open") onOpen();
@@ -146,7 +161,7 @@ export function createTalkPanel({ BrowserWindow, screen, iconPath, onOpen, onDis
   async function paint() {
     const target = win;
     const ticket = ++latest;
-    const payload = JSON.stringify({ state: view.state, text: replyPreview(view.text) });
+    const payload = JSON.stringify({ state: view.state, text: replyPreview(view.text), ...(theme ? { theme } : {}) });
     let height;
     try {
       height = await target.webContents.executeJavaScript(`render(${payload})`);
@@ -154,12 +169,14 @@ export function createTalkPanel({ BrowserWindow, screen, iconPath, onOpen, onDis
       return;
     }
     if (win !== target || ticket !== latest || !live(target)) return;
-    target.setBounds(talkPanelBounds(workArea(), height));
+    target.setBounds(talkPanelBounds(area, height));
     if (!shown) {
       shown = true;
       target.showInactive();
     }
   }
+
+  const repaint = () => void paint().catch(() => {});
 
   return {
     render(next) {
@@ -169,7 +186,13 @@ export function createTalkPanel({ BrowserWindow, screen, iconPath, onOpen, onDis
         loaded = false;
         shown = false;
       }
-      if (loaded) void paint();
+      if (loaded) repaint();
+    },
+    /** The app's skin, light or dark; the box follows macOS until a page of the app says which. */
+    setTheme(next) {
+      if (next === theme) return;
+      theme = next;
+      if (win && loaded && view) repaint();
     },
     close() {
       const target = win;

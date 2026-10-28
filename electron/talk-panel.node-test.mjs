@@ -1,14 +1,24 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test, { mock } from "node:test";
+import { fileURLToPath } from "node:url";
 import { TALK_LABELS, TALK_PANEL, createTalkPanel, isTalkPanel, replyPreview, talkPanelBounds, talkPanelHtml } from "./talk-panel.mjs";
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const pick = (object, keys) => Object.fromEntries(keys.map(key => [key, object[key]]));
 
-function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width: 1440, height: 875 }, loadFails = false, iconPath = new URL("./resources/app-icon.png", import.meta.url).pathname } = {}) {
+const APP_ICON = fileURLToPath(new URL("./resources/app-icon.png", import.meta.url));
+
+function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width: 1440, height: 875 }, loadFails = false, boundsFail = false, iconPath = APP_ICON, theme } = {}) {
   const made = [];
+  const resized = [];
+  const nativeImage = {
+    createFromPath: path => ({
+      isEmpty: () => !existsSync(path),
+      resize: size => { resized.push(size); return { toPNG: () => Buffer.from(`png ${size.width}x${size.height}`) }; },
+    }),
+  };
   class FakeBrowserWindow {
     constructor(options) {
       const { x, y, width, height } = options;
@@ -27,7 +37,7 @@ function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width:
     on(...args) { this.events.on(...args); }
     setAlwaysOnTop(...args) { this.calls.push(["setAlwaysOnTop", ...args]); }
     setVisibleOnAllWorkspaces(...args) { this.calls.push(["setVisibleOnAllWorkspaces", ...args]); }
-    setBounds(bounds) { this.bounds = bounds; this.calls.push(["setBounds", bounds]); }
+    setBounds(bounds) { if (boundsFail) throw new Error("bounds failed"); this.bounds = bounds; this.calls.push(["setBounds", bounds]); }
     getBounds() { return this.bounds; }
     show() { this.calls.push(["show"]); }
     focus() { this.calls.push(["focus"]); }
@@ -40,8 +50,8 @@ function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width:
   const screen = { getCursorScreenPoint: () => state.cursor, getDisplayNearestPoint: () => ({ workArea: state.workArea }) };
   const opened = [];
   const dismissed = [];
-  const panel = createTalkPanel({ BrowserWindow: FakeBrowserWindow, screen, iconPath, onOpen: () => opened.push(1), onDismiss: () => dismissed.push(1) });
-  return { panel, made, opened, dismissed, state };
+  const panel = createTalkPanel({ BrowserWindow: FakeBrowserWindow, screen, nativeImage, iconPath, onOpen: () => opened.push(1), onDismiss: () => dismissed.push(1), theme });
+  return { panel, made, opened, dismissed, state, resized };
 }
 
 test("talkPanelBounds sits the box bottom-centre of the work area, clamped", () => {
@@ -94,7 +104,7 @@ test("the page shows reply text as plain text, never HTML", () => {
   const cut = replyPreview("word ".repeat(120));
   assert.ok(cut.length <= 400 && cut.endsWith("…") && !cut.endsWith(" …") && !cut.includes("wor…"));
   const html = talkPanelHtml("AAAA");
-  assert.match(html, /default-src 'none'/);
+  assert.match(html, /default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"/);
   assert.match(html, /textContent/);
   assert.match(html, /prefers-color-scheme: light/);
   assert.doesNotMatch(html, /innerHTML|insertAdjacentHTML|outerHTML|https?:\/\//);
@@ -205,7 +215,83 @@ test("a box destroyed outside close() is forgotten, so the next render makes a n
   assert.equal(made[0].webContents.scripts.length, 1);
 });
 
+test("a reply of wide characters is cut at whole lines, so the card's bottom edge stays inside the tallest box", () => {
+  const html = talkPanelHtml("AAAA");
+  assert.match(html, /#text\{[^}]*display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:10;overflow:hidden\}/);
+  assert.match(html, /font:13px\/1\.4 /);
+  assert.match(html, /padding:14px 40px 14px 14px;border:1px solid/);
+  assert.ok(28 + 2 + 2 + 11 * 18.2 <= TALK_PANEL.maxHeight, "label and ten lines of text fit the box");
+});
+
 test("replyPreview stays within the limit on pathological input", () => {
   const out = replyPreview("**".repeat(200000) + " tail");
   assert.ok(out.length <= 400);
+});
+
+test("the box stays on the display it opened on while it is up; the next box opens under the pointer", async () => {
+  const { panel, made, state } = harness();
+  panel.render({ state: "listening", text: "" });
+  state.cursor = { x: 2000, y: 500 };
+  state.workArea = { x: 1440, y: 25, width: 1440, height: 875 };
+  made[0].webContents.emit("did-finish-load");
+  await flush();
+  panel.render({ state: "reply", text: "Hi" });
+  await flush();
+  assert.deepEqual(made[0].bounds, { x: 520, y: 780, width: 400, height: 96 });
+  panel.close();
+  panel.render({ state: "listening", text: "" });
+  assert.deepEqual(made[1].options.x, 1960);
+});
+
+test("the mascot is inlined at 56 px, twice its 28 px size, never the full-size app icon", () => {
+  const { panel, made, resized } = harness();
+  panel.render({ state: "listening", text: "" });
+  assert.deepEqual(resized, [{ width: 56, height: 56, quality: "best" }]);
+  const page = decodeURIComponent(made[0].url);
+  assert.ok(page.includes(`data:image/png;base64,${Buffer.from("png 56x56").toString("base64")}`));
+  assert.ok(!page.includes(readFileSync(APP_ICON).toString("base64").slice(0, 200)));
+  panel.close();
+  panel.render({ state: "listening", text: "" });
+  assert.equal(resized.length, 1, "made once, then reused");
+});
+
+test("the box takes the app's skin, light or dark, over macOS's appearance, and repaints when it changes", async () => {
+  const { panel, made } = harness({ theme: "light" });
+  panel.render({ state: "reply", text: "Hi" });
+  made[0].webContents.emit("did-finish-load");
+  await flush();
+  assert.equal(made[0].webContents.scripts.at(-1), 'render({"state":"reply","text":"Hi","theme":"light"})');
+  panel.setTheme("dark");
+  await flush();
+  assert.equal(made[0].webContents.scripts.at(-1), 'render({"state":"reply","text":"Hi","theme":"dark"})');
+  panel.setTheme("dark");
+  await flush();
+  assert.equal(made[0].webContents.scripts.length, 2, "the same skin again repaints nothing");
+  panel.close();
+  panel.setTheme("light");
+  assert.equal(made[0].webContents.scripts.at(-1), "fadeOut()", "a closed box is not painted");
+
+  const html = talkPanelHtml("AAAA");
+  assert.match(html, /body\{color-scheme:dark;--panel:#111111f5;/);
+  assert.match(html, /body\.light\{color-scheme:light;--panel:#f7f7f7f5;/);
+  assert.match(html, /@media \(prefers-color-scheme: light\)\{body:not\(\.dark\)\{color-scheme:light;--panel:#f7f7f7f5;/);
+  assert.match(html, /document\.body\.className=\["on",view\.state,view\.theme\]/);
+});
+
+test("a box that fails to place itself is not an unhandled rejection", async () => {
+  const unhandled = [];
+  const record = reason => unhandled.push(reason);
+  process.on("unhandledRejection", record);
+  try {
+    const { panel, made } = harness({ boundsFail: true });
+    panel.render({ state: "listening", text: "" });
+    made[0].webContents.emit("did-finish-load");
+    await flush();
+    panel.render({ state: "thinking", text: "" });
+    await flush();
+    await flush();
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off("unhandledRejection", record);
+  }
 });

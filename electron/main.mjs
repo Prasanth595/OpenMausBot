@@ -2387,7 +2387,7 @@ ipcMain.handle("desktop:open-logs", localOrHome("desktop:open-logs", () => openL
 ipcMain.handle("desktop:skin", (event, skin) => {
   if (!isKnownSkin(skin)) return false;
   try {
-    const { color } = skinChrome(skin);
+    talk.skin(skin); const { color } = skinChrome(skin);
     const win = BrowserWindow.fromWebContents(event.sender) ?? mainWindow;
     if (win && !win.isDestroyed()) {
       try { win.setBackgroundColor(color); } catch {}
@@ -2479,7 +2479,7 @@ ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
 }));
 
 const talk = installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions.appleSpeech,
-  speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy }, packaged: app.isPackaged, devUrl: DEV_URL, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog });
+  speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy }, packaged: app.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog });
 
 ipcMain.handle("companion:state", localOnly("companion:state", () => desktopCompanionState()));
 function managedRemoteAccessRefusal() {
@@ -2704,7 +2704,7 @@ const oneHome = installOneHome({ ipcMain, cloudPage: cloudPageAsking, server: ()
 const homePlaces = createHomePlaces({ store: jsonFile(path.join(app.getPath("userData"), "home-place.json")), environments: () => environmentsState, persist: persistEnvironments, makeId: randomUUID, homeOrigin: myCloud, log: slog });
 const homeWindow = createHomeWindow({ journal: oneHome.journal, frozen: oneHome.marker, account: () => (app.isPackaged && !desktopRemoteAccess ? cloudAccount : null), restored: cloudAccountRestored,
   window: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null), ensureWindow: () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow({ deferNavigation: true }); },
-  localOrigin: rendererOrigin, cookieFetch: (...args) => session.defaultSession.fetch(...args), power: cloudPower, splash: () => startupScreen, lastInput: oneHome.lastInput, log: slog,
+  localOrigin: rendererOrigin, cookieFetch: (...args) => session.defaultSession.fetch(...args), power: cloudPower, splash: () => startupScreen, lastInput: oneHome.lastInput, rehomed: () => talk.homeChanged(), log: slog,
   hosts: () => session.defaultSession, readyStore: jsonFile(path.join(app.getPath("userData"), "cloud-ready.json")),
   remembered: homePlaces.remembered, remember: homePlaces.remember, left: homePlaces.left, drop: homePlaces.drop,
   publish: view => { if (mainWindow && !mainWindow.isDestroyed() && senderIsLocal({ sender: mainWindow.webContents })) mainWindow.webContents.send("home:state-changed", view); },
@@ -3060,7 +3060,7 @@ app.whenReady().then(async () => {
       for (const win of appWindows()) if (!win.isDestroyed() && win.webContents !== sender) win.webContents.send("desktop-language:changed", language);
     },
     page: event => senderIsLocal(event) ? "local" : cloudPageAsking(event) ?? (workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin()) ? "server" : null) });
-  talk.start({ globalShortcut, screen, prefs: desktopPrefs, remote: () => Boolean(desktopRemoteAccess), localRequest: localServerRequest, dataDir: () => runningDataDir });
+  talk.start({ globalShortcut, screen, prefs: desktopPrefs, remote: () => Boolean(desktopRemoteAccess), away: () => homeWindow.current().kind !== "computer", starting: () => !serverReady, localRequest: localServerRequest, dataDir: () => runningDataDir });
   // Before the window, so the harness has the CUA descriptor on first render.
   cuaReady =
     !desktopRemoteAccess && (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32")
@@ -3180,7 +3180,7 @@ app.whenReady().then(async () => {
       return credentials;
     }).finally(syncManagedComposioCredentials);
   }
-  startUpdater(quietSignals({ powerMonitor, window: () => mainWindow, lastInput: oneHome.lastInput, local: localServerRequest, place: () => homeWindow.placeOrigin(), cloudFetch: (...args) => session.defaultSession.fetch(...args), asleep: origin => origin === homeWindow.cloudOrigin() && cloudPower.asleep(), busy: () => (oneHome.oneHome.busy() && "move") || (computerSharing?.busy() && "lending") || (companyBackupController || companyRestoreCommitting ? "backup" : null) }));
+  startUpdater(quietSignals({ powerMonitor, window: () => mainWindow, lastInput: oneHome.lastInput, local: localServerRequest, place: () => homeWindow.placeOrigin(), cloudFetch: (...args) => session.defaultSession.fetch(...args), asleep: origin => origin === homeWindow.cloudOrigin() && cloudPower.asleep(), busy: () => (oneHome.oneHome.busy() && "move") || (computerSharing?.busy() && "lending") || (talk.busy() && "talk") || (companyBackupController || companyRestoreCommitting ? "backup" : null) }));
   refreshApplicationMenu();
   openWindowForLink = () => {
     if (!mainWindow || mainWindow.isDestroyed()) createWindow({ deferNavigation: homeWindow.current().kind !== "computer" });

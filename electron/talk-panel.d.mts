@@ -9,10 +9,14 @@ export declare function talkPanelBounds(workArea: { x: number; y: number; width:
 export declare function replyPreview(text: string, limit?: number): string;
 export declare function talkPanelHtml(iconBase64: string): string;
 export declare function isTalkPanel(win: unknown): boolean;
+export type TalkTheme = "light" | "dark";
 export declare function createTalkPanel(deps: {
   BrowserWindow: new (options: Record<string, unknown>) => any;
   screen: { getCursorScreenPoint(): { x: number; y: number }; getDisplayNearestPoint(point: { x: number; y: number }): { workArea: { x: number; y: number; width: number; height: number } } };
+  nativeImage: { createFromPath(path: string): { isEmpty(): boolean; resize(options: { width: number; height: number; quality?: string }): { toPNG(): Buffer } } };
   iconPath: string;
   onOpen: () => void;
   onDismiss: () => void;
-}): { render(view: TalkView): void; close(): void; hovered(): boolean };
+  /** The app's skin as last painted; null follows macOS's appearance. */
+  theme?: TalkTheme | null;
+}): { render(view: TalkView): void; setTheme(theme: TalkTheme | null): void; close(): void; hovered(): boolean };
