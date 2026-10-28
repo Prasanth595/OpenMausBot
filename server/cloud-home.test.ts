@@ -449,7 +449,7 @@ it("ships an edge and a Fly template that keep the server private", () => {
   expect(caddy.match(/header_up X-Forwarded-For \{client_ip\}/g)).toHaveLength(upstreams.length);
   expect(caddy.match(/lb_try_interval 50ms/g)).toHaveLength(upstreams.length);
   // Who may name the client, and in which header, is the launcher's to say (edgeClientAddress); the file names neither.
-  expect(caddy).toMatch(/^\t\ttrusted_proxies static \{\$OMB_CLOUD_EDGE_TRUSTED_PROXIES\}\n\t\ttrusted_proxies_strict\n\t\tclient_ip_headers \{\$OMB_CLOUD_EDGE_CLIENT_IP_HEADER\}\n/m);
+  expect(caddy).toMatch(/^\t\ttrusted_proxies static \{\$OMB_CLOUD_EDGE_TRUSTED_PROXIES\}\r?\n\t\ttrusted_proxies_strict\r?\n\t\tclient_ip_headers \{\$OMB_CLOUD_EDGE_CLIENT_IP_HEADER\}\r?\n/m);
   expect(caddy.match(/^\s*(?:trusted_proxies|client_ip_headers)\b/gm)).toHaveLength(2);
   // The root supervisor's code is root's, maus owns only the volume; the image's last step refuses to build otherwise.
   const dockerfile = readFileSync(join(import.meta.dirname, "../Dockerfile"), "utf8");
