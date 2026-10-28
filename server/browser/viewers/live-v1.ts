@@ -314,8 +314,9 @@ export class LiveV1 {
     return this.#viewers.has(viewerId);
   }
 
-  handBack(session: string): void {
-    void this.#service.handBack(session).then(() => this.#controlAll(session), () => undefined);
+  async handBack(session: string): Promise<void> {
+    await this.#service.handBack(session);
+    this.#controlAll(session);
   }
 
   closeForSession(session: string): void { for (const viewer of this.#viewers.values()) if (viewer.session === session) this.#close(viewer); }

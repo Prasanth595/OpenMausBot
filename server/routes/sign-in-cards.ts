@@ -9,7 +9,7 @@ export type SignInOutcome = "done" | "cancelled";
 type Answer = { status: number; body: Record<string, unknown> };
 
 export interface SignInCardRouteDeps {
-  settle(botId: string, threadId: string, messageId: string, outcome: SignInOutcome): Answer;
+  settle(botId: string, threadId: string, messageId: string, outcome: SignInOutcome): Answer | Promise<Answer>;
   saveLogin(botId: string, threadId: string, messageId: string, body: Record<string, unknown>, auth: RequestAuth): Promise<Answer>;
   saveTarget(botId: string, threadId: string, messageId: string): Promise<Answer>;
   /** A member reaches a card only in a thread shown to them, which in a room can be narrower than the bot. */
@@ -42,7 +42,7 @@ export function createSignInCardRoutes(deps: SignInCardRouteDeps): RouteHandler 
     }
     const body = await readBody(req);
     const threadId = String(body.threadId ?? "");
-    const result = deps.threadVisible(auth, threadId) ? deps.settle(m[1]!, threadId, m[2]!, m[3] === "done" ? "done" : "cancelled") : HIDDEN;
+    const result = deps.threadVisible(auth, threadId) ? await deps.settle(m[1]!, threadId, m[2]!, m[3] === "done" ? "done" : "cancelled") : HIDDEN;
     return json(res, result.status, result.body);
   };
 }

@@ -551,9 +551,9 @@ describe("authenticated browser viewer relay", () => {
   it("hands back whichever view holds the browser when its sign-in card is answered elsewhere", async () => {
     const a = await open(); const b = await open({ botId: "bot-b" });
     await a.action({ type: "take" });
-    live.handBack("profile-b");
+    await live.handBack("profile-b");
     expect(held.get("profile-a")).toBe(a.res.id);
-    live.handBack("profile-a");
+    await live.handBack("profile-a");
     expect(held.has("profile-a")).toBe(false);
     expect(a.res.events("control").at(-1)).toEqual({ held: false, owned: false, controlling: false });
     expect(b.res.events("control").at(-1)).toEqual({ held: false, owned: false, controlling: false });
@@ -938,6 +938,26 @@ describe("a person's view whose stream drops while they hold the browser", () =>
   const bodies = () => nativeInput.mock.calls.map(([, init]) => JSON.parse(init.body));
   const botWorks = () => runtime.withAgentAction("profile-a", async () => true);
   beforeEach(() => { runtime = new BrowserRuntime(); live = new BrowserLive({ runtime }); });
+
+  it.each([false, true])("waits for pending human input before sign-in Done returns control, dropped=%s", async (dropped) => {
+    const a = await open(); await a.action({ type: "take" });
+    let finish!: (value: Response) => void;
+    nativeInput.mockImplementationOnce(() => new Promise<Response>((resolve) => { finish = resolve; }));
+    const typing = a.action({ type: "input_keyboard", eventType: "char", text: "person@example.test" });
+    await vi.waitFor(() => expect(nativeInput).toHaveBeenCalledOnce());
+    if (dropped) a.res.destroy();
+    let returned = false;
+    const handingBack = live.handBack("profile-a").then(() => { returned = true; });
+    await Promise.resolve();
+    expect(returned).toBe(false);
+    await expect(botWorks()).rejects.toThrow("paused while a person controls");
+    finish(Response.json({ success: true }));
+    await typing;
+    await handingBack;
+    expect(runtime.heldBy("profile-a")).toBeNull();
+    expect(runtime.interrupted("profile-a")).toBe(false);
+    await expect(botWorks()).resolves.toBe(true);
+  });
 
   it("keeps their control for the same panel's reconnect, takes its input there, and hands back afterwards", async () => {
     const a = await open(); await a.action({ type: "take" });

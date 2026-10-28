@@ -80,6 +80,32 @@ describe("fill_login fills and submits in one call", () => {
     expect(outcome.text).toContain("the page is now https://example.com/dashboard");
   });
 
+  it.each([
+    '<span id="sign-in-name">Sign in</span><button type="button" id="go" aria-labelledby="sign-in-name"><svg></svg></button>',
+    '<button type="button" id="go" aria-label="Sign in"><span aria-hidden="true">→</span></button>',
+  ])("presses the sign-in button by its accessible name", async (button) => {
+    const { page, fill } = setup("https://example.com/login",
+      `<div><input name="email" type="email" autocomplete="username"><input name="password" type="password">${button}</div>`,
+      [{ host: "example.com", username: "alice" }]);
+    page.window.document.querySelector("#go")!.addEventListener("click", () => page.navigate(DASHBOARD.url, DASHBOARD.html));
+    const outcome = await fill();
+    expect(outcome).toMatchObject({ ok: true, filled: ["username", "password"] });
+    expect(page.pressed).toEqual(["Enter"]);
+    expect(page.clicked).toHaveLength(1);
+    expect(outcome.text).toContain("the page is now https://example.com/dashboard");
+    expectNoSecret(outcome, page, [PASSWORD]);
+  });
+
+  it("does not press a disabled sign-in control or a different SSO sign-in method", async () => {
+    const { page, fill } = setup("https://example.com/login",
+      `<input name="email" type="email"><input name="password" type="password"><button disabled aria-label="Sign in">→</button><div role="button" aria-disabled="true" aria-label="Sign in">→</div><button aria-label="Sign in with Google">→</button>`,
+      [{ host: "example.com", username: "alice" }]);
+    const outcome = await fill();
+    expect(outcome.text).toContain("It was not submitted: Enter did nothing and the page has no sign-in button to press.");
+    expect(page.clicked).toEqual([]);
+    expect(page.sent).toEqual([]);
+  });
+
   it("waits for a page that sends the login by its own script, instead of pressing its button as well", async () => {
     const { page, fill } = setup("https://example.com/login",
       `<div><input name="email" type="email" autocomplete="username"><input name="password" type="password"><button type="button" id="go">Log in</button></div>`,
@@ -96,6 +122,30 @@ describe("fill_login fills and submits in one call", () => {
     expect(page.clicked).toEqual([]);
     expect(polls).toBe(12);
     expect(outcome.text).toContain("the page is now https://example.com/dashboard");
+  });
+
+  it("waits through redirect context loss without resubmitting or filling the unrelated OAuth host", async () => {
+    const { page, fill } = setup("https://example.com/login", LOGIN_FORM, [{ host: "example.com", username: "alice@example.com" }]);
+    page.answer = () => ({ navigate: { url: "https://accounts.google.com/o/oauth2/v2/auth?state=fake-oauth-state", html: LOGIN_FORM } });
+    const engine = page.engine.bind(page);
+    let contextLosses = 0;
+    page.engine = async (args) => {
+      if (args[0] === "eval" && args[1]!.includes("present:") && contextLosses < 2) {
+        contextLosses++;
+        throw new Error("Execution context was destroyed, most likely because of a navigation.");
+      }
+      return engine(args);
+    };
+    const outcome = await fill();
+    expect(outcome).toMatchObject({ ok: true, filled: ["username", "password"] });
+    expect(contextLosses).toBe(2);
+    expect(page.sent).toHaveLength(1);
+    expect(page.pressed).toEqual(["Enter"]);
+    expect(page.clicked).toEqual([]);
+    expect(page.typed).toEqual(["alice@example.com", PASSWORD]);
+    expect(page.field("#password").value).toBe("");
+    expect(outcome.text).toContain("https://accounts.google.com/o/oauth2/v2/auth, where this login is not used");
+    expectNoSecret(outcome, page, [PASSWORD, "fake-oauth-state"]);
   });
 
   it("goes through a two-step login in one call: the username, Next, then the password", async () => {
@@ -220,7 +270,7 @@ describe("a login the site refuses is cleared from the page", () => {
     page.answer = () => ({ error: "Incorrect password." });
     const outcome = await fill();
     expect(outcome).toMatchObject({ ok: false, filled: ["username", "password"] });
-    expect(outcome.text).toBe("The site did not accept the login for alice@example.com on example.com. It said: “Incorrect password.”. Check the saved login in Settings → Logins, or call request_sign_in. The password was cleared from the page.");
+    expect(outcome.text).toBe("The site did not accept the login for alice@example.com on example.com. It said: “Incorrect password.”. A rejected password alone does not distinguish an incorrect saved password from an account that requires SSO (such as Google or GitHub). Check the saved login in Settings → Logins and confirm the account's sign-in method, or call request_sign_in. The password was cleared from the page.");
     expect(page.sent).toHaveLength(1);
     expect(page.field("#password").value).toBe("");
     expect(page.field("#email").value).toBe("alice@example.com");
@@ -235,6 +285,20 @@ describe("a login the site refuses is cleared from the page", () => {
     expect(outcome.text).toContain("it asked for it again, and nothing was submitted twice. It said: “Wrong email or password”.");
     expect(page.sent).toHaveLength(1);
     expect(page.typed).toEqual(["alice@example.com", PASSWORD]);
+  });
+
+  it("does not diagnose a rejected password as stale or choose an SSO provider for the account", async () => {
+    const { page, fill } = setup("https://example.com/login", `${LOGIN_FORM}<button>Sign in with Google</button><button>Sign in with GitHub</button>`,
+      [{ host: "example.com", username: "alice@example.com" }]);
+    page.answer = () => ({ error: "Incorrect email or password" });
+    const outcome = await fill();
+    expect(outcome.ok).toBe(false);
+    expect(outcome.text).toContain('It said: “Incorrect email or password”.');
+    expect(outcome.text).toContain("A rejected password alone does not distinguish an incorrect saved password from an account that requires SSO (such as Google or GitHub).");
+    expect(page.sent).toHaveLength(1);
+    expect(page.clicked).toEqual([]);
+    expect(page.field("#password").value).toBe("");
+    expectNoSecret(outcome, page, [PASSWORD]);
   });
 
   it("clears the password when the page does not answer the submit at all", async () => {
