@@ -3,7 +3,7 @@ import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_REFUSAL_PLAIN, CONTROL_UNCON
 import { ChatMcpClient } from "../drivers/chat-mcp-tools.ts";
 import type { CallOutcome, ComputerCaller } from "./resolve.ts";
 
-export const STEP_TIMEOUT_MS = 30_000;
+export const STEP_TIMEOUT_MS = 60_000;
 const ERROR_CHARS = 300;
 const INVALID: CallOutcome = { ok: false, error: "the computer returned an invalid result" };
 

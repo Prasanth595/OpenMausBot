@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_WAITED, controlRefusal, type ControlState } from "../control-client.ts";
+import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_WAIT_MS, CONTROL_WAITED, controlRefusal, type ControlState } from "../control-client.ts";
 import { computerPersonAwayText } from "../computer-wait.ts";
 import { ChatMcpClient } from "../drivers/chat-mcp-tools.ts";
 import { createGateInterceptor } from "../mcp-bridge.ts";
@@ -61,11 +61,12 @@ describe("openComputerCaller", () => {
     expect(await caller.call("unknown_tool", {}, signal)).toEqual({ ok: false, error: "MCP request failed; inspect the configured integration" });
   });
 
-  it("gives every call the 30 second step timeout and reports a timeout as a failed call", async () => {
+  it("gives every call the 60 second step timeout, past the control gate's longest hold, and reports a timeout as a failed call", async () => {
     const caller = await recordingComputer();
     const call = vi.spyOn(ChatMcpClient.prototype, "call").mockRejectedValueOnce(new Error("MCP request timed out; execution outcome may be uncertain"));
     expect(await caller.call("click", { element_index: 2 }, signal)).toEqual({ ok: false, error: "MCP request timed out; execution outcome may be uncertain" });
-    expect(STEP_TIMEOUT_MS).toBe(30_000);
+    expect(STEP_TIMEOUT_MS).toBe(60_000);
+    expect(STEP_TIMEOUT_MS).toBeGreaterThan(CONTROL_WAIT_MS);
     expect(call).toHaveBeenCalledWith("tools/call", { name: "click", arguments: { element_index: 2 } }, signal, STEP_TIMEOUT_MS);
   });
 
