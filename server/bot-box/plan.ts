@@ -146,7 +146,9 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     { kind: "ro", source: "/opt", target: "/opt", optional: true },
     { kind: "ro", source: "/var/lib", target: "/var/lib", optional: true },
   ];
-  for (const mount of mounts) if ("source" in mount) mount.source = physicalPath(mount.source);
+  if (process.platform !== "win32") {
+    for (const mount of mounts) if ("source" in mount) mount.source = physicalPath(mount.source);
+  }
   for (const root of setup.codeRoots) {
     const code = resolve(root);
     if (["/usr", "/etc", "/opt", "/var/lib"].some((base) => under(code, base))) continue;
