@@ -45,10 +45,12 @@ part people feel.
 The bridge already sees every `tools/call` and its response. It also runs the
 Local VM and VPS proxies with the same control variables, so recording is
 switched on by a separate `OMB_COMPUTER_JOURNAL=1` that only the host mount
-(`gatedLocalComputer`) sets (builder's call), and only for the person's own
-direct request while saved steps are on: room turns, routine runs and every
-turn while the setting is off never journal, and the journal route drops posts
-while it is off. With it set, the bridge pairs each
+(`gatedLocalComputer`) sets (builder's call), and only for a direct request
+that began with the person's own line while saved steps are on: room turns,
+routine runs, work a peer hands on (though it keeps the person's origin) and
+every turn while the setting is off never journal, and the journal route drops
+posts while it is off. A continuation of the person's request, such as a
+`select_computer` hand-off, journals like its first turn. With it set, the bridge pairs each
 request id with its response and POSTs `{tool, arguments, result}` to
 `/api/internal/computer/journal` **before** forwarding the response to the
 engine (1 s timeout, then forward anyway). Awaiting keeps the journal complete
@@ -114,13 +116,20 @@ if **all** hold:
   - key and element actions with a `scope` other than `window` refuse;
   - anything with `x`/`y`, `drag`, `move_cursor`, `zoom` or a `browser_*` tool
     makes the whole request not saveable;
-  - `type_text` makes it not saveable: cua-driver 0.28.2's contract
-    (`TypeTextInput`) does not say whether it replaces a field's value or adds
-    to it, and element values never leave the bridge, so a replay could type
-    "pizzapizza" into a field that already holds the text;
+  - `type_text` makes it not saveable: the shipped cua-driver 0.28.2 binary
+    describes it as "Insert text into the target pid via
+    `AXSetAttribute(kAXSelectedText)`", so it inserts at the selection rather
+    than replacing the field's value (its contract, `TypeTextInput`, says
+    nothing either way), and element values never leave the bridge, so a replay
+    could type "pizzapizza" into a field that already holds the text.
+    `set_value` ("Set a value on a UI element", addressed by `element_index`
+    with a `window_id` or by `element_token`) replaces the value, and saves;
   - a click, double click or key press on a check box, switch, toggle, radio
     button or disclosure triangle makes it not saveable: it flips the control
-    from whatever state it is in, which a replay cannot see.
+    from whatever state it is in, which a replay cannot see. Toggles are known
+    by role only, so a checkmarked menu item (`AXMenuItem`, such as View → Show
+    Sidebar) or a toggle that reports itself as `AXButton` still saves its
+    click; refusing every menu item would drop most menu recipes.
 
 Observation calls (`get_window_state`, `list_apps`, `list_windows`, …) are not
 replayed; they are how the run found its way. The recipe stores each action
@@ -300,7 +309,8 @@ new input route, no second binary, one permission identity. Update that doc's
   looked up again for up to 3 s; saving and replay run on macOS only, from
   trees that say `elements_complete`; a replayed turn is withheld from the
   engine's handoff record and marks the conversation externally updated; only
-  the person's own requests journal, within 256 KB an entry and 32 MB in all;
+  requests that began with the person's own line journal, within 256 KB an
+  entry and 32 MB in all; toggles are known by role only (accepted);
   the "next time no AI" chip shows only when a replay could follow. Not done
   here: no real app has been driven by a replay yet; that smoke test is
   Omkar's, by hand, before merge.

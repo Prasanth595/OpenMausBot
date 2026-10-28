@@ -170,9 +170,9 @@ each round, `prompts.jsonl`, `cua-calls.jsonl`, the Auto round's
 
 ### Last exercised
 
-2026-10-28 on macOS against `feat/learned-replay`, once, with the machine's
-one-minute load average near 5: all eight rounds as stated, 40 driver calls
-and 5 engine prompts in the run. A script asserted each round's statements
+2026-10-28 on macOS against `feat/learned-replay`, twice, with the machine's
+one-minute load average near 5 and then near 40: all eight rounds as stated
+each time, 40 driver calls and 5 engine prompts per run. A script asserted each round's statements
 above except round 5's rebuilt prompt, which was read from `prompts.jsonl`.
 
 ## Limits
@@ -183,7 +183,10 @@ approvals through the normal handler, Stop, fallback with its note, the place,
 approval and switch checks), not real macOS accessibility trees, real
 cua-driver tokens, real timing between steps or a real model. Before merge,
 Omkar runs one replay against the real driver by hand on his Mac (for example
-TextEdit, New Document, set a value); agents never drive the host. The fake engine
+TextEdit, New Document, set a value); agents never drive the host. Toggles
+are known by role only: a checkmarked menu item (`AXMenuItem`) or a toggle that
+reports itself as `AXButton` still saves its click, and no round or test can
+show otherwise without real element values. The fake engine
 names the driver's tools bare (`list_apps`); Claude Code names them
 `mcp__computer__list_apps`, and both count as computer calls.
 

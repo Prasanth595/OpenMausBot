@@ -195,7 +195,7 @@ export function buildRecipe(input: { request: string; journal: RequestJournal; i
     }
     if (PIXEL_TOOLS.has(tool) || tool.startsWith("browser_") || "x" in args || "y" in args) return refuse("pixel-or-drag");
     if (!isActionTool(tool)) return refuse("unknown-tool");
-    // cua-driver 0.28.2's contract (TypeTextInput) does not say whether type_text replaces a field's value or adds to it.
+    // cua-driver 0.28.2's type_text inserts at the selection (AXSetAttribute(kAXSelectedText)), so a field's old text stays.
     if (tool === "type_text") return refuse("typing-appends");
     if (tool === "launch_app") learnLaunch(call);
 
