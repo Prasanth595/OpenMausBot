@@ -88,10 +88,10 @@ describe("a bot's threads in the chat header", () => {
     expect(tabs()).toHaveLength(0);
   });
 
-  it("draws nothing for a bot with one conversation", () => {
+  it("names a bot's single conversation with one tab", () => {
     render(bot({ tasks: [task("who", "Who am I?", 1)] }));
-    expect(host.querySelector("[data-chathead-tabs]")).toBeNull();
-    expect(tabs()).toHaveLength(0);
+    expect(tabs().map((element) => element.dataset.threadTab)).toEqual(["who"]);
+    expect(tab("who").getAttribute("aria-selected")).toBe("true");
   });
 
   it("shows a running turn and an unread reply from the tab itself", () => {
@@ -329,7 +329,7 @@ describe("a bot's threads in the chat header", () => {
 
   it("sets up its scroll handling when a second thread gives the strip something to scroll", () => {
     render(bot({ tasks: [task("who", "Who am I?", 1)] }));
-    expect(host.querySelector('[role="tablist"]')).toBeNull();
+    expect(host.querySelectorAll('[role="tab"]')).toHaveLength(1);
 
     render(bot());
     const list = host.querySelector<HTMLElement>('[role="tablist"]')!;

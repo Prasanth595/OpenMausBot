@@ -154,8 +154,9 @@ describe("the Simple header", () => {
     fixture.advanced = false;
     try {
       const simple = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
+      const identityAt = simple.indexOf("data-chathead-identity");
       const tabsAt = simple.indexOf("data-chathead-tabs");
-      const identity = simple.slice(simple.indexOf("data-chathead-identity"), tabsAt === -1 ? simple.indexOf("data-chathead-controls") : tabsAt);
+      const identity = simple.slice(identityAt, tabsAt > identityAt ? tabsAt : simple.indexOf("data-chathead-controls"));
       const pill = identity.match(/<button[^>]*data-chathead-pill="true"[^>]*>([\s\S]*?)<\/button>/)!;
       expect(identity.replace(pill[0], "").replace(/<span role="status"[^>]*>[^<]*<\/span>/, "")).not.toMatch(/<(button|a|span)[\s>]/);
       expect(pill[1]).toContain(">Pepper</span>");
@@ -302,15 +303,20 @@ describe("glass header", () => {
     expect(markup.slice(scroller)).toMatch(/class="glass-scroller-content[^"]*"[^>]*role="log"/);
   });
 
-  it("fades the transcript into the canvas under Simple mode's header, where Advanced keeps the glass", () => {
+  it("keeps the glass while the thread bar shows, and fades only when there is no bar", () => {
     const bar = (markup: string) => markup.match(/<div data-glass-bar="top"[^>]*>/)?.[0] ?? "";
     expect(bar(renderToStaticMarkup(createElement(ChatView, { bot })))).not.toContain("data-glass-fade");
     fixture.advanced = false;
     try {
-      const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
-      expect(bar(markup)).toContain('data-glass-fade=""');
-      expect(bar(markup)).not.toContain("before:hidden");
-      expect(markup).toMatch(/class="glass-scroller [^"]*" style="scroll-padding-bottom:calc\(/);
+      // The bar is the title bar's solid surface, so the header must not fade out from under it.
+      const withBar = renderToStaticMarkup(createElement(ChatView, { bot }));
+      expect(bar(withBar)).not.toContain("data-glass-fade");
+      expect(withBar).toMatch(/class="glass-scroller [^"]*" style="scroll-padding-bottom:calc\(/);
+
+      // A thread with no tab of its own keeps Simple mode's fade.
+      const faded = renderToStaticMarkup(createElement(ChatView, { bot: { ...bot, threadId: "missing" } }));
+      expect(bar(faded)).toContain('data-glass-fade=""');
+      expect(bar(faded)).not.toContain("before:hidden");
     } finally {
       fixture.advanced = true;
     }
@@ -727,10 +733,12 @@ describe("thread tabs in the chat header", () => {
     ],
   };
 
-  it("puts a bot's threads as tabs in its identity column, before the model picker", () => {
+  it("puts a bot's threads as tabs to the left of the identity, clear of the model picker", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot: threaded }));
     expect(markup).toContain("data-chathead-tabs");
-    const identity = markup.slice(markup.indexOf("data-chathead-identity"), markup.indexOf("data-chathead-controls"));
+    expect(markup.indexOf("data-chathead-tabs")).toBeLessThan(markup.indexOf("data-chathead-identity"));
+    expect(markup.indexOf("data-chathead-identity")).toBeLessThan(markup.indexOf("data-chathead-controls"));
+    const identity = markup.slice(markup.indexOf("data-chathead-tabs"), markup.indexOf("data-chathead-identity"));
     expect(identity).toContain('data-thread-tab="selected"');
     expect(identity).toContain('data-thread-tab="launch"');
     expect(identity).toContain('data-thread-tab="pricing"');
@@ -775,11 +783,10 @@ describe("thread tabs in the chat header", () => {
     }
   });
 
-  it("leaves a one-conversation bot's header alone", () => {
+  it("still names a one-conversation bot's thread with a single tab", () => {
     const markup = renderToStaticMarkup(createElement(ChatView, { bot }));
-    expect(markup).not.toContain("data-chathead-tabs");
-    expect(markup).not.toContain('role="tabpanel"');
-    expect(markup).not.toContain('aria-controls="chat-thread-panel"');
+    expect(markup).toContain("data-chathead-tabs");
+    expect(markup.match(/data-thread-tab="/g)).toHaveLength(1);
   });
 
   it("leaves the header alone when threads are switched off", () => {

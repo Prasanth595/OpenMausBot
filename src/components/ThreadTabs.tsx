@@ -28,13 +28,14 @@ const displayTitle = (task: TabTask) => localizedTaskTitle(task.title || t("task
 export const CHAT_THREAD_PANEL_ID = "chat-thread-panel";
 export const threadTabId = (threadId: string) => `thread-tab-${threadId}`;
 
-/** True only when the strip renders: the open thread qualifies for a tab, and at least two tasks do. A routine run or
- *  archived open thread is filtered out of the strip, so a panel must not be labelled by a tab that cannot exist. */
+/** True only when the strip renders: the open thread has a tab of its own. A routine run or an archived open thread is
+ *  filtered out of the strip, so a panel must not be labelled by a tab that cannot exist. */
 export function threadTabsShown(bot: Bot): boolean {
   const tasks = bot.tasks ?? [];
   const active = tasks.find((task) => task.threadId === bot.threadId);
   if (!active || active.routineRunId || isArchived(active)) return false;
-  return tasks.filter((task) => !task.routineRunId && !isArchived(task)).length >= 2;
+  // One conversation is enough: the bar names the thread on screen, and its menu is how that thread is acted on.
+  return true;
 }
 
 /** What a tab says besides its name: a spinner for a running turn or a dot for an unread reply, in words for a reader. */
