@@ -9,6 +9,7 @@ import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
 import { PERSON_TOOL_DEFINITIONS, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
 import type { CatalogProfile } from "./agents-catalog-profile.ts";
+import { advertisedSchema } from "./agents-schema.ts";
 export { catalogProfileFromEnv, type CatalogProfile } from "./agents-catalog-profile.ts";
 
 export const WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"] as const;
@@ -235,14 +236,14 @@ const TOOL_DEFINITIONS = [
     description: "Read-only: one assignment's status, outcome and result (give its id from a coordinate_bots receipt or a list_threads row), or, with no id, everything this conversation still waits on. A result resumes you on its own, so a bot in a turn never needs this to wait: use it in a later turn when the person asks how a hand-off is going. A standing external runtime long-polls it with wait_ms instead of being resumed. It starts nothing and changes nothing.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
       id: { type: "string", description: "The assignment id (a coordinate_bots receipt's requestId, or a delegation id from list_threads). Omit to list every outstanding assignment of this conversation." },
-      wait_ms: { type: "integer", minimum: 0, maximum: 240_000, description: "Only for a standing external runtime: hold the answer up to this many milliseconds (at most 240000) for the assignment to settle. Omit inside a turn." },
+      wait_ms: { type: "integer", minimum: 0, description: "Only for a standing external runtime: hold the answer up to this many milliseconds (at most 240000) for the assignment to settle. Omit inside a turn." },
     } },
   },
   {
     name: "raise_escalation",
     description: "Flag a gate only the person can lift — a permission or decision your work is parked on and you cannot proceed without. One reason line, the person's own words where possible; the Chief of Staff (or the person directly) is told at once. Then end your turn and wait: the gate lifting resumes nothing on its own, so say plainly that you stopped and why. Not for failures (those report themselves), not for a credential or sign-in (use request_credential or request_sign_in, which resume you), and not to ask the person a question you could ask by ending your turn on it.",
     inputSchema: { type: "object", additionalProperties: false, properties: {
-      reason: { type: "string", minLength: 1, maxLength: 500, description: "One line: what you need from the person and why your work is parked on it." },
+      reason: { type: "string", minLength: 1, description: "One line: what you need from the person and why your work is parked on it." },
     }, required: ["reason"] },
   },
   {
@@ -308,7 +309,7 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
       properties: {
         command: { type: "string", description: "The shell command to run, for example: python3 make_report.py && ls -l report.pdf" },
-        timeout_seconds: { type: "integer", minimum: 1, maximum: 300, description: "How long it may run before it is stopped. Default 60." },
+        timeout_seconds: { type: "integer", description: "How long it may run before it is stopped. Default 60." },
       },
       required: ["command"],
     },
@@ -491,7 +492,7 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
       properties: {
         site: { type: "string", minLength: 1, maxLength: 2048, description: "The page to sign in on: its address, or the domain, such as example.com." },
-        reason: { type: "string", maxLength: 240, description: "One short sentence, in your words, on what the sign-in is for." },
+        reason: { type: "string", description: "One short sentence, in your words, on what the sign-in is for." },
       },
       required: ["site"],
     },
@@ -504,7 +505,7 @@ const TOOL_DEFINITIONS = [
       type: "object",
       additionalProperties: false,
       properties: {
-        username: { type: "string", maxLength: 512, description: "Which saved login to use when the site has more than one." },
+        username: { type: "string", description: "Which saved login to use when the site has more than one." },
         submit: { type: "boolean", description: "false: fill only, you submit." },
       },
     },
@@ -589,7 +590,7 @@ const TOOL_DEFINITIONS = [
           description: "Only messages from this time on: a span back from now like \"24h\", \"3d\", \"2w\"; \"today\" or \"yesterday\"; or a date. With no query, lists everything in that window, newest first.",
         },
         until: { type: "string", description: "Only messages up to this time; same forms as since." },
-        limit: { type: "integer", minimum: 1, maximum: 25, description: "Maximum hits to return; default 12." },
+        limit: { type: "integer", description: "Maximum hits to return, at most 25; default 12." },
         scope: {
           type: "string",
           enum: ["all", "conversations", "memory", "team"],
@@ -635,7 +636,7 @@ const TOOL_DEFINITIONS = [
       additionalProperties: false,
       properties: {
         app: { type: "string", description: "Optional app slug, e.g. gmail." },
-        search: { type: "string", maxLength: 100, description: "Optional words in event names." },
+        search: { type: "string", description: "Optional words in event names." },
       },
     },
   },
@@ -924,11 +925,19 @@ const CLOUD_HOME_SURFACE = {
 
 export function availableTools(profile: CatalogProfile) {
   const tools = catalogTools(profile);
-  return profile.cloudHome
+  const placed = profile.cloudHome
     ? tools.filter(tool => !LOCAL_VM_TOOL_NAMES.has(tool.name)).map(tool => tool.name === "select_computer"
       ? { ...tool, inputSchema: { ...tool.inputSchema, properties: { surface: CLOUD_HOME_SURFACE } } }
       : tool)
     : tools;
+  return placed.map((tool) => ({ ...tool, inputSchema: advertisedSchema(tool.inputSchema, tool.description) }));
+}
+
+const FULL_INPUT_SCHEMAS = new Map<string, unknown>([...TOOL_DEFINITIONS, ...MAUSBOT_TOOL_DEFINITIONS].map((tool) => [tool.name, tool.inputSchema]));
+
+/** A tool's input schema as the catalog writes it, before tools/list leaves anything out: what every call is held to. */
+export function fullInputSchema(name: string): unknown {
+  return FULL_INPUT_SCHEMAS.get(name);
 }
 
 function catalogTools(profile: CatalogProfile) {

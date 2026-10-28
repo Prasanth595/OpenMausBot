@@ -13,7 +13,6 @@
           },
           "offset": {
             "type": "integer",
-            "minimum": 0,
             "description": "Character offset copied from the previous result's notice. Defaults to 0."
           }
         },
@@ -53,20 +52,14 @@
             "items": {
               "type": "string",
               "description": "A teammate's id exactly as list_bots or your roster prints it ([id: …]). A teammate's unique display name also resolves; a name shared by two reachable teammates is refused."
-            },
-            "minItems": 1,
-            "maxItems": 4,
-            "uniqueItems": true
+            }
           },
           "message": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 4000,
             "description": "Question or task for these teammates; later requests in the same conversation can build on earlier ones. Send separate requests when responsibilities differ."
           },
           "reason": {
             "type": "string",
-            "maxLength": 200,
             "description": "Optional one line for the person about why this goes to them (shown as a chip)."
           },
           "rework": {
@@ -104,7 +97,6 @@
           },
           "done_when": {
             "type": "string",
-            "maxLength": 1000,
             "description": "Optional: what must be true for this to count as done, in one or two sentences; the teammate is held to it."
           }
         },
@@ -198,7 +190,6 @@
           },
           "title": {
             "type": "string",
-            "maxLength": 200,
             "description": "A short name for the page."
           },
           "page_id": {
@@ -277,13 +268,10 @@
         "properties": {
           "site": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 2048,
             "description": "The page to sign in on: its address, or the domain, such as example.com."
           },
           "reason": {
             "type": "string",
-            "maxLength": 240,
             "description": "One short sentence, in your words, on what the sign-in is for."
           }
         },
@@ -301,7 +289,6 @@
         "properties": {
           "username": {
             "type": "string",
-            "maxLength": 512,
             "description": "Which saved login to use when the site has more than one."
           },
           "submit": {
@@ -320,8 +307,6 @@
         "properties": {
           "text": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 1000,
             "description": "The note verbatim: short, speakable text, at most 1000 characters."
           }
         },
@@ -349,13 +334,10 @@
           },
           "text": {
             "type": "string",
-            "minLength": 1,
-            "maxLength": 1000,
             "description": "Non-blank new text for append, replace, or supersede: the fact itself, without a date or bullet. Omit for remove and forget; use remove to delete a passage."
           },
           "old_text": {
             "type": "string",
-            "minLength": 1,
             "description": "Exact unique existing passage for replace, supersede, or remove; for forget, words naming it. Omit for append."
           },
           "until": {

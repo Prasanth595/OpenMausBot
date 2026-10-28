@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { childEnv } from "../testing/omb-env.ts";
 import { ToolResults } from "../tool-results.ts";
 import { waitForExit } from "../testing/cleanup.ts";
+import { fullInputSchema } from "./agents-catalog.ts";
 
 const PROXY = join(dirname(fileURLToPath(import.meta.url)), "agents-proxy.ts");
 const TOKEN = "test-comms-token";
@@ -150,7 +151,7 @@ function setProposalResponse(tool: string, response: unknown) {
 
 const proposalCases = [
   { tool: "propose_profile", args: { name: "Kiwi" } },
-  { tool: "propose_team_setup", args: { operations: [] } },
+  { tool: "propose_team_setup", args: { reason: "Fixture plan", operations: [{ action: "update", botId: "bot-helper", fields: { title: "Fixture" } }] } },
   { tool: "propose_bot_deletion", args: { bot_id: "bot-helper", reason: "User requested deletion" } },
   { tool: "skill_manage", args: { action: "create", skill_md: "---\nname: fixture-skill\ndescription: Fixture only\n---\n# Fixture\n", source: "conversation" } },
   { tool: "skill_manage", args: { action: "update", skill_name: "fixture-skill", skill_md: "---\nname: fixture-skill\ndescription: Updated fixture\n---\n# Fixture\n", source: "conversation" } },
@@ -542,7 +543,7 @@ describe("agents-proxy MCP surface", () => {
 
   it.each(["failed", "cancelled", "denied"])("does not misreport a %s team result as applied or pending", async state => {
     teamRequestResponse = { state, result: { state, error: "Fixture target changed", bots: [], newTeams: [] } };
-    const response = await callTool("propose_team_setup", { operations: [] });
+    const response = await callTool("propose_team_setup", { reason: "Fixture plan", operations: [{ action: "update", botId: "bot-helper", fields: { title: "Fixture" } }] });
     expect(response.result.isError).toBe(true);
     expect(response.result.content[0].text).toContain("Fixture target changed");
     expect(response.result.content[0].text).toContain("Do not claim it was applied");
@@ -681,7 +682,8 @@ describe("agents-proxy MCP surface", () => {
     const status = tool("assignment_status");
     expect(status.description).toContain("Read-only");
     expect(status.description).toContain("never needs this to wait");
-    expect(status.inputSchema.properties.wait_ms).toMatchObject({ type: "integer", minimum: 0, maximum: 240_000 });
+    expect(status.inputSchema.properties.wait_ms).toEqual({ type: "integer", description: expect.stringContaining("at most 240000") });
+    expect(fullInputSchema("assignment_status")).toMatchObject({ properties: { wait_ms: { type: "integer", minimum: 0 } } });
     expect(status.inputSchema.required ?? []).toEqual([]);
     expect(JSON.stringify(list.result.tools)).not.toMatch(/Brief synchronous consultation|DEFAULT FOR ASSIGNING WORK|BLOCKING status tool|Never call it in the same turn as delegate_bot|Deprecated alias/);
     for (const name of ["post_to_room", "create_bot", "retry_thread", "list_bots"]) {
@@ -789,11 +791,12 @@ describe("agents-proxy MCP surface", () => {
       "sunday",
     ]);
     expect(create.inputSchema.properties).not.toHaveProperty("duration_minutes");
-    expect(create.inputSchema.properties.timeout_minutes).toMatchObject({ minimum: 5, maximum: 240 });
+    expect(create.inputSchema.properties.timeout_minutes.description).toContain("from 5 to 240 minutes");
+    expect(fullInputSchema("create_trigger")).toMatchObject({ properties: { timeout_minutes: { minimum: 5, maximum: 240 }, schedule: { properties: { every_minutes: { minimum: 5, maximum: 1_440 } } } } });
     expect(create.inputSchema.properties.continuity).toMatchObject({ type: "boolean" });
     expect(create.inputSchema.properties.run_on_startup).toMatchObject({ type: "boolean" });
     expect(create.inputSchema.properties.clear_timeout.type).toBe("boolean");
-    expect(schedule.properties.every_minutes).toMatchObject({ minimum: 5, maximum: 1_440 });
+    expect(schedule.properties.every_minutes.description).toContain("from 5 to 1440");
     expect(schedule.properties.window_start.type).toBe("string");
     expect(schedule.properties.window_end.type).toBe("string");
     expect(schedule.properties.ends_at.type).toBe("string");
@@ -1305,7 +1308,7 @@ describe("agents-proxy MCP surface", () => {
     const tools = await rpc("tools/list");
     const schema = tools.result.tools.find((tool: { name: string }) => tool.name === "memory_update").inputSchema;
     // No pattern on free-text params: constrained decoding collapses a patterned field to a minimal satisfier.
-    expect(schema.properties.text).toMatchObject({ minLength: 1, maxLength: 1000 });
+    expect(fullInputSchema("memory_update")).toMatchObject({ properties: { text: { minLength: 1, maxLength: 1000 } } });
     expect(schema.properties.text).not.toHaveProperty("pattern");
     memoryStatus = 409;
     memoryResponse = { error: "oldText must match exactly once in the latest memory." };
