@@ -43,18 +43,20 @@ kernel refuses user namespaces or the image has no `bwrap`, the box reports `off
 it. The cloud-home image installs `bubblewrap` and `socat` (the in-box bridges; without socat a bundled Node bridge does
 the same).
 
-Boxed launches require bubblewrap 0.11 or later for `--bind-fd` and
-`--ro-bind-fd`. The runner opens each validated source with Linux
+Boxed launches require bubblewrap with `--bind-fd` and `--ro-bind-fd`
+support. Distribution packages can backport these features; Debian
+Bookworm's `0.8.0-2+deb12u1` includes them. The runner opens each validated source with Linux
 `O_PATH | O_NOFOLLOW` and checks its physical path through `/proc/self/fd`.
 It passes the descriptors to bubblewrap and closes its copies after spawn.
 A source replaced before pinning is refused. A replacement after pinning
 does not change the mounted source. Missing optional sources are skipped.
 
-The namespace probe in `detect.ts` can accept an older bubblewrap.
-That version refuses the fd-bind launch; the runner does not retry with
-path binds or an unboxed command. The main `Dockerfile` installs the
-distribution's bubblewrap package without a version floor. Supply 0.11 or
-later when enabling boxed turns.
+The namespace probe in `detect.ts` uses path binds and does not test
+fd-bind support. A package without these features refuses the boxed
+launch. The runner does not retry with path binds or an unboxed command.
+The main `Dockerfile` installs the
+distribution's bubblewrap package without a version floor. Check that
+the installed package supports both fd-bind flags before enabling boxed turns.
 
 Cost on Fly (measured, T0 build notes): about 5 ms and 3 MB per box, plus one socat per bridge.
 
