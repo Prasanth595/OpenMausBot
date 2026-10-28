@@ -15,7 +15,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check) { for (let i = 0; i < 200; i++) { if (check()) return; await sleep(5); } assert.fail("did not reach the expected state"); }
 
 async function world(t) {
-  const f = { now: 1_800_000_000_000, approved: false, supported: true, down: false, account: null, accountId: "account-1", accessToken, requests: [], saved: null, timer: null, available: true, gate: null, failWithdrawals: 0, failOptIns: 0, emails: new Map() };
+  const f = { now: 1_800_000_000_000, approved: false, supported: true, down: false, account: null, accountId: "account-1", accessToken, requests: [], saved: null, timer: null, available: true, gate: null };
   const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "device-1" }, account: { id: f.accountId, email: "person@example.test" } });
   const server = createServer(async (req, res) => {
     let raw = ""; for await (const chunk of req) raw += chunk;
@@ -48,6 +48,7 @@ async function world(t) {
     }
     send(404, { error: "not_found" });
   });
+  Object.assign(f, { failWithdrawals: 0, failOptIns: 0, emails: new Map() });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   f.origin = `http://127.0.0.1:${server.address().port}`;
   f.client = createCloudAccountClient({ origin: f.origin, fixture: true, deviceName: "Fixture computer", platform: "darwin", appVersion: "0.1.125", now: () => f.now,
@@ -150,17 +151,17 @@ test("an answer given while signed out is carried over to an account that has no
   assert.deepEqual(g.requests.filter(request => request.method === "POST"), []);
 });
 
+async function overtake(f, first, second) {
+  let release; f.gate = new Promise(resolve => { release = resolve; });
+  const sending = f.consent.choose(first);
+  await until(() => f.requests.length === 1);
+  const changing = f.consent.choose(second);
+  await until(() => Object.entries(second).every(([key, value]) => f.saved.updatesConsent[key] === value));
+  f.gate = null; release();
+  await Promise.all([sending, changing]);
+}
+
 test("a new answer given while the previous one is still on its way wins on this computer and reaches the Admin", async t => {
-  /** Holds the Admin's reply to the first answer until the second answer is saved here. */
-  const overtake = async (f, first, second) => {
-    let release; f.gate = new Promise(resolve => { release = resolve; });
-    const sending = f.consent.choose(first);
-    await until(() => f.requests.length === 1);
-    const changing = f.consent.choose(second);
-    await until(() => Object.entries(second).every(([key, value]) => f.saved.updatesConsent[key] === value));
-    f.gate = null; release();
-    await Promise.all([sending, changing]);
-  };
   const f = await world(t);
   await f.signInNow();
   await overtake(f, { status: "opted_in" }, { status: "withdrawn" });
@@ -176,8 +177,83 @@ test("a new answer given while the previous one is still on its way wins on this
     { status: "opted_in", email: "person@example.test", installId: g.saved.installId, textVersion: UPDATES_CONSENT_VERSION },
     { status: "withdrawn", receipt: RECEIPT }]);
   assert.deepEqual(g.saved.updatesConsent, { status: "withdrawn", version: UPDATES_CONSENT_VERSION, at: g.now, email: "person@example.test", receipt: RECEIPT });
+});
 
-  // Signed out, a new email: the earlier one is withdrawn with its receipt before the new one is sent.
+test("a slow account A consent read cannot overwrite account B's withdrawal", async t => {
+  const f = await world(t);
+  f.saved = { updatesConsent: { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now, pending: true } };
+  f.launch();
+  await f.signInNow();
+  const held = Promise.withResolvers();
+  t.after(() => held.resolve());
+  f.gate = held.promise;
+  const syncing = f.consent.sync();
+  await until(() => f.requests.length === 1);
+  await f.client.signOut();
+  f.accountId = "account-2";
+  f.accessToken = `omc_${"B".repeat(43)}`;
+  f.account = { status: "withdrawn", textVersion: UPDATES_CONSENT_VERSION, source: "cloud_page", decidedAt: f.now };
+  await f.signInNow();
+  f.gate = null;
+  held.resolve();
+  await syncing;
+  assert.equal(f.account.status, "withdrawn");
+  assert.deepEqual(f.requests.map(({ method }) => method), ["GET", "GET"]);
+  assert.deepEqual(f.saved.updatesConsent, { status: "withdrawn", version: UPDATES_CONSENT_VERSION, at: f.now, account: "account-2" });
+});
+
+test("nothing is asked or sent where it isn't available: a branded build, or no Cloud sign-in in this app", async t => {
+  const f = await world(t);
+  f.available = false;
+  assert.deepEqual(await f.consent.state(), { available: false, due: false, status: null, signedIn: false, email: null, version: UPDATES_CONSENT_VERSION });
+  await assert.rejects(f.consent.choose({ status: "opted_in", email: "person@example.test" }), /not available/);
+  await f.consent.sync();
+  assert.deepEqual(f.requests, []);
+  const none = createUpdatesConsent({ prefs: createDesktopPrefs({ read: () => null, write: () => {} }), account: () => null, available: async () => true });
+  assert.equal((await none.state()).available, false);
+});
+
+test("the record on disk: only a whole, known answer is kept", () => {
+  for (const value of [null, "opted_in", [], { status: "subscribed", version: "2026-10-23", at: 1 }, { status: "opted_in", version: "", at: 1 }, { status: "declined", version: "2026-10-23", at: -1 }])
+    assert.equal(parseUpdatesConsent(value), null, JSON.stringify(value));
+  assert.deepEqual(parseUpdatesConsent({ status: "opted_in", version: "2026-10-23", at: 5, email: "a@b.test", receipt: "short", account: "x\n", pending: "yes", extra: 1 }),
+    { status: "opted_in", version: "2026-10-23", at: 5, email: "a@b.test" });
+  assert.deepEqual(parseUpdatesConsent({ status: "withdrawn", version: "2026-10-23", at: 5, replacedReceipts: [RECEIPT, "short", 7, RECEIPT] }),
+    { status: "withdrawn", version: "2026-10-23", at: 5, replacedReceipts: [RECEIPT] });
+  assert.deepEqual(parseUpdatesConsent({ status: "withdrawn", version: "2026-10-23", at: 5, replacedReceipts: RECEIPT }), { status: "withdrawn", version: "2026-10-23", at: 5 });
+  let saved = null;
+  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
+  assert.equal(prefs.setUpdatesConsent({ status: "maybe" }), false);
+  assert.equal(saved, null);
+  const id = prefs.installId();
+  assert.equal(prefs.installId(), id, "one id per install");
+  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).installId(), id, "kept across launches");
+});
+
+test("only this computer's page and My Cloud's own page may ask or answer; main wires it through the desktop prefs", async () => {
+  const handlers = new Map(), calls = [];
+  const consent = { state: async () => { calls.push("state"); return { due: true }; }, choose: async choice => { calls.push(choice); return { due: false }; } };
+  registerUpdatesConsent({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, page: event => event.page, consent });
+  assert.deepEqual([...handlers.keys()], ["updates-consent:state", "updates-consent:choose"]);
+  for (const page of ["server", null]) {
+    await assert.rejects(async () => handlers.get("updates-consent:state")({ page }), /only available in this app's window/);
+    await assert.rejects(async () => handlers.get("updates-consent:choose")({ page }, { status: "opted_in" }), /only available/);
+  }
+  assert.deepEqual(await handlers.get("updates-consent:state")({ page: "local" }), { due: true });
+  assert.deepEqual(await handlers.get("updates-consent:choose")({ page: "cloud" }, { status: "declined" }), { due: false });
+  assert.deepEqual(calls, ["state", { status: "declined" }]);
+
+  const channels = new Set();
+  const ipcMain = { handle: channel => channels.add(channel), on: channel => channels.add(channel) };
+  const base = { ipcMain, read: () => null, write: () => {}, page: () => "local", cloudOffered: async () => false };
+  assert.equal(registerDesktopPrefs(base), null, "no Cloud client: no question");
+  assert.equal(channels.has("updates-consent:state"), false);
+  const wired = registerDesktopPrefs({ ...base, cloudAccount: () => null });
+  assert.equal(typeof wired.accountChanged, "function");
+  assert.ok(channels.has("updates-consent:state") && channels.has("updates-consent:choose"));
+});
+
+test("signed out, an overtaken email is withdrawn before its replacement even after a failed withdrawal", async t => {
   const h = await world(t);
   await overtake(h, { status: "opted_in", email: "old@example.test" }, { status: "opted_in", email: "new@example.test" });
   assert.deepEqual(h.requests.map(request => request.body), [
@@ -372,78 +448,4 @@ test("an account without a choice never inherits another account's answer", asyn
       assert.equal(f.account.status, "withdrawn");
       assert.equal(f.saved.updatesConsent.account, "account-2");
     });
-});
-
-test("a slow account A consent read cannot overwrite account B's withdrawal", async t => {
-  const f = await world(t);
-  f.saved = { updatesConsent: { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now, pending: true } };
-  f.launch();
-  await f.signInNow();
-  const held = Promise.withResolvers();
-  t.after(() => held.resolve());
-  f.gate = held.promise;
-  const syncing = f.consent.sync();
-  await until(() => f.requests.length === 1);
-  await f.client.signOut();
-  f.accountId = "account-2";
-  f.accessToken = `omc_${"B".repeat(43)}`;
-  f.account = { status: "withdrawn", textVersion: UPDATES_CONSENT_VERSION, source: "cloud_page", decidedAt: f.now };
-  await f.signInNow();
-  f.gate = null;
-  held.resolve();
-  await syncing;
-  assert.equal(f.account.status, "withdrawn");
-  assert.deepEqual(f.requests.map(({ method }) => method), ["GET", "GET"]);
-  assert.deepEqual(f.saved.updatesConsent, { status: "withdrawn", version: UPDATES_CONSENT_VERSION, at: f.now, account: "account-2" });
-});
-
-test("nothing is asked or sent where it isn't available: a branded build, or no Cloud sign-in in this app", async t => {
-  const f = await world(t);
-  f.available = false;
-  assert.deepEqual(await f.consent.state(), { available: false, due: false, status: null, signedIn: false, email: null, version: UPDATES_CONSENT_VERSION });
-  await assert.rejects(f.consent.choose({ status: "opted_in", email: "person@example.test" }), /not available/);
-  await f.consent.sync();
-  assert.deepEqual(f.requests, []);
-  const none = createUpdatesConsent({ prefs: createDesktopPrefs({ read: () => null, write: () => {} }), account: () => null, available: async () => true });
-  assert.equal((await none.state()).available, false);
-});
-
-test("the record on disk: only a whole, known answer is kept", () => {
-  for (const value of [null, "opted_in", [], { status: "subscribed", version: "2026-10-23", at: 1 }, { status: "opted_in", version: "", at: 1 }, { status: "declined", version: "2026-10-23", at: -1 }])
-    assert.equal(parseUpdatesConsent(value), null, JSON.stringify(value));
-  assert.deepEqual(parseUpdatesConsent({ status: "opted_in", version: "2026-10-23", at: 5, email: "a@b.test", receipt: "short", account: "x\n", pending: "yes", extra: 1 }),
-    { status: "opted_in", version: "2026-10-23", at: 5, email: "a@b.test" });
-  assert.deepEqual(parseUpdatesConsent({ status: "withdrawn", version: "2026-10-23", at: 5, replacedReceipts: [RECEIPT, "short", 7, RECEIPT] }),
-    { status: "withdrawn", version: "2026-10-23", at: 5, replacedReceipts: [RECEIPT] });
-  assert.deepEqual(parseUpdatesConsent({ status: "withdrawn", version: "2026-10-23", at: 5, replacedReceipts: RECEIPT }), { status: "withdrawn", version: "2026-10-23", at: 5 });
-  let saved = null;
-  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
-  assert.equal(prefs.setUpdatesConsent({ status: "maybe" }), false);
-  assert.equal(saved, null);
-  const id = prefs.installId();
-  assert.equal(prefs.installId(), id, "one id per install");
-  assert.equal(createDesktopPrefs({ read: () => saved, write: () => {} }).installId(), id, "kept across launches");
-});
-
-test("only this computer's page and My Cloud's own page may ask or answer; main wires it through the desktop prefs", async () => {
-  const handlers = new Map(), calls = [];
-  const consent = { state: async () => { calls.push("state"); return { due: true }; }, choose: async choice => { calls.push(choice); return { due: false }; } };
-  registerUpdatesConsent({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, page: event => event.page, consent });
-  assert.deepEqual([...handlers.keys()], ["updates-consent:state", "updates-consent:choose"]);
-  for (const page of ["server", null]) {
-    await assert.rejects(async () => handlers.get("updates-consent:state")({ page }), /only available in this app's window/);
-    await assert.rejects(async () => handlers.get("updates-consent:choose")({ page }, { status: "opted_in" }), /only available/);
-  }
-  assert.deepEqual(await handlers.get("updates-consent:state")({ page: "local" }), { due: true });
-  assert.deepEqual(await handlers.get("updates-consent:choose")({ page: "cloud" }, { status: "declined" }), { due: false });
-  assert.deepEqual(calls, ["state", { status: "declined" }]);
-
-  const channels = new Set();
-  const ipcMain = { handle: channel => channels.add(channel), on: channel => channels.add(channel) };
-  const base = { ipcMain, read: () => null, write: () => {}, page: () => "local", cloudOffered: async () => false };
-  assert.equal(registerDesktopPrefs(base), null, "no Cloud client: no question");
-  assert.equal(channels.has("updates-consent:state"), false);
-  const wired = registerDesktopPrefs({ ...base, cloudAccount: () => null });
-  assert.equal(typeof wired.accountChanged, "function");
-  assert.ok(channels.has("updates-consent:state") && channels.has("updates-consent:choose"));
 });
