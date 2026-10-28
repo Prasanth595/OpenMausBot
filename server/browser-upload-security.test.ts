@@ -64,18 +64,21 @@ it.each(["darwin", "linux"])("stages a regular file with valid %s open flags", a
   expect(fs.readFileSync(staged!, "utf8")).toBe("report");
 });
 
-it.each([false, true])("refuses workspace-file staging on Windows before opening the source (everyFile: %s)", async (everyFile) => {
-  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-windows-refusal-")));
+it.each([false, true])("stages workspace files on Windows from the checked path (everyFile: %s)", async (everyFile) => {
+  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-windows-")));
   dirs.push(base);
   const source = join(base, "report.txt"), folder = join(base, "uploads");
   fs.writeFileSync(source, "report");
   vi.stubGlobal("process", { ...process, platform: "win32" });
-  let opened = false;
-  hooks.afterOpen = () => { opened = true; };
-  await expect(namedUploadPaths([{ file: source, name: everyFile ? null : "Report.txt" }], folder, Date.now(), { everyFile }))
-    .rejects.toThrow("Uploads of workspace files through the browser are not supported on Windows yet.");
-  expect(opened).toBe(false);
-  expect(fs.existsSync(folder)).toBe(false);
+  const flags: fs.OpenMode[] = [];
+  hooks.openFlags = (path, mode) => {
+    if (path === source) flags.push(mode);
+    return mode;
+  };
+  const [staged] = await namedUploadPaths([{ file: source, name: everyFile ? null : "Report.txt" }], folder, Date.now(), { everyFile });
+  expect(flags).toEqual([fs.constants.O_RDONLY]);
+  expect(staged).not.toBe(source);
+  expect(fs.readFileSync(staged!, "utf8")).toBe("report");
 });
 
 it.skipIf(process.platform === "win32")("pins both sources before a directory is swapped while the first file copies", async () => {

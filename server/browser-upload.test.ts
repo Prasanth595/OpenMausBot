@@ -47,7 +47,7 @@ describe("files a page may receive", () => {
   });
 });
 
-describe.skipIf(process.platform === "win32")("the name a page sees", () => {
+describe("the name a page sees", () => {
   it("gives an attachment the person's own name, and leaves every other file as it is", async () => {
     const { base, attachments, workspace } = folders();
     const stored = join(attachments, "cv.pdf"), report = join(workspace, "report.csv");
@@ -92,7 +92,7 @@ describe.skipIf(process.platform === "win32")("the name a page sees", () => {
   });
 });
 
-describe.skipIf(process.platform === "win32")("the files a boxed browser is given", () => {
+describe("the files a boxed browser is given", () => {
   it("copies every file into the one folder the box shows Chrome, under the person's name or its own", async () => {
     const root = realpathSync.native(mkdtempSync(join(tmpdir(), "omb-boxed-upload-")));
     const source = join(root, "work", "report.txt"), stored = join(root, "attachments", "a1b2.pdf");

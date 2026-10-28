@@ -618,15 +618,17 @@ describe("a Team Cloud's browsers, one per audience", () => {
 describe("a Team Cloud's boxed browsers and the files a turn uploads", () => {
   afterEach(() => chromeLauncher.boxWith(() => null));
 
-  it.each([null, "report.txt", "Report.txt"])("refuses workspace-file uploads through Chrome on Windows (name: %s)", async (name) => {
+  it.each([null, "report.txt", "Report.txt"])("gives Chrome on Windows a private copy of a workspace file (name: %s)", async (name) => {
     const work = realpathSync(mkdtempSync(join(tmpdir(), "omb-host-upload-windows-")));
     try {
       const file = join(work, "report.txt");
       writeFileSync(file, "report");
       const { host } = setup("chrome");
       vi.stubGlobal("process", { ...process, platform: "win32" });
-      await expect(host.uploadPaths([{ file, name }], "bot-scout", { command: "omb-cdp", args: ["bot:scout"], env: {} }))
-        .rejects.toThrow("Uploads of workspace files through the browser are not supported on Windows yet.");
+      const [staged] = await host.uploadPaths([{ file, name }], "bot-scout", { command: "omb-cdp", args: ["bot:scout"], env: {} });
+      vi.unstubAllGlobals();
+      expect(staged!.startsWith(join(DATA_DIR, "browser-uploads"))).toBe(true);
+      expect(readFileSync(staged!, "utf8")).toBe("report");
     } finally {
       vi.unstubAllGlobals();
       rmSync(work, { recursive: true, force: true });
@@ -668,7 +670,7 @@ describe("a Team Cloud's boxed browsers and the files a turn uploads", () => {
     }
   });
 
-  it.skipIf(process.platform === "win32")("are copied into that browser's own profile, the one folder of the disk its box shows Chrome", async () => {
+  it("are copied into that browser's own profile, the one folder of the disk its box shows Chrome", async () => {
     const work = realpathSync(mkdtempSync(join(tmpdir(), "omb-host-upload-")));
     const file = join(work, "report.txt");
     writeFileSync(file, "report");

@@ -83,8 +83,10 @@ export async function namedUploadPaths(files: ReadonlyArray<{ file: string; name
 }
 
 function openUpload(source: string): { input: number; size: number } {
-  if (process.platform === "win32") throw new BrowserUploadRefusal("Uploads of workspace files through the browser are not supported on Windows yet.");
-  const input = openSync(source, constants.O_RDONLY | constants.O_NONBLOCK | (process.platform === "darwin" ? O_NOFOLLOW_ANY : constants.O_NOFOLLOW));
+  // Windows has no O_NOFOLLOW: there the copy is read from the path the allowlist just checked, before any wait.
+  const flags = process.platform === "win32" ? constants.O_RDONLY
+    : constants.O_RDONLY | constants.O_NONBLOCK | (process.platform === "darwin" ? O_NOFOLLOW_ANY : constants.O_NOFOLLOW);
+  const input = openSync(source, flags);
   try {
     if (process.platform === "linux" && readlinkSync(`/proc/self/fd/${input}`) !== source) throw new BrowserUploadRefusal(`${source} changed while staging the upload.`);
     const file = fstatSync(input, { bigint: true });
