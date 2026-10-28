@@ -1,11 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, read, readdirSync, readlinkSync, realpathSync, rmSync, statSync, write, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative } from "node:path";
+import { promisify } from "node:util";
 
+import { BROWSER_UPLOAD_MAX_BYTES, FILE_MAX_BYTES } from "../shared/upload-limits.ts";
 import { safeFileName } from "./browser/cdp/downloads.ts";
 
 const MAX_FILES = 10;
+const readChunk = promisify(read), writeChunk = promisify(write);
 // Node 24 omits Darwin's O_NOFOLLOW_ANY, which rejects symlinks in every path component.
 const O_NOFOLLOW_ANY = 0x20000000;
 const NAMED_COPY_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -43,48 +46,74 @@ export function uploadableFiles(files: unknown, roots: readonly string[]): { fil
 /** Chrome names an uploaded file after its file on disk and reads it only when the form is sent, so an attachment stored
  * under a random id gets a copy with the person's own name that outlives the call. `everyFile`: stage every file in
  * `folder`, outside the bot's writable workspace. */
-export function namedUploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, folder: string, now = Date.now(), { everyFile = false } = {}): string[] {
+export async function namedUploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, folder: string, now = Date.now(), { everyFile = false } = {}): Promise<string[]> {
   sweepNamedCopies(folder, now);
   const created: string[] = [];
+  const opened: Array<{ input: number; size: number }> = [];
   try {
-    return files.map(({ file, name: given }) => {
+    let total = 0;
+    const prepared = files.map(({ file, name: given }) => {
       const name = given && basename(given) === given ? given : everyFile ? basename(file) : null;
-      if (!name || (name === basename(file) && !everyFile)) return file;
+      if (!name || (name === basename(file) && !everyFile)) return { file };
+      const source = openUpload(file);
+      opened.push(source);
+      total += source.size;
+      if (total > BROWSER_UPLOAD_MAX_BYTES) throw new Error("Uploads are limited to 100 MiB per batch.");
+      return { file, name, source };
+    });
+    const paths: string[] = [];
+    for (const entry of prepared) {
+      if (!entry.source) { paths.push(entry.file); continue; }
       const dir = join(folder, randomUUID());
       mkdirSync(dir, { recursive: true, mode: 0o700 });
       created.push(dir);
-      const named = join(dir, name);
-      copyUpload(file, named);
-      return named;
-    });
+      const named = join(dir, entry.name);
+      await copyUpload(entry.source, named, entry.file);
+      paths.push(named);
+    }
+    return paths;
   } catch (error) {
     for (const dir of created) rmSync(dir, { recursive: true, force: true });
     throw error;
+  } finally {
+    for (const { input } of opened) closeSync(input);
   }
 }
 
-function copyUpload(source: string, destination: string): void {
+function openUpload(source: string): { input: number; size: number } {
   const checked = process.platform === "win32" ? lstatSync(source, { bigint: true }) : null;
   if (checked && !checked.isFile()) throw new Error(`${source} is not a file.`);
   const input = openSync(source, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK | (process.platform === "darwin" ? O_NOFOLLOW_ANY : 0)));
-  let output: number | undefined;
   try {
     if (process.platform === "linux" && readlinkSync(`/proc/self/fd/${input}`) !== source) throw new Error(`${source} changed while staging the upload.`);
     const file = fstatSync(input, { bigint: true });
     if (checked && (checked.dev !== file.dev || checked.ino !== file.ino)) throw new Error(`${source} changed while staging the upload.`);
     if (!file.isFile()) throw new Error(`${source} is not a file.`);
-    output = openSync(destination, "wx", 0o600);
+    if (file.size > BigInt(FILE_MAX_BYTES)) throw new Error("Uploads are limited to 25 MiB per file.");
+    return { input, size: Number(file.size) };
+  } catch (error) {
+    closeSync(input);
+    throw error;
+  }
+}
+
+async function copyUpload({ input, size }: { input: number; size: number }, destination: string, source: string): Promise<void> {
+  const output = openSync(destination, "wx", 0o600);
+  try {
     const chunk = Buffer.allocUnsafe(1024 * 1024);
-    for (let remaining = Number(file.size); remaining > 0;) {
-      const count = readSync(input, chunk, 0, Math.min(chunk.length, remaining), null);
+    for (let remaining = size; remaining > 0;) {
+      const { bytesRead: count } = await readChunk(input, chunk, 0, Math.min(chunk.length, remaining), null);
       if (!count) throw new Error(`${source} changed while staging the upload.`);
       let offset = 0;
-      while (offset < count) offset += writeSync(output, chunk, offset, count - offset);
+      while (offset < count) {
+        const { bytesWritten } = await writeChunk(output, chunk, offset, count - offset, null);
+        if (!bytesWritten) throw new Error(`Could not stage ${source}.`);
+        offset += bytesWritten;
+      }
       remaining -= count;
     }
   } finally {
-    closeSync(input);
-    if (output !== undefined) closeSync(output);
+    closeSync(output);
   }
 }
 

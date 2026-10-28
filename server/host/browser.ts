@@ -499,7 +499,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return (await Promise.all(requests.map((request) => eraseOneBrowser(request)))).every(Boolean);
   }
   /** Chrome receives private copies; a boxed agent-browser reads them from its own profile's folder. */
-  function uploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, session: string, spec: Spec): string[] {
+  function uploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, session: string, spec: Spec): Promise<string[]> {
     const chrome = chromeTarget(session, spec);
     const folder = boxed && !chrome ? join(browserProfileDirectory(session), "omb-uploads") : join(DATA_DIR, "browser-uploads");
     return namedUploadPaths(files, folder, Date.now(), { everyFile: boxed || Boolean(chrome) });

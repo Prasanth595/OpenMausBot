@@ -631,7 +631,7 @@ describe("a Team Cloud's boxed browsers and the files a turn uploads", () => {
       if ("error" in checked) throw new Error(checked.error);
       const box = { bwrap: "/usr/bin/bwrap", options: ["--unshare-pid"], seccomp: null };
       const { host } = setup("chrome", { cloudHome: true, ...(boxed ? { browserBox: () => box } : {}) });
-      const paths = host.uploadPaths(checked.files.map((file) => ({ file, name: null })), "bot-scout", { command: "omb-cdp", args: ["bot:scout"], env: {} });
+      const paths = await host.uploadPaths(checked.files.map((file) => ({ file, name: null })), "bot-scout", { command: "omb-cdp", args: ["bot:scout"], env: {} });
       const choosers = new FileChoosers();
       let opened!: (params: Params) => void;
       const uploaded: Array<{ method: string; files: unknown; bytes: string[] }> = [];
@@ -653,18 +653,18 @@ describe("a Team Cloud's boxed browsers and the files a turn uploads", () => {
     }
   });
 
-  it("are copied into that browser's own profile, the one folder of the disk its box shows Chrome", () => {
+  it("are copied into that browser's own profile, the one folder of the disk its box shows Chrome", async () => {
     const work = realpathSync(mkdtempSync(join(tmpdir(), "omb-host-upload-")));
     const file = join(work, "report.txt");
     writeFileSync(file, "report");
     const box = { bwrap: "/usr/bin/bwrap", options: ["--unshare-pid"], seccomp: null };
     const boxed = setup(undefined, { cloudHome: true, browserBox: () => box }).host;
     const session = `bot-scout${ADA}`;
-    const [linked] = boxed.uploadPaths([{ file, name: null }], session, { command: "agent-browser", env: {} });
+    const [linked] = await boxed.uploadPaths([{ file, name: null }], session, { command: "agent-browser", env: {} });
     expect(linked!.startsWith(join(DATA_DIR, "agent-browser-profiles"))).toBe(true);
     expect(readFileSync(linked!, "utf8")).toBe("report");
     const plain = setup(undefined, { cloudHome: true }).host;
-    expect(plain.uploadPaths([{ file, name: null }], session, { command: "agent-browser", env: {} }), "unboxed, the file is given as it is").toEqual([file]);
+    expect(await plain.uploadPaths([{ file, name: null }], session, { command: "agent-browser", env: {} }), "unboxed, the file is given as it is").toEqual([file]);
     rmSync(work, { recursive: true, force: true });
   });
 });

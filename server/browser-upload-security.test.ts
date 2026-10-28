@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 
-const hooks = vi.hoisted(() => ({ beforeRead: null as (() => void) | null, redirect: null as { source: string; target: string } | null }));
+const hooks = vi.hoisted(() => ({ beforeRead: null as ((input: number) => void) | null, redirect: null as { source: string; target: string } | null }));
 vi.mock("node:fs", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:fs")>();
   return {
@@ -13,9 +13,13 @@ vi.mock("node:fs", async (importOriginal) => {
       return original.openSync(redirected, args[1], args[2]);
     },
     readSync: (...args: Parameters<typeof original.readSync>) => {
-      hooks.beforeRead?.();
+      hooks.beforeRead?.(args[0]);
       return original.readSync(...args);
     },
+    read: Object.defineProperties((...args: Parameters<typeof original.read>) => {
+      hooks.beforeRead?.(args[0]);
+      return original.read(...args);
+    }, Object.getOwnPropertyDescriptors(original.read)),
   };
 });
 
@@ -28,7 +32,7 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-it.skipIf(process.platform === "win32")("refuses a second file reached through a directory swapped while the first file copies", () => {
+it.skipIf(process.platform === "win32")("pins both sources before a directory is swapped while the first file copies", async () => {
   const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-race-")));
   dirs.push(base);
   const workspace = join(base, "workspace"), sub = join(workspace, "sub"), outside = join(base, "outside");
@@ -44,10 +48,11 @@ it.skipIf(process.platform === "win32")("refuses a second file reached through a
     fs.rmSync(sub, { recursive: true });
     fs.symlinkSync(outside, sub, "dir");
   };
-  expect(() => namedUploadPaths(checked.files.map((file) => ({ file, name: null })), join(base, "uploads"), Date.now(), { everyFile: true })).toThrow();
+  const staged = await namedUploadPaths(checked.files.map((file) => ({ file, name: null })), join(base, "uploads"), Date.now(), { everyFile: true });
+  expect(fs.readFileSync(staged[1]!, "utf8")).toBe("report");
 });
 
-it("rejects a Windows open that follows a symlink swapped in after lstat", () => {
+it("rejects a Windows open that follows a symlink swapped in after lstat", async () => {
   const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-windows-")));
   dirs.push(base);
   const source = join(base, "report.txt"), secret = join(base, "secret.txt");
@@ -55,16 +60,75 @@ it("rejects a Windows open that follows a symlink swapped in after lstat", () =>
   fs.writeFileSync(secret, "outside secret");
   vi.stubGlobal("process", { ...process, platform: "win32" });
   hooks.redirect = { source, target: secret };
-  expect(() => namedUploadPaths([{ file: source, name: "Report.txt" }], join(base, "uploads"))).toThrow(/changed/);
+  await expect(async () => namedUploadPaths([{ file: source, name: "Report.txt" }], join(base, "uploads"))).rejects.toThrow(/changed/);
 });
 
-it("removes every directory from a batch when its second file fails", () => {
+it("removes every directory from a batch when its second file fails", async () => {
   const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-cleanup-")));
   dirs.push(base);
-  const first = join(base, "first.txt"), folder = join(base, "uploads");
+  const first = join(base, "first.txt"), second = join(base, "second.txt"), folder = join(base, "uploads");
   fs.writeFileSync(first, "first");
-  expect(() => namedUploadPaths([
-    { file: first, name: "First.txt" }, { file: join(base, "missing.txt"), name: "Missing.txt" },
-  ], folder)).toThrow();
+  fs.writeFileSync(second, "second");
+  const secondInode = fs.statSync(second, { bigint: true }).ino;
+  hooks.beforeRead = (input) => {
+    if (fs.fstatSync(input, { bigint: true }).ino === secondInode) fs.truncateSync(second, 0);
+  };
+  await expect(async () => namedUploadPaths([
+    { file: first, name: "First.txt" }, { file: second, name: "Second.txt" },
+  ], folder)).rejects.toThrow(/changed/);
   expect(fs.readdirSync(folder)).toEqual([]);
+});
+
+it("rejects an oversized sparse file before reading it", async () => {
+  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-size-")));
+  dirs.push(base);
+  const source = join(base, "large.bin");
+  fs.writeFileSync(source, "");
+  fs.truncateSync(source, 25 * 1024 * 1024 + 1);
+  let read = false;
+  hooks.beforeRead = () => { read = true; };
+  await expect(async () => namedUploadPaths([{ file: source, name: "Large.bin" }], join(base, "uploads"))).rejects.toThrow(/limit/i);
+  expect(read).toBe(false);
+});
+
+it("rejects a batch over 100 MiB before reading any file", async () => {
+  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-batch-")));
+  dirs.push(base);
+  const files = Array.from({ length: 5 }, (_, i) => {
+    const file = join(base, `${i}.bin`);
+    fs.writeFileSync(file, "");
+    fs.truncateSync(file, 21 * 1024 * 1024);
+    return { file, name: `Upload-${i}.bin` };
+  });
+  let read = false;
+  hooks.beforeRead = () => { read = true; };
+  await expect(async () => namedUploadPaths(files, join(base, "uploads"))).rejects.toThrow(/limit/i);
+  expect(read).toBe(false);
+});
+
+it("lets the event loop run while an accepted upload copies", async () => {
+  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-async-")));
+  dirs.push(base);
+  const source = join(base, "large.bin");
+  fs.writeFileSync(source, Buffer.alloc(2 * 1024 * 1024, 0x61));
+  let yielded = false;
+  setImmediate(() => { yielded = true; });
+  const [staged] = await namedUploadPaths([{ file: source, name: "Large.bin" }], join(base, "uploads"));
+  expect(yielded).toBe(true);
+  expect(fs.readFileSync(staged!)).toEqual(Buffer.alloc(2 * 1024 * 1024, 0x61));
+});
+
+it.skipIf(process.platform === "win32")("rejects a directory symlink inserted after the allowlist check before staging", async () => {
+  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-parent-")));
+  dirs.push(base);
+  const workspace = join(base, "workspace"), sub = join(workspace, "sub"), outside = join(base, "outside");
+  fs.mkdirSync(sub, { recursive: true });
+  fs.mkdirSync(outside);
+  fs.writeFileSync(join(sub, "report.txt"), "report");
+  fs.writeFileSync(join(outside, "report.txt"), "outside secret");
+  const checked = uploadableFiles([join(sub, "report.txt")], [workspace]);
+  if ("error" in checked) throw new Error(checked.error);
+  fs.rmSync(sub, { recursive: true });
+  fs.symlinkSync(outside, sub, "dir");
+  await expect(async () => namedUploadPaths(checked.files.map((file) => ({ file, name: "Report.txt" })), join(base, "uploads"))).rejects.toThrow();
 });

@@ -13527,7 +13527,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
           const upload = uploadableFiles(params.arguments?.files, messageFileRootsForThread(bot.id, internalCapability.threadId));
           if ("error" in upload) return json(res, 200, { result: { isError: true, content: [{ type: "text", text: upload.error }] } });
           const requested = params.arguments.files as string[];
-          const files = uploadPaths(upload.files.map((file, i) => ({ file, name: attachmentNameInThread(internalCapability.threadId, requested[i]!) })), browser.session, browser.spec);
+          const files = await uploadPaths(upload.files.map((file, i) => ({ file, name: attachmentNameInThread(internalCapability.threadId, requested[i]!) })), browser.session, browser.spec);
           params = { ...params, arguments: { ...params.arguments, files } };
         }
         const result = await browserRuntime.agentRpc(browser.session, browser.spec, body.method, params, () => {
