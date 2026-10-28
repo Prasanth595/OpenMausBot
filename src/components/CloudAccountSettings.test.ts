@@ -12,7 +12,7 @@ vi.mock("react", async original => ({ ...await original<typeof import("react")>(
 vi.mock("./DesktopCapabilities", () => ({ useDesktopCapabilities: () => ({ capabilities: { host: { platform: f.platform } }, ready: true }) }));
 vi.mock("@/state/store", async original => ({ ...await original<typeof import("@/state/store")>(), useStore: () => ({ state: { bots: [{ name: "Ember" }] }, dispatch: vi.fn() }) }));
 import { CloudAccountSettings, CloudPlanOnCloud, TeamPeopleCard, cloudLinkAction, cloudPlanLabel } from "./CloudAccountSettings";
-import { CloudLending } from "./CloudLending";
+import { CloudLendingFor } from "./CloudLendingFor";
 import { LentComputersCard } from "./LentComputers";
 type Node = ReactElement<{ children?: ReactNode; onClick?: () => void }>;
 function nodes(value: ReactNode): Node[] { if (!isValidElement(value)) return []; const node = value as Node; return [node, ...Children.toArray(node.props.children).flatMap(nodes)]; }
@@ -270,14 +270,14 @@ it("while the bots move to My Cloud, says how the move goes, with nothing to ope
   let view = await moving();
   all(view.html, ["Moving your bots to My Cloud… 3 of 12 chats", "data-cloud-moving"]);
   none(view.html, [">Open the Cloud</button>", "Switch back to This computer", "The Cloud is ready"]);
-  expect(view.nodes.find(node => node.type === CloudLending)?.props).toMatchObject({ moving: true });
+  expect(view.nodes.find(node => node.type === CloudLendingFor)?.props).toMatchObject({ moving: true });
   move = { phase: "finishing" };
   f.values = []; view = await moving();
   all(view.html, ["Moving to My Cloud… almost done"]); none(view.html, [">Open the Cloud</button>", "Switch back to This computer"]);
   move = undefined;
   f.values = []; view = await moving();
   all(view.html, [">Open the Cloud</button>", "Switch back to This computer", "The Cloud is ready"]); none(view.html, ["data-cloud-moving", "Moving"]);
-  expect(view.nodes.find(node => node.type === CloudLending)?.props).toMatchObject({ moving: false });
+  expect(view.nodes.find(node => node.type === CloudLendingFor)?.props).toMatchObject({ moving: false });
 });
 it("says why a ready Cloud can't be reached when the Admin knows, with no button that can't reach it", async () => {
   const since = Date.UTC(2026, 9, 16, 9);

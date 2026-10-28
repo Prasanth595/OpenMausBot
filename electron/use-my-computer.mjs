@@ -63,17 +63,19 @@ export async function backInWindow({ window, wait }) {
 
 /**
  * @param {{
- *   lending: { state(): Promise<import("./cloud-lending-ipc.mjs").LendingNow>, lendByDefault(input?: { asked?: boolean }): Promise<import("./cloud-lending-ipc.mjs").PageLending | null>,
- *     lendScreen(): Promise<import("./cloud-lending-ipc.mjs").PageLending | null> },
+ *   lending: { state(target?: unknown): Promise<import("./cloud-lending-ipc.mjs").LendingNow>,
+ *     lendByDefault(input?: { asked?: boolean, target?: unknown }): Promise<import("./cloud-lending-ipc.mjs").PageLending | null>,
+ *     lendScreen(target?: unknown): Promise<import("./cloud-lending-ipc.mjs").PageLending | null> },
  *   computerUse: { possible: boolean, ready(): Promise<boolean>, missing(): Promise<string[]>, request(): Promise<unknown>, returned(): Promise<void> },
  *   ask(input: { screen: boolean }): Promise<"use" | "later" | null>,
  *   store: { read(): unknown, write(value: unknown): void },
- *   cloud?(): string | null,
+ *   cloud?(target?: unknown): string | null,
  *   log?(line: string): void,
  * }} deps `computerUse`: whether computer control can work on this computer at all, whether it works now, the macOS
  * permissions it still lacks, starting it again (which asks macOS for what it never asked), and the person coming back
  * to the window. `ask`: the popup, null when there is no window for it. `store`: for which Clouds the popup came, and
- * that apps and screen go on once computer control works. `cloud`: the My Cloud lending is for (its address), or null.
+ * that apps and screen go on once computer control works. `cloud(target)`: the address of the Cloud lending is for, or
+ * null. Each flow lends to its `target`, a saved place of the person's own Cloud; none is My Cloud.
  */
 export function createUseMyComputer({ lending, computerUse, ask, store, cloud = () => null, log = () => {} }) {
   /** The popup, and what its answer starts: one at a time. */
@@ -84,12 +86,12 @@ export function createUseMyComputer({ lending, computerUse, ask, store, cloud = 
     return value && typeof value === "object" && value.v === 1 ? value : { v: 1 };
   };
   const write = (patch) => store.write({ ...read(), ...patch });
-  const askedHere = () => {
-    const kept = read(), key = cloud();
+  const askedHere = (target) => {
+    const kept = read(), key = cloud(target);
     return kept.asked === true || (Boolean(key) && Array.isArray(kept.clouds) && kept.clouds.includes(key));
   };
-  const answered = () => {
-    const key = cloud();
+  const answered = (target) => {
+    const key = cloud(target);
     if (!key) return write({ asked: true });
     const before = Array.isArray(read().clouds) ? read().clouds.filter((entry) => typeof entry === "string" && entry !== key) : [];
     write({ clouds: [...before, key].slice(-CLOUDS_KEPT) });
@@ -102,8 +104,8 @@ export function createUseMyComputer({ lending, computerUse, ask, store, cloud = 
 
   /** Apps and screen once computer control works: each start of computer control asks macOS for what it never asked,
    * one permission after another, as long as the person allows each; nothing here opens System Settings. */
-  async function grantScreen() {
-    const works = async () => ((await computerUse.ready()) ? lending.lendScreen() : null);
+  async function grantScreen(target) {
+    const works = async () => ((await computerUse.ready()) ? lending.lendScreen(target) : null);
     for (let missing = await computerUse.missing(); ;) {
       await computerUse.request();
       await computerUse.returned();
@@ -116,18 +118,18 @@ export function createUseMyComputer({ lending, computerUse, ask, store, cloud = 
   }
 
   /** Every part at once: the internet connection and the usual folders now, apps and screen as soon as they work. */
-  async function useAll() {
-    const lent = await lending.lendByDefault({ asked: true });
+  async function useAll(target) {
+    const lent = await lending.lendByDefault({ asked: true, ...(target ? { target } : {}) });
     if (!lent?.on || lent.screen || !computerUse.possible) return;
     write({ screenWanted: true });
-    if ((await grantScreen())?.screen) write({ screenWanted: undefined });
+    if ((await grantScreen(target))?.screen) write({ screenWanted: undefined });
   }
 
-  async function popup() {
+  async function popup(target) {
     const answer = await ask({ screen: computerUse.possible });
     if (!answer) return;
-    answered();
-    if (answer === "use") await useAll();
+    answered(target);
+    if (answer === "use") await useAll(target);
   }
 
   /** Chosen before computer control worked: apps and screen go on once it does, unless lending is off by then. */
@@ -144,14 +146,14 @@ export function createUseMyComputer({ lending, computerUse, ask, store, cloud = 
     const now = await lending.state();
     if (!now.available || asking || askedHere()) return;
     if (!now.ownOff && !fullyLent(now, computerUse.possible)) {
-      if (!(await computerUse.ready())) return alone(popup);
+      if (!(await computerUse.ready())) return alone(() => popup());
       await lending.lendByDefault();
     }
     answered();
   }
 
-  async function due() {
-    try { return popupDue({ now: await lending.state(), cloud: cloud(), kept: read(), screenPossible: computerUse.possible }); }
+  async function due(target) {
+    try { return popupDue({ now: await lending.state(target), cloud: cloud(target), kept: read(), screenPossible: computerUse.possible }); }
     catch (error) { failed(error); return false; }
   }
 
@@ -160,16 +162,16 @@ export function createUseMyComputer({ lending, computerUse, ask, store, cloud = 
      * silently when computer control already works here, else the popup. Called again on every run of the move. */
     offer: () => asking ?? firstTime().catch(failed),
     /** A bot's Use my Mac link: the same popup, whatever was answered before, unless every part is lent already. */
-    again: () => asking ?? alone(async () => {
-      const now = await lending.state();
-      if (now.available && !fullyLent(now, computerUse.possible)) await popup();
+    again: (target) => asking ?? alone(async () => {
+      const now = await lending.state(target);
+      if (now.available && !fullyLent(now, computerUse.possible)) await popup(target);
     }),
     /** Computer control started, or started again. */
     changed: () => asking ?? screenOnceItWorks().catch(failed),
     /** Whether the popup is due for My Cloud now (popupDue). */
     due,
     /** This app's page found the moment (nothing else open, not mid-setup): the popup, if it is still due. */
-    ask: () => asking ?? alone(async () => { if (await due()) await popup(); }),
+    ask: (target) => asking ?? alone(async () => { if (await due(target)) await popup(target); }),
   };
 }
 
@@ -185,6 +187,7 @@ const languageTag = (value) => (typeof value === "string" && /^[A-Za-z]{2,3}(?:-
  * @param {{
  *   ipcMain: { handle(channel: string, handler: (...args: any[]) => unknown): void },
  *   cloudPage(event: unknown): string | null,
+ *   place?(event: unknown): unknown,
  *   lending: Parameters<typeof createUseMyComputer>[0]["lending"],
  *   connection(): Promise<any>,
  *   request(): Promise<unknown>,
@@ -193,15 +196,15 @@ const languageTag = (value) => (typeof value === "string" && /^[A-Za-z]{2,3}(?:-
  *   lastInput(): number,
  *   dialogs: { useMyComputer(parent: unknown, input: { screen: boolean, locale?: string }): Promise<"use" | "later"> },
  *   store: { read(): unknown, write(value: unknown): void },
- *   cloud?(): string | null,
+ *   cloud?(target?: unknown): string | null,
  *   locale?(): string,
  *   log?(line: string): void,
  *   platform?: string,
  *   env?: Record<string, string | undefined>,
  *   wait?(ms: number): Promise<void>,
- * }} deps
+ * }} deps `place(event)`: the saved place of the Cloud whose page asks, which its popup lends to (null: My Cloud).
  */
-export function installUseMyComputer({ ipcMain, cloudPage, lending, connection, request, window, remote, lastInput, dialogs, store, cloud, locale = () => "en", log, platform = process.platform, env = process.env, wait = waitMs }) {
+export function installUseMyComputer({ ipcMain, cloudPage, place = () => null, lending, connection, request, window, remote, lastInput, dialogs, store, cloud, locale = () => "en", log, platform = process.platform, env = process.env, wait = waitMs }) {
   const running = () => connection().catch(() => null);
   let shownIn = null;
   const useMyComputer = createUseMyComputer({
@@ -224,20 +227,16 @@ export function installUseMyComputer({ ipcMain, cloudPage, lending, connection, 
   const fromPage = (channel, event, language) => {
     if (!cloudPage(event)) throw new Error(`${channel} is only available in this app's window`);
     shownIn = languageTag(language) ?? shownIn;
+    return place(event) ?? undefined;
   };
   // Security: the page only says when, and in which language. Main decides whether the popup is due, draws it itself, and
-  // lends only what the person chooses in it.
+  // lends only what the person chooses in it, to the Cloud whose page asked.
   ipcMain.handle("cloud-lending:offer", (event, language) => {
-    fromPage("cloud-lending:offer", event, language);
-    void useMyComputer.again();
+    void useMyComputer.again(fromPage("cloud-lending:offer", event, language));
   });
-  ipcMain.handle("cloud-lending:due", (event) => {
-    fromPage("cloud-lending:due", event);
-    return useMyComputer.due();
-  });
+  ipcMain.handle("cloud-lending:due", (event) => useMyComputer.due(fromPage("cloud-lending:due", event)));
   ipcMain.handle("cloud-lending:ask", async (event, language) => {
-    fromPage("cloud-lending:ask", event, language);
-    await useMyComputer.ask();
+    await useMyComputer.ask(fromPage("cloud-lending:ask", event, language));
   });
   return useMyComputer;
 }

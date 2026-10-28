@@ -9,6 +9,16 @@ import { useStore } from "@/state/store";
 import { sharedComputersEnabled } from "@/lib/feature-flags";
 
 type SavedWorkspaces = Awaited<ReturnType<NonNullable<NonNullable<Window["ogb"]>["environments"]>["state"]>>;
+type SavedEntry = SavedWorkspaces["environments"][number] | { id: string; name: string; origin: string; color: undefined };
+
+/** My Cloud, or another Cloud of the person's own: one switch lends it this computer, in Settings → MausBot Cloud. */
+const ownCloud = (entry: SavedEntry) => ("home" in entry && entry.home === true) || ("cloud" in entry && Boolean(entry.cloud));
+
+/** That Cloud's lending card: chosen there first, so the card opens on it. */
+async function openLending(entry: SavedEntry) {
+  if ("cloud" in entry && entry.cloud) await window.ogb?.cloudAccount?.lending?.choose?.(entry.cloud.id).catch(() => {});
+  await window.ogb?.cloudLending?.open().catch(() => {});
+}
 
 export function ConnectedWorkspacesSettings() {
   const bridge = window.ogb?.environments;
@@ -152,8 +162,8 @@ export function ConnectedWorkspacesSettings() {
                 <button type="button" disabled={busy} aria-label={`Switch to ${entry.name}`} onClick={() => void perform(async () => { await bridge.switch(entry.id); return true; })}
                   className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control disabled:opacity-50">Switch</button>}
               {/* My Cloud has one control for what it may use: Let my bots use this Mac, in Settings → MausBot Cloud. */}
-              {entry.id !== "local" && "home" in entry && entry.home && window.ogb?.cloudLending && <button type="button" disabled={busy} data-cloud-lending-link onClick={() => void window.ogb?.cloudLending?.open().catch(() => {})} className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control">{lendingTitle()}</button>}
-              {entry.id !== "local" && !("home" in entry && entry.home) && sharingOffered && <button type="button" disabled={busy} aria-label={`Computer access for ${entry.name}`} onClick={() => setComputerId(entry.id)} className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control">Computer access</button>}
+              {entry.id !== "local" && ownCloud(entry) && window.ogb?.cloudLending && <button type="button" disabled={busy} data-cloud-lending-link onClick={() => void openLending(entry)} className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control">{lendingTitle()}</button>}
+              {entry.id !== "local" && !ownCloud(entry) && sharingOffered && <button type="button" disabled={busy} aria-label={`Computer access for ${entry.name}`} onClick={() => setComputerId(entry.id)} className="rounded-md px-2 py-1.5 text-[12px] text-ink hover:bg-control">Computer access</button>}
               {entry.id !== "local" && <button type="button" disabled={busy} aria-label={`Forget ${entry.name}`} title={`Forget ${entry.name}`}
                 onClick={() => void perform(() => bridge.forget(entry.id))} className="rounded-md p-1.5 text-ink-secondary hover:bg-control hover:text-danger disabled:opacity-50"><Trash2 size={14} /></button>}
             </li>;

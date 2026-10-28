@@ -17,7 +17,7 @@ const onlyAt = process.argv.indexOf("--only");
 const only = onlyAt === -1 ? null : new Set((process.argv[onlyAt + 1] ?? "").split(",").filter(Boolean));
 const CHROME = process.env.OMB_CDP_CHROME ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 /** Each view: its query, what must be on screen before the picture, and the window's height. */
-const VIEWS: Array<{ name: string; query: string; ready: string; height?: number }> = [
+const VIEWS: Array<{ name: string; query: string; ready: string; height?: number; card?: true }> = [
   { name: "rail", query: "", ready: "[data-places-rail]" },
   { name: "rail-simple", query: "mode=simple", ready: "[data-places-rail]" },
   { name: "rail-many", query: "places=many&more=1", ready: "[data-rail-more] li" },
@@ -30,6 +30,8 @@ const VIEWS: Array<{ name: string; query: string; ready: string; height?: number
   { name: "connect-server", query: "places=servers&sheet=connect", ready: "[data-place-add='connect-server']" },
   { name: "look-settings", query: "look=teal&settings=look", ready: "[data-place-look='admin']" },
   { name: "look-member", query: "member=1&settings=look", ready: "[data-place-look='locked']" },
+  // This computer's lending card on its own, for someone with two Clouds of their own (no sidebar on this page).
+  { name: "lending-for", query: "view=lending&chosen=c-a", ready: "[data-lending-for] select", card: true },
 ];
 const SKINS = [{ id: "daylight", look: "light" }, { id: "midnight", look: "dark" }];
 
@@ -62,11 +64,11 @@ async function openChrome(profile: string) {
   });
   const evaluate = async (expression: string) => (await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result?.value;
   return {
-    async shoot(url: string, ready: string, file: string, height = 800) {
+    async shoot(url: string, ready: string, file: string, height = 800, card = false) {
       await send("Emulation.setDeviceMetricsOverride", { width: 1280, height, deviceScaleFactor: 2, mobile: false });
       await send("Page.navigate", { url });
       const end = Date.now() + 60_000;
-      const condition = `Boolean(document.querySelector(${JSON.stringify(ready)}) && document.querySelector("[data-sidebar-bot-row], [data-sidebar-hero]"))`;
+      const condition = `Boolean(document.querySelector(${JSON.stringify(ready)}) && (${card} || document.querySelector("[data-sidebar-bot-row], [data-sidebar-hero]")))`;
       while (!(await evaluate(condition).catch(() => false))) {
         if (Date.now() > end) throw new Error(`${url}: ${ready} never showed (${await evaluate("document.querySelector('main')?.textContent?.slice(0, 120) ?? ''")})`);
         await delay(250);
@@ -94,7 +96,7 @@ try {
     try {
       for (const view of VIEWS.filter((entry) => !only || only.has(entry.name))) for (const skin of SKINS) {
         const file = join(shots, `${view.name}-${skin.look}.png`);
-        await chrome.shoot(`${ui.previewUrl}?skin=${skin.id}${view.query ? `&${view.query}` : ""}`, view.ready, file, view.height);
+        await chrome.shoot(`${ui.previewUrl}?skin=${skin.id}${view.query ? `&${view.query}` : ""}`, view.ready, file, view.height, view.card === true);
         console.log(file);
       }
     } finally {

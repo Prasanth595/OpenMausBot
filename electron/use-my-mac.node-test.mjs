@@ -489,3 +489,28 @@ test("the menu bar says it is the internet connection when that is all that is l
   indicator.update({ lending: true, internetOnly: false, busy: false });
   assert.equal(trays[0].menu[0].label, "Your bots can use this PC");
 });
+
+test("another Cloud of the person's own going to sleep holds only its own link: My Cloud's keeps lending, and the sleeping one isn't dialled again at once", async (t) => {
+  const dir = await realpath(await mkdtemp(path.join(tmpdir(), "omb-use-my-mac-")));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const OTHER = "https://omb-c-a.fly.dev";
+  const mine = env, other = { id: "client-a", name: "Client A", origin: OTHER, cloud: { id: "c-a", role: "owner" } };
+  const homes = { [ORIGIN]: cloudHome(), [OTHER]: cloudHome() };
+  const sockets = fakeSockets((url) => { const at = new URL(url.replace(/^wss:/, "https:")); return homes[at.origin].registered.has(at.pathname.split("/")[3]); });
+  const power = createCloudPowerGate({ power: () => null, holdMs: 60_000 });
+  const sharing = createComputerSharing({
+    file: path.join(dir, "profile", "computer-sharing.json"), fetch: (url, init) => homes[new URL(url).origin].fetch(url, init), environments: () => [mine, other],
+    enabled: async () => false, myCloud: () => mine, cloud: (place) => ({ status: "connected", accountId: "acct_1", origin: place?.cloud ? place.origin : ORIGIN }),
+    home: path.join(dir, "home"), cuaConnection: async () => null, power, WebSocket: sockets.FakeSocket, linkHeaders: () => ({}),
+  });
+  t.after(() => sharing.close());
+  await sharing.saveCloud(mine, { folders: [], screen: false, internet: true });
+  await sharing.saveCloud(other, { folders: [], screen: false, internet: true });
+  const to = (origin) => sockets.made.filter((socket) => socket.url.startsWith(origin.replace("https:", "wss:")));
+  await until(() => to(ORIGIN).some((socket) => !socket.closed) && to(OTHER).some((socket) => !socket.closed), "both links to open");
+  to(OTHER)[0].end(4001, "asleep");
+  await delay(400);
+  assert.equal(power.asleep(), false, "My Cloud's gate never holds for another Cloud");
+  assert.equal(to(OTHER).length, 1, "the Cloud going to sleep is not dialled again at once");
+  assert.equal(to(ORIGIN).filter((socket) => !socket.closed).length, 1, "My Cloud's link stays open");
+});

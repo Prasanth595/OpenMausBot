@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import vm from "node:vm";
 
-import { createLendingTarget, defaultGrant, existingFolders, installCloudLending, pageLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs";
+import { createLendingPlaces, createLendingTarget, defaultGrant, existingFolders, installCloudLending, pageLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs";
 
 const usual = ["Desktop", "Documents", "Downloads"].map((name, i) => ({ id: `id-${i}`, path: `/Users/me/${name}`, name, write: false }));
 
@@ -388,4 +388,90 @@ test("the default grant never lends Chrome unless it was lent before", () => {
   assert.equal(defaultGrant({ kept: { chrome: true, folders: [] }, usual, projects: [] }).chrome, true);
   assert.equal(pageLending({ state: { enabled: true, chrome: true } }).chrome, true);
   assert.equal(pageLending({ state: { enabled: false, chrome: true } }).chrome, false);
+});
+
+test("each Cloud's page lends this computer to that Cloud, and this computer's Settings to the one chosen there; nothing else names a place", async () => {
+  const handlers = new Map(), saved = [], stopped = [];
+  const places = { cloud: { id: "home" }, "cloud-a": { id: "a", cloud: { id: "c-a" } }, local: { id: "a", cloud: { id: "c-a" } } };
+  const states = new Map();
+  installCloudLending({
+    ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    localOnly: (channel, handler) => (event, ...args) => { if (event.page !== "local") throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
+    cloudPage: (channel, handler) => (event, ...args) => { if (!event.page) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
+    snapshot: async (env) => ({ available: Boolean(env), screenAvailable: false, screenReady: false, state: states.get(env?.id) ?? { enabled: false, folders: [] } }),
+    environment: (event) => (event ? places[event.page] ?? null : places.cloud),
+    save: async (env, choice) => { saved.push([env.id, choice.internet]); states.set(env.id, { enabled: true, connected: true, folders: choice.folders, internet: choice.internet }); },
+    stop: (env) => { stopped.push(env?.id ?? null); states.set(env?.id, { enabled: false, folders: [] }); },
+    chooseFolder: async () => null, confirmScreen: async () => true, confirmTerminal: async () => true,
+    defaults: async () => [], validate: async (folders) => folders,
+  });
+  assert.equal((await handlers.get("cloud-lending:set")({ page: "cloud-a" }, true)).on, true);
+  assert.equal((await handlers.get("cloud-lending:state")({ page: "cloud" })).on, false, "My Cloud's page sees My Cloud's own switch");
+  await handlers.get("cloud-lending:set")({ page: "cloud" }, true);
+  await handlers.get("cloud-lending:set")({ page: "cloud-a" }, false);
+  await handlers.get("lending:save")({ page: "local" }, { folders: [], screen: false, internet: true });
+  assert.deepEqual(saved, [["a", true], ["home", true], ["a", true]]);
+  assert.deepEqual(stopped, ["a"]);
+});
+
+test("lending's place: another Cloud of the person's own is checked at its own address while the session lists it; any other place against My Cloud", () => {
+  const home = { id: "home", origin: "https://omb-u-1.fly.dev", home: true }, other = { id: "a", origin: "https://omb-c-a.fly.dev", cloud: { id: "c-a" } };
+  const server = { id: "s", origin: "https://bots.example.test" }, gone = { id: "g", origin: "https://omb-c-gone.fly.dev", cloud: { id: "c-gone" } };
+  const state = { status: "connected", account: { id: "acct-1" }, machine: { status: "ready", origin: home.origin } };
+  const target = createLendingTarget({ account: () => ({ state: () => state, isOwnCloud: (origin) => [home.origin, other.origin].includes(origin) }), environments: () => [server, other, home, gone] });
+  assert.deepEqual(target.cloud(other), { status: "connected", accountId: "acct-1", origin: other.origin });
+  assert.equal(target.cloud(gone).origin, home.origin, "a Cloud the session no longer lists is checked against My Cloud, so lending to it ends");
+  assert.equal(target.cloud(server).origin, home.origin);
+  assert.equal(target.cloud().origin, home.origin);
+  assert.deepEqual(target.places().map((place) => place.id), ["home", "a"]);
+});
+
+test("the lending card's place: a Cloud's own page lends to it, this computer's Settings to the one chosen there by an id the session lists, anything else to My Cloud", async () => {
+  const home = { id: "home", name: "My Cloud", origin: "https://omb-u-1.fly.dev", home: true, color: "blue" };
+  const other = { id: "a", name: "Client A", origin: "https://omb-c-a.fly.dev", cloud: { id: "c-a", role: "owner" }, color: "teal" };
+  let saved = null;
+  const places = createLendingPlaces({ target: { places: () => [home, other], environment: () => home }, ownPage: (event) => event.own ?? null,
+    local: (event) => event.page === "local", store: { read: () => saved, write: (value) => { saved = value; } } });
+  assert.deepEqual(places.list(), [{ id: "home", name: "My Cloud", color: "blue" }, { id: "c-a", name: "Client A", color: "teal" }]);
+  assert.equal(places.place({ own: { id: "c-a" } }), other, "another Cloud's own page lends to that Cloud");
+  assert.equal(places.place({ page: "local" }), home, "nothing chosen yet: My Cloud");
+  places.choose("c-a");
+  assert.deepEqual(saved, { cloud: "c-a" });
+  assert.deepEqual([places.place({ page: "local" }), places.chosen({ page: "local" })], [other, "c-a"]);
+  assert.equal(places.place({ page: "cloud" }), home, "a page that is neither: My Cloud, never this computer's choice");
+  assert.equal(places.place(), home);
+  for (const id of ["c-gone", "https://evil.example", ""]) assert.throws(() => places.choose(id), /Choose one of your Clouds/);
+  places.choose("home");
+  assert.deepEqual(saved, { cloud: null });
+  saved = { cloud: "c-gone" };
+  assert.equal(places.place({ page: "local" }), home, "a Cloud the session no longer lists: My Cloud");
+
+  const handlers = new Map();
+  installCloudLending({ ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) },
+    localOnly: (channel, handler) => (event, ...args) => { if (event.page !== "local") throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
+    cloudPage: (channel, handler) => handler, snapshot: async () => ({ available: true }), environment: places.place, save: async () => {}, stop: () => {},
+    chooseFolder: async () => null, confirmScreen: async () => true, confirmTerminal: async () => true, defaults: async () => [], validate: async (folders) => folders, places });
+  assert.deepEqual(await handlers.get("lending:places")({ page: "local" }), { places: places.list(), chosen: "home" });
+  await handlers.get("lending:place")({ page: "local" }, "c-a");
+  assert.deepEqual(saved, { cloud: "c-a" });
+  await assert.rejects(async () => handlers.get("lending:place")({ page: "cloud" }, "home"), /only available/, "only this app's own page chooses");
+});
+
+test("the tray's Terminal reaches every Cloud this computer is lent to, asking once; with one lent it is that one's, as before", async () => {
+  const home = { id: "home", name: "My Cloud" }, other = { id: "a", name: "Client A", cloud: { id: "c-a", role: "owner" } };
+  const states = new Map([["home", { enabled: true, connected: true, folders: [], internet: true }], ["a", { enabled: true, connected: true, folders: [], internet: true }]]);
+  const asked = [], saved = [];
+  const lending = installCloudLending({ ipcMain: { handle: () => {} }, localOnly: (_c, handler) => handler, cloudPage: (_c, handler) => handler,
+    snapshot: async (env) => ({ available: Boolean(env), state: states.get(env?.id) }), environment: () => home,
+    save: async (env, choice) => { saved.push([env.id, choice.terminal === true]); states.set(env.id, { ...states.get(env.id), enabled: true, terminal: choice.terminal === true }); },
+    stop: () => {}, chooseFolder: async () => null, confirmScreen: async () => true, confirmTerminal: async () => { asked.push("terminal"); return true; },
+    defaults: async () => [], validate: async (folders) => folders, places: { all: () => [home, other] } });
+  await lending.lendTerminalEverywhere(true);
+  assert.deepEqual([asked, saved], [["terminal"], [["home", true], ["a", true]]]);
+  await lending.lendTerminalEverywhere(false);
+  assert.deepEqual(saved.slice(2), [["home", false], ["a", false]]);
+  states.set("home", { enabled: false, folders: [] });
+  asked.length = 0; saved.length = 0;
+  await lending.lendTerminalEverywhere(true);
+  assert.deepEqual([asked, saved], [["terminal"], [["a", true]]], "lent to one Cloud only: that one's Terminal");
 });

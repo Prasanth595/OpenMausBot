@@ -96,7 +96,7 @@ export function lendingStatusKey(snapshot: CloudLendingSnapshot | null, switched
 
 /** Security: main picks the Cloud from the verified sign-in; nothing here names a server. `moving`: the bots are on their
  * way to My Cloud, which lends this computer once they are there unless the person turned lending off. */
-export function CloudLending({ bridge, moving = false }: { bridge: CloudLendingBridge; moving?: boolean }) {
+export function CloudLending({ bridge, moving = false, cloudName = null }: { bridge: CloudLendingBridge; moving?: boolean; cloudName?: string | null }) {
   const [snapshot, setSnapshot] = useState<CloudLendingSnapshot | null>(null);
   const [draftOn, setDraftOn] = useState(false);
   const [folders, setFolders] = useState<SharedFolder[]>([]);
@@ -169,7 +169,7 @@ export function CloudLending({ bridge, moving = false }: { bridge: CloudLendingB
     <div className="flex items-start justify-between gap-3">
       <div className="min-w-0">
         <p className="text-[14px] font-medium text-ink">{lendingTitle()}</p>
-        <p className="mt-1 text-[12px] text-ink-secondary">{t("lending.explain")}</p>
+        <p className="mt-1 text-[12px] text-ink-secondary">{cloudName ? t("lending.explainFor", { name: cloudName }) : t("lending.explain")}</p>
       </div>
       <Switch checked={on} disabled={working} aria-label={lendingTitle()} onClick={toggle} />
     </div>

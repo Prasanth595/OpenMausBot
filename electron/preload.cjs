@@ -366,6 +366,9 @@ const bridge = {
       chooseFolder: () => ipcRenderer.invoke("lending:folder"),
       save: input => ipcRenderer.invoke("lending:save", input),
       stop: () => ipcRenderer.invoke("lending:stop"),
+      // Which of the person's Clouds this card lends to: one the verified session lists, by its id ("home": My Cloud).
+      places: () => ipcRenderer.invoke("lending:places"),
+      choose: id => ipcRenderer.invoke("lending:place", String(id)),
     },
     files: {
       state: () => ipcRenderer.invoke("files:state"),

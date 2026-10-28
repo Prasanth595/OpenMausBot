@@ -79,11 +79,12 @@ export function pageLending(snapshot) {
 }
 
 /** Which Cloud lending is for, from the verified Cloud sign-in alone (the renderer names no server, account or origin):
- * `cloud()` is the sign-in's state, and `environment()` the saved server that is My Cloud, kept through a brief
- * disconnect of the same account. */
+ * `cloud(env)` is the sign-in's state as that saved place's lending checks it (another Cloud of the person's own at its own
+ * address, any other place against My Cloud), and `environment()` the saved server that is My Cloud, kept through a brief
+ * disconnect of the same account. `places()`: every saved place lending can go to, My Cloud first. */
 export function createLendingTarget({ account, environments }) {
   let lastHome = null;
-  const cloud = () => {
+  const mine = () => {
     const current = account();
     if (!current) return null;
     const state = current.state();
@@ -93,12 +94,50 @@ export function createLendingTarget({ account, environments }) {
     else if (!accountId || lastHome?.accountId !== accountId) lastHome = null;
     return { status: state.status === "signed-out" && state.message === "restoring" ? "restoring" : state.status, accountId, origin };
   };
+  const cloud = (env = null) => {
+    const base = mine();
+    if (!base || !env?.cloud || base.origin === env.origin) return base;
+    return account()?.isOwnCloud?.(env.origin) ? { ...base, origin: env.origin } : base;
+  };
+  const environment = () => {
+    const snapshot = mine();
+    const origin = snapshot?.origin ?? (lastHome?.accountId === snapshot?.accountId ? lastHome?.origin : null);
+    return origin ? environments().find((entry) => entry.origin === origin) ?? null : null;
+  };
   return {
     cloud,
-    environment() {
-      const snapshot = cloud();
-      const origin = snapshot?.origin ?? (lastHome?.accountId === snapshot?.accountId ? lastHome?.origin : null);
-      return origin ? environments().find((entry) => entry.origin === origin) ?? null : null;
+    environment,
+    places() {
+      const home = environment();
+      const others = environments().filter((entry) => entry.cloud && entry !== home && account()?.isOwnCloud?.(entry.origin));
+      return home ? [home, ...others] : others;
+    },
+  };
+}
+
+/**
+ * Which Cloud of the person's own a page's lending card is for: another Cloud's own page lends to that Cloud, this
+ * computer's Settings to the one chosen there (`store`: lending-place.json, by an id the session lists), and anything
+ * else to My Cloud. `ownPage(event)`: the Cloud of the person's own whose page asks, as the session lists it, or null;
+ * `local(event)`: the asker is this app's own page. The page names a Cloud only by the id this lists.
+ */
+export function createLendingPlaces({ target, ownPage, local, store }) {
+  const chosen = () => { try { return store.read()?.cloud ?? null; } catch { return null; } };
+  const place = (event = null) => {
+    const own = event ? ownPage(event) : null;
+    if (own) return target.places().find((entry) => entry.cloud?.id === own.id) ?? null;
+    const id = event && local(event) ? chosen() : null;
+    return (id && target.places().find((entry) => entry.cloud?.id === id)) || target.environment();
+  };
+  const list = () => target.places().map((entry) => ({ id: entry.cloud?.id ?? "home", name: entry.name, ...(entry.color ? { color: entry.color } : {}) }));
+  return {
+    place,
+    list,
+    all: () => target.places(),
+    chosen: (event) => place(event)?.cloud?.id ?? "home",
+    choose(id) {
+      if (!list().some((entry) => entry.id === id)) throw new Error("Choose one of your Clouds.");
+      store.write({ cloud: id === "home" ? null : id });
     },
   };
 }
@@ -134,26 +173,27 @@ export function defaultGrant({ kept, usual, projects, screenAvailable, screenRea
  *   ipcMain: { handle(channel: string, handler: (...args: any[]) => unknown): void },
  *   localOnly: (channel: string, handler: (...args: any[]) => unknown) => (...args: any[]) => unknown,
  *   cloudPage: (channel: string, handler: (...args: any[]) => unknown) => (...args: any[]) => unknown,
- *   snapshot: () => Promise<{ available: boolean, screenAvailable?: boolean, screenReady?: boolean, state?: Record<string, any>, activity?: unknown[] }>,
- *   environment: () => unknown,
+ *   snapshot: (env: unknown) => Promise<{ available: boolean, screenAvailable?: boolean, screenReady?: boolean, state?: Record<string, any>, activity?: unknown[] }>,
+ *   environment: (event?: unknown) => unknown,
  *   save: (env: unknown, choice: { folders: unknown, screen: boolean, internet?: boolean, chrome?: boolean, terminal?: boolean }) => Promise<unknown>,
- *   stop: () => void,
+ *   stop: (env: unknown) => void,
  *   chooseFolder: () => Promise<{ id: string, path: string, name: string, write: boolean } | null>,
  *   defaults: () => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
  *   validate: (folders: unknown[]) => Promise<Array<{ id: string, path: string, name: string, write: boolean }>>,
  *   confirmScreen: () => Promise<boolean>,
  *   confirmTerminal: () => Promise<boolean>,
- * }} deps `cloudPage` lets only My Cloud's verified page through; turning lending or Apps and screen on from it still
- * takes a real click (the preload bridge's rule). Security: Apps and screen lets bots act as the person, and a page
- * served by the Cloud must never grant that alone, so main also asks in a dialog of its own (`confirmScreen`). The
- * terminal runs any command as the person, so the same holds for it: from My Cloud's page it takes a real click and a Yes
- * in main's own dialog (`confirmTerminal`).
+ * }} deps `cloudPage` lets only the verified page of a Cloud of the person's own through; turning lending or Apps and
+ * screen on from it still takes a real click (the preload bridge's rule). `environment(event)`: the saved place the
+ * asking page lends to (that Cloud's own; on this computer's Settings, the one chosen there), and without an event My
+ * Cloud's. Security: Apps and screen lets bots act as the person, and a page served by the Cloud must never grant that
+ * alone, so main also asks in a dialog of its own (`confirmScreen`). The terminal runs any command as the person, so the
+ * same holds for it: from a Cloud's page it takes a real click and a Yes in main's own dialog (`confirmTerminal`).
  * `screenReady` in a snapshot: computer control works here for this computer's own bots, read from its running state,
  * never by asking macOS.
  */
-export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, save, stop, chooseFolder, defaults, validate, confirmScreen, confirmTerminal }) {
-  const env = () => {
-    const current = environment();
+export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, environment, save, stop, chooseFolder, defaults, validate, confirmScreen, confirmTerminal, places = null }) {
+  const env = (event) => {
+    const current = environment(event);
     if (!current) throw new Error("Open My Cloud first.");
     return current;
   };
@@ -169,79 +209,99 @@ export function installCloudLending({ ipcMain, localOnly, cloudPage, snapshot, e
     if (folders.length || input?.screen === true || input?.internet === true || input?.chrome === true || terminal) return { folders, screen: input?.screen === true, internet: input?.internet === true, chrome: input?.chrome === true, ...(terminal ? { terminal: true } : {}) };
     return { folders: await defaults(), screen: false, internet: true, chrome: false };
   };
-  ipcMain.handle("lending:state", localOnly("lending:state", () => snapshot()));
-  ipcMain.handle("lending:folder", localOnly("lending:folder", plainly(async () => { env(); return chooseFolder(); })));
-  ipcMain.handle("lending:save", localOnly("lending:save", plainly(async (_event, input) => {
-    await save(env(), await choice(input));
-    return snapshot();
+  ipcMain.handle("lending:state", localOnly("lending:state", (event) => snapshot(environment(event))));
+  ipcMain.handle("lending:folder", localOnly("lending:folder", plainly(async (event) => { env(event); return chooseFolder(); })));
+  ipcMain.handle("lending:save", localOnly("lending:save", plainly(async (event, input) => {
+    const target = env(event);
+    await save(target, await choice(input));
+    return snapshot(target);
   })));
-  ipcMain.handle("lending:stop", localOnly("lending:stop", async () => { stop(); return snapshot(); }));
+  ipcMain.handle("lending:stop", localOnly("lending:stop", async (event) => { const target = environment(event); stop(target); return snapshot(target); }));
+  if (places) {
+    ipcMain.handle("lending:places", localOnly("lending:places", (event) => ({ places: places.list(), chosen: places.chosen(event) })));
+    ipcMain.handle("lending:place", localOnly("lending:place", (_event, id) => { places.choose(String(id)); }));
+  }
 
-  ipcMain.handle("cloud-lending:state", cloudPage("cloud-lending:state", async () => pageLending(await snapshot())));
-  ipcMain.handle("cloud-lending:set", cloudPage("cloud-lending:set", plainly(async (_event, on) => {
-    if (on !== true) { stop(); return pageLending(await snapshot()); }
-    const current = await snapshot();
+  ipcMain.handle("cloud-lending:state", cloudPage("cloud-lending:state", async (event) => pageLending(await snapshot(environment(event)))));
+  ipcMain.handle("cloud-lending:set", cloudPage("cloud-lending:set", plainly(async (event, on) => {
+    const target = environment(event);
+    if (on !== true) { stop(target); return pageLending(await snapshot(target)); }
+    const current = await snapshot(target);
     if (current.state?.enabled) return pageLending(current);
     const kept = current.state ?? {};
-    await save(env(), await choice({ folders: kept.folders, screen: kept.screen === true && current.screenAvailable === true, internet: kept.internet === true, chrome: kept.chrome === true }));
-    return pageLending(await snapshot());
+    await save(env(event), await choice({ folders: kept.folders, screen: kept.screen === true && current.screenAvailable === true, internet: kept.internet === true, chrome: kept.chrome === true }));
+    return pageLending(await snapshot(target));
   })));
-  ipcMain.handle("cloud-lending:screen", cloudPage("cloud-lending:screen", plainly(async (_event, on) => {
-    const current = await snapshot();
+  ipcMain.handle("cloud-lending:screen", cloudPage("cloud-lending:screen", plainly(async (event, on) => {
+    const target = environment(event);
+    const current = await snapshot(target);
     const kept = current.state;
     if (!kept?.enabled || (kept.screen === true) === (on === true)) return pageLending(current);
     if (on === true && (!current.screenAvailable || !(await confirmScreen()))) return pageLending(current);
-    await save(env(), await choice({ folders: kept.folders, screen: on === true, internet: kept.internet === true, chrome: kept.chrome === true, ...keptTerminal(kept) }));
-    return pageLending(await snapshot());
+    await save(env(event), await choice({ folders: kept.folders, screen: on === true, internet: kept.internet === true, chrome: kept.chrome === true, ...keptTerminal(kept) }));
+    return pageLending(await snapshot(target));
   })));
-  /** The terminal on or off on top of what is lent. Turning it on asks first; a Yes never starts lending that was
-   * stopped while the question was open. */
-  const lendTerminal = async (on) => {
-    const before = await snapshot();
+  /** The terminal on or off on top of what is lent to `target`. Turning it on asks first; a Yes never starts lending that
+   * was stopped while the question was open. */
+  const lendTerminal = async (on, target = environment(), { asked = false } = {}) => {
+    const before = await snapshot(target);
     if (!before.available || !before.state?.enabled || (before.state.terminal === true) === (on === true)) return pageLending(before);
-    if (on === true && !(await confirmTerminal())) return pageLending(before);
-    const current = await snapshot();
+    if (on === true && !asked && !(await confirmTerminal())) return pageLending(before);
+    const current = await snapshot(target);
     const kept = current.state;
     if (!current.available || !kept?.enabled) return pageLending(current);
     const screen = kept.screen === true && current.screenAvailable === true, internet = kept.internet === true, chrome = kept.chrome === true;
-    if (on !== true && !kept.folders?.length && !screen && !internet && !chrome) { stop(); return pageLending(await snapshot()); }
-    await save(env(), await choice({ folders: kept.folders, screen, internet, chrome, ...(on === true ? { terminal: true } : {}) }));
-    return pageLending(await snapshot());
+    if (on !== true && !kept.folders?.length && !screen && !internet && !chrome) { stop(target); return pageLending(await snapshot(target)); }
+    await save(target, await choice({ folders: kept.folders, screen, internet, chrome, ...(on === true ? { terminal: true } : {}) }));
+    return pageLending(await snapshot(target));
   };
-  ipcMain.handle("cloud-lending:terminal", cloudPage("cloud-lending:terminal", plainly(async (_event, on) => lendTerminal(on === true))));
+  ipcMain.handle("cloud-lending:terminal", cloudPage("cloud-lending:terminal", plainly(async (event, on) => lendTerminal(on === true, environment(event)))));
   const ownOff = (state) => !state?.enabled && state?.stopped?.reason === "you";
   return {
-    /** What is lent, as My Cloud's page sees it, whether computer control works here, and whether the person turned
-     * lending off themselves. */
-    async state() {
-      const current = await snapshot();
+    /** What is lent to `target` (My Cloud by default), as its page sees it, whether computer control works here, and whether
+     * the person turned lending off themselves. */
+    async state(target = environment()) {
+      const current = await snapshot(target);
       return { ...pageLending(current), screenReady: current.screenReady === true, ownOff: ownOff(current.state) };
     },
     /** At the move to My Cloud, and when the person chooses Use my Mac (`asked`): lends the default grant (defaultGrant)
-     * on top of what is lent, a terminal lent now included. Without `asked` the person's own Off is never undone: lending
-     * they turned off stays off, and so does an internet connection they unticked. Answers the page's view, or null when
-     * it stayed off. */
-    async lendByDefault({ projects = [], asked = false } = {}) {
-      const current = await snapshot();
+     * on top of what is lent to `target` (My Cloud by default), a terminal lent now included. Without `asked` the person's
+     * own Off is never undone: lending they turned off stays off, and so does an internet connection they unticked.
+     * Answers the page's view, or null when it stayed off. */
+    async lendByDefault({ projects = [], asked = false, target = environment() } = {}) {
+      const current = await snapshot(target);
       const kept = current.state;
-      if (!current.available || (!asked && ownOff(kept))) return null;
+      if (!current.available || !target || (!asked && ownOff(kept))) return null;
       const lentBefore = kept?.folders?.length ? await existingFolders(kept.folders, validate) : [];
       const internet = asked || kept?.enabled !== true || kept.internet === true;
       const grant = defaultGrant({ kept: { folders: lentBefore, screen: kept?.screen === true, internet, chrome: kept?.chrome === true }, usual: await defaults(), projects: await editableFolders(projects, validate),
         screenAvailable: current.screenAvailable, screenReady: current.screenReady });
-      await save(env(), { ...grant, ...keptTerminal(kept) });
-      return pageLending(await snapshot());
+      await save(target, { ...grant, ...keptTerminal(kept) });
+      return pageLending(await snapshot(target));
     },
-    /** Apps and screen on top of what is lent, once computer control works here; null while lending is off or computer
-     * control does not work yet. */
-    async lendScreen() {
-      const current = await snapshot();
+    /** Apps and screen on top of what is lent to `target`, once computer control works here; null while lending is off or
+     * computer control does not work yet. */
+    async lendScreen(target = environment()) {
+      const current = await snapshot(target);
       const kept = current.state;
-      if (!current.available || !kept?.enabled || current.screenAvailable !== true) return null;
+      if (!current.available || !target || !kept?.enabled || current.screenAvailable !== true) return null;
       if (kept.screen === true) return pageLending(current);
-      await save(env(), await choice({ folders: kept.folders, screen: true, internet: kept.internet === true, chrome: kept.chrome === true, ...keptTerminal(kept) }));
-      return pageLending(await snapshot());
+      await save(target, await choice({ folders: kept.folders, screen: true, internet: kept.internet === true, chrome: kept.chrome === true, ...keptTerminal(kept) }));
+      return pageLending(await snapshot(target));
     },
     lendTerminal,
+    /** The tray's Terminal: on or off for every Cloud of the person's own this computer is lent to (My Cloud's when it is
+     * lent to none or one), asking once before it is lent to several. */
+    async lendTerminalEverywhere(on) {
+      const lent = [];
+      for (const place of places?.all() ?? []) {
+        const current = await snapshot(place);
+        if (current.available && current.state?.enabled) lent.push(place);
+      }
+      if (lent.length <= 1) return lendTerminal(on, lent[0] ?? environment());
+      if (on === true && !(await confirmTerminal())) return null;
+      for (const place of lent) await lendTerminal(on, place, { asked: true });
+      return null;
+    },
   };
 }

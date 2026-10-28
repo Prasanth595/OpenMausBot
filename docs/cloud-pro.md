@@ -586,6 +586,16 @@ own desktop app and their own Cloud home, never a Team Cloud. Other users (deskt
 only, self-hosted, hosted team workspaces) keep computer sharing exactly as before:
 off unless a maintainer sets `features.sharedComputers` by hand.
 
+**Each Cloud of the person's own.** Someone with several Clouds of their own lends
+this computer to each one apart: another Cloud's own page has the same switch for
+itself, and **Settings → MausBot Cloud** gets a **Which Cloud** picker above the
+card once there are two (`createLendingPlaces` in electron/cloud-lending-ipc.mjs;
+the choice is kept in `lending-place.json` by an id the verified session lists).
+Each Cloud is checked at its own address and sleeps on a gate of its own, so one
+asleep never holds another's lending. My Cloud's Off stops all lending, as it
+always did; another Cloud's stops only that one. The move stays My Cloud's: it is
+the one home.
+
 ### What the person sees
 
 In **Settings → MausBot Cloud**, the **My Cloud** card has a **Let my bots use

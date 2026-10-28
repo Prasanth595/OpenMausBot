@@ -89,11 +89,11 @@ async function lendingFixture(t, options = {}) {
   const leases = [];
   const driver = await hangingDriver(dir);
   const sharing = createComputerSharing({
-    file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [env],
+    file: path.join(dir, "profile", "computer-sharing.json"), fetch: home.fetch, environments: () => [options.env ?? env],
     ...(options.reconnect ? { reconnect: options.reconnect } : {}), ...(options.now ? { now: options.now } : {}),
     // The maintainer flag is off, as for every Cloud Pro user.
     enabled: async () => { maintainerChecks++; return false; },
-    cloud: () => cloud, home: path.join(dir, "home"),
+    cloud: asked => (typeof cloud === "function" ? cloud(asked) : cloud), home: path.join(dir, "home"),
     cuaConnection: async () => driver.connection, ...(options.idleSeconds ? { idleSeconds: options.idleSeconds } : {}),
     hostControl: options.hostControl ?? (async id => { leases.push(`acquire:${id}`); return { renew: async () => {}, release: async () => { leases.push(`release:${id}`); } }; }),
     onChange: summary => summaries.push(summary),
@@ -509,4 +509,21 @@ test("signs back in to My Cloud by itself when its session there ended, and trie
   await delay(5_600);
   assert.equal(tries, 1, "a failed sign-in is not retried every few seconds");
   assert.equal(stuck.sharing.cloudState(env).problem, "connect-first");
+});
+
+test("another Cloud of the person's own is lent at its own address, apart from My Cloud, and lending to it ends once the session no longer lists it", async t => {
+  const other = { id: "client-a", name: "Client A", origin: "https://omb-c-a.fly.dev", cloud: { id: "c-a", role: "owner" } };
+  let listed = true;
+  const asked = [];
+  const { folderPath, home, sharing } = await lendingFixture(t, { env: other, cloud: place => {
+    asked.push(place?.id ?? null);
+    return { status: "connected", accountId: "acct_1", origin: listed && place?.origin === other.origin ? other.origin : ORIGIN };
+  } });
+  const lent = await sharing.saveCloud(other, { folders: [{ id: randomUUID(), path: folderPath, write: false }], screen: false });
+  assert.equal(lent.enabled, true);
+  await until(() => sharing.cloudState(other).connected && home.connects.length >= 1, "the other Cloud's link");
+  assert.ok(asked.includes("client-a"), "its own Cloud's word, never My Cloud's alone");
+  listed = false;
+  sharing.cloudChanged();
+  assert.deepEqual([sharing.cloudState(other).enabled, sharing.cloudState(other).problem], [false, "machine-changed"]);
 });

@@ -377,3 +377,24 @@ test("System Settings opens a permission's own pane, and nothing where there is 
   assert.equal(await askForMicrophone({ available: true, systemPreferences: { askForMediaAccess: async () => true } }), true);
   assert.equal(await askForMicrophone({ available: true, systemPreferences: { askForMediaAccess: async () => { throw new Error("no"); } } }), false);
 });
+
+test("Use my Mac from another Cloud's page lends to that Cloud, and remembers the answer for that Cloud alone", async () => {
+  const lentTo = [], kept = { v: 1 };
+  const other = { id: "a", origin: "https://omb-c-a.fly.dev" };
+  const useMyComputer = createUseMyComputer({
+    lending: {
+      state: async () => ({ available: true, on: false, internet: false, folders: [], screen: false, screenAvailable: false, screenReady: false, ownOff: false }),
+      async lendByDefault(input) { lentTo.push(input?.target?.id ?? "my-cloud"); return { on: true, internet: true, folders: USUAL, screen: false }; },
+      async lendScreen() { return null; },
+    },
+    computerUse: { possible: false, ready: async () => false, missing: async () => [], async request() {}, async returned() {} },
+    ask: async () => "use",
+    store: { read: () => structuredClone(kept), write: (value) => { Object.assign(kept, value); } },
+    cloud: (target) => target?.origin ?? MY_CLOUD,
+  });
+  await useMyComputer.again(other);
+  assert.deepEqual(lentTo, ["a"]);
+  assert.deepEqual(kept.clouds, [other.origin], "asked for that Cloud");
+  assert.equal(await useMyComputer.due(), true, "My Cloud's own popup is still due");
+  assert.equal(await useMyComputer.due(other), false);
+});

@@ -58,6 +58,10 @@ export interface CloudLendingBridge {
   chooseFolder(): Promise<SharedFolder | null>;
   save(input: { folders: SharedFolder[]; screen: boolean; internet?: boolean; chrome?: boolean; terminal?: boolean }): Promise<CloudLendingSnapshot>;
   stop(): Promise<CloudLendingSnapshot>;
+  /** The person's Clouds this computer can lend to (`home` is My Cloud), and the one this card is for. Absent on an older app. */
+  places?(): Promise<{ places: Array<{ id: string; name: string; color?: string }>; chosen: string }>;
+  /** This card lends to that Cloud from now on. */
+  choose?(id: string): Promise<void>;
 }
 export type CloudLendingVerdict = { allow: true } | { pause: string } | { stop: "signed-out" | "account-changed" | "machine-changed" };
 export function cloudLendingVerdict(binding: { accountId: string; origin: string } | null | undefined, current: { status: string; accountId: string | null; origin: string | null } | null, env: { origin: string } | null | undefined): CloudLendingVerdict;
@@ -84,7 +88,8 @@ export function createComputerSharing(options: {
   home?: string;
   activityFile?: string;
   /** The verified Cloud sign-in: { status, accountId, origin }; status "restoring" while a saved sign-in is read. */
-  cloud?: () => { status: string; accountId: string | null; origin: string | null } | null;
+  /** The MausBot Cloud sign-in as `env`'s lending checks it (its own address for another Cloud of the person's own), else My Cloud's. */
+  cloud?: (env?: Workspace | null) => { status: string; accountId: string | null; origin: string | null } | null;
   /** Signs this app back in to the person's own Cloud after its session there ended; true when it did. */
   reconnect?: ((origin: string) => Promise<boolean> | boolean) | null;
   now?: () => number;

@@ -223,9 +223,9 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     if (!grant.cloud) return requireEnabled();
     // Quitting only pauses: a check in flight at close must never switch lending off for the next launch.
     if (closed) throw new Paused("This app is closing.");
-    const verdict = cloudLendingVerdict(grant.cloud, cloud(), env);
+    const verdict = cloudLendingVerdict(grant.cloud, cloud(env), env);
     if (verdict.allow) return;
-    if (verdict.stop) { endCloud(env, verdict.stop); throw new Error("Lending to My Cloud stopped."); }
+    if (verdict.stop) { endCloud(env, verdict.stop); throw new Error("Lending to this Cloud stopped."); }
     throw new Paused("Waiting for your MausBot Cloud sign-in.");
   };
   const store = next => {
@@ -236,6 +236,15 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     fs.renameSync(temporary, file); records = next;
   };
   const sleepsHere = env => Boolean(records[env.id]?.cloud) || cloud()?.origin === env.origin;
+  /** My Cloud sleeps by the Admin's word and its own, on the gate this app shares with Files (`power`); another Cloud of
+   * the person's own by its own "going to sleep" answer alone, on a gate of its own, so one Cloud asleep never holds
+   * another's lending, and a sleeping one is not dialled again before its hold ends. */
+  const ownGates = new Map();
+  const sleepGate = env => {
+    if (env.id === myCloud()?.id || cloud()?.origin === env.origin) return power;
+    if (!ownGates.has(env.id)) ownGates.set(env.id, createCloudPowerGate());
+    return ownGates.get(env.id);
+  };
   const request = async (env, route, body, signal, secret) => {
     const origin = new URL(env.origin);
     if (origin.protocol !== "https:" && !(origin.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname))) throw new Error("Computer sharing requires an HTTPS server address");
@@ -247,7 +256,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     });
     if (asleepAnswer(response)) {
       await response.body?.cancel?.().catch(() => {});
-      if (sleepsHere(env)) power.hold();
+      if (sleepsHere(env)) sleepGate(env).hold();
       throw new CloudAsleepError();
     }
     const chunks = []; let bytes = 0;
@@ -290,8 +299,8 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
    * sleeping Cloud is never dialled. */
   const keepLink = async (env, grant, signal) => {
     for (let failures = 0; !signal.aborted;) {
-      if (sleepsHere(env) && power.asleep()) {
-        await power.wait(signal);
+      if (sleepsHere(env) && sleepGate(env).asleep()) {
+        await sleepGate(env).wait(signal);
         continue;
       }
       let opened = false;
@@ -304,7 +313,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       });
       linked.delete(env.id); changed();
       if (signal.aborted) return;
-      if (ended.code === LINK_ASLEEP) { if (sleepsHere(env)) power.hold(); continue; }
+      if (ended.code === LINK_ASLEEP) { if (sleepsHere(env)) sleepGate(env).hold(); continue; }
       if (!opened) failures++;
       try { await delay(LINK_RETRY_MS[Math.min(failures, LINK_RETRY_MS.length - 1)], undefined, { signal }); } catch { return; }
     }
@@ -323,7 +332,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
     const signal = live.abort.signal;
     const call = (action, body = {}, held = signal) => request(env, `/api/shared-computers/${grant.id}/${action}`, body, held, grant.secret);
     const gate = () => requireGrant(env, grant);
-    const awake = () => { if (sleepsHere(env) && power.asleep()) throw new CloudAsleepError(); };
+    const awake = () => { if (sleepsHere(env) && sleepGate(env).asleep()) throw new CloudAsleepError(); };
     void (async () => {
       while (!signal.aborted) {
         try {
@@ -361,7 +370,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
           while (!signal.aborted) {
             await gate();
             awake();
-            const { job } = await call("poll", {}, sleepsHere(env) ? AbortSignal.any([signal, power.signal()]) : signal);
+            const { job } = await call("poll", {}, sleepsHere(env) ? AbortSignal.any([signal, sleepGate(env).signal()]) : signal);
             await gate();
             if (!job) continue;
             if (!uuid(job.id)) throw new Error("Invalid computer request");
@@ -432,10 +441,10 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
             changed();
             break;
           }
-          if (!signal.aborted && sleepsHere(env) && (error instanceof CloudAsleepError || power.asleep())) {
+          if (!signal.aborted && sleepsHere(env) && (error instanceof CloudAsleepError || sleepGate(env).asleep())) {
             status.set(env.id, { connected: false, problem: "asleep" });
             changed();
-            await power.wait(signal);
+            await sleepGate(env).wait(signal);
             continue;
           }
           const problem = grant.cloud ? error.problem ?? (error.status === 401 || error.status === 403 ? "connect-first" : "waiting") : undefined;
@@ -467,7 +476,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   // `paused`: lending waits (for the Cloud sign-in, say) and resumes by itself, so the server keeps it as lent, not stopped.
   const disconnect = (env, grant, paused = false) => {
     stop(env.id);
-    if (paused && sleepsHere(env) && power.asleep()) return;
+    if (paused && sleepsHere(env) && sleepGate(env).asleep()) return;
     if (grant?.secret) void request(env, `/api/shared-computers/${grant.id}/disconnect`, paused ? { paused: true } : {}, undefined, grant.secret).catch(() => {});
   };
   // One truthful state for My Cloud, whichever control lent to it: a grant from Settings → Servers → Computer access
@@ -497,7 +506,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
   const cloudGrant = (env, current, info, { folders = [], screen, internet, terminal, chrome }) => ({ ...info, id: randomUUID(), secret: randomBytes(32).toString("hex"), enabled: true, folders,
     terminal: terminal === true, computer: screen === true, internet: internet === true, chrome: chrome === true, cloud: { accountId: current.accountId, origin: env.origin } });
   const verifiedCloud = env => {
-    const current = cloud();
+    const current = cloud(env);
     return current?.status === "connected" && current.accountId && current.origin === env.origin ? current : null;
   };
   /** Calls nothing itself: the grant reaches My Cloud the way any grant does, once it is awake. */
@@ -574,7 +583,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       for (const env of environments()) {
         const grant = records[env.id];
         if (!validRecord(grant)) continue;
-        if (grant.cloud) { if (cloudLendingVerdict(grant.cloud, cloud(), env).allow) run(env, grant); }
+        if (grant.cloud) { if (cloudLendingVerdict(grant.cloud, cloud(env), env).allow) run(env, grant); }
         else if (maintainer && !maintainerOff) run(env, grant);
       }
       changed();
@@ -585,7 +594,7 @@ export function createComputerSharing({ file, fetch: fetchImpl, environments, cu
       for (const env of environments()) {
         const grant = records[env.id];
         if (!grant?.cloud || grant.enabled !== true) continue;
-        const verdict = cloudLendingVerdict(grant.cloud, cloud(), env);
+        const verdict = cloudLendingVerdict(grant.cloud, cloud(env), env);
         if (verdict.stop) endCloud(env, verdict.stop);
         else if (verdict.pause) { if (running.has(env.id)) { disconnect(env, grant, true); status.set(env.id, { connected: false, problem: "paused" }); changed(); } }
         else if (!running.has(env.id) && validRecord(grant)) run(env, grant);

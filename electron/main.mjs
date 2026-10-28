@@ -99,7 +99,7 @@ import { createDesktopIncludedX } from "./included-x.mjs"; import { createDeskto
 import { cloudPageSenderAllowed, cloudPlanDisk, cloudUnreachableText, createCloudPowerGate, isCloudHomeEntry, myCloudOrigin, rememberedCloudHome, savedCloudHomeOrigin, signInCloudSession, withCloudHome } from "./cloud-home.mjs";
 import { installCloudFiles } from "./cloud-sync-main.mjs";
 import { createCloudEntry } from "./cloud-entry.mjs";
-import { createLendingTarget, installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs"; import { createOpenAtLogin, installOpenAtLogin } from "./open-at-login.mjs";
+import { createLendingPlaces, createLendingTarget, installCloudLending, usualFolderPaths, usualFolders } from "./cloud-lending-ipc.mjs"; import { createOpenAtLogin, installOpenAtLogin } from "./open-at-login.mjs";
 import { installOneHome } from "./one-home-main.mjs";
 import { installUseMyComputer } from "./use-my-computer.mjs";
 import { askForMicrophone, openPrivacySettings } from "./privacy-settings.mjs";
@@ -1454,7 +1454,7 @@ function sharingController() {
     fetch: (...args) => session.defaultSession.fetch(...args),
     environments: () => environmentsState.environments,
     enabled: refreshSharedComputersAllowed,
-    cloud: lendingTarget.cloud, myCloud: lendingTarget.environment, power: cloudPower, reconnect: origin => signInCloudSession({ origin, mine: myCloud(), pair: () => ensureCloudAccount().pairHome(), fetch: (...args) => session.defaultSession.fetch(...args) }),
+    cloud: lendingTarget.cloud, myCloud: lendingTarget.environment, power: cloudPower, reconnect: reconnectCloud,
     linkHeaders: async env => ({ cookie: (await session.defaultSession.cookies.get({ url: env.origin })).map(cookie => `${cookie.name}=${cookie.value}`).join("; ") }),
     onChange: summary => { lendingIndicator().update({ lending: summary.lending.length > 0, internetOnly: summary.internetOnly, terminal: summary.terminal, busy: Boolean(summary.busy && summary.lending.includes(summary.busy.env)) }); loginItem.follow(summary.lending.length > 0); },
     cuaConnection: () => cuaReady, screenLocked: () => powerMonitor.getSystemIdleState(1) === "locked", idleSeconds: () => powerMonitor.getSystemIdleState(1) === "unknown" ? null : powerMonitor.getSystemIdleTime(),
@@ -1464,6 +1464,12 @@ function sharingController() {
 }
 
 const lendingTarget = createLendingTarget({ account: () => cloudAccount, environments: () => environmentsState.environments });
+const lendingPlaces = createLendingPlaces({ target: lendingTarget, ownPage: event => ownCloudPage(event), local: senderIsLocal, store: jsonFile(path.join(app.getPath("userData"), "lending-place.json")) });
+/** A Cloud of the person's own whose session in this window ended: a new one from the Admin's code for that very Cloud. */
+function reconnectCloud(origin) {
+  const other = otherOwnClouds(cloudAccount?.state().clouds).find(cloud => cloud.origin === origin);
+  return signInCloudSession({ origin, mine: other ? origin : myCloud(), pair: () => ensureCloudAccount().pairHome(other?.id ?? null), fetch: (...args) => session.defaultSession.fetch(...args) });
+}
 const loginItem = createOpenAtLogin({ app, file: path.join(app.getPath("userData"), "open-at-login.json"), home: os.homedir() });
 installOpenAtLogin({ ipcMain, guard: localOrHome, loginItem, changed: refreshApplicationMenu });
 let hiddenStart = false;
@@ -1492,7 +1498,7 @@ function lendingIndicator() {
   lendingTray ??= createLendingIndicator({
     Tray, Menu, nativeImage, iconPath: APP_ICON, onStop: stopLending,
     onOpen: () => void openLendingSettings().catch(error => slog(`lending settings: ${error?.message ?? error}`)),
-    onTerminal: on => useMyMac.lendTerminal(on).catch(error => slog(`lending terminal: ${error?.message ?? error}`)),
+    onTerminal: on => useMyMac.lendTerminalEverywhere(on).catch(error => slog(`lending terminal: ${error?.message ?? error}`)),
   });
   return lendingTray;
 }
@@ -2635,7 +2641,8 @@ const updaterPageOffered = event => {
 ipcMain.on("update:offered", event => {
   try { event.returnValue = updaterPageOffered(event) === true; } catch { event.returnValue = false; }
 });
-ipcMain.handle("cloud-lending:open", cloudPageSender("cloud-lending:open", () => openLendingSettings()));
+// Another Cloud's own page ("Choose folders" in its welcome): its own Settings, where its own lending switch is.
+ipcMain.handle("cloud-lending:open", event => (ownCloudPage(event) ? void (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send("app:open-settings", "cloud-settings")) : cloudPageSender("cloud-lending:open", () => openLendingSettings())(event)));
 installCloudPlanIpc({ ipcMain, pageSender: cloudPageSender, account: () => cloudAccount, client: () => ensureCloudAccount(), notices: () => cloudTrialNotices(), homePage: event => homeWindow.homePage(event), otherCloud: ownCloudPage });
 
 const savedWorkspace = id => {
@@ -2712,13 +2719,14 @@ ipcMain.handle("sharing:save", localWorkspaceOnly("sharing:save", async (_event,
 }));
 
 // Decided from the verified Cloud sign-in alone: the renderer names no server, account or origin.
-async function lendingSnapshot() {
-  const env = lendingTarget.environment();
+async function lendingSnapshot(env = lendingTarget.environment()) {
   const connection = await cuaReady.catch(() => null);
   return { available: Boolean(env), screenAvailable: sharedCuaConnection(connection) !== null, screenReady: localComputerReady(process.platform, connection), ...(env ? { state: sharingController().cloudState(env), activity: sharingController().activity(env.id, 30) } : {}) };
 }
-const useMyMac = installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: lendingTarget.environment, save: (env, choice) => sharingController().saveCloud(env, choice), stop: () => { sharingController(); stopLending(); },
-  cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
+// My Cloud's Off stops all lending, as it always did; another Cloud's stops lending to that Cloud only.
+const useMyMac = installCloudLending({ ipcMain, localOnly: localWorkspaceOnly, snapshot: lendingSnapshot, environment: lendingPlaces.place, places: lendingPlaces, save: (env, choice) => sharingController().saveCloud(env, choice),
+  stop: env => { sharingController(); if (env?.cloud) computerSharing.revoke(env); else stopLending(); },
+  cloudPage: (channel, handler) => (event, ...args) => { if (!cloudPageAsking(event) && !ownCloudPage(event)) throw new Error(`${channel} is only available in this app's window`); return handler(event, ...args); },
   chooseFolder: () => lendingDialogs.chooseFolder("Choose a folder or drive My Cloud can use"),
   defaults: () => usualFolders(usualFolderPaths(name => app.getPath(name), os.homedir()), validateSharedFolders), validate: validateSharedFolders,
   confirmScreen: lendingDialogs.confirmScreen, confirmTerminal: lendingDialogs.confirmTerminal });
@@ -2728,7 +2736,8 @@ const cloudSync = installCloudFiles({
   send: (channel, value) => { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, value); },
   cloudOrigin: () => myCloud(), cloudAccount: () => ensureCloudAccount(), stateDir: cloudTarget(process.env).sync, power: cloudPower, lending: { environment: lendingTarget.environment, sharing: sharingController, validate: validateSharedFolders },
 });
-const useMyComputer = installUseMyComputer({ ipcMain, cloudPage: cloudPageAsking, lending: useMyMac, connection: () => cuaReady, request: requestComputerUse, cloud: () => lendingTarget.environment()?.origin ?? null,
+const useMyComputer = installUseMyComputer({ ipcMain, cloudPage: event => cloudPageAsking(event) ?? (ownCloudPage(event) ? "cloud" : null), place: event => (ownCloudPage(event) ? lendingPlaces.place(event) : null),
+  lending: useMyMac, connection: () => cuaReady, request: requestComputerUse, cloud: target => (target ?? lendingTarget.environment())?.origin ?? null,
   locale: () => app.getLocale(), window: () => mainWindow, remote: () => Boolean(desktopRemoteAccess), lastInput: oneHome.lastInput, dialogs: lendingDialogs, store: jsonFile(path.join(app.getPath("userData"), "use-my-computer.json")), log: slog });
 
 // window.confirm() has no parent window, so (tiling) window managers cannot center it over the app.

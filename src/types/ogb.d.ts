@@ -211,6 +211,8 @@ const __APP_VERSION__: string;
             color?: string;
             /** The person's own My Cloud. */
             home?: boolean;
+            /** Another Cloud of the person's own, as the verified session lists it. */
+            cloud?: { id: string; role: string };
           }>;
         }>;
         /** Local targets answer {ok, error?} (error strings are an open set); remote ones answer nothing. */

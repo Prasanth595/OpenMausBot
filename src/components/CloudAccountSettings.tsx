@@ -11,7 +11,7 @@ import type { LocaleKey } from "@/locales";
 import { Card } from "./SettingsPrimitives";
 import { StagingMark } from "./cloud-buy/parts";
 import { CloudKeepHere } from "./CloudKeepHere";
-import { CloudLending } from "./CloudLending";
+import { CloudLendingFor } from "./CloudLendingFor";
 import { CloudSetupSteps } from "./CloudSetupSteps";
 import { useCloudSendNotice } from "./CloudSendStrip";
 import { LentComputersCard } from "./LentComputers";
@@ -70,7 +70,7 @@ function cloudHomeCard({ machine, busy, failed, onConnect, lending, trial = fals
         {!team && cloudFilesBridge() && <OpenFilesButton label={t("cloudHome.filesLink")} className="text-[13px] font-medium text-accent-text underline underline-offset-2 hover:text-ink" />}
       </>}
       {failed && !unreachable && <p role="alert" className="text-[13px] text-danger">{t("cloudHome.connectFailed")}</p>}
-      {lending && <CloudLending bridge={lending} moving={Boolean(moving)} />}
+      {lending && <CloudLendingFor bridge={lending} moving={Boolean(moving)} />}
     </div>
   </Card>;
 }

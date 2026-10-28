@@ -114,7 +114,7 @@ function mainLending({ response }) {
   const context = vm.createContext({
     createLendingDialogs, installCloudLending, usualFolders, usualFolderPaths, dialog, mainWindow: win, validateSharedFolders: named, sharedCuaConnection, isHomeFolder: async () => false,
     ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) }, localWorkspaceOnly: passThrough, cloudPageAsking: () => "cloud",
-    requireSharedComputers: async () => {}, savedWorkspace: () => team, lendingTarget: { environment: () => cloud }, cuaReady: Promise.resolve({ mcpCommand: "cua", mcpArgs: ["mcp"] }), localComputerReady: () => false, process: { platform: "darwin" },
+    requireSharedComputers: async () => {}, savedWorkspace: () => team, lendingTarget: { environment: () => cloud }, lendingPlaces: { place: () => cloud, all: () => [cloud] }, cuaReady: Promise.resolve({ mcpCommand: "cua", mcpArgs: ["mcp"] }), localComputerReady: () => false, process: { platform: "darwin" },
     stopLending: () => {}, app: { getPath: (name) => `/Users/me/${name}` }, os: { homedir: () => "/Users/me" },
     sharingController: () => ({
       identity: async () => ({ id: "info" }),
