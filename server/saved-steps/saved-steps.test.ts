@@ -230,7 +230,7 @@ describe("SavedSteps.requestSettled", () => {
   });
 
   it("records a mount's computer calls only for the person's own request while saving is on", () => {
-    const person = { origin: { kind: "user" } };
+    const person = { origin: { kind: "user" }, personLine: true };
     expect(steps.journals(person)).toBe(true);
     expect(steps.journals(undefined)).toBe(false);
     expect(steps.journals({ ...person, automation: { kind: "schedule" } })).toBe(false);
@@ -240,6 +240,13 @@ describe("SavedSteps.requestSettled", () => {
     enabled = false;
     expect(steps.journals(person)).toBe(false);
     expect(facade({ platform: "linux" }).journals(person)).toBe(false);
+  });
+
+  it("never records a turn a peer handed on, though it carries the person's origin", () => {
+    const handed = { origin: { kind: "user", request: "Open TextEdit and type hello world" } };
+    expect(steps.journals(handed)).toBe(false);
+    expect(steps.journals({ ...handed, personLine: false })).toBe(false);
+    expect(steps.journals({ ...handed, personLine: true })).toBe(true);
   });
 
   it.each(["linux", "win32"] as const)("neither saves nor replays on %s", async (platform) => {

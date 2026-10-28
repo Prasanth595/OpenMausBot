@@ -39,7 +39,8 @@ export interface SettledRequest {
   automated: boolean;
 }
 
-export interface RequestOwner { automation?: unknown; origin?: { kind: string } }
+/** `personLine`: the request began with the person's own line here, not work a peer handed on with the person's origin. */
+export interface RequestOwner { automation?: unknown; origin?: { kind: string }; personLine?: boolean }
 
 export const personRequest = (owner: RequestOwner): boolean => owner.automation === undefined && owner.origin?.kind === "user";
 
@@ -113,7 +114,7 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
       if (scope) journal.gateChecked(scope);
       else if (capability.kind === "computer") journal.taint({ threadId: capability.threadId, generation: capability.generation });
     },
-    journals: (owner) => owner !== undefined && personRequest(owner) && enabled(),
+    journals: (owner) => owner?.personLine === true && personRequest(owner) && enabled(),
     journalRoutes: (internal) => createComputerJournalRoutes({ ...internal, enabled, record: (scope, entry) => journal.record(scope, entry) }),
     requestSettled(settled) {
       const taken = journal.take(settled.threadId, settled.generations);
