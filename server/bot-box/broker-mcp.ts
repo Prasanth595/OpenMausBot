@@ -11,12 +11,15 @@ import type { McpServerSpec } from "../contracts.ts";
 import { botBox, type BoxBroker } from "./box.ts";
 import { brokerUrl } from "./broker.ts";
 
-export interface BrokerTurn { botId: string; threadId: string }
+export interface BrokerTurn { botId: string; threadId: string; configRevision?: number }
 
 const NAME = /^[a-z0-9][a-z0-9_-]{0,47}$/i;
 const MAX_REMEMBERED = 10_000;
 /** The live token per conversation and the servers it was minted for. */
 const remembered = new Map<string, { token: string; fingerprint: string; grant: string; names: string[]; broker: BoxBroker }>();
+let configRevision = 0;
+
+export function mcpConfigRevision(): number { return configRevision; }
 
 function revokeRemembered(key: string): void {
   const known = remembered.get(key);
@@ -27,6 +30,7 @@ function revokeRemembered(key: string): void {
 onConfigSaved((before, after) => {
   const previous = before.mcpServers as Record<string, unknown> | undefined;
   const current = after.mcpServers as Record<string, unknown> | undefined;
+  if (!isDeepStrictEqual(previous, current)) configRevision += 1;
   for (const [key, known] of remembered) {
     if (known.names.some((name) => !isDeepStrictEqual(previous?.[name], current?.[name]))) revokeRemembered(key);
   }
@@ -43,6 +47,9 @@ export function forgetBrokeredMcp(): void { remembered.clear(); }
 /** The turn's custom servers with every URL server's headers moved to the broker; unchanged when the broker is off. */
 export function brokerRemoteMcp(custom: Record<string, McpServerSpec>, turn: BrokerTurn, broker: BoxBroker | null = botBox.broker()): Record<string, McpServerSpec> {
   if (!broker) return custom;
+  if (turn.configRevision !== undefined && turn.configRevision !== configRevision) {
+    throw new Error("MCP configuration changed while preparing this turn. Retry the message.");
+  }
   const out: Record<string, McpServerSpec> = {};
   const grants: Record<string, { upstream: string; headers: Record<string, string> }> = {};
   const brokered: string[] = [];

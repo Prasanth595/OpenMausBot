@@ -1,7 +1,19 @@
-import { brokerRemoteMcp, type BrokerTurn } from "./bot-box/broker-mcp.ts";
+import { brokerRemoteMcp, mcpConfigRevision, type BrokerTurn } from "./bot-box/broker-mcp.ts";
 import type { AppConfig } from "./config.ts";
 import type { McpServerSpec, SendTurnInput } from "./contracts.ts";
 import { parseStoredMcpServer } from "./mcp-registry.ts";
+
+export async function prepareCustomMcp(
+  integrations: Parameters<typeof attachCustomMcp>[0],
+  preparation: Promise<Record<string, McpServerSpec>>,
+  cfg: AppConfig,
+  turn: BrokerTurn,
+): Promise<Record<string, McpServerSpec>> {
+  const configRevision = mcpConfigRevision();
+  const custom = await preparation;
+  attachCustomMcp(integrations, custom, cfg, { ...turn, configRevision });
+  return custom;
+}
 
 export function customMcpResultBudgets(cfg: AppConfig, names: readonly string[]): Record<string, number> {
   const out: Record<string, number> = {};

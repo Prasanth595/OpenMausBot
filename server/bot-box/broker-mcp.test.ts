@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { saveConfig } from "../config.ts";
+import { customMcpServers, loadConfig, saveConfig } from "../config.ts";
 import type { McpServerSpec, RemoteMcpSpec } from "../contracts.ts";
-import { attachCustomMcp } from "../mcp-result-budget.ts";
+import { attachCustomMcp, prepareCustomMcp } from "../mcp-result-budget.ts";
+import { McpOAuthManager, withMcpSignIn } from "../mcp-oauth.ts";
+import { McpOAuthStore } from "../mcp-oauth-store.ts";
 import { RemoteMcpClient } from "../mcp-http.ts";
 import { probeMcpServer } from "../mcp-probe.ts";
 import { startFakeHttpMcp } from "../testing/fake-http-mcp-server.ts";
@@ -93,6 +95,51 @@ describe("remote MCP servers through the broker", () => {
     attachCustomMcp(integrations, {}, {}, turn);
     expect(integrations).toEqual({});
     expect(credentials.lookup(new URL(first).pathname.split("/")[2]!, "mcp-notion").ok).toBe(false);
+  });
+
+  withBroker("does not regrant a removed server after another server's OAuth refresh resumes", async () => {
+    const b = await broker();
+    vi.spyOn(botBox, "broker").mockReturnValue(b);
+    let entered!: () => void, resume!: () => void;
+    const refreshing = new Promise<void>((resolve) => { entered = resolve; });
+    const release = new Promise<void>((resolve) => { resume = resolve; });
+    const upstream = createHttpServer((req, res) => {
+      if (req.url === "/token") {
+        entered();
+        void release.then(() => res.writeHead(200, { "content-type": "application/json" })
+          .end(JSON.stringify({ access_token: "refreshed", token_type: "Bearer", expires_in: 3600 })));
+      } else res.writeHead(req.headers.authorization === "Bearer notion-secret" ? 200 : 403).end();
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, "127.0.0.1", resolve));
+    const url = `http://127.0.0.1:${(upstream.address() as AddressInfo).port}`;
+    const file = join(dir, "oauth.json");
+    const manager = new McpOAuthManager({ file });
+    new McpOAuthStore(file).put("slow", { url: `${url}/slow`, state: "signed-in", clientId: "fixture",
+      tokenEndpoint: `${url}/token`, tokens: { access: "expired", refresh: "refresh", expiresAt: 1 } });
+    try {
+      const notion = { ...custom.notion, url: `${url}/mcp`, enabled: true };
+      const slow = { type: "http", url: `${url}/slow`, headers: {}, enabled: true };
+      saveConfig({ mcpServers: { notion, slow } });
+      const cfg = loadConfig(), turn = { botId: "b1", threadId: "t1" };
+      const first = (brokerRemoteMcp(customMcpServers(cfg), turn, b).notion as RemoteMcpSpec).url;
+      expect(await call(first)).toBe(200);
+      const integrations: Parameters<typeof attachCustomMcp>[0] = {};
+      const pending = prepareCustomMcp(integrations, withMcpSignIn(customMcpServers(cfg), manager), cfg, turn)
+        .then(() => null, (error: unknown) => error);
+      await refreshing;
+      saveConfig({ mcpServers: { slow } });
+      expect(await call(first)).toBe(401);
+      resume();
+      const error = await pending;
+      const stale = integrations.custom?.notion as RemoteMcpSpec | undefined;
+      expect(stale ? await call(stale.url) : 401).toBe(401);
+      expect(error).toBeInstanceOf(Error);
+      expect(credentials.stats().tokens).toBe(0);
+    } finally {
+      resume();
+      manager.dispose();
+      await new Promise<void>((resolve) => upstream.close(() => resolve()));
+    }
   });
 
   withBroker("moves a URL server's headers to the broker and leaves stdio servers alone", async () => {

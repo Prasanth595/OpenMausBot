@@ -224,7 +224,7 @@ import {
   listMcpServers,
   parseStoredMcpServer,
 } from "./mcp-registry.ts";
-import { attachCustomMcp } from "./mcp-result-budget.ts";
+import { attachCustomMcp, prepareCustomMcp } from "./mcp-result-budget.ts";
 import { MCP_OAUTH_CALLBACK_PATH, McpOAuthManager, mcpOAuthRedirectUri } from "./mcp-oauth.ts";
 import {
   GROUP_GOAL_WAIT_MAX_MS,
@@ -8127,8 +8127,7 @@ async function startTurn(
       }
       // User MCP servers' tools are never pre-allowed: every call rides the normal permission flow.
       if (instance.adapter.capabilities.customMcp === true && !proactive.fence.confines(threadId)) {
-        const custom = await teamConnections.turnMcp(bot, threadId, dispatchClaimId);
-        attachCustomMcp(integrations, custom, cfg, { botId: bot.id, threadId });
+        const custom = await prepareCustomMcp(integrations, teamConnections.turnMcp(bot, threadId, dispatchClaimId), cfg, { botId: bot.id, threadId });
         if (Object.keys(custom).length) Object.assign(integrations, chatAppsMcp.turnMounts(custom, bot.toolScope));
       }
       const worksInWorkspace = supportsWorkspaceFiles(instance.driverKind);
@@ -10067,7 +10066,7 @@ async function runClaimedGroupMemberTurn(
     return true;
   }
   if (instance.adapter.capabilities.customMcp === true) {
-    attachCustomMcp(integrations, await teamConnections.turnMcp(bot, threadId, internalGeneration), cfg, { botId: bot.id, threadId });
+    await prepareCustomMcp(integrations, teamConnections.turnMcp(bot, threadId, internalGeneration), cfg, { botId: bot.id, threadId });
   }
   // An interrupt during connected-app setup must still stop the queued room operation before it starts a process.
   if (isCancelled?.()) return false;
