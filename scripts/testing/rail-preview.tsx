@@ -3,8 +3,6 @@ import type { CloudSwatch } from "../../electron/cloud-list.mjs";
 import type { AddCloudView, RailPlace, RailState } from "../../electron/cloud-rail.mjs";
 import type { PlaceLook } from "../../electron/place-look.mjs";
 import App from "../../src/App";
-import { CloudLendingFor } from "../../src/components/CloudLendingFor";
-import { Card } from "../../src/components/SettingsPrimitives";
 import { setAnalyticsEnabled, setEmailGateDone } from "../../src/lib/analytics";
 import { setAdvancedMode } from "../../src/lib/interface-mode";
 import { markSimpleModePromptSeen } from "../../src/lib/simple-mode-prompt";
@@ -16,8 +14,7 @@ import "../../src/styles.css";
 // ?mode=simple Simple mode, ?sheet=add|server|cloud|name|connect opens ＋'s sheet there (?adding=setting_up: a Cloud
 // being bought; connect: a signed-in server's), ?places=many the list past eight (?more opens it), ?places=servers the
 // person's own servers that signed in. ?look=<colour>|none is the place's colour (its tint), ?member a team's Cloud
-// its member is on, ?settings=look Settings → Appearance at the place's colour. ?view=lending is this computer's
-// lending card alone, for someone with two Clouds of their own (?chosen=c-a: lending to the second).
+// its member is on, ?settings=look Settings → Appearance at the place's colour.
 const params = new URLSearchParams(location.search);
 setAnalyticsEnabled(false);
 setEmailGateDone("skipped");
@@ -82,15 +79,7 @@ Object.assign(window, { ogb: {
   cloudAdd: { state: async () => addView, start: async () => ({ outcome: "opened" }), reopen: async () => true, copyLink: async () => true, open: ok, interest: ok, sheet: ok },
 } });
 
-const lendingTo = { chosen: params.get("chosen") ?? "home" };
-const lent = () => ({ available: true, screenAvailable: true, screenReady: true,
-  state: { enabled: true, connected: true, folders: [{ id: "f1", path: "/Users/you/Documents", name: "Documents", write: false }], screen: false, internet: true } });
-const lendingBridge = { state: async () => lent(), chooseFolder: async () => null, save: async () => lent(), stop: async () => lent(),
-  places: async () => ({ places: [{ id: "home", name: "My Cloud", color: "blue" }, { id: "c-a", name: "Client A", color: "teal" }], chosen: lendingTo.chosen }),
-  choose: async (id: string) => { lendingTo.chosen = id; } };
-createRoot(document.getElementById("root")!).render(params.get("view") === "lending"
-  ? <div className="min-h-screen bg-app px-8 py-10"><div data-lending-preview className="mx-auto max-w-[620px]"><Card title="MausBot Cloud"><CloudLendingFor bridge={lendingBridge as never} /></Card></div></div>
-  : <App />);
+createRoot(document.getElementById("root")!).render(<App />);
 
 // The macOS window's traffic lights, drawn where the system draws them, so the picture shows what sits beside them.
 const lights = document.createElement("div");
