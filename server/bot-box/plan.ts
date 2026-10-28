@@ -223,6 +223,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
       if (code === "EACCES" || code === "ENOTDIR") continue;
       throw error;
     }
+    if (under(dataDir, source) || (under(source, dataDir) && !under(source, approvedPath(path)))) continue;
     for (const target of new Set([source, resolve(path)])) {
       if (mountAccess(mounts, target) !== "none") continue;
       mounts.push({ kind: "ro", source, target, optional: true });

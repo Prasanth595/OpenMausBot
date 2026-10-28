@@ -67,6 +67,10 @@ describe.skipIf(detection.box !== "bwrap")("synthetic filesystem layouts inside 
     });
   });
 
+  it.each(["ro", "argv"].flatMap((grant) => ["data", "bot"].map((target) => `readonly-alias-${grant}-${target}`)))("refuses a read-only HOME alias that widens the approved subtree (%s)", (scenario) => {
+    expect(layout(scenario)).toEqual(["hidden", "hidden", "hidden"]);
+  });
+
   it("keeps private temporary files hidden when an environment path aliases /tmp", () => {
     expect(layout("symlink-private-env")).toEqual(["hidden"]);
   });

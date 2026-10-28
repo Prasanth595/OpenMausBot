@@ -67,6 +67,16 @@ if (scenario === "browser" || scenario === "browser-read-only") {
     }
   }
   console.log(JSON.stringify(results));
+} else if (scenario?.startsWith("readonly-alias-")) {
+  const otherBot = join(realData, "workspaces", "bot-b"), alias = join(home, "skills");
+  mkdirSync(otherBot, { recursive: true });
+  writeFileSync(join(otherBot, "private.txt"), "other bot fixture");
+  const intoData = scenario.endsWith("-data");
+  symlinkSync(intoData ? realData : otherBot, alias);
+  const access = scenario.includes("-argv-") ? { args: ["--add-dir", alias] } : { ro: [alias] };
+  const plan = planBox(setup, { ...request, ...access });
+  console.log(JSON.stringify(probe(bwrapArgs(plan),
+    `for file in ${realData}/messages.db ${otherBot}/private.txt ${alias}/${intoData ? "messages.db" : "private.txt"}; do if test -r "$file"; then echo exposed; else echo hidden; fi; done`)));
 } else if (scenario?.startsWith("hostile-")) {
   const otherBot = join(realData, "workspaces", "bot-b");
   const alias = scenario.includes("outside") ? "/srv/granted" : join(home, ".codex");
