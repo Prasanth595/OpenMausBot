@@ -14,6 +14,19 @@ export const viewportArgs = (size: PageSize): string[] => ["set", "viewport", St
  * busy page can pass the 5 MB that Claude's API (2026) takes for one image. */
 const ENLARGED_PICTURE = { format: "jpeg", quality: 80 } as const;
 
+/** agent-browser's live stream sends frames at the page's own size (0.37.0 ignores a size cap), and a frame of a page of
+ * noise this large is about 2.8 MB of base64: a larger panel gets this many pixels in its shape, drawn larger. */
+export const MAX_PAGE_PIXELS = 1280 * 2560;
+
+/** The page that fills `panel` within MAX_PAGE_PIXELS, still at least a desktop wide. */
+export function streamedPage(panel: PageSize): PageSize {
+  const page = fillPage(panel);
+  const pixels = page.width * page.height;
+  if (pixels <= MAX_PAGE_PIXELS) return page;
+  const scale = Math.sqrt(MAX_PAGE_PIXELS / pixels);
+  return { width: Math.floor(page.width * scale), height: Math.floor(page.height * scale) };
+}
+
 const key = (size: PageSize) => `${size.width}x${size.height}`;
 
 export interface PageSizeHost {
@@ -62,7 +75,7 @@ export class PageSizes {
    */
   resize(session: string, panel: PageSize | null, fresh = false): Promise<void> {
     const entry = this.#entry(session);
-    entry.wanted = panel ? fillPage(panel) : BROWSER_VIEWPORT;
+    entry.wanted = panel ? streamedPage(panel) : BROWSER_VIEWPORT;
     if (fresh) entry.applied = null;
     if (!entry.applying && this.#behind(session, entry)) entry.applying = this.#follow(session, entry);
     return entry.applying ?? Promise.resolve();

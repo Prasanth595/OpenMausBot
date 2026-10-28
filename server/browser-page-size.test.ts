@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BROWSER_VIEWPORT, PageSizes, type PageSize } from "./browser-page-size.ts";
+import { BROWSER_VIEWPORT, MAX_PAGE_PIXELS, PageSizes, streamedPage, type PageSize } from "./browser-page-size.ts";
 
 function deferred() {
   let resolve!: () => void;
@@ -65,6 +65,18 @@ describe("the page size of a watched agent-browser page", () => {
     state.watched = true;
     await sizes.resize("s", null, true);
     expect(applied).toHaveLength(4);
+  });
+
+  it("keeps a page whose frames the live stream sends whole within 1280x2560's pixels, in the panel's shape and a desktop wide", () => {
+    expect(streamedPage({ width: 365, height: 686 })).toEqual({ width: 1280, height: 2406 });
+    expect(streamedPage({ width: 1440, height: 819 })).toEqual({ width: 1440, height: 819 });
+    expect(streamedPage({ width: 3840, height: 2160 })).toEqual({ width: 2413, height: 1357 });
+    expect(streamedPage({ width: 1600, height: 3200 })).toEqual({ width: 1280, height: 2560 });
+    for (const panel of [{ width: 3840, height: 2160 }, { width: 2000, height: 2000 }, { width: 100, height: 2160 }]) {
+      const page = streamedPage(panel);
+      expect(page.width * page.height).toBeLessThanOrEqual(MAX_PAGE_PIXELS);
+      expect(page.width).toBeGreaterThanOrEqual(1280);
+    }
   });
 
   it("asks for a JPEG screenshot of a page larger than the standard one, unless the bot chose a format", () => {

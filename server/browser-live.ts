@@ -12,8 +12,10 @@ import { relay } from "./browser-relay.ts";
 import { BROWSER_HELD_ELSEWHERE } from "../shared/browser-held.ts";
 
 const execute = promisify(execFile);
-const MAX_FRAME = 3 * 1024 * 1024;
-const MAX_BUFFER = 4 * 1024 * 1024;
+/** A frame of the largest page the view sizes (MAX_PAGE_PIXELS) is up to about 2.8 MB of base64 for a page of noise, and two
+ * may be on their way to a view at once. */
+const MAX_FRAME = 4 * 1024 * 1024;
+const MAX_BUFFER = 8 * 1024 * 1024;
 const HEARTBEAT_MS = 10_000;
 const COMMAND_TIMEOUT_MS = 30_000;
 const STATUS_PROBE_MS = 10_000;
