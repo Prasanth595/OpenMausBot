@@ -59,6 +59,18 @@ describe.skipIf(detection.box !== "bwrap")("synthetic filesystem layouts inside 
     });
   });
 
+  it.each(["home", "outside", "task"].flatMap((location) => ["data", "bot", "thread", "ancestor"].map((target) => `hostile-cwd-${location}-${target}`)))("refuses a cwd alias into protected data (%s)", (scenario) => {
+    expect(layout(scenario)).toEqual({ error: "The bot box refuses a working folder that aliases protected bot box data." });
+  });
+
+  it.each(["env", "rw", "ro", "argv"])("keeps a ..x child of the data directory hidden through an external %s alias", (grant) => {
+    expect(layout(`dotdot-alias-${grant}`)).toEqual({ files: ["hidden", "hidden"], hostFile: "private fixture" });
+  });
+
+  it("allows HOME as cwd while keeping its data directory masked", () => {
+    expect(layout("home-cwd")).toEqual(["hidden", "writable"]);
+  });
+
   it.each(["env", "rw"].flatMap((grant) => ["data", "bot", "ancestor"].map((target) => `hostile-outside-${grant}-${target}`)))("refuses writable aliases outside HOME into masked data (%s)", (scenario) => {
     expect(layout(scenario)).toEqual({
       files: ["hidden", "hidden", "hidden"],

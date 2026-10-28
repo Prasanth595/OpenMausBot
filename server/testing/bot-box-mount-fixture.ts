@@ -87,6 +87,38 @@ if (scenario === "browser" || scenario === "browser-read-only") {
   const plan = planBox(setup, { ...request, ...access });
   console.log(JSON.stringify(probePlan(plan,
     `for file in ${realData}/messages.db ${otherBot}/private.txt ${alias}/${intoData ? "messages.db" : "private.txt"}; do if test -r "$file"; then echo exposed; else echo hidden; fi; done`)));
+} else if (scenario?.startsWith("hostile-cwd-")) {
+  const cwd = join(realData, "task-workspaces", "bot-a", "thread-1");
+  const otherBot = join(realData, "workspaces", "bot-b"), otherThread = join(realData, "task-workspaces", "bot-a", "thread-2");
+  for (const folder of [cwd, otherBot, otherThread, join(realData, "workspaces", "bot-a")]) mkdirSync(folder, { recursive: true });
+  const alias = scenario.includes("-outside-") ? "/srv/granted" : join(scenario.includes("-task-") ? cwd : home, "granted");
+  const target = scenario.endsWith("-data") ? realData : scenario.endsWith("-bot") ? otherBot : scenario.endsWith("-thread") ? otherThread : "/var/lib";
+  symlinkSync(target, alias);
+  writeFileSync(join(target, "cwd-private.txt"), "private fixture");
+  const result: { error: string | null; files?: string[] } = { error: null };
+  try {
+    const plan = planBox(setup, { ...request, cwd: alias });
+    result.files = probePlan(plan, 'cat cwd-private.txt; echo; echo changed > cwd-private.txt');
+  } catch (caught) { result.error = (caught as Error).message; }
+  console.log(JSON.stringify(result));
+} else if (scenario?.startsWith("dotdot-alias-")) {
+  const secret = join(realData, "..x"), alias = "/srv/granted";
+  mkdirSync(secret);
+  writeFileSync(join(secret, "private.txt"), "private fixture");
+  symlinkSync(secret, alias);
+  const grant = scenario.slice("dotdot-alias-".length);
+  const access = grant === "env" ? { env: { CODEX_HOME: alias } } : grant === "rw" ? { rw: [alias] } : grant === "ro" ? { ro: [alias] } : { args: [alias] };
+  const plan = planBox(setup, { ...request, ...access });
+  const files = probePlan(plan,
+    `for file in ${secret}/private.txt ${alias}/private.txt; do if test -r "$file"; then echo exposed; else echo hidden; fi; (echo changed >> "$file") 2>/dev/null || :; done`);
+  console.log(JSON.stringify({ files, hostFile: readFileSync(join(secret, "private.txt"), "utf8") }));
+} else if (scenario === "home-cwd") {
+  const dataDir = join(home, ".openmausbot");
+  mkdirSync(dataDir);
+  writeFileSync(join(dataDir, "messages.db"), "private fixture");
+  const plan = planBox({ ...setup, dataDir }, { ...request, cwd: home });
+  console.log(JSON.stringify(probePlan(plan,
+    `if test -r ${dataDir}/messages.db; then echo exposed; else echo hidden; fi; if (echo changed > cwd-probe) 2>/dev/null; then echo writable; else echo unwritable; fi`)));
 } else if (scenario?.startsWith("hostile-")) {
   const otherBot = join(realData, "workspaces", "bot-b");
   const alias = scenario.includes("outside") ? "/srv/granted" : join(home, ".codex");

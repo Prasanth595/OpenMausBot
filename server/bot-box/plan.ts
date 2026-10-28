@@ -106,7 +106,7 @@ function optionalSource(path: string): string | null {
 /** `child` is `parent` or below it. */
 export function under(child: string, parent: string): boolean {
   const rel = relative(parent, child);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 /** The bot and conversation of a task workspace (`<data>/task-workspaces/<bot>/<thread>`), or null. */
@@ -182,18 +182,6 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   if (allowedHome && homeInsideData) rw(allowedHome, realHome!);
   const covered = (path: string) => mountAccess(mounts, path) === "rw";
 
-  const cwd = request.cwd ? physicalPath(request.cwd) : null;
-  const ids = cwd ? taskWorkspaceIds(cwd, dataDir) : null;
-  const botId = request.botId ?? ids?.botId ?? null;
-  if (cwd && !covered(cwd)) rw(cwd, cwd);
-  if (botId && ID.test(botId)) {
-    const own = join(dataDir, "workspaces", botId);
-    if (!covered(own)) rw(own);
-  }
-  if (mutate.has("bind-otherws")) {
-    rw(join(dataDir, "workspaces"));
-    rw(join(dataDir, "task-workspaces"));
-  }
   const approvedPath = (path: string) => {
     const full = resolve(path);
     if (under(full, resolve(setup.dataDir))) return join(dataDir, relative(resolve(setup.dataDir), full));
@@ -210,6 +198,23 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
       return under(allowed, dataDir) && under(source, allowed);
     }) ? source : null;
   };
+
+  const cwd = request.cwd ? physicalPath(request.cwd) : null;
+  const ids = cwd ? taskWorkspaceIds(cwd, dataDir) : null;
+  const botId = request.botId ?? ids?.botId ?? null;
+  if (cwd && !covered(cwd)) {
+    const source = safeWritable(request.cwd!);
+    if (!source) throw new Error("The bot box refuses a working folder that aliases protected bot box data.");
+    rw(cwd, source);
+  }
+  if (botId && ID.test(botId)) {
+    const own = join(dataDir, "workspaces", botId);
+    if (!covered(own)) rw(own);
+  }
+  if (mutate.has("bind-otherws")) {
+    rw(join(dataDir, "workspaces"));
+    rw(join(dataDir, "task-workspaces"));
+  }
   for (const name of PATH_ENV_NAMES) {
     const value = request.env[name];
     // A temp folder stays the box's own private one; anything else the engine writes is put back.

@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { engineInstallRoots } from "../engine-roots.ts";
-import { BOX_MUTATIONS, argvPaths, describeBoxArgs, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
+import { BOX_MUTATIONS, argvPaths, describeBoxArgs, planBox, taskWorkspaceIds, under, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
 const dataDir = "/data/.openmausbot";
@@ -22,6 +22,24 @@ const turn = (mutate?: BoxMutation[]) => planBox(setup(mutate), {
 const linuxBox = describe.skipIf(process.platform === "win32");
 
 linuxBox("the box plan", () => {
+  it.each(["..x", "...", "..x/nested"])("recognizes %s as a child rather than parent traversal", (child) => {
+    expect(under(join(dataDir, child), dataDir)).toBe(true);
+  });
+
+  it.each([dataDir, join(dataDir, "child")])("contains its own path and ordinary children (%s)", (child) => {
+    expect(under(child, dataDir)).toBe(true);
+  });
+
+  it.each([home, join(home, "sibling"), `${dataDir}-sibling`])("rejects parents and siblings (%s)", (child) => {
+    expect(under(child, dataDir)).toBe(false);
+  });
+
+  it("allows an already mounted HOME as cwd without restoring its masked data", () => {
+    const plan = planBox(setup(), { command: "/usr/bin/x", args: [], cwd: home, env: {} });
+    expect(visibleInBox(plan, home)).toBe("rw");
+    expect(visibleInBox(plan, join(dataDir, "messages.db"))).toBe("none");
+  });
+
   it("shows the turn its own folders and the code, and nothing else of the data folder", () => {
     const plan = turn();
     expect(plan.botId).toBe("bot-a");
