@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TalkShortcutState } from "../../electron/talk-shortcut.mjs";
 import { setLocale } from "@/lib/i18n";
-import { TalkShortcutRow } from "./TalkShortcutRow";
+import { TalkShortcutRow, talkShortcutKeywords } from "./TalkShortcutRow";
 
 const KEYS: TalkShortcutState["keys"] = [
   { id: "ctrl-opt-space", label: "⌃⌥Space" },
@@ -75,6 +75,43 @@ describe("TalkShortcutRow", () => {
     await settle();
     expect(bridge.set).toHaveBeenCalledWith({ key: "ctrl-shift-space" });
     expect(host.textContent).toContain("Hold ⌃⇧Space");
+  });
+
+  it("shows nothing when the setting can't be read, and says so when a change fails, keeping the row as it was", async () => {
+    bridge.state.mockRejectedValueOnce(new Error("no main process"));
+    await show();
+    expect(host.textContent).toBe("");
+    await act(async () => { root.unmount(); });
+    root = createRoot(host);
+    await show();
+    bridge.set.mockRejectedValueOnce(new Error("refused"));
+    await click(toggle());
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("Could not change this. Try again.");
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    expect(toggle().disabled).toBe(false);
+    await click(toggle());
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("holds the switch and the key while a change is on its way, so two changes never cross", async () => {
+    let finish!: (state: TalkShortcutState) => void;
+    await show();
+    bridge.set.mockImplementationOnce(() => new Promise<TalkShortcutState>((resolve) => { finish = resolve; }));
+    await click(toggle());
+    expect(toggle().disabled).toBe(true);
+    expect(host.querySelector("select")?.disabled).toBe(true);
+    await act(async () => { finish({ ...base, enabled: false }); });
+    await settle();
+    expect(toggle().disabled).toBe(false);
+  });
+
+  it("is found by search only where the row can show: the Mac app's own page", () => {
+    const mac = { platform: "darwin", talkShortcut: bridge } as unknown as Window["ogb"];
+    expect(talkShortcutKeywords(mac)).toContain("hold to talk");
+    expect(talkShortcutKeywords({ platform: "win32", talkShortcut: bridge } as unknown as Window["ogb"])).toEqual([]);
+    expect(talkShortcutKeywords({ platform: "darwin" } as unknown as Window["ogb"])).toEqual([]);
+    expect(talkShortcutKeywords(undefined)).toEqual([]);
   });
 
   it("says when another app holds the key", async () => {

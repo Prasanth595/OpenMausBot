@@ -1279,6 +1279,7 @@
   "settings.talk.aria": "Talk to MausBot from any app",
   "settings.talk.keyAria": "Talk shortcut",
   "settings.talk.taken": "{key} is used by another app. Pick another shortcut.",
+  "settings.talk.failed": "Could not change this. Try again.",
   "updatesConsent.title": "Get MausBot updates?",
   "updatesConsent.body": "We'll email you about new features and tips, about twice a month. You can unsubscribe any time.",
   "updatesConsent.yes": "Yes, send me updates",
