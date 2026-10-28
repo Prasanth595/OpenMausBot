@@ -10,14 +10,14 @@ import { failedTurnTool } from "../../shared/failed-turn";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { showThreads: true, advanced: true, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { showThreads: true, advanced: true, phone: false, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
   const original = await importOriginal<typeof import("@/state/store")>();
   return { ...original, useStore: () => ({
     state: { ...original.initialState, config: fixture.showToolCalls ? { features: { showToolCalls: true } } : null,
-      instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test" } as InstanceInfo] },
+      instances: [{ instanceId: "test", driverKind: "codex", displayName: "Test", models: { options: [] } } as unknown as InstanceInfo] },
     dispatch: fixture.dispatch,
   }) };
 });
@@ -32,6 +32,11 @@ vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
   useShowThreads: () => fixture.advanced && fixture.showThreads,
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
+// Only the phone breakpoint varies here; every other query answers as it does without a matchMedia.
+vi.mock("@/lib/use-media-query", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/use-media-query")>(),
+  useMediaQuery: (query: string) => (query === "(max-width: 767.98px)" ? fixture.phone : false),
+}));
 // The trigger still renders, so the markup assertions in this file see the same header.
 vi.mock("./SidebarPopoverMenu", async (importOriginal) => ({
   ...await importOriginal<typeof import("./SidebarPopoverMenu")>(),
@@ -706,5 +711,64 @@ describe("the way back to the bot's own conversation", () => {
     expect(header(true, visiting)).not.toContain("data-chathead-back");
     expect(header(false, { ...visiting, threadId: "main" })).not.toContain("data-chathead-back");
     expect(header(false, { ...visiting, mainThreadId: "unknown" })).not.toContain("data-chathead-back");
+  });
+});
+
+describe("thread tabs in the chat header", () => {
+  const threaded: Bot = {
+    ...bot,
+    tasks: [
+      { threadId: "selected", title: "Selected", createdAt: 2 },
+      { threadId: "launch", title: "Launch post", createdAt: 1, unread: true },
+      { threadId: "pricing", title: "Competitor pricing", createdAt: 0, busy: true, activity: "working", turnStartedAt: 1 },
+      { threadId: "routine", title: "Morning brief", createdAt: 0, routineRunId: "run-1" },
+    ],
+  };
+
+  it("puts a bot's threads as tabs in its identity column, before the model picker", () => {
+    const markup = renderToStaticMarkup(createElement(ChatView, { bot: threaded }));
+    expect(markup).toContain("data-chathead-tabs");
+    const identity = markup.slice(markup.indexOf("data-chathead-identity"), markup.indexOf("data-chathead-controls"));
+    expect(identity).toContain('data-thread-tab="selected"');
+    expect(identity).toContain('data-thread-tab="launch"');
+    expect(identity).toContain('data-thread-tab="pricing"');
+    expect(identity).not.toContain('data-thread-tab="routine"');
+    expect(identity).toContain('role="tablist"');
+    expect(identity.match(/<button[^>]*data-thread-tab="selected"[^>]*>/)?.[0]).toContain('aria-selected="true"');
+    expect(identity.match(/<button[^>]*data-thread-tab="launch"[^>]*>/)?.[0]).toContain('aria-selected="false"');
+    const controls = markup.slice(markup.indexOf("data-chathead-controls"));
+    expect(controls).toContain("data-test-model-control");
+    expect(controls).not.toContain("data-chathead-tabs");
+  });
+
+  it("leaves the header alone in Simple mode", () => {
+    fixture.advanced = false;
+    try {
+      expect(renderToStaticMarkup(createElement(ChatView, { bot: threaded }))).not.toContain("data-chathead-tabs");
+    } finally {
+      fixture.advanced = true;
+    }
+  });
+
+  it("leaves the phone header alone", () => {
+    fixture.phone = true;
+    try {
+      expect(renderToStaticMarkup(createElement(ChatView, { bot: threaded }))).not.toContain("data-chathead-tabs");
+    } finally {
+      fixture.phone = false;
+    }
+  });
+
+  it("leaves a one-conversation bot's header alone", () => {
+    expect(renderToStaticMarkup(createElement(ChatView, { bot }))).not.toContain("data-chathead-tabs");
+  });
+
+  it("leaves the header alone when threads are switched off", () => {
+    fixture.showThreads = false;
+    try {
+      expect(renderToStaticMarkup(createElement(ChatView, { bot: threaded }))).not.toContain("data-chathead-tabs");
+    } finally {
+      fixture.showThreads = true;
+    }
   });
 });

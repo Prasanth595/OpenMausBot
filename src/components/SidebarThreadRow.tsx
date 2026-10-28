@@ -70,21 +70,21 @@ export function threadByline(task: Pick<Task, "openedBy" | "closedBy" | "archive
 /** Present, not truthy: a thread stored with archivedAt: 0 is archived. */
 export const isArchived = (task: Pick<Task, "archivedAt">): boolean => task.archivedAt !== undefined;
 
-const nextSixPm = () => {
+export const nextSixPm = () => {
   const when = new Date();
   when.setHours(18, 0, 0, 0);
   if (when.getTime() <= Date.now()) when.setDate(when.getDate() + 1);
   return when.getTime();
 };
 
-const tomorrowNineAm = () => {
+export const tomorrowNineAm = () => {
   const when = new Date();
   when.setDate(when.getDate() + 1);
   when.setHours(9, 0, 0, 0);
   return when.getTime();
 };
 
-const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activity === "working" || Boolean(task.busy);
+export const isWorking = (task: Pick<Task, "activity" | "busy">): boolean => task.activity === "working" || Boolean(task.busy);
 
 const isWaitingOnTeammate = (task: Pick<Task, "waitingForTeammates">): boolean =>
   task.waitingForTeammates === true;
