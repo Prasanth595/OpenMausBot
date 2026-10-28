@@ -65,6 +65,7 @@ Use only mapped, tested commands:
 - [Native dictation retention and send-to-stop](dictation.md)
 - [Proactive routines and the brief](proactive-routines.md)
 - [Waits: tell me when, with no AI while waiting](waits.md)
+- [A new Cloud's first hour](first-hour.md)
 - [Chat widgets](widgets.md)
 - [Reactions](reactions.md)
 - [Chat widgets: prompts to try with a real bot](widget-prompts.md)

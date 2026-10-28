@@ -55,6 +55,8 @@ function profiles(): Record<string, Profile> {
   all["default+legacy-switches"] = {
     env: { ...all.default!.env, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1" },
   };
+  // The person's MausBot holds a Chief's powers and adds its notification pair; MAUSBOT_ADDS bounds what that costs.
+  for (const name of ["default", "skills+shared+voice"]) all[`${name}+mausbot`] = { env: { ...all[name]!.env, OMB_MAUSBOT: "1" } };
   return all;
 }
 
@@ -63,34 +65,39 @@ const CHIEF_ONLY_TOOLS = ["create_bot", "list_team_setup", "list_team_library", 
 const CHIEF_TARGET_TOOLS = ["propose_profile", "propose_model"];
 const CHIEF_PROFILE_TARGET = " A Chief of Staff may pass for_bot_id (from list_bots) for a requested change to another bot in its section.";
 const TEAMWORK_TOOLS = ["list_room_targets", "coordinate_bots", "assignment_status", "list_bots", "list_rooms", "list_threads", "close_thread", "start_thread", "post_to_room"];
+const MAUSBOT_TOOLS = ["list_unread_notifications", "mark_notifications_read"];
+/** MausBot's tools may make its list at most this much longer than the same Chief's without them. */
+const MAUSBOT_ADDS = 0.02;
 const RESEARCH_TOOLS = ["x_search", "x_user_posts", "x_post", "x_profile", "research_search", "research_endpoint", "research_call"];
 /** The fullest profile, checked in whole; every other one is pinned by tool names, bytes and sha256. */
 const FULL = "skills+shared+voice+escalations+x+team";
 
 /** Bytes when the budget was last set; a profile may move at most 2% either way (lower it to lock in a win). */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 64706,
-  "voice": 65518,
-  "shared": 66639,
-  "shared+voice": 67451,
-  "skills": 67525,
-  "skills+voice": 68337,
-  "skills+shared": 69458,
-  "skills+shared+voice": 70270,
-  "non-chief": 54787,
-  "voice+non-chief": 55599,
-  "shared+non-chief": 56720,
-  "shared+voice+non-chief": 57532,
-  "skills+non-chief": 57606,
-  "skills+voice+non-chief": 58418,
-  "skills+shared+non-chief": 59539,
-  "skills+shared+voice+non-chief": 60351,
-  "skills+shared+voice+cloud-home": 69325,
-  "skills+shared+voice+non-chief+cloud-home": 59406,
-  "default+legacy-switches": 64706,
-  "skills+shared+voice+escalations": 71130,
-  "skills+shared+voice+escalations+x": 75768,
-  "skills+shared+voice+escalations+x+team": 76433,
+  "default": 65348,
+  "voice": 66160,
+  "shared": 67281,
+  "shared+voice": 68093,
+  "skills": 68167,
+  "skills+voice": 68979,
+  "skills+shared": 70100,
+  "skills+shared+voice": 70912,
+  "non-chief": 55429,
+  "voice+non-chief": 56241,
+  "shared+non-chief": 57362,
+  "shared+voice+non-chief": 58174,
+  "skills+non-chief": 58248,
+  "skills+voice+non-chief": 59060,
+  "skills+shared+non-chief": 60181,
+  "skills+shared+voice+non-chief": 60993,
+  "skills+shared+voice+cloud-home": 69967,
+  "skills+shared+voice+non-chief+cloud-home": 60048,
+  "default+legacy-switches": 65348,
+  "default+mausbot": 66025,
+  "skills+shared+voice+mausbot": 71589,
+  "skills+shared+voice+escalations": 71772,
+  "skills+shared+voice+escalations+x": 76410,
+  "skills+shared+voice+escalations+x+team": 77075,
 };
 
 const RPC_PREFIX = '{"jsonrpc":"2.0","id":1,"result":';
@@ -191,6 +198,7 @@ describe("agents proxy tools/list golden", () => {
       for (const tool of toolsOf(wires[name]!)) {
         if (profile.env.OMB_CLOUD_HOME === "1" && tool.name === "select_computer") continue;
         if (profile.env.OMB_CHIEF_OF_STAFF === "0" && CHIEF_TARGET_TOOLS.includes(tool.name)) continue;
+        if (profile.env.OMB_MAUSBOT === "1" && MAUSBOT_TOOLS.includes(tool.name)) continue;
         expect(JSON.stringify(tool), `${name}: ${tool.name}`).toBe(full.get(tool.name));
       }
     }
@@ -366,6 +374,14 @@ describe("agents proxy tools/list wire size", () => {
     ];
     console.log(lines.join("\n"));
     expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it.each(Object.keys(PROFILES).filter((name) => name.endsWith("+mausbot")))("%s adds at most 2% to the same Chief's list", (name) => {
+    const without = name.slice(0, -"+mausbot".length);
+    const tools = toolsOf(wires[name]!).map((tool) => tool.name);
+    expect(tools.slice(-MAUSBOT_TOOLS.length)).toEqual(MAUSBOT_TOOLS);
+    expect(tools.slice(0, -MAUSBOT_TOOLS.length)).toEqual(toolsOf(wires[without]!).map((tool) => tool.name));
+    expect(bytes(wires[name]!)).toBeLessThanOrEqual(Math.floor(bytes(wires[without]!) * (1 + MAUSBOT_ADDS)));
   });
 
   it.each(Object.keys(PROFILES))("%s stays within 2% of its budget baseline", (name) => {

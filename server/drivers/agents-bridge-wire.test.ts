@@ -63,6 +63,7 @@ function profiles(): Record<string, Record<string, string>> {
   all["skills+shared+voice+escalations+x"] = { ...all["skills+shared+voice+escalations"]!, OMB_X_RESEARCH: "1" };
   all["skills+shared+voice+escalations+x+team"] = { ...all["skills+shared+voice+escalations+x"]!, OMB_TEAM_PEOPLE: "1" };
   all["default+legacy-switches"] = { ...all.default!, OMB_ROOM_TURN: "1", OMB_OWN_THREAD_CREATION: "1", OMB_EXTERNAL_RUNTIME: "1" };
+  for (const name of ["default", "skills+shared+voice"]) all[`${name}+mausbot`] = { ...all[name]!, OMB_MAUSBOT: "1" };
   return all;
 }
 
@@ -77,28 +78,30 @@ const FULL = "skills+shared+voice+escalations+x+team";
  * either: lock a saving in by lowering the number. A Chief's list is longer
  * than another bot's only by the Chief-only names in find_tool's description. */
 const BUDGET_BASELINE: Record<string, number> = {
-  "default": 15996,
-  "voice": 16737,
-  "shared": 16036,
-  "shared+voice": 16777,
-  "skills": 16023,
-  "skills+voice": 16764,
-  "skills+shared": 16063,
-  "skills+shared+voice": 16804,
-  "non-chief": 15866,
-  "voice+non-chief": 16607,
-  "shared+non-chief": 15906,
-  "shared+voice+non-chief": 16647,
-  "skills+non-chief": 15893,
-  "skills+voice+non-chief": 16634,
-  "skills+shared+non-chief": 15933,
-  "skills+shared+voice+non-chief": 16674,
-  "skills+shared+voice+cloud-home": 16802,
-  "skills+shared+voice+non-chief+cloud-home": 16672,
-  "skills+shared+voice+escalations": 16822,
-  "skills+shared+voice+escalations+x": 16916,
-  "skills+shared+voice+escalations+x+team": 17238,
-  "default+legacy-switches": 15996,
+  "default": 16430,
+  "voice": 17242,
+  "shared": 16470,
+  "shared+voice": 17282,
+  "skills": 16457,
+  "skills+voice": 17269,
+  "skills+shared": 16497,
+  "skills+shared+voice": 17309,
+  "non-chief": 16300,
+  "voice+non-chief": 17112,
+  "shared+non-chief": 16340,
+  "shared+voice+non-chief": 17152,
+  "skills+non-chief": 16327,
+  "skills+voice+non-chief": 17139,
+  "skills+shared+non-chief": 16367,
+  "skills+shared+voice+non-chief": 17179,
+  "skills+shared+voice+cloud-home": 17307,
+  "skills+shared+voice+non-chief+cloud-home": 17177,
+  "skills+shared+voice+escalations": 17327,
+  "skills+shared+voice+escalations+x": 17421,
+  "skills+shared+voice+escalations+x+team": 17275,
+  "default+legacy-switches": 16430,
+  "default+mausbot": 16321,
+  "skills+shared+voice+mausbot": 17200,
 };
 
 type RpcAnswer = { id: number; result?: { tools?: unknown[]; content?: Array<{ text: string }>; isError?: boolean }; error?: { code: number; message: string } };
