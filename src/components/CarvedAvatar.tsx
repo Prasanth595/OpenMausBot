@@ -12,7 +12,7 @@ import { MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/
 import { HALLOWEEN_BODIES, type HalloweenBody, type HalloweenBodyId } from "../../shared/halloween-bodies";
 import type { CursorAvatarHandle } from "./CursorAvatar";
 import { usePrefersReducedMotion } from "./mascot-clock";
-import { GLANCES, carvedFace, moodFor, moodPose, nextGlanceDelay, r2, stepPose, wantedPose, type CarvedFace, type CarvedPose } from "./carved-face";
+import { GLANCES, carvedFace, carvedLean, moodFor, moodPose, nextGlanceDelay, stepPose, wantedPose, type CarvedFace, type CarvedPose } from "./carved-face";
 
 const PIVOT = 150;
 
@@ -20,12 +20,9 @@ export type CarvedGeometry = Omit<CarvedFace, "centre"> & { body: string };
 
 /** Every attribute the face needs for a pose. */
 export function carvedGeometry(body: HalloweenBody, p: CarvedPose): CarvedGeometry {
-  const lean = -p.gx * 9;
-  const sx = 1 - 0.06 * p.wide;
-  const sy = 1 + 0.09 * p.wide;
   const { eyes, smile, open } = carvedFace(body.eyes, p);
   return {
-    body: `translate(120 ${PIVOT}) rotate(${r2(lean)}) scale(${r2(sx * 1000) / 1000} ${r2(sy * 1000) / 1000}) translate(-120 ${-PIVOT})`,
+    body: carvedLean(p, 120, PIVOT),
     eyes,
     smile,
     open,

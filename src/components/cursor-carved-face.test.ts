@@ -3,9 +3,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { MausAvatar } from "./Avatar";
-import { CARVED_INK, REST_POSE, moodPose, stepPose, wantedPose } from "./carved-face";
-import { CARVED_EYES, carvedEyesFor } from "./cursor-carved-face";
-import { MASCOT_BODY_IDS } from "../../shared/mascot-bodies";
+import { CARVED_INK, REST_POSE, carvedLean, moodPose, stepPose, wantedPose, type CarvedPose } from "./carved-face";
+import { carvedEyesFor, fitPose, paintCarvedFace, type CarvedParts } from "./cursor-carved-face";
+import { FACE_BOX } from "./cursor-face-data";
+import { MASCOT_BODY_IDS, type MascotBodyId } from "../../shared/mascot-bodies";
 
 const face = (markup: string) => markup.slice(markup.indexOf("clip-path="));
 
@@ -32,11 +33,56 @@ describe("the carved face on mascot bodies", () => {
     expect(markup).not.toContain("<path ");
   });
 
-  it("sits the cursor's face lower, with a shorter glance, and leaves the other bodies alone", () => {
+  it("startles straight out, and keeps a glance within the body's reach", () => {
     const cursor = carvedEyesFor("cursor");
-    expect(cursor.cy).toBeGreaterThan(CARVED_EYES.cy);
-    expect(cursor.reach).toBeLessThan(1);
-    for (const body of MASCOT_BODY_IDS.filter((id) => id !== "cursor")) expect(carvedEyesFor(body)).toEqual({ ...CARVED_EYES, reach: 1 });
+    const startled = fitPose(cursor, { ...REST_POSE, gx: 1, gy: -1, wide: 1 });
+    expect(Math.abs(startled.gx) + Math.abs(startled.gy)).toBe(0);
+    expect(fitPose(cursor, { ...REST_POSE, gx: -1 }).gx).toBe(-cursor.reach);
+    expect(fitPose(carvedEyesFor("circle"), { ...REST_POSE, gx: -1, gy: 1 })).toMatchObject({ gx: -1, gy: 0.6 });
+  });
+});
+
+type Painted = Record<string, string>;
+const fakeElement = () => {
+  const attrs: Painted = {};
+  return { attrs, el: { setAttribute: (k: string, v: string) => { attrs[k] = v; } } };
+};
+
+function paint(body: MascotBodyId, pose: CarvedPose) {
+  const [left, right, smile, open, lean] = [fakeElement(), fakeElement(), fakeElement(), fakeElement(), fakeElement()];
+  const parts = { eyes: [left.el, right.el], smile: smile.el, open: open.el } as unknown as CarvedParts;
+  paintCarvedFace(parts, carvedEyesFor(body), pose, 1, lean.el as unknown as SVGGElement);
+  return { eyes: [left.attrs, right.attrs], lean: lean.attrs.transform };
+}
+
+const POSES: CarvedPose[] = [-1, -0.5, 0, 0.5, 1].flatMap((gx) =>
+  [-1, 0, 0.6].flatMap((gy) => [0, 0.5, 1].flatMap((wide) => [0, 0.9].map((shut) => ({ gx, gy, wide, shut, smile: 1 })))));
+
+describe("the carved face as a body turns its gaze", () => {
+  it("moves the eyes as a level pair of the same shape, turned by one rotation and never squeezed", () => {
+    for (const body of MASCOT_BODY_IDS) {
+      for (const pose of POSES) {
+        const { eyes } = paint(body, pose);
+        const [a, b] = eyes.map((e) => ({
+          cy: Number(e.y) + Number(e.height) / 2,
+          aspect: Number(e.width) / Number(e.height),
+          turn: e.transform.match(/^rotate\((-?[\d.]+) [-\d.]+ (-?[\d.]+)\)$/),
+        }));
+        const at = `${body} ${JSON.stringify(pose)}`;
+        expect(a.turn, at).not.toBeNull();
+        expect(b.turn?.[1], at).toBe(a.turn?.[1]);
+        expect(Math.abs(a.cy - b.cy), at).toBeLessThan(0.02);
+        expect(Math.abs(a.aspect / b.aspect - 1), at).toBeLessThan(0.01);
+      }
+    }
+  });
+
+  it("leans the whole body into the glance, as a carved Halloween body does", () => {
+    const body = carvedEyesFor("blob");
+    const pose = { ...REST_POSE, gx: -1 };
+    expect(paint("blob", pose).lean).toBe(carvedLean(fitPose(body, pose), FACE_BOX / 2, FACE_BOX * 0.625));
+    expect(paint("blob", pose).lean).toContain("rotate(9)");
+    expect(paint("blob", REST_POSE).lean).toContain("rotate(0)");
   });
 });
 

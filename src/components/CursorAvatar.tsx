@@ -1105,8 +1105,8 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     useEffect(() => {
       const drawFace = (e: typeof engine.current, now: number, spinTurn: number) => {
         const p = e.props
-        const radians = (((p.turn ?? 0) + spinTurn) * Math.PI) / 180
-        if (p.face === 'carved') return paintCarvedFace(carved, p.carvedEyes, e.carved.pose, p.eyeScale ?? 1, x => onSphere(x, radians))
+        if (p.face === 'carved') return paintCarvedFace(carved, p.carvedEyes, e.carved.pose, p.eyeScale ?? 1, bodyContent.current)
+        bodyContent.current?.removeAttribute('transform')
         const g = displayedGaze(e)
         const look = p.lookAround ?? 0.35
         const ox = g[0] * look
@@ -1116,6 +1116,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         )
         const gx = clamp(p.gaze?.x ?? 0, -1, 1) * GAZE_TRAVEL.x
         const gy = clamp(p.gaze?.y ?? 0, -1, 1) * GAZE_TRAVEL.y
+        const radians = (((p.turn ?? 0) + spinTurn) * Math.PI) / 180
         const base = p.eyeScale ?? 1
         const blink = blinkScale(e, now)
 
@@ -1218,7 +1219,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           else spinTurn = 360 * tt
         }
 
-        if (p.face === 'carved') stepCarved(e.carved, p.state, p.gaze, dt, 1 - blinkScale(e, now), p.paused || p.reduced)
+        if (p.face === 'carved') stepCarved(e.carved, p.state, p.gaze, dt, 1 - blinkScale(e, now), p.paused || p.reduced, e.spinStart !== null)
 
         const faceMoving = () => e.morph < 1 || e.blinkStart !== null || e.spinStart !== null || e.carved.left > 0
         if (e.faceStale || e.faceMoving || faceMoving()) drawFace(e, now, spinTurn)

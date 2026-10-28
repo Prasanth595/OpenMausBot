@@ -68,6 +68,13 @@ export function carvedFace(e: CarvedEyes, p: CarvedPose): CarvedFace {
   };
 }
 
+/** Leans a carved body into its glance about (x, y) and stretches it when startled. */
+export function carvedLean(p: CarvedPose, x: number, y: number): string {
+  const sx = 1 - 0.06 * p.wide;
+  const sy = 1 + 0.09 * p.wide;
+  return `translate(${x} ${y}) rotate(${r2(-p.gx * 9)}) scale(${r2(sx * 1000) / 1000} ${r2(sy * 1000) / 1000}) translate(${-x} ${-y})`;
+}
+
 export type CarvedMood = Partial<CarvedPose> & { glance?: number };
 
 export function moodFor(state: MausState): CarvedMood {
