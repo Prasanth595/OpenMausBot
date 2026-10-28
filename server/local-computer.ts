@@ -25,9 +25,11 @@ export type LocalComputerConnection = {
   scope: "local-computer";
 };
 
+/** `journal`: the bridge records each computer call for saved steps. */
 export function gatedLocalComputer(
   connection: LocalComputerConnection,
   control: { url: string; token: string },
+  journal = false,
 ): LocalComputerConnection {
   return {
     ...connection,
@@ -41,7 +43,7 @@ export function gatedLocalComputer(
       OMB_CUA_ARGS: JSON.stringify(connection.args),
       OMB_CONTROL_URL: control.url,
       OMB_CONTROL_TOKEN: control.token,
-      OMB_COMPUTER_JOURNAL: "1",
+      ...(journal ? { OMB_COMPUTER_JOURNAL: "1" } : {}),
     },
   };
 }

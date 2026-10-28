@@ -31,6 +31,7 @@ interface ThreadJournal {
   recorded: Map<string, number>;
   tainted: Set<string>;
   overflow: Set<string>;
+  bytes: number;
 }
 
 function bump(counts: Map<string, number>, key: string): void {
@@ -40,7 +41,9 @@ function bump(counts: Map<string, number>, key: string): void {
 interface Tombstone { generations: Set<string>; all: boolean }
 
 const LOST_GENERATIONS = 64;
-const emptyThread = (): ThreadJournal => ({ calls: [], checks: new Map(), recorded: new Map(), tainted: new Set(), overflow: new Set() });
+export const ENTRY_BYTES = 256 * 1024;
+export const TOTAL_BYTES = 32 * 1024 * 1024;
+const emptyThread = (): ThreadJournal => ({ calls: [], checks: new Map(), recorded: new Map(), tainted: new Set(), overflow: new Set(), bytes: 0 });
 
 export class ComputerJournal {
   private readonly threads = new Map<string, ThreadJournal>();
@@ -48,11 +51,24 @@ export class ComputerJournal {
   private readonly callsPerThread: number;
   private readonly maxThreads: number;
   private readonly maxEvicted: number;
+  private readonly entryBytes: number;
+  private readonly totalBytes: number;
+  private bytes = 0;
 
-  constructor(limits: { callsPerThread?: number; threads?: number; evictedThreads?: number } = {}) {
+  constructor(limits: { callsPerThread?: number; threads?: number; evictedThreads?: number; entryBytes?: number; totalBytes?: number } = {}) {
     this.callsPerThread = limits.callsPerThread ?? 400;
     this.maxThreads = limits.threads ?? 64;
     this.maxEvicted = limits.evictedThreads ?? 1024;
+    this.entryBytes = limits.entryBytes ?? ENTRY_BYTES;
+    this.totalBytes = limits.totalBytes ?? TOTAL_BYTES;
+  }
+
+  heldBytes(): number {
+    return this.bytes;
+  }
+
+  private drop(journal: ThreadJournal): void {
+    this.bytes -= journal.bytes;
   }
 
   private thread(threadId: string): ThreadJournal {
@@ -67,6 +83,7 @@ export class ComputerJournal {
     while (this.threads.size > this.maxThreads) {
       const [oldest, journal] = this.threads.entries().next().value!;
       this.threads.delete(oldest);
+      this.drop(journal);
       this.evict(oldest, journal);
     }
     return found;
@@ -91,8 +108,14 @@ export class ComputerJournal {
   record(scope: JournalScope, entry: JournalEntry): void {
     const thread = this.thread(scope.threadId);
     bump(thread.recorded, scope.generation);
-    if (thread.calls.length >= this.callsPerThread) thread.overflow.add(scope.generation);
-    else thread.calls.push({ ...entry, generation: scope.generation });
+    const size = Buffer.byteLength(JSON.stringify(entry));
+    if (thread.calls.length >= this.callsPerThread || size > this.entryBytes || this.bytes + size > this.totalBytes) {
+      thread.overflow.add(scope.generation);
+      return;
+    }
+    thread.calls.push({ ...entry, generation: scope.generation });
+    thread.bytes += size;
+    this.bytes += size;
   }
 
   taint(scope: Pick<JournalScope, "threadId" | "generation">): void {
@@ -103,6 +126,7 @@ export class ComputerJournal {
     const thread = this.threads.get(threadId) ?? emptyThread();
     const tombstone = this.evicted.get(threadId);
     const lost = tombstone?.all ? new Set(generations) : tombstone?.generations ?? new Set<string>();
+    this.drop(thread);
     this.threads.delete(threadId);
     this.evicted.delete(threadId);
     const seen = new Set<string>();

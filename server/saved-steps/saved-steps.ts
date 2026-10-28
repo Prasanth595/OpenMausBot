@@ -37,11 +37,16 @@ export interface SettledRequest {
   automated: boolean;
 }
 
+export interface RequestOwner { automation?: unknown; origin?: { kind: string } }
+
+export const personRequest = (owner: RequestOwner): boolean => owner.automation === undefined && owner.origin?.kind === "user";
+
 export interface SavedSteps {
   journal: ComputerJournal;
   recipes: RecipeStore;
   dispatch: SavedStepsDispatch;
   gateChecked(capability: JournalCapability): void;
+  journals(owner: RequestOwner | undefined): boolean;
   routes: RouteHandler;
   journalRoutes(internal: { capability: JournalCapability; readBody(): Promise<unknown> }): RouteHandler;
   requestSettled(settled: SettledRequest): void;
@@ -104,7 +109,8 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
       if (scope) journal.gateChecked(scope);
       else if (capability.kind === "computer") journal.taint({ threadId: capability.threadId, generation: capability.generation });
     },
-    journalRoutes: (internal) => createComputerJournalRoutes({ ...internal, record: (scope, entry) => journal.record(scope, entry) }),
+    journals: (owner) => owner !== undefined && personRequest(owner) && enabled(),
+    journalRoutes: (internal) => createComputerJournalRoutes({ ...internal, enabled, record: (scope, entry) => journal.record(scope, entry) }),
     requestSettled(settled) {
       const taken = journal.take(settled.threadId, settled.generations);
       const unmarked = dispatch.takeUnmarked(settled.threadId);

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { JournalEntry } from "./driver-wire.ts";
-import { ComputerJournal, hostScope, parseJournalEntry } from "./journal.ts";
+import { ComputerJournal, ENTRY_BYTES, hostScope, parseJournalEntry, TOTAL_BYTES } from "./journal.ts";
 import { createSavedSteps } from "./saved-steps.ts";
 
 const scope = { botId: "b1", threadId: "t1", generation: "g1" };
@@ -36,6 +36,42 @@ describe("computer journal", () => {
     const taken = j.take("t1", new Set(["g1"]))!;
     expect(taken.complete).toBe(false);
     expect(taken.calls).toHaveLength(2);
+  });
+
+  it("is incomplete when an entry is larger than the per-entry budget, and keeps none of it", () => {
+    const j = new ComputerJournal({ entryBytes: 200 });
+    j.gateChecked(scope); j.record(scope, CLICK);
+    j.gateChecked(scope); j.record(scope, { ...CLICK, arguments: { element: "x".repeat(300) } });
+    const taken = j.take("t1", new Set(["g1"]))!;
+    expect(taken.complete).toBe(false);
+    expect(taken.calls).toHaveLength(1);
+  });
+
+  it("is incomplete once the journal holds its total budget, and frees what a taken request held", () => {
+    const size = Buffer.byteLength(JSON.stringify(CLICK));
+    const j = new ComputerJournal({ totalBytes: size * 2 });
+    const other = { ...scope, threadId: "t2" };
+    j.gateChecked(other); j.record(other, CLICK);
+    j.gateChecked(scope); j.record(scope, CLICK);
+    j.gateChecked(scope); j.record(scope, CLICK);
+    expect(j.heldBytes()).toBe(size * 2);
+    expect(j.take("t1", new Set(["g1"]))).toMatchObject({ complete: false });
+    expect(j.heldBytes()).toBe(size);
+    j.gateChecked(scope); j.record(scope, CLICK);
+    expect(j.take("t1", new Set(["g1"]))).toMatchObject({ complete: true, calls: [{ tool: "click" }] });
+    expect(j.take("t2", new Set(["g1"]))).toMatchObject({ complete: true });
+    expect(j.heldBytes()).toBe(0);
+  });
+
+  it("frees an evicted thread's bytes", () => {
+    const j = new ComputerJournal({ threads: 1 });
+    j.record(scope, CLICK);
+    j.record({ ...scope, threadId: "t2" }, CLICK);
+    expect(j.heldBytes()).toBe(Buffer.byteLength(JSON.stringify(CLICK)));
+  });
+
+  it("budgets 256 KB an entry and 32 MB in all", () => {
+    expect([ENTRY_BYTES, TOTAL_BYTES]).toEqual([256 * 1024, 32 * 1024 * 1024]);
   });
 
   it("keeps two turns of one request together and drops other requests' leftovers", () => {

@@ -199,6 +199,19 @@ describe("SavedSteps.requestSettled", () => {
     expect(patches).toEqual([]);
   });
 
+  it("records a mount's computer calls only for the person's own request while saving is on", () => {
+    const person = { origin: { kind: "user" } };
+    expect(steps.journals(person)).toBe(true);
+    expect(steps.journals(undefined)).toBe(false);
+    expect(steps.journals({ ...person, automation: { kind: "schedule" } })).toBe(false);
+    expect(steps.journals({ origin: { kind: "outside" } })).toBe(false);
+    expect(steps.journals({ origin: { kind: "bot" } })).toBe(false);
+    expect(steps.journals({})).toBe(false);
+    enabled = false;
+    expect(steps.journals(person)).toBe(false);
+    expect(facade({ platform: "linux" }).journals(person)).toBe(false);
+  });
+
   it.each(["linux", "win32"] as const)("neither saves nor replays on %s", async (platform) => {
     steps = facade({ platform });
     record(textEditJournal().calls);

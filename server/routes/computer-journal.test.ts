@@ -18,11 +18,12 @@ afterEach(async () => {
 const HOST: JournalCapability = { botId: "b1", threadId: "t1", generation: "g1", kind: "computer" };
 const ENTRY: JournalEntry = { tool: "click", arguments: { element: "Save" }, result: { isError: false } };
 
-async function fixture(capability: JournalCapability = HOST) {
+async function fixture(capability: JournalCapability = HOST, enabled = true) {
   let currentBody: unknown;
   const recorded: Array<{ scope: JournalScope; entry: JournalEntry }> = [];
   const routes = [createComputerJournalRoutes({
     capability,
+    enabled: () => enabled,
     readBody: async () => currentBody,
     record: (scope, entry) => void recorded.push({ scope, entry }),
   })];
@@ -49,6 +50,12 @@ describe(`POST ${COMPUTER_JOURNAL_PATH}`, () => {
     const { recorded, send } = await fixture();
     expect(await send({ ...ENTRY, botId: "someone-else", threadId: "t9" })).toEqual({ status: 200, body: { ok: true } });
     expect(recorded).toEqual([{ scope: { botId: "b1", threadId: "t1", generation: "g1" }, entry: ENTRY }]);
+  });
+
+  it("drops entries while saved steps are off", async () => {
+    const { recorded, send } = await fixture(HOST, false);
+    expect(await send(ENTRY)).toEqual({ status: 200, body: { ok: true, recorded: false } });
+    expect(recorded).toEqual([]);
   });
 
   it("refuses a Local VM or cloud turn with 403", async () => {
