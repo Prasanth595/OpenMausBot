@@ -43,6 +43,7 @@ async function world(t) {
         return send(200, { ok: true });
       }
       if (!bearer) return send(401, { error: "invalid_token" });
+      if (req.method === "POST" && f.failAccountPosts > 0) { f.failAccountPosts--; return send(503, { error: "unavailable" }); }
       if (req.method === "POST") f.account = { status: body.status, textVersion: body.textVersion, source: "desktop", decidedAt: f.now };
       return send(200, { cloudContractVersion: 1, consent: req.method === "GET" ? previous : f.account });
     }
@@ -266,7 +267,7 @@ test("signed out, an overtaken email is withdrawn before its replacement even af
   const k = await world(t);
   k.failWithdrawals = 2;
   await overtake(k, { status: "opted_in", email: "old@example.test" }, { status: "opted_in", email: "new@example.test" });
-  assert.deepEqual(k.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: k.now, email: "new@example.test", replacedReceipts: [receiptOf("old@example.test")], pending: true });
+  assert.deepEqual(k.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: k.now, email: "new@example.test", replacedReceipts: [receiptOf("old@example.test")], receiptEmails: { [receiptOf("old@example.test")]: "old@example.test" }, pending: true });
   k.launch();
   await k.consent.sync();
   assert.deepEqual(k.requests.map(request => request.body), [
@@ -392,7 +393,7 @@ test("a matching account answer queues an older email receipt until its withdraw
     await assert.rejects(f.consent.sync(), /Cloud request failed/);
     assert.equal(f.emails.get("old@example.test"), "opted_in");
     assert.deepEqual(f.saved.updatesConsent, { status, version: "2026-10-24", at: f.now,
-      account: "account-1", email: "old@example.test", replacedReceipts: [receiptOf("old@example.test")] });
+      account: "account-1", email: "old@example.test", replacedReceipts: [receiptOf("old@example.test")], receiptEmails: { [receiptOf("old@example.test")]: "old@example.test" } });
     f.launch();
     await f.consent.sync();
     assert.equal(f.emails.get("old@example.test"), "withdrawn");
@@ -511,7 +512,7 @@ test("an unanswered account withdraws another account's retained email receipt w
       f.launch();
       await f.consent.sync();
       assert.equal(f.emails.get("old@example.test"), "withdrawn");
-      assert.deepEqual(afterFailure, { ...ownerAnswer, replacedReceipts: [receiptOf("old@example.test")] });
+      assert.deepEqual(afterFailure, { ...ownerAnswer, replacedReceipts: [receiptOf("old@example.test")], receiptEmails: { [receiptOf("old@example.test")]: "old@example.test" } });
       assert.deepEqual(f.saved.updatesConsent, ownerAnswer);
       const state = await f.consent.state();
       assert.equal(state.due, true);
@@ -523,4 +524,123 @@ test("an unanswered account withdraws another account's retained email receipt w
         { status: "withdrawn", receipt: receiptOf("old@example.test") },
         { status: "withdrawn", receipt: receiptOf("old@example.test") }]);
     });
+});
+
+test("a failed account withdrawal survives another account's answer and restarts until its owner retries", async t => {
+  for (const choice of [null, "opted_in"]) await t.test(choice ?? "read only", async t => {
+    const f = await world(t);
+    await f.signInNow();
+    await f.consent.choose({ status: "opted_in" });
+    const original = structuredClone(f.account), held = Promise.withResolvers();
+    t.after(() => held.resolve());
+    const first = f.requests.length;
+    f.gate = held.promise;
+    const withdrawing = f.consent.choose({ status: "withdrawn" });
+    await until(() => f.requests.length === first + 1);
+    await f.client.signOut();
+    f.accountId = "account-2";
+    f.accessToken = `omc_${"B".repeat(43)}`;
+    f.account = { status: "declined", textVersion: UPDATES_CONSENT_VERSION, source: "cloud_page", decidedAt: f.now };
+    await f.signInNow();
+    f.failAccountPosts = 1;
+    f.gate = null;
+    held.resolve();
+    await withdrawing;
+    assert.deepEqual(f.requests.slice(first).map(({ method }) => method), ["POST", "GET"]);
+    assert.equal(f.account.status, "declined");
+    assert.equal((await f.consent.state()).status, "declined");
+    if (choice) {
+      f.failAccountPosts = 1;
+      await f.consent.choose({ status: choice });
+      assert.equal(f.account.status, "declined");
+    }
+    f.launch();
+    await f.consent.sync();
+    assert.equal(f.account.status, choice ?? "declined");
+    await f.client.signOut();
+    f.accountId = "account-1";
+    f.accessToken = accessToken;
+    f.account = original;
+    await f.signInNow();
+    f.failAccountPosts = 1;
+    await assert.rejects(f.consent.sync(), /Cloud request failed/);
+    f.launch();
+    const retry = f.requests.length;
+    f.consent.accountChanged(f.client.state());
+    await f.consent.sync();
+    assert.equal(f.account.status, "withdrawn");
+    assert.deepEqual(f.requests.slice(retry).map(({ method, body }) => ({ method, body })), [
+      { method: "POST", body: { status: "withdrawn", textVersion: UPDATES_CONSENT_VERSION } }]);
+    assert.equal(f.saved.updatesConsent.pending, undefined);
+  });
+});
+
+test("signed out, returning to a queued email after restart never withdraws its active opt-in when resubmission fails", async t => {
+  for (const legacy of [false, true]) await t.test(`legacy queue=${legacy}`, async t => {
+    const f = await world(t);
+    await f.consent.choose({ status: "opted_in", email: "person@example.test" });
+    f.failWithdrawals = 1;
+    await f.consent.choose({ status: "opted_in", email: "other@example.test" });
+    assert.equal(f.emails.get("person@example.test"), "opted_in");
+    assert.equal(f.saved.updatesConsent.pending, true);
+    if (legacy) delete f.saved.updatesConsent.receiptEmails;
+    f.launch();
+    const held = Promise.withResolvers(), first = f.requests.length;
+    t.after(() => held.resolve());
+    f.gate = held.promise;
+    const returning = f.consent.choose({ status: "opted_in", email: " Person@Example.TEST " });
+    await until(() => f.requests.length === first + 1);
+    f.failOptIns = 1;
+    f.gate = null;
+    held.resolve();
+    await returning;
+    assert.equal(f.emails.get("person@example.test"), "opted_in");
+    assert.deepEqual(f.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now,
+      email: "person@example.test", ...(legacy ? { replacedReceipts: [RECEIPT] } : { receipt: RECEIPT }), pending: true });
+    assert.deepEqual(f.requests.slice(first).map(request => request.body.status), ["opted_in"]);
+    f.launch();
+    await f.consent.sync();
+    assert.equal(f.emails.get("person@example.test"), "opted_in");
+    assert.equal(f.saved.updatesConsent.pending, undefined);
+    await f.consent.choose({ status: "withdrawn" });
+    assert.equal(f.emails.get("person@example.test"), "withdrawn");
+  });
+});
+
+test("a successful account post clears its pending choice even if another account is current", async t => {
+  for (const answerOnB of [false, true]) await t.test(`answer on B=${answerOnB}`, async t => {
+    let saved = null, current = "account-1";
+    const statuses = new Map([["account-1", "opted_in"], ["account-2", "declined"]]), sent = [];
+    const held = Promise.withResolvers();
+    t.after(() => held.resolve());
+    const client = {
+      state: () => ({ status: "connected", account: { id: current, email: "person@example.test" } }),
+      async updatesConsent() {
+        sent.push({ method: "GET", account: current });
+        return { cloudContractVersion: 1, consent: { status: statuses.get(current), textVersion: UPDATES_CONSENT_VERSION } };
+      },
+      async recordUpdatesConsent(status) {
+        const account = current;
+        sent.push({ method: "POST", account, status });
+        if (account === "account-1" && status === "withdrawn") await held.promise;
+        statuses.set(account, status);
+      },
+    };
+    const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
+    const consent = createUpdatesConsent({ prefs, account: () => client, available: () => true });
+    await consent.choose({ status: "opted_in" });
+    const withdrawing = consent.choose({ status: "withdrawn" });
+    await until(() => sent.length === 2);
+    current = "account-2";
+    const changing = answerOnB ? consent.choose({ status: "opted_in" }) : null;
+    if (changing) await until(() => saved.updatesConsent.account === current);
+    held.resolve();
+    await Promise.all([withdrawing, changing]);
+    statuses.set("account-1", "opted_in");
+    current = "account-1";
+    const first = sent.length;
+    await consent.sync();
+    assert.equal(statuses.get("account-1"), "opted_in");
+    assert.deepEqual(sent.slice(first), [{ method: "GET", account: "account-1" }]);
+  });
 });
