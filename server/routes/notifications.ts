@@ -1,6 +1,6 @@
 import { markNotificationLogRead, recentNotificationLog } from "../message-db.ts";
 import type { NotificationLogEntry } from "../../shared/notification.ts";
-import type { RequestAuth } from "../request-auth.ts";
+import { ownerOrAdmin, type RequestAuth } from "../request-auth.ts";
 import { PASS, type RouteHandler } from "./table.ts";
 
 /** Opening a conversation reads the notifications its opener's list shows, so every open app's badge drops them too. */
@@ -18,7 +18,8 @@ export function notificationListedFor(shown: (auth: RequestAuth) => (threadId: s
   reaches: (auth: RequestAuth, entry: NotificationLogEntry) => boolean = () => true) {
   return (auth: RequestAuth) => {
     const seen = shown(auth);
-    return (entry: NotificationLogEntry) => (!entry.threadId || seen(entry.threadId)) && reaches(auth, entry);
+    const admin = ownerOrAdmin(auth);
+    return (entry: NotificationLogEntry) => (entry.kind !== "spend" || admin) && (!entry.threadId || seen(entry.threadId)) && reaches(auth, entry);
   };
 }
 
