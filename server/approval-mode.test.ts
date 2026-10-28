@@ -85,7 +85,7 @@ describe("approval modes", () => {
     expect(DEFAULT_APPROVAL_MODE).toBe("ask");
     expect(approvalModeFor({})).toBe("ask");
     // Every bot made over HTTP stores the legacy bit off beside no level.
-    expect(approvalModeFor({ autoApprove: false })).toBe("full");
+    expect(approvalModeFor({ autoApprove: false })).toBe("ask");
     expect(approvalModeFor({ approvalMode: "ask", autoApprove: false })).toBe("ask");
   });
 
