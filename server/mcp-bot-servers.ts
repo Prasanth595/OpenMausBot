@@ -1,7 +1,7 @@
-// A command MCP server whose program or files are in one bot's folder is that bot's own: on a Cloud a bot's turn sees
-// only its own folders, so no other bot can reach those files and it starts only for that bot. Files in one of the bot's
-// conversation folders (task-workspaces/<bot>/<thread>) go when that conversation does, so they are copied into the
-// bot's own folder first, under tools/.
+// Where bots are boxed (a Cloud), a bot's turn sees only its own folders, so a command MCP server whose program or files
+// are in one bot's folder is that bot's own: no other bot can reach those files, and it starts only for that bot. Files in
+// one of a bot's conversation folders (task-workspaces/<bot>/<thread>) go when that conversation does, boxed or not, so a
+// server the bot adds from there is copied into the bot's own folder first, under tools/.
 import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
 import { basename, delimiter, isAbsolute, join, relative, resolve, sep } from "node:path";
 
@@ -123,19 +123,22 @@ export function keepInBotFolder(server: StoredStdioMcpServer, use: BotFolderUse,
 
 export type BotMcpServerAdd = DisabledMcpServerAdd & { moved?: Array<{ from: string; to: string }> };
 
-/** A bot's add_mcp_server: saved off as always; a server that uses this bot's files becomes its own, with files from a
- * conversation folder kept in its own folder; one that uses another bot's files is refused. */
-export function addBotMcpServer(current: Record<string, unknown>, body: unknown, botId: string, dataDir: string): BotMcpServerAdd {
+/** A bot's add_mcp_server: saved off as always, with files from one of its conversation folders kept in its own folder.
+ * `boxed`: no bot reaches another's folders, so a server using this bot's files becomes its own, and one using another
+ * bot's files is refused; unboxed, every bot reaches them and the server stays every bot's. */
+export function addBotMcpServer(current: Record<string, unknown>, body: unknown, botId: string, dataDir: string, boxed: boolean): BotMcpServerAdd {
   const added = addDisabledMcpServer(current, body);
   if (!added.ok || isRemoteMcpServer(added.server)) return added;
   const use = botFolderUse(added.server, dataDir);
   if (!use) return added;
-  if (use === "several" || use.botId !== botId) {
+  const theirs = use === "several" || use.botId !== botId;
+  if (theirs && boxed) {
     return { ok: false, status: 400, error: "That command uses files in another bot's folder, which only that bot can reach. Use files in your own folder." };
   }
+  if (theirs) return added;
   const kept = keepInBotFolder(added.server, use, dataDir);
   if (!kept.ok) return { ok: false, status: 400, error: `This server could not be kept: ${kept.error}` };
-  const server = { ...kept.server, bot: botId };
+  const server = boxed ? { ...kept.server, bot: botId } : kept.server;
   return { ...added, server, next: { ...current, [added.name]: server }, moved: kept.moved };
 }
 
@@ -145,16 +148,16 @@ export interface ClaimedMcpServers {
   claimed: Record<string, string[]>;
 }
 
-/** Existing installs: every server no bot owns yet whose files are in one bot's folders becomes that bot's own, its
- * conversation-folder files kept in its own folder. Null when nothing changes. */
-export function claimBotMcpServers(raw: Record<string, unknown> | undefined, dataDir: string): ClaimedMcpServers | null {
+/** Existing installs where bots are boxed: every server no bot owns yet whose files are in the folders of one bot that
+ * exists becomes that bot's own, its conversation-folder files kept in its own folder. Null when nothing changes. */
+export function claimBotMcpServers(raw: Record<string, unknown> | undefined, dataDir: string, isBot: (botId: string) => boolean): ClaimedMcpServers | null {
   const next: Record<string, unknown> = { ...raw };
   const claimed: Record<string, string[]> = {};
   for (const [name, value] of Object.entries(raw ?? {})) {
     const parsed = parseStoredMcpServer(name, value);
     if (!parsed.ok || isRemoteMcpServer(parsed.server) || parsed.server.bot || parsed.server.runsOn) continue;
     const use = botFolderUse(parsed.server, dataDir);
-    if (!use || use === "several") continue;
+    if (!use || use === "several" || !isBot(use.botId)) continue;
     let kept: KeptServer;
     try { kept = keepInBotFolder(parsed.server, use, dataDir); } catch (error) { kept = { ok: false, error: String(error) }; }
     if (!kept.ok) console.warn(`[mcp] ${name}: kept in place for its bot: ${kept.error}`);

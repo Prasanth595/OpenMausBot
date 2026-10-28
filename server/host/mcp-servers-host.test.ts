@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
@@ -19,9 +19,9 @@ function script(data: string, ...parts: string[]): string {
   return path;
 }
 
-function setup() {
-  const data = mkdtempSync(join(tmpdir(), "omb-mcp-host-"));
-  dirs.push(data);
+function setup(options: { boxed?: boolean; data?: string; bots?: Array<{ id: string; name: string; mcpServers?: string[]; toolScope?: unknown }> } = {}) {
+  const data = options.data ?? mkdtempSync(join(tmpdir(), "omb-mcp-host-"));
+  if (!options.data) dirs.push(data);
   const cfg: AppConfig = {
     mcpServers: {
       "sketch-suite": { command: "/usr/bin/python3", args: [script(data, "task-workspaces", "iris", "t1", "native-sketch", "server.py")], enabled: true },
@@ -37,8 +37,9 @@ function setup() {
     dataDir: data,
     cfg: () => cfg,
     persist: (next) => { cfg.mcpServers = next; },
-    bots: () => [IRIS, PAUL, ROSA, NOTES_ONLY, NO_SERVERS],
+    bots: () => options.bots ?? [IRIS, PAUL, ROSA, NOTES_ONLY, NO_SERVERS],
     startsServers: (botId) => botId !== NO_SERVERS.id,
+    boxed: () => options.boxed ?? true,
     policy: (servers) => servers,
     tell: (text, about) => told.push({ text, about: about.id }),
     // The image's python has no `mcp` module: these start only in Iris's own box, where it is installed.
@@ -73,6 +74,35 @@ it("moves servers in one bot's folders to that bot once, says so once, and keeps
   expect(told, "a second start says nothing new").toHaveLength(2);
   host.botDeleted("iris");
   expect(Object.keys(cfg.mcpServers!).sort()).toEqual(["broken", "notes"]);
+});
+
+it("where every bot reaches every folder (a desktop), keeps such servers every bot's and says nothing about them", async () => {
+  const { cfg, host, told, data } = setup({ boxed: false });
+  host.boot();
+  await host.health.settled();
+  expect(Object.values(cfg.mcpServers!).some((server) => "bot" in (server as object))).toBe(false);
+  expect((cfg.mcpServers!.blender as { args: string[] }).args[0], "nothing moved").toBe(join(data, "task-workspaces", "iris", "t2", "blender-mcp", "server.py"));
+  expect(told.map((entry) => entry.text)).toEqual(["The Broken tool doesn't start, so it's off for now. It comes back on its own once it starts."]);
+  expect(existsSync(join(data, "mcp-bot-servers.json")), "a later boxed start still moves them over").toBe(false);
+});
+
+it("moves servers over once: a server added in Settings afterwards stays every bot's across restarts", () => {
+  const first = setup();
+  first.host.boot();
+  first.cfg.mcpServers!.shared = { command: "/usr/bin/python3", args: [script(first.data, "workspaces", "iris", "tools", "shared", "server.py")], enabled: true };
+  const again = createMcpServersHost({
+    dataDir: first.data, cfg: () => first.cfg, persist: (next) => { first.cfg.mcpServers = next; }, bots: () => [IRIS, PAUL], policy: (servers) => servers,
+    tell: () => {}, startsServers: () => true, boxed: () => true, start: async () => ({ ok: true }),
+  });
+  again.boot();
+  expect(first.cfg.mcpServers!.shared).not.toHaveProperty("bot");
+  expect(Object.keys(again.mounted(PAUL))).toContain("shared");
+});
+
+it("never makes a server the own of a deleted bot whose folder was left behind", () => {
+  const { cfg, host } = setup({ bots: [PAUL, ROSA] });
+  host.boot();
+  expect(Object.values(cfg.mcpServers!).some((server) => "bot" in (server as object)), "Iris is gone").toBe(false);
 });
 
 it("says it in one plain line per bot", () => {

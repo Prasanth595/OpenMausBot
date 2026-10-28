@@ -8,7 +8,9 @@ import { launchVerificationServer } from "../scripts/control-omb.ts";
 
 const FAKE_MCP = fileURLToPath(new URL("./testing/fake-mcp-server.ts", import.meta.url));
 
-it("a bot's own MCP server starts only for that bot, and a server that doesn't start rides along on no bot's turns", async () => {
+// This fixture runs bots unboxed, as a desktop does, so a server a bot adds stays every bot's; where bots are boxed it is
+// that bot's own (server/host/mcp-servers-host.test.ts).
+it("a bot's server from a conversation folder is kept in its own folder, and a server that doesn't start rides along on no bot's turns", async () => {
   const scratch = mkdtempSync(join(tmpdir(), "omb-own-mcp-"));
   const gate = join(scratch, "finish");
   const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "slow", FAKE_CLAUDE_SLOW_FINISH_GATE: gate });
@@ -47,9 +49,12 @@ it("a bot's own MCP server starts only for that bot, and a server that doesn't s
     mkdirSync(chatFolder, { recursive: true });
     copyFileSync(FAKE_MCP, join(chatFolder, "server.ts"));
     const added = await api("POST", "/api/internal/mcp-servers", { name: "sketch", command: process.execPath, args: ["--experimental-strip-types", "--no-warnings", join(chatFolder, "server.ts")] }, 201, token);
-    expect(added).toMatchObject({ name: "sketch", own: true, keptIn: [join("tools", "sketch")], enabled: false });
+    expect(added).toMatchObject({ name: "sketch", keptIn: [join("tools", "sketch")], enabled: false });
+    expect(added.own).toBeUndefined();
     const kept = join(fixture.info.dataDir, "workspaces", iris.id, "tools", "sketch", "server.ts");
-    expect(JSON.parse(readFileSync(join(fixture.info.dataDir, "config.json"), "utf8")).mcpServers.sketch).toMatchObject({ bot: iris.id, args: ["--experimental-strip-types", "--no-warnings", kept] });
+    const stored = JSON.parse(readFileSync(join(fixture.info.dataDir, "config.json"), "utf8")).mcpServers.sketch;
+    expect(stored).toMatchObject({ args: ["--experimental-strip-types", "--no-warnings", kept] });
+    expect(stored.bot).toBeUndefined();
     writeFileSync(gate, "");
     await first.settled();
     await api("PATCH", "/api/mcp/servers/sketch", { enabled: true });
@@ -63,12 +68,12 @@ it("a bot's own MCP server starts only for that bot, and a server that doesn't s
       listed = (await api("GET", "/api/mcp/servers")).servers;
       return listed.find((server) => server.name === "broken")?.offFor?.length ?? 0;
     }, { timeout: 20_000 }).toBe(3);
-    expect(listed.find((server) => server.name === "sketch")).toMatchObject({ bot: iris.id, enabled: true });
+    expect(listed.find((server) => server.name === "sketch")).toMatchObject({ enabled: true });
     expect(listed.find((server) => server.name === "sketch").offFor).toBeUndefined();
 
     const pauls = (await turnOf(paul)).mounts;
     expect(pauls.agents).toBeDefined();
-    expect(pauls.sketch, "Iris's own server").toBeUndefined();
+    expect(JSON.stringify(pauls.sketch), "every bot reaches Iris's folder here").toContain(JSON.stringify(kept).slice(1, -1));
     expect(pauls.broken, "a server that doesn't start for Paul").toBeUndefined();
     const iriss = (await turnOf(iris)).mounts;
     expect(JSON.stringify(iriss.sketch), "Iris's turn starts it from its own folder").toContain(JSON.stringify(kept).slice(1, -1));

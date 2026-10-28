@@ -92,7 +92,7 @@ describe("existing installs", () => {
       notes: { command: "npx", args: ["-y", "@x/notes-mcp"], env: {}, enabled: true },
       docs: { type: "http", url: "https://docs.example/mcp", headers: {}, enabled: true },
     };
-    const claimed = claimBotMcpServers(raw, data);
+    const claimed = claimBotMcpServers(raw, data, (botId) => botId === "iris");
     expect(claimed?.claimed).toEqual({ iris: ["sketch-suite", "blender", "blender-own"] });
     const next = claimed!.next as Record<string, { bot?: string; args?: string[] }>;
     expect(next["sketch-suite"]).toMatchObject({ bot: "iris", args: [join(data, "workspaces", "iris", "tools", "native-sketch", "server.py")] });
@@ -100,7 +100,7 @@ describe("existing installs", () => {
     expect(next["blender-own"]).toMatchObject({ bot: "iris", args: [irisOwn] });
     expect(next.notes).toBe(raw.notes);
     expect(next.docs).toBe(raw.docs);
-    expect(claimBotMcpServers(claimed!.next, data), "a second start changes nothing").toBeNull();
+    expect(claimBotMcpServers(claimed!.next, data, () => true), "a second pass changes nothing").toBeNull();
 
     const cfg = { mcpServers: claimed!.next } as AppConfig;
     expect(Object.keys(customMcpServers(cfg, undefined, "iris")).sort()).toEqual(["blender", "blender-own", "docs", "notes", "sketch-suite"]);
@@ -111,7 +111,13 @@ describe("existing installs", () => {
   it("still makes it the bot's own when its chat folder is gone", () => {
     const data = dataDir();
     const raw = { lost: { ...python(join(data, "task-workspaces", "iris", "t9", "srv", "server.py")), enabled: true } };
-    expect(claimBotMcpServers(raw, data)?.next.lost).toMatchObject({ bot: "iris", args: [raw.lost.args[0]] });
+    expect(claimBotMcpServers(raw, data, () => true)?.next.lost).toMatchObject({ bot: "iris", args: [raw.lost.args[0]] });
+  });
+
+  it("never makes a server the own of a bot that no longer exists: its leftover folder is nobody's", () => {
+    const data = dataDir();
+    const raw = { leftover: { ...python(file(join(data, "workspaces", "gone", "tools", "srv", "server.py"))), enabled: true } };
+    expect(claimBotMcpServers(raw, data, (botId) => botId === "iris")).toBeNull();
   });
 
   it("drops a deleted bot's own servers and nothing else", () => {
@@ -121,11 +127,11 @@ describe("existing installs", () => {
   });
 });
 
-describe("a bot adding a server", () => {
+describe("a bot adding a server where bots are boxed", () => {
   it("makes one in its own folder its own, saved off as always", () => {
     const data = dataDir();
     const script = file(join(data, "task-workspaces", "iris", "t1", "srv", "server.py"));
-    const added = addBotMcpServer({}, { name: "blender", ...python(script) }, "iris", data);
+    const added = addBotMcpServer({}, { name: "blender", ...python(script) }, "iris", data, true);
     if (!added.ok) throw new Error(added.error);
     expect(added.server).toMatchObject({ bot: "iris", enabled: false, args: [join(data, "workspaces", "iris", "tools", "srv", "server.py")] });
     expect(added.moved).toEqual([{ from: join(data, "task-workspaces", "iris", "t1", "srv"), to: join(data, "workspaces", "iris", "tools", "srv") }]);
@@ -134,9 +140,23 @@ describe("a bot adding a server", () => {
 
   it("refuses one that uses another bot's files, and keeps a plain command every bot's", () => {
     const data = dataDir();
-    expect(addBotMcpServer({}, { name: "theirs", ...python(join(data, "workspaces", "paul", "s.py")) }, "iris", data))
+    expect(addBotMcpServer({}, { name: "theirs", ...python(join(data, "workspaces", "paul", "s.py")) }, "iris", data, true))
       .toMatchObject({ ok: false, status: 400, error: expect.stringMatching(/another bot's folder/) });
-    const plain = addBotMcpServer({}, { name: "notes", command: "npx", args: ["-y", "@x/notes-mcp"] }, "iris", data);
+    const plain = addBotMcpServer({}, { name: "notes", command: "npx", args: ["-y", "@x/notes-mcp"] }, "iris", data, true);
     expect(plain.ok && plain.server).toEqual({ command: "npx", args: ["-y", "@x/notes-mcp"], env: {}, enabled: false });
+  });
+});
+
+describe("a bot adding a server where every bot reaches every folder (a desktop)", () => {
+  it("still keeps files from a conversation folder in its own folder, but the server stays every bot's", () => {
+    const data = dataDir();
+    const script = file(join(data, "task-workspaces", "iris", "t1", "srv", "server.py"));
+    const added = addBotMcpServer({}, { name: "blender", ...python(script) }, "iris", data, false);
+    if (!added.ok) throw new Error(added.error);
+    expect(added.server).toEqual({ ...python(join(data, "workspaces", "iris", "tools", "srv", "server.py")), enabled: false });
+    expect(added.moved).toHaveLength(1);
+    const theirs = addBotMcpServer({}, { name: "theirs", ...python(join(data, "workspaces", "paul", "s.py")) }, "iris", data, false);
+    expect(theirs.ok && theirs.server, "another bot's files are reachable here").toMatchObject({ args: [join(data, "workspaces", "paul", "s.py")] });
+    expect(theirs.ok && "bot" in theirs.server).toBe(false);
   });
 });

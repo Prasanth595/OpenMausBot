@@ -234,18 +234,22 @@ shell sandbox. Individual tool approvals depend on the engine and approval mode.
 ### A bot's own servers, and servers that don't start
 
 A bot can add a command server with `add_mcp_server` (saved switched off, as
-always). When that command, its arguments or its environment point into the
-bot's own folder (`workspaces/<bot>`) or one of its conversation folders
-(`task-workspaces/<bot>/<conversation>`), the server is that bot's own: no
-other bot can reach those files, so it starts only for that bot, and the
-`config.json` entry says so with `"bot": "<bot id>"`. A conversation folder
-goes when its conversation does, so files there are first copied into the
-bot's own folder under `tools/` and the server runs from the copy. A command
-that uses another bot's files is refused. Servers you add in Settings stay
-every bot's. On the first start after an update, a server no bot owns whose
-files are in one bot's folders becomes that bot's own the same way, and you
-hear about it once: "The Blender tool only works for Iris, so it's off for
-your other bots."
+always). A conversation folder (`task-workspaces/<bot>/<conversation>`) goes
+when its conversation does, so when the command, its arguments or its
+environment point into one of the bot's conversation folders, those files are
+first copied into the bot's own folder under `tools/`, and the server runs
+from the copy.
+
+Where bots are boxed (a Cloud), each bot's turn sees only its own folders.
+There a server whose files are in the bot's own folder (`workspaces/<bot>`) or
+its conversation folders is that bot's own: it starts only for that bot, and
+the `config.json` entry says so with `"bot": "<bot id>"`. A command that uses
+another bot's files is refused there. On a desktop every bot reaches every
+folder, so such a server stays every bot's. Servers you add in Settings stay
+every bot's. The first time bots run boxed after an update, a server no bot
+owns whose files are in the folders of one existing bot becomes that bot's own
+the same way, once, and you hear about it once: "The Blender tool only works
+for Iris, so it's off for your other bots."
 
 Each enabled command server is also started once for each bot that uses it,
 the way that bot's AI starts it (in the bot's box on a Cloud, from its own
