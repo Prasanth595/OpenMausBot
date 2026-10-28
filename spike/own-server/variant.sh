@@ -18,7 +18,7 @@ SECCOMP=$HERE/seccomp-omb-home.json
 mkdir -p "$OUT"
 log() { printf '== [%s] %s\n' "$VARIANT" "$*"; }
 
-PROFILE=""; RESTARTS=0
+PROFILE=""; RESTARTS=0; ROLE=home
 case "$VARIANT" in
   # Stock host: kernel.apparmor_restrict_unprivileged_userns=1, as Ubuntu 24.04 ships it.
   a)    USERNS=1; OPTS=() ;;
@@ -33,6 +33,7 @@ case "$VARIANT" in
   cs)   USERNS=1; PROFILE=omb-home; OPTS=(--security-opt apparmor=omb-home --security-opt seccomp=unconfined --security-opt systempaths=unconfined) ;;
   dnh)  USERNS=1; PROFILE=omb-home-narrow; RESTARTS=1; OPTS=(--security-opt apparmor=omb-home-narrow --security-opt "seccomp=$SECCOMP" --security-opt systempaths=unconfined
           --security-opt no-new-privileges=true --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add KILL --oom-score-adj -800) ;;
+  dnt)  USERNS=1; PROFILE=omb-home-narrow; ROLE=team; OPTS=(--security-opt apparmor=omb-home-narrow --security-opt "seccomp=$SECCOMP" --security-opt systempaths=unconfined) ;;
   dsx)  USERNS=1; PROFILE=omb-home; OPTS=(--security-opt apparmor=omb-home --security-opt "seccomp=$SECCOMP" --security-opt systempaths=unconfined --cap-add SYS_ADMIN) ;;
   # The same host with kernel.apparmor_restrict_unprivileged_userns=0 (a host-wide change).
   e)    USERNS=0; OPTS=() ;;
@@ -74,6 +75,7 @@ if [ -n "$PROFILE" ]; then
 fi
 cat "$OUT/host-step.txt"
 host_facts > "$OUT/host-after.txt" 2>&1
+sudo dmesg -C
 
 log "pull"
 start=$(date +%s)
@@ -87,13 +89,15 @@ SECRET_FILE=$(mktemp); ENV_FILE=$(mktemp)
 head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n' > "$SECRET_FILE"
 [ -n "${GITHUB_ACTIONS:-}" ] && echo "::add-mask::$(cat "$SECRET_FILE")"
 cat > "$ENV_FILE" <<ENV
-OMB_CLOUD_ROLE=home
+OMB_CLOUD_ROLE=$ROLE
 OMB_CLOUD_MACHINE_ID=spike-$VARIANT
 OMB_CLOUD_ADMIN_URL=https://admin.spike.invalid
 OMB_PUBLIC_URL=https://$PUBLIC_HOST
 OMB_CLOUD_IMAGE=$IMAGE
 OMB_CLOUD_BOOTSTRAP_SECRET=$(cat "$SECRET_FILE")
 ENV
+# A Team Cloud also boots with its team (docs/team-cloud.md); the Admin's pairing then carries a member claim.
+if [ "$ROLE" = team ]; then printf 'OMB_CLOUD_TEAM_ID=spike-team\nOMB_CLOUD_TEAM_NAME=Spike Team\n' >> "$ENV_FILE"; export TEAM_ID=spike-team; fi
 umask 022
 export SECRET_FILE HOME_PORT=$PORT HOME_HOST=$PUBLIC_HOST
 
@@ -158,7 +162,8 @@ p bwrap-pidns-proc bwrap --unshare-user --unshare-pid --ro-bind / / --proc /proc
 p bwrap-dev bwrap --unshare-user --ro-bind / / --dev /dev true
 p bwrap-detect-probe bwrap --unshare-user --unshare-pid --unshare-net --unshare-ipc --unshare-uts --die-with-parent --ro-bind /usr /usr --symlink usr/bin /bin --symlink usr/lib /lib --symlink usr/lib64 /lib64 --proc /proc --dev /dev --tmpfs /tmp /bin/true
 p tmpfs-in-userns unshare -Urm sh -c "d=\$(mktemp -d) && mount -t tmpfs none \$d"
-p overlay-in-userns unshare -Urm sh -c "d=\$(mktemp -d) && mkdir \$d/l \$d/u \$d/w \$d/m && mount -t overlay overlay -o lowerdir=\$d/l,upperdir=\$d/u,workdir=\$d/w \$d/m"
+p overlay-in-userns unshare -Urm sh -c "d=\$(mktemp -d) && mount -t tmpfs none \$d && mkdir \$d/l \$d/u \$d/w \$d/m && mount -t overlay overlay -o lowerdir=\$d/l,upperdir=\$d/u,workdir=\$d/w \$d/m"
+p sysfs-in-userns unshare -Urmn sh -c "d=\$(mktemp -d) && mount -t sysfs sysfs \$d"
 ' > "$OUT/probes.txt" 2>&1
 cat "$OUT/probes.txt"
 
@@ -170,10 +175,19 @@ echo "mounts over /proc and /sys: $(awk "\$5 ~ \"^/(proc|sys)/\" {print \$5}" /p
 echo "hidepid: $(grep -oE "hidepid=[a-z0-9]+" /proc/mounts | head -1)"
 ' > "$OUT/security.txt" 2>&1
 docker exec omb-probe sh -c '
-r() { if head -c 1 "$1" >/dev/null 2>&1; then echo "root read $1: allowed"; else echo "root read $1: denied"; fi; }
-for f in /proc/kcore /proc/keys /proc/sched_debug /proc/timer_list /proc/interrupts /proc/latency_stats; do r "$f"; done
-if ls /sys/firmware >/dev/null 2>&1; then echo "root list /sys/firmware: allowed"; else echo "root list /sys/firmware: denied"; fi
-for f in /proc/sysrq-trigger /proc/sys/kernel/shmmax /proc/sys/vm/overcommit_memory; do if ( : > "$f" ) 2>/dev/null; then echo "root open-for-write $f: allowed"; else echo "root open-for-write $f: denied"; fi; done
+# Docker masks a file with /dev/null and a folder with an empty tmpfs, so "readable" means real content came back.
+r() {
+  if [ ! -e "$1" ]; then echo "root read $1: absent"; return; fi
+  err=$(head -c 1 "$1" 2>&1 >/dev/null)
+  if [ -n "$err" ]; then echo "root read $1: denied ($err)"
+  elif [ "$(head -c 64 "$1" 2>/dev/null | wc -c)" -gt 0 ]; then echo "root read $1: readable"
+  else echo "root read $1: empty (masked)"; fi
+}
+for f in /proc/kcore /proc/keys /proc/timer_list /proc/interrupts /proc/latency_stats /proc/sched_debug; do r "$f"; done
+err=$(ls -A /sys/firmware 2>&1 >/dev/null)
+if [ -n "$err" ]; then echo "root list /sys/firmware: denied ($err)"; elif [ -n "$(ls -A /sys/firmware 2>/dev/null)" ]; then echo "root list /sys/firmware: readable"; else echo "root list /sys/firmware: empty (masked)"; fi
+fw=$(find /sys/firmware -type f 2>/dev/null | head -1); if [ -n "$fw" ]; then r "$fw"; else echo "root find a file under /sys/firmware: none found"; fi
+for f in /proc/sysrq-trigger /proc/sys/kernel/shmmax /proc/sys/vm/overcommit_memory; do err=$( ( : > "$f" ) 2>&1 ); if [ -z "$err" ]; then echo "root open-for-write $f: allowed"; else echo "root open-for-write $f: denied ($err)"; fi; done
 ' > "$OUT/paths.txt" 2>&1
 docker exec -u maus "$NAME" sh -c '
 sup=""; for d in /proc/[0-9]*; do case "$(tr "\0" " " < $d/cmdline 2>/dev/null)" in node\ /app/dist-server/cloud-home-start.js*) sup=${d#/proc/};; esac; done
@@ -205,6 +219,12 @@ if [ "$HEALTH_OK" -eq 0 ] && [ "$RESTARTS" -eq 1 ]; then
     start_home > /dev/null 2>&1
     echo "SIGKILL then a new container on the same volume: health $(wait_health 150)"
     docker logs "$NAME" 2>&1 | grep -aE 'already using|lease|startup failed' | head -3 | sed 's/^/  log: /'
+    # What a connector could do itself once it knows no other container holds the volume: remove the lease records.
+    docker rm -f "$NAME" > /dev/null 2>&1
+    docker run --rm -v "$VOLUME:/data" --entrypoint sh "$IMAGE" -c 'cd /data/.openmausbot && rm -f openmausbot-server.lease openmausbot-server.lease.reap-* openmausbot-server.lease.candidate-* .openmausbot-server-child/openmausbot-server.lease && echo "lease records removed"' 2>&1 | sed 's/^/  /'
+    start_home > /dev/null 2>&1
+    echo "lease records removed, then a new container on the same volume: health $(wait_health 150)"
+    echo "  same volume kept its data: $(docker exec -u maus "$NAME" sh -c 'cat /data/.omb-cloud-home.json; ls /data/.openmausbot | wc -l' 2>&1 | tr '\n' ' ')"
     echo "after restarts, signed box: $(node "$HERE/admin.mjs" wait-box 60 | head -c 300)"
   } > "$OUT/restarts.txt" 2>&1
   cat "$OUT/restarts.txt"

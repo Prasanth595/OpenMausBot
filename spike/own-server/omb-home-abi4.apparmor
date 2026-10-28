@@ -44,13 +44,13 @@ profile omb-home-abi4 flags=(attach_disconnected,mediate_deleted) {
   deny @{PROC}/kcore rwklx,
 
   # systempaths=unconfined lifts Docker's masks over /proc and /sys; these put back what the masks hid.
-  deny @{PROC}/acpi/** rwklx,
-  deny @{PROC}/asound/** rwklx,
+  deny @{PROC}/acpi/{,**} rwklx,
+  deny @{PROC}/asound/{,**} rwklx,
   deny @{PROC}/interrupts rwklx,
   deny @{PROC}/keys rwklx,
   deny @{PROC}/latency_stats rwklx,
   deny @{PROC}/sched_debug rwklx,
-  deny @{PROC}/scsi/** rwklx,
+  deny @{PROC}/scsi/{,**} rwklx,
   deny @{PROC}/timer_list rwklx,
   deny @{PROC}/timer_stats rwklx,
   deny @{PROC}/sys/** w,
@@ -61,8 +61,8 @@ profile omb-home-abi4 flags=(attach_disconnected,mediate_deleted) {
   deny /sys/fs/[^c]*/** wklx,
   deny /sys/fs/c[^g]*/** wklx,
   deny /sys/fs/cg[^r]*/** wklx,
-  deny /sys/firmware/** rwklx,
-  deny /sys/devices/virtual/powercap/** rwklx,
+  deny /sys/firmware/{,**} rwklx,
+  deny /sys/devices/virtual/powercap/{,**} rwklx,
   deny /sys/kernel/security/** rwklx,
 
   ptrace (trace,tracedby,read,readby) peer=omb-home-abi4,

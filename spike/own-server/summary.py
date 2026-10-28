@@ -4,7 +4,7 @@ import json
 import os
 import sys
 
-ORDER = ["a", "b", "c", "bc", "bcs", "d", "ds", "dn", "d4", "cs", "dnh", "dsx", "e", "ec", "ebc", "ebcs", "eds"]
+ORDER = ["a", "b", "c", "bc", "bcs", "d", "ds", "dn", "d4", "cs", "dnh", "dnt", "dsx", "e", "ec", "ebc", "ebcs", "eds"]
 
 root = sys.argv[1]
 results = {}
@@ -49,7 +49,7 @@ def signed(data):
 def first_failure(data):
     for line in data.get("probes", []):
         parts = line.split("\t")
-        if len(parts) >= 3 and parts[1] != "rc=0" and not parts[0].startswith("overlay"):
+        if len(parts) >= 3 and parts[1] != "rc=0" and parts[0] not in ("overlay-in-userns", "sysfs-in-userns"):
             return f"{parts[0]}: {parts[2][:110]}"
     return ""
 

@@ -63,7 +63,9 @@ else if (command === "wait-box") {
     fields: report ? Object.keys(report).sort() : [],
   });
 } else if (command === "pair") {
-  const body = JSON.stringify({ label: "own-server spike", ttlSeconds: 120 });
+  // A Team Cloud pairs a person only with the Admin's claim of who they are on the team (server/cloud-team.ts).
+  const team = process.env.TEAM_ID ? { team: { id: process.env.TEAM_ID }, member: { email: "owner@spike.invalid", role: "owner" } } : {};
+  const body = JSON.stringify({ label: "own-server spike", ttlSeconds: 120, ...team });
   const opened = await signed("POST", "/api/cloud/pairing", body);
   const window = parse(opened.text);
   let redeem = null, session = null;
@@ -85,7 +87,8 @@ else if (command === "wait-box") {
   const newForged = await bad({ "fly-client-ip": "198.51.100.8" });
   const shared = [];
   for (let i = 0; i < 10; i += 1) shared.push(await bad());
-  const adminAfter = (await signed("POST", "/api/cloud/pairing", JSON.stringify({ label: "own-server spike", ttlSeconds: 60 }))).status;
+  const team = process.env.TEAM_ID ? { team: { id: process.env.TEAM_ID }, member: { email: "owner@spike.invalid", role: "owner" } } : {};
+  const adminAfter = (await signed("POST", "/api/cloud/pairing", JSON.stringify({ label: "own-server spike", ttlSeconds: 60, ...team }))).status;
   print({ sameForgedAddress: sameForged, newForgedAddress: newForged, noHeaderTen: shared, validAdminPairingAfterwardsNoHeader: adminAfter });
 } else {
   process.stderr.write("usage: admin.mjs box | wait-box <seconds> | health | pair | lockout\n");
