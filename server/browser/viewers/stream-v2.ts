@@ -50,6 +50,8 @@ export interface StreamRequest {
   botId: string;
   /** A session id, or local-owner. */
   owner: string;
+  /** The person watching, whose hold this view shares on any device; the owner when unset. */
+  person?: string;
   /** False for a passive view (picture in picture): it never takes control. */
   canOperate: boolean;
   params: URLSearchParams;
@@ -134,7 +136,7 @@ class StreamSession {
       return;
     }
     if (output.type === "gone") {
-      this.close(STREAM_CLOSE.reconnect, "reconnect");
+      this.close(STREAM_CLOSE.reconnect, "reconnect", { dropped: true });
       return;
     }
     const message = wireMessage(output);
@@ -198,7 +200,7 @@ class StreamSession {
     if (this.#restarting || !this.viewer || this.closing) return;
     this.#restarting = true;
     try {
-      await service.restart(this.request.target.session, this.viewer.id);
+      await service.restart(this.request.target.session, this.viewer.options.person);
     } catch {
       this.notice("The browser could not restart. Wait for active work to finish and try again.");
     } finally {
@@ -206,11 +208,12 @@ class StreamSession {
     }
   }
 
-  /** Lets the viewer go at once, releasing any control and held input, then tells the client why and cuts it off. */
-  close(code: number, reason: string): void {
+  /** Lets the viewer go at once, and its held input, then tells the client why and cuts it off. `dropped`: the client comes
+   * straight back, so a hold of its person waits for it. */
+  close(code: number, reason: string, { dropped = false }: { dropped?: boolean } = {}): void {
     if (this.closed || this.closing) return;
     this.closing = true;
-    void this.viewer?.close().catch(() => undefined);
+    void this.viewer?.close({ dropped }).catch(() => undefined);
     try { this.ws.close(code, reason.slice(0, 120)); } catch { this.kill(); return; }
     setTimeout(() => this.kill(), CLOSE_GRACE_MS).unref();
   }
@@ -220,7 +223,12 @@ class StreamSession {
     if (this.closed) return;
     this.closed = true;
     for (const ack of this.unacknowledged.splice(0)) ack();
-    void this.viewer?.close().catch(() => undefined);
+    void this.viewer?.close({ dropped: this.theirs() }).catch(() => undefined);
+  }
+
+  /** Still the view of a person allowed to see this browser: its stream went, not its sign-in. */
+  theirs(): boolean {
+    try { return this.request.isCurrent(); } catch { return false; }
   }
 }
 
@@ -276,6 +284,7 @@ export class StreamV2 {
     const size = requestedSize(Number(params.get("width")), Number(params.get("height")));
     const options: ViewerOptions = {
       owner: request.owner,
+      ...(request.person ? { person: request.person } : {}),
       canOperate: request.canOperate,
       maxWidth: intParam(params, "maxWidth", 1280, FRAME_CAP_LIMITS.maxWidth),
       maxHeight: intParam(params, "maxHeight", 800, FRAME_CAP_LIMITS.maxHeight),
@@ -287,7 +296,7 @@ export class StreamV2 {
     };
     try {
       const viewer = await this.#service.attachViewer(request.target, options, (output) => session.push(output));
-      if (session.closed || session.closing) await viewer.close();
+      if (session.closed || session.closing) await viewer.close({ dropped: !session.closing && session.theirs() });
       else session.attached(viewer, this.#service);
     } catch (error) {
       if (error instanceof BrowserHostError) session.close(STREAM_CLOSE.hostSetup, JSON.stringify({ need: error.kind, command: SETUP_COMMAND }));

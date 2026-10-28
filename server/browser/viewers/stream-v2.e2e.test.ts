@@ -63,6 +63,7 @@ suite("the v2 stream on real Chrome", () => {
     const route = createBrowserViewerRoutes({
       upgrades,
       dataDir: real.dataDir,
+      person: () => "local-owner",
       viewers: {
         open: async () => {},
         action: async () => ({ ok: true }),
