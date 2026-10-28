@@ -85,7 +85,7 @@ export interface Delivery {
 export interface PersonInboxDeps {
   team: CloudTeam | null;
   dataDir: string;
-  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "createTask" | "deleteTask" | "patchTask" | "patchGroup" | "appendMessage" | "patchMessage" | "messagesFor" | "groupByThread" | "onChange">;
+  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "backfillPrivateTasks" | "createTask" | "deleteTask" | "patchTask" | "patchGroup" | "appendMessage" | "patchMessage" | "messagesFor" | "groupByThread" | "onChange">;
   starters: { get(threadId: string): string | undefined; set(threadId: string, person: string): void };
   audienceOf(threadId: string): Audience;
   personKeyOf(email: string): string;
@@ -126,10 +126,7 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   const now = deps.now ?? Date.now;
   const file = join(deps.dataDir, PERSON_INBOX_FILE);
   let { homes, items } = team ? loadPersonInboxState(deps.dataDir) : { homes: {}, items: [] };
-  for (const at of [...Object.values(homes), ...items]) {
-    const task = store.taskByThread(at.botId, at.threadId);
-    if (task && !task.private) store.patchTask(at.botId, at.threadId, { private: true });
-  }
+  store.backfillPrivateTasks([...Object.values(homes), ...items]);
   const save = () => {
     items = items.filter((item) => now() - item.at < KEEP_MS).slice(-MAX_ITEMS);
     try {

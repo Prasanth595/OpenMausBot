@@ -1,12 +1,13 @@
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Notification } from "../../shared/notification.ts";
+import * as atomic from "../atomic.ts";
 import { audienceIncludes, memberAudience } from "../audience.ts";
 import { DATA_DIR } from "../config.ts";
 import { personKey } from "../person-key.ts";
-import { Store } from "../store.ts";
+import { Store, type BotRecord } from "../store.ts";
 import { ThreadStarters } from "../thread-starters.ts";
 import { createCloudTeamHost } from "./cloud-team-host.ts";
 import { createTeamMessages } from "./team-messages.ts";
@@ -17,7 +18,7 @@ const CARL = { email: "carl@acme.test", role: "owner" as const };
 const key = (email: string) => personKey({ id: "", email });
 const stopped: Array<() => void> = [];
 beforeEach(() => rmSync(DATA_DIR, { recursive: true, force: true }));
-afterEach(() => { for (const stop of stopped.splice(0)) stop(); });
+afterEach(() => { for (const stop of stopped.splice(0)) stop(); vi.restoreAllMocks(); });
 
 function fixture() {
   const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
@@ -48,7 +49,64 @@ function fixture() {
   return { ...open(), botId: bot.id, main: bot.threadId, origin, file, ownersDir, open };
 }
 
+function legacyFixture(records: "homes" | "items" | "both" = "both") {
+  const f = fixture();
+  f.team.stop();
+  f.store.createBot({ name: "Mira" });
+  f.store.createBot({ name: "Cleo" });
+  const botsFile = join(DATA_DIR, "bots.json");
+  const bots = JSON.parse(readFileSync(botsFile, "utf8")) as BotRecord[];
+  const destinations = bots.flatMap((bot, index) => Array.from({ length: 20 }, (_, number) => {
+    const threadId = `legacy-${index}-${number}`;
+    bot.tasks!.push({ ...bot.tasks![0]!, threadId, title: "Legacy inbox" });
+    return { botId: bot.id, threadId, person: key(`${threadId}@acme.test`) };
+  }));
+  const homes = records === "items" ? {} : Object.fromEntries(destinations.map(({ person, botId, threadId }) => [person, { botId, threadId }]));
+  const items = records === "homes" ? [] : destinations.map((at) => ({ ...at, id: at.threadId, kind: "message", from: "Ada", text: "Private date", at: 1 }));
+  writeFileSync(botsFile, JSON.stringify(bots));
+  writeFileSync(join(DATA_DIR, "person-inbox.json"), JSON.stringify({ version: 1, homes, items }));
+  new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
+  return { ...f, botsFile, destinations };
+}
+
 describe("private message ownership", () => {
+  it.each(["homes", "items", "both"] as const)("backfills many legacy destinations from %s with one registry save and needs no save after restart", (records) => {
+    const f = legacyFixture(records);
+    const save = vi.spyOn(atomic, "writeFileAtomicIfChanged");
+    const restarted = f.open();
+    expect(save.mock.calls.filter(([file]) => file === f.botsFile)).toHaveLength(1);
+    for (const at of f.destinations) {
+      expect(restarted.store.taskByThread(at.botId, at.threadId)?.private).toBe(true);
+      expect(restarted.starters.get(at.threadId)).toBeUndefined();
+    }
+    expect(restarted.host.audienceOf(f.main)).toBe("team");
+    restarted.team.stop();
+    f.open().team.stop();
+    expect(save.mock.calls.filter(([file]) => file === f.botsFile)).toHaveLength(1);
+    rmSync(join(DATA_DIR, "person-inbox.json"));
+    const again = f.open();
+    for (const at of f.destinations) expect(again.host.audienceOf(at.threadId)).toBe(`member:unowned-${at.threadId}`);
+    expect(save.mock.calls.filter(([file]) => file === f.botsFile)).toHaveLength(1);
+  });
+
+  it("keeps every legacy destination denied in memory and logs a failed registry save", () => {
+    const f = legacyFixture();
+    const write = atomic.writeFileAtomicIfChanged;
+    const save = vi.spyOn(atomic, "writeFileAtomicIfChanged").mockImplementation((file, ...args) => {
+      if (file === f.botsFile) throw new Error("synthetic registry save failure");
+      return write(file, ...args);
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const restarted = f.open();
+    expect(save.mock.calls.filter(([file]) => file === f.botsFile)).toHaveLength(1);
+    for (const at of f.destinations) {
+      expect(restarted.store.taskByThread(at.botId, at.threadId)?.private).toBe(true);
+      for (const person of [ADA, BOB, CARL]) expect(restarted.sees(person.email, at.threadId)).toBe(false);
+    }
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("could not save"));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("synthetic registry save failure"));
+  });
+
   it.each(["homes", "items"])("isolates an untouched ownerless legacy inbox from %s before engine-home migration", (records) => {
     const f = fixture();
     const shared = f.store.createTask(f.botId, "Shared work", false)!.threadId;
