@@ -15,6 +15,8 @@ export interface ReplayRequest {
   message: Message;
   /** The person's words this turn sends: several queued lines arrive as one turn, under the last line's message. */
   turnText: string;
+  /** The person picked this computer as the bot's place, so its screen calls never stop to ask them first. */
+  placePicked: boolean;
 }
 export interface DispatchDeps {
   recipes: Pick<RecipeStore, "find" | "forget">;
@@ -118,7 +120,7 @@ export class SavedStepsDispatch {
 
   private recipeFor(request: ReplayRequest, input: SendTurnInput): Recipe | undefined {
     if (!this.deps.enabled() || input.approvalMode !== "full" || input.integrations?.localComputer?.scope !== "local-computer") return undefined;
-    if (!personTextRequest(request.message) || request.turnText !== request.message.text) return undefined;
+    if (!request.placePicked || !personTextRequest(request.message) || request.turnText !== request.message.text) return undefined;
     const text = request.turnText;
     const recipe = this.deps.recipes.find(request.botId, requestKey(text));
     return recipe && recipeFitsRequest(recipe, text) ? recipe : undefined;
@@ -177,7 +179,7 @@ export class SavedStepsDispatch {
   }
 
   private async fallBack(run: Run, failed: Failed, input: SendTurnInput, start: Start): Promise<void> {
-    this.forget(run);
+    if (!failed.gate) this.forget(run);
     if (run.controller.signal.aborted || this.deps.stopped(run.threadId)) return this.end(run, STOPPED);
     this.deps.engines.set(run.threadId, run.engine);
     const note = fallbackNote(failed);

@@ -101,6 +101,14 @@ describe("runSteps", () => {
     expect(events.at(-1)).toMatchObject({ type: "item.completed", itemType: "tool", ok: false, output: "Fixture failure." });
   });
 
+  it("marks a step the control gate refused, while resolving or while acting", async () => {
+    const busy = (at: string) => computer((tool) => (tool === at ? { ok: false, error: "Another thread is using this computer.", gate: true } : undefined));
+    expect(await runSteps(RECIPE, TURN, { ...deps, caller: busy("type_text") })).toEqual({
+      kind: "failed", done: 1, total: 2, tool: "type_text", label: '"Document" in TextEdit', error: "Another thread is using this computer.", gate: true });
+    expect(await runSteps(RECIPE, TURN, { ...deps, caller: busy("list_apps") })).toEqual({
+      kind: "failed", done: 0, total: 2, tool: "click", label: '"Document" in TextEdit', error: "Another thread is using this computer.", gate: true });
+  });
+
   it("fails a step whose target is gone before asking about it", async () => {
     const quit = computer((tool) => (tool === "list_apps" ? { ok: true, structured: { apps: [] } } : undefined));
     expect(await runSteps(RECIPE, TURN, { ...deps, caller: quit }))

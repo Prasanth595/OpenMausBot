@@ -54,7 +54,7 @@ describe("createSavedSteps", () => {
     const input: SendTurnInput = { threadId: "t1", botId: "b1", text: REQUEST, approvalMode: "full",
       integrations: { localComputer: { command: process.execPath, args: ["--experimental-strip-types", FAKE], env: {}, scope: "local-computer" } } };
 
-    expect(await steps.dispatch.sendTurn(engine, { botId: "b1", message: { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST }, turnText: REQUEST }, input, start))
+    expect(await steps.dispatch.sendTurn(engine, { botId: "b1", message: { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST }, turnText: REQUEST, placePicked: true }, input, start))
       .toEqual({ turnId: "e1" });
     expect(start).toHaveBeenCalledWith(input);
     expect(events).toEqual([]);
@@ -80,7 +80,7 @@ describe("createSavedSteps", () => {
     const start = vi.fn(async (_input: SendTurnInput): Promise<TurnStartResult> => ({ turnId: "e1" }));
     const computer = { command: process.execPath, args: ["--experimental-strip-types", FAKE], env: {}, scope: "local-computer" as const };
 
-    const { turnId } = await steps.dispatch.sendTurn(engine, { botId: "b1", message: { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST }, turnText: REQUEST },
+    const { turnId } = await steps.dispatch.sendTurn(engine, { botId: "b1", message: { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST }, turnText: REQUEST, placePicked: true },
       { threadId: "t1", botId: "b1", text: REQUEST, approvalMode: "full", integrations: { localComputer: computer } }, start);
 
     expect(steps.journal.take("t1", new Set(["g1"]))).toEqual({ calls: [], complete: true, tainted: true });

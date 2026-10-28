@@ -1,10 +1,11 @@
 import { elementPath, type WireElement } from "./driver-wire.ts";
 import type { AppIdentity, ElementIdentity, RecipeStep } from "./rules.ts";
 
-export type CallOutcome = { ok: true; structured: Record<string, unknown> } | { ok: false; error: string };
+/** `gate`: the computer's control gate refused the call (a person holds it, another turn has it): the step was not tried. */
+export type CallOutcome = { ok: true; structured: Record<string, unknown> } | { ok: false; error: string; gate?: true };
 export interface ComputerCaller { call(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<CallOutcome> }
 export type Match<T> = { ok: true; value: T } | { ok: false; reason: "none" | "ambiguous" };
-type Resolved = { ok: true; args: Record<string, unknown> } | { ok: false; error: string };
+type Resolved = { ok: true; args: Record<string, unknown> } | Extract<CallOutcome, { ok: false }>;
 
 type Kind = "string" | "number" | "boolean";
 interface Shape { required: Record<string, Kind>; optional: Record<string, Kind>; id?: string }

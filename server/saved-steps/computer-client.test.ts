@@ -3,7 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CONTROL_BUSY, CONTROL_WAITED, controlRefusal, type ControlState } from "../control-client.ts";
+import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_WAITED, controlRefusal, type ControlState } from "../control-client.ts";
+import { computerPersonAwayText } from "../computer-wait.ts";
 import { ChatMcpClient } from "../drivers/chat-mcp-tools.ts";
 import { createGateInterceptor } from "../mcp-bridge.ts";
 import { callOutcome, openComputerCaller, STEP_TIMEOUT_MS } from "./computer-client.ts";
@@ -94,12 +95,24 @@ describe("callOutcome", () => {
     ["another thread holds it", { held: true, helpOpen: false, blockedReason: CONTROL_BUSY }, {}],
     ["its state cannot be confirmed", { held: true, helpOpen: false }, {}],
     ["the call waited for it", { held: false, helpOpen: false }, { actWithinMs: -1 }],
-  ])("fails a call the control gate refuses because %s", async (_case, state, timing) => {
+    ["the person handed it back mid-call", { held: true, helpOpen: false, blockedReason: CONTROL_HANDED_BACK }, {}],
+    ["the person has had it too long", { held: true, helpOpen: false, blockedReason: computerPersonAwayText(30 * 60_000) }, {}],
+  ])("fails a call the control gate refuses because %s, marked as the gate's", async (_case, state, timing) => {
     let refused = "";
     const gate = createGateInterceptor({ check: async () => state, forward: () => { throw new Error("forwarded"); }, refuse: (line) => { refused = line; }, ...timing });
     await gate(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "click", arguments: {} } }));
     const text = state.held ? controlRefusal(state) : CONTROL_WAITED;
-    expect(callOutcome(JSON.parse(refused).result)).toEqual({ ok: false, error: text.slice(0, 300) });
+    expect(callOutcome(JSON.parse(refused).result)).toEqual({ ok: false, error: text.slice(0, 300), gate: true });
+  });
+
+  it.each([
+    ["the driver's own error", { content: [{ type: "text", text: "AXPress was not performed" }], isError: true }],
+    ["a driver error that quotes part of a gate text", { content: [{ type: "text", text: "A person has taken control" }], isError: true }],
+    ["the driver's refusal", { content: [], structuredContent: { refusal: { code: "x", message: CONTROL_BUSY } } }],
+  ])("never marks %s as the gate's", (_case, result) => {
+    const outcome = callOutcome(result);
+    expect(outcome.ok).toBe(false);
+    expect(outcome).not.toHaveProperty("gate");
   });
 
   it("names a refusal by its code when it has no message", () => {

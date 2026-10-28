@@ -1,3 +1,5 @@
+import { computerPersonAwayText } from "../computer-wait.ts";
+import { CONTROL_BUSY, CONTROL_HANDED_BACK, CONTROL_REFUSAL_PLAIN, CONTROL_UNCONFIRMED, CONTROL_WAITED } from "../control-client.ts";
 import { ChatMcpClient } from "../drivers/chat-mcp-tools.ts";
 import type { CallOutcome, ComputerCaller } from "./resolve.ts";
 
@@ -9,9 +11,14 @@ export type LocalComputerSpec = { command: string; args: string[]; env: Record<s
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
-function errorText(content: unknown[]): string {
+const GATE_REFUSALS: ReadonlySet<string> = new Set([CONTROL_REFUSAL_PLAIN, CONTROL_HANDED_BACK, CONTROL_WAITED, CONTROL_BUSY, CONTROL_UNCONFIRMED]);
+const PERSON_AWAY = computerPersonAwayText(60_000).replace(/ for over [\s\S]*$/u, " for over ");
+const gateRefusal = (text: string) => GATE_REFUSALS.has(text) || text.startsWith(PERSON_AWAY);
+
+function errorOutcome(content: unknown[]): CallOutcome {
   const text = content.flatMap((item) => (isRecord(item) && item.type === "text" && typeof item.text === "string" ? [item.text] : [])).join(" ").trim();
-  return text ? text.slice(0, ERROR_CHARS) : "the tool reported an error";
+  if (!text) return { ok: false, error: "the tool reported an error" };
+  return { ok: false, error: text.slice(0, ERROR_CHARS), ...(gateRefusal(text) ? { gate: true as const } : {}) };
 }
 
 function refusalText(refusal: unknown): string {
@@ -30,7 +37,7 @@ export function callOutcome(result: unknown): CallOutcome {
   if (isError !== undefined && typeof isError !== "boolean") return INVALID;
   if (structuredContent !== undefined && structuredContent !== null && !isRecord(structuredContent)) return INVALID;
   const structured = isRecord(structuredContent) ? structuredContent : {};
-  if (isError) return { ok: false, error: errorText(result.content) };
+  if (isError) return errorOutcome(result.content);
   if (structured.refusal !== undefined && structured.refusal !== null) return { ok: false, error: refusalText(structured.refusal) };
   return { ok: true, structured };
 }

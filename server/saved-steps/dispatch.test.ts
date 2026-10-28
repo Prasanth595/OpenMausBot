@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { newId, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener, type SendTurnInput, type TurnStartResult } from "../contracts.ts";
+import { CONTROL_BUSY } from "../control-client.ts";
 import { EventBus } from "../harness/bus.ts";
 import { QuickModelFallback } from "../quick-model-fallback.ts";
 import type { Message } from "../store.ts";
@@ -29,7 +30,7 @@ const FAILED = { kind: "failed", done: 1, total: 2, tool: "type_text", label: LA
 const COMPUTER = { command: "gated-computer", args: ["--turn"], env: { OMB_CONTROL_TOKEN: "turn-token" }, platform: "darwin" as const, scope: "local-computer" as const };
 const INPUT: SendTurnInput = { threadId: "t1", botId: "b1", text: REQUEST, approvalMode: "full", integrations: { localComputer: COMPUTER } };
 const MESSAGE: Message = { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST };
-const REQ: ReplayRequest = { botId: "b1", message: MESSAGE, turnText: REQUEST };
+const REQ: ReplayRequest = { botId: "b1", message: MESSAGE, turnText: REQUEST, placePicked: true };
 const reworded = (text: string): ReplayRequest => ({ ...REQ, message: { ...MESSAGE, text }, turnText: text });
 const OBSERVATIONS = new Set(["list_apps", "list_windows", "get_window_state"]);
 
@@ -55,6 +56,7 @@ let acted: string[];
 let events: RuntimeEvent[];
 let answer: (event: Extract<RuntimeEvent, { type: "request.opened" }>) => Answer;
 let failAt: string | undefined;
+let gateAt: string | undefined;
 let throwAt: string | undefined;
 let slots: Map<string, ProviderInstance>;
 let engine: ReturnType<typeof engineStub>;
@@ -73,6 +75,7 @@ function computer(): ComputerCaller {
     async call(tool) {
       if (tool === throwAt) throw new Error("the fixture computer broke");
       if (tool === failAt) return { ok: false, error: "Fixture failure." } satisfies CallOutcome;
+      if (tool === gateAt) return { ok: false, error: CONTROL_BUSY, gate: true } satisfies CallOutcome;
       if (tool === "list_apps") return { ok: true, structured: { apps: [{ pid: 4242, name: "TextEdit", bundle_id: "com.apple.TextEdit", running: true }] } };
       if (tool === "list_windows") return { ok: true, structured: { windows: [{ window_id: 7, pid: 4242, title: "Untitled", app_name: "TextEdit" }] } };
       if (tool === "get_window_state") return { ok: true, structured: completeWindowState(windowState(snapshot++)) };
@@ -98,6 +101,7 @@ beforeEach(() => {
   events = [];
   answer = () => "allow";
   failAt = undefined;
+  gateAt = undefined;
   throwAt = undefined;
   stopped = false;
   engine = engineStub();
@@ -130,6 +134,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
     ["Ask", REQ, { ...INPUT, approvalMode: "ask" }],
     ["Auto", REQ, { ...INPUT, approvalMode: "auto" }],
     ["no host computer", REQ, { ...INPUT, integrations: {} }],
+    ["the person did not pick this computer as the bot's place", { ...REQ, placePicked: false }, INPUT],
     ["another computer", REQ, { ...INPUT, integrations: { localComputer: { ...COMPUTER, scope: undefined } } }],
     ["spoken", { ...REQ, message: { ...REQ.message, via: "call" } }, INPUT],
     ["no saved steps", reworded("open notes"), INPUT],
@@ -266,6 +271,18 @@ describe("SavedStepsDispatch.sendTurn", () => {
     expect(events.at(-2)).toMatchObject({ text: "Done by the AI." });
     expect(dispatch.take(ev("item.completed", "e1"))).toBe(false);
     expect(dispatch.replayed("t1", turnId)).toBeUndefined();
+  });
+
+  it("a control-gate refusal keeps the recipe and hands the request to the AI with the note", async () => {
+    gateAt = "type_text";
+    const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
+    await settled();
+    expect(recipes.forget).not.toHaveBeenCalled();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start.mock.calls[0]![0].text).toBe(`${INPUT.text}\n\n${fallbackNote({ kind: "failed", done: 1, total: 2, tool: "type_text", label: LABEL, error: CONTROL_BUSY })}`);
+    expect(engines()).toBe(engine);
+    expect(dispatch.take(ev("turn.completed", "e1"))).toBe(true);
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", turnId });
   });
 
   it("appends the note to recoveryText too", async () => {

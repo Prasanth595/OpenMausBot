@@ -1,5 +1,5 @@
 import { newId, type RuntimeEvent } from "../contracts.ts";
-import { resolveStep, type ComputerCaller } from "./resolve.ts";
+import { resolveStep, type CallOutcome, type ComputerCaller } from "./resolve.ts";
 import { stepLabel, type Recipe, type RecipeStep } from "./rules.ts";
 
 export interface ReplayTurn { threadId: string; turnId: string; provider: string; providerInstanceId: string }
@@ -7,7 +7,7 @@ export interface StepApproval { ask(tool: string, summary: string): Promise<bool
 export type ReplayOutcome =
   | { kind: "done" }
   | { kind: "declined"; tool: string; label: string }
-  | { kind: "failed"; done: number; total: number; tool: string; label: string; error: string }
+  | { kind: "failed"; done: number; total: number; tool: string; label: string; error: string; gate?: true }
   | { kind: "stopped" };
 
 const STOPPED: ReplayOutcome = { kind: "stopped" };
@@ -44,9 +44,10 @@ export async function runSteps(
   for (const [done, step] of recipe.steps.entries()) {
     if (signal.aborted) return STOPPED;
     const label = stepLabel(step);
-    const failed = (error: string): ReplayOutcome => (signal.aborted ? STOPPED : { kind: "failed", done, total, tool: step.tool, label, error });
+    const failed = ({ error, gate }: Extract<CallOutcome, { ok: false }>): ReplayOutcome =>
+      (signal.aborted ? STOPPED : { kind: "failed", done, total, tool: step.tool, label, error, ...(gate ? { gate } : {}) });
     const target = await resolveStep(step, caller, signal);
-    if (!target.ok) return failed(target.error);
+    if (!target.ok) return failed(target);
     const tool = engineToolName(step.tool);
     const summary = stepSummary(step.tool, label);
     const allowed = await approval.ask(tool, approvalSummary(step, label));
@@ -56,7 +57,7 @@ export async function runSteps(
     publish({ ...base(itemId), type: "item.started", itemType: "tool", title: tool, input: summary });
     const result = await caller.call(step.tool, target.args, signal);
     publish({ ...base(itemId), type: "item.completed", itemType: "tool", ok: result.ok, output: result.ok ? "done" : result.error });
-    if (!result.ok) return failed(result.error);
+    if (!result.ok) return failed(result);
   }
   return { kind: "done" };
 }
