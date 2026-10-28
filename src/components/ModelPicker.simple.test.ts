@@ -363,7 +363,7 @@ describe("the model picker in Simple mode", () => {
     expect(atDefault).toContain('title="The model decides how hard to think." class="text-[12px] leading-4 text-ink-tertiary">Default</span>');
   });
 
-  it("names the model on the Simple chip at every header width, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
+  it("names the model on the Simple chip, quiet until hovered; thinking and route stay in its tooltip and the menu", () => {
     const chip = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
     const markup = renderToStaticMarkup(chip);
     expect(markup).not.toContain("data-model-effort");
@@ -380,6 +380,15 @@ describe("the model picker in Simple mode", () => {
     const advanced = render(bot("high")).nodes.find((node) => node.props["data-tour"] === "model")!;
     expect(renderToStaticMarkup(advanced)).toContain("· High");
     expect(String(advanced.props.title)).toContain("High effort");
+  });
+
+  it("lets the contained trigger shrink inside the bot panel's Model row, and the loose one keep its size", () => {
+    const contained = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(contained.props.className)).toContain("min-w-0 max-w-[58%]");
+    expect(String(contained.props.className)).not.toMatch(/\bshrink-0\b/);
+    const loose = render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(loose.props.className)).toContain("shrink-0");
+    expect(String(loose.props.className)).not.toContain("max-w-[58%]");
   });
 
   it("puts the provider before a model the catalog names in one bare word, on the chip and the current row", () => {
@@ -704,7 +713,7 @@ describe("the model picker in Simple mode", () => {
     expect(html).not.toMatch(/data-simple-route="true"[^>]*>openai</);
   });
 
-  it("gives a model's route its own line and lets the row grow, so a long name and its route cannot collide", () => {
+  it("renders a model's route on its own line in a row that may grow", () => {
     fixture.instances = [engine("pi", "piAgent", "pi", "custom", [
       { id: "amazon-bedrock/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "amazon-bedrock" },
       { id: "anthropic/claude-sonnet-4-5", label: "Claude Sonnet 4.5", custom: true, provider: "anthropic" },

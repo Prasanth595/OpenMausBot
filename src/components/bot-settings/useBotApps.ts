@@ -22,15 +22,31 @@ export interface BotApps {
   connectedSlugs: string[];
 }
 
-let cardsRequest: Promise<Map<string, ToolkitCard>> | null = null;
-export function loadAppCards(): Promise<Map<string, ToolkitCard>> {
-  cardsRequest ??= api("/api/connectors/catalog")
-    .then((response: { cards?: ToolkitCard[] }) => new Map((response.cards ?? []).map((card) => [card.slug, card])))
+export interface AppCatalogue {
+  cards: Map<string, ToolkitCard>;
+  slugs: string[];
+  /** false when the catalogue could not be read. An unread catalogue is not an empty one. */
+  complete: boolean;
+}
+
+let catalogueRequest: Promise<AppCatalogue> | null = null;
+export function loadAppCatalogue(): Promise<AppCatalogue> {
+  catalogueRequest ??= api("/api/connectors/catalog")
+    .then((response: { cards?: ToolkitCard[]; pagination?: { complete?: boolean; stalled?: boolean } }) => {
+      const cards = new Map((response.cards ?? []).map((card) => [card.slug, card]));
+      // A marketplace page that stopped early is a partial catalogue, not the whole universe.
+      const complete = response.pagination?.complete !== false;
+      return { cards, slugs: [...cards.keys()], complete };
+    })
     .catch(() => {
-      cardsRequest = null;
-      return new Map<string, ToolkitCard>();
+      catalogueRequest = null;
+      return { cards: new Map<string, ToolkitCard>(), slugs: [], complete: false };
     });
-  return cardsRequest;
+  return catalogueRequest;
+}
+
+export function loadAppCards(): Promise<Map<string, ToolkitCard>> {
+  return loadAppCatalogue().then(({ cards }) => cards);
 }
 
 function slugLabel(slug: string): string {

@@ -2,11 +2,12 @@ import { Puzzle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/cn";
-import { everyAppConnected } from "@/lib/connector-status";
+import { everyAppConnected, everyCatalogueAppConnected } from "@/lib/connector-status";
 import { t } from "@/lib/i18n";
+import { loadNativeAppConnections } from "@/lib/native-app-connections";
 import { useStore } from "@/state/store";
 
-import { loadAppCards } from "./bot-settings/useBotApps";
+import { loadAppCatalogue } from "./bot-settings/useBotApps";
 import { preloadConnectedApps, type ToolkitCard } from "./PluginsPanel";
 import { ELEVATED_CONTROL, ELEVATED_HOVER } from "./elevated";
 import { SIMPLE_TOP_BUTTON } from "./SidebarSimpleTop";
@@ -26,26 +27,32 @@ export function appFaces(connected: readonly string[], cards: ReadonlyMap<string
   return [...own, ...POPULAR_APPS.filter((app) => !own.some((card) => card.slug === app.slug))].slice(0, APP_FACES);
 }
 
-function useAppFaces(): { faces: AppFace[]; nothingToConnect: boolean } {
+/** `null` until the first inventory and catalogue answer arrive: the pill starts hidden so a fully connected sidebar
+ *  never paints it for a frame and then snatches it away. */
+function useAppFaces(): { faces: AppFace[]; nothingToConnect: boolean } | null {
   const { state } = useStore();
-  const [result, setResult] = useState<{ faces: AppFace[]; nothingToConnect: boolean }>(
-    () => ({ faces: appFaces([], new Map()), nothingToConnect: false }),
-  );
+  const [result, setResult] = useState<{ faces: AppFace[]; nothingToConnect: boolean } | null>(null);
   useEffect(() => {
     if (state.pluginsOpen) return;
     let alive = true;
-    void preloadConnectedApps(true)
-      .then(async (inventory) => {
+    void Promise.all([preloadConnectedApps(true), loadAppCatalogue()])
+      .then(async ([inventory, catalogue]) => {
         const connected = Object.entries(inventory.services).filter(([, status]) => status.connected).map(([slug]) => slug).sort();
-        const cards = connected.length > 0 ? await loadAppCards() : new Map<string, AppFace>();
+        const cards = connected.length > 0 ? catalogue.cards : new Map<string, AppFace>();
+        // An unread or empty catalogue must keep the pill: the other direction hides a real connection.
+        const slugs = catalogue.complete ? catalogue.slugs : null;
+        const catalogueDone = everyCatalogueAppConnected(inventory.services, inventory.authoritative, slugs);
+        const native = catalogueDone ? await loadNativeAppConnections() : [];
         if (alive) {
           setResult({
             faces: appFaces(connected, cards),
-            nothingToConnect: everyAppConnected(inventory.services, inventory.authoritative),
+            nothingToConnect: everyAppConnected(inventory.services, inventory.authoritative, slugs, native),
           });
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (alive) setResult({ faces: appFaces([], new Map()), nothingToConnect: false });
+      });
     return () => { alive = false; };
   }, [state.pluginsOpen]);
   return result;
@@ -68,20 +75,25 @@ function AppFaceIcon({ face, className }: { face: AppFace; className?: string })
 const FAN = ["motion-safe:group-hover/apps:-translate-x-[3px] motion-safe:group-hover/apps:-rotate-[8deg]", "", "motion-safe:group-hover/apps:translate-x-[3px] motion-safe:group-hover/apps:rotate-[8deg]"];
 
 /** `circle` is the collapsed rail's round button. */
-export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
-  const { state, dispatch } = useStore();
-  const { faces, nothingToConnect } = useAppFaces();
+export function SidebarConnectAppsButton({ circle = false, faces, open, onOpen, settled = true }: {
+  circle?: boolean;
+  faces: readonly AppFace[];
+  open: boolean;
+  onOpen: () => void;
+  /** false before the first inventory answer: the button is in the tree for its footer slot but never painted. */
+  settled?: boolean;
+}) {
   const label = t("sidebar.connectApps");
-  if (nothingToConnect) return null;
   return (
     <button
       type="button"
       data-tour="nav-apps"
       data-sidebar-nav="apps"
-      aria-pressed={state.pluginsOpen}
+      hidden={!settled}
+      aria-pressed={open}
       aria-label={circle ? label : undefined}
       title={circle ? label : undefined}
-      onClick={() => dispatch({ type: "togglePlugins", open: true })}
+      onClick={onOpen}
       className={circle ? SIMPLE_TOP_BUTTON : cn("group/apps flex h-9 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-full pl-4 pr-3 text-[14px] font-medium leading-5 text-ink", ELEVATED_CONTROL, ELEVATED_HOVER)}
     >
       {circle ? <Puzzle size={18} strokeWidth={1.5} aria-hidden="true" /> : <>
@@ -93,4 +105,17 @@ export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
       </>}
     </button>
   );
+}
+
+export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
+  const { state, dispatch } = useStore();
+  const result = useAppFaces();
+  if (result?.nothingToConnect) return null;
+  return <SidebarConnectAppsButton
+    circle={circle}
+    faces={result?.faces ?? appFaces([], new Map())}
+    open={state.pluginsOpen}
+    onOpen={() => dispatch({ type: "togglePlugins", open: true })}
+    settled={result !== null}
+  />;
 }

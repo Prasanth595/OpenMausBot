@@ -857,105 +857,105 @@ export function Composer({
           <MentionTextarea
             matchInputStyle={!advanced}
             wrapperClassName={singleRow || simpleDock ? undefined : "@max-[30rem]/composer:order-first @max-[30rem]/composer:basis-full"}
-          inputRef={inputRef}
-          peers={[...(group ? members ?? [] : state.bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}
-          everyone={Boolean(group && !group.dm)}
-          dir="auto"
-          rows={1}
-          value={text}
-          onChange={(e) => {
-            if (recording) stopDictation();
-            editText(e.target.value);
-            setCaret(e.target.selectionStart ?? e.target.value.length);
-            setDismissedAt(null);
-            setDismissedSlashAt(null);
-          }}
-          onPaste={handlePaste}
-          onKeyUp={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
-          onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
-          onKeyDown={(e) => {
-            // An input method's confirming Enter and arrows pick its own candidates, not a mention or command.
-            if (imeComposing(e.nativeEvent)) return;
-            if (commandPickerOpen) {
-              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            inputRef={inputRef}
+            peers={[...(group ? members ?? [] : state.bots.filter((member) => member.id !== bot?.id)), ...teammates.peers]}
+            everyone={Boolean(group && !group.dm)}
+            dir="auto"
+            rows={1}
+            value={text}
+            onChange={(e) => {
+              if (recording) stopDictation();
+              editText(e.target.value);
+              setCaret(e.target.selectionStart ?? e.target.value.length);
+              setDismissedAt(null);
+              setDismissedSlashAt(null);
+            }}
+            onPaste={handlePaste}
+            onKeyUp={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
+            onClick={(e) => setCaret((e.target as HTMLTextAreaElement).selectionStart ?? 0)}
+            onKeyDown={(e) => {
+              // An input method's confirming Enter and arrows pick its own candidates, not a mention or command.
+              if (imeComposing(e.nativeEvent)) return;
+              if (commandPickerOpen) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  const delta = e.key === "ArrowDown" ? 1 : -1;
+                  setHighlight((current) =>
+                    (current + delta + commandCandidates.length) % commandCandidates.length,
+                  );
+                  return;
+                }
+                if (e.key === "Enter" || e.key === "Tab") {
+                  e.preventDefault();
+                  pickCommand(commandCandidates[highlight]);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setDismissedSlashAt(slash?.start ?? null);
+                  return;
+                }
+              }
+              if (mentionPickerOpen) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  const delta = e.key === "ArrowDown" ? 1 : -1;
+                  setHighlight((h) => (h + delta + candidates.length) % candidates.length);
+                  return;
+                }
+                if (e.key === "Enter" || e.key === "Tab") {
+                  e.preventDefault();
+                  pickMention(candidates[highlight]);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  e.preventDefault();
+                  setDismissedAt(mention?.start ?? null);
+                  return;
+                }
+              }
+              if (onClearReply && escapeCancelsReply(e.nativeEvent, { replying: Boolean(replyTo), recording })) {
                 e.preventDefault();
-                const delta = e.key === "ArrowDown" ? 1 : -1;
-                setHighlight((current) =>
-                  (current + delta + commandCandidates.length) % commandCandidates.length,
-                );
+                onClearReply();
                 return;
               }
-              if (e.key === "Enter" || e.key === "Tab") {
+              if (e.key === "ArrowUp" && !hasContent && onEditLast) {
                 e.preventDefault();
-                pickCommand(commandCandidates[highlight]);
+                onEditLast();
                 return;
               }
-              if (e.key === "Escape") {
+              if (sendsMessage(e.nativeEvent, sendKey)) {
                 e.preventDefault();
-                setDismissedSlashAt(slash?.start ?? null);
-                return;
+                if (
+                  canSteer &&
+                  doubleEnterSteersQueue(steerAgainUntilRef.current, Date.now(), pendingCount, hasContent)
+                ) {
+                  steerAgainUntilRef.current = 0;
+                  steerQueued();
+                  return;
+                }
+                send();
               }
-            }
-            if (mentionPickerOpen) {
-              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                e.preventDefault();
-                const delta = e.key === "ArrowDown" ? 1 : -1;
-                setHighlight((h) => (h + delta + candidates.length) % candidates.length);
-                return;
-              }
-              if (e.key === "Enter" || e.key === "Tab") {
-                e.preventDefault();
-                pickMention(candidates[highlight]);
-                return;
-              }
-              if (e.key === "Escape") {
-                e.preventDefault();
-                setDismissedAt(mention?.start ?? null);
-                return;
-              }
-            }
-            if (onClearReply && escapeCancelsReply(e.nativeEvent, { replying: Boolean(replyTo), recording })) {
-              e.preventDefault();
-              onClearReply();
-              return;
-            }
-            if (e.key === "ArrowUp" && !hasContent && onEditLast) {
-              e.preventDefault();
-              onEditLast();
-              return;
-            }
-            if (sendsMessage(e.nativeEvent, sendKey)) {
-              e.preventDefault();
-              if (
-                canSteer &&
-                doubleEnterSteersQueue(steerAgainUntilRef.current, Date.now(), pendingCount, hasContent)
-              ) {
-                steerAgainUntilRef.current = 0;
-                steerQueued();
-                return;
-              }
-              send();
-            }
-            if (e.key === "Escape" && recording) stopDictation();
-          }}
-          // Not disabled during an upload: a disabled element drops keyboard focus for good. send() refuses while one
-          // is pending.
-          disabled={Boolean(approval) || locked}
-          aria-busy={bot?.awaitingThreadSnapshot || undefined}
-          placeholder={composerPlaceholder({
-            simple: !advanced, locked: setupLocked, approval: Boolean(approval), attaching: attachmentPending, listening: recording,
-            replying: Boolean(replyTo), busy, canSteer, queued: pendingCount > 0, busyName, sendLabel, group, members: members ?? [],
-            jevOn: jevRoomRoutingOn(state.config), goal: channelMode === "goal", botName: bot?.name ?? "",
-            setupHint: group ? null : setupRequestPlaceholder(bot, threadId),
-          })}
-          aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
+              if (e.key === "Escape" && recording) stopDictation();
+            }}
+            // Not disabled during an upload: a disabled element drops keyboard focus for good. send() refuses while one
+            // is pending.
+            disabled={Boolean(approval) || locked}
+            aria-busy={bot?.awaitingThreadSnapshot || undefined}
+            placeholder={composerPlaceholder({
+              simple: !advanced, locked: setupLocked, approval: Boolean(approval), attaching: attachmentPending, listening: recording,
+              replying: Boolean(replyTo), busy, canSteer, queued: pendingCount > 0, busyName, sendLabel, group, members: members ?? [],
+              jevOn: jevRoomRoutingOn(state.config), goal: channelMode === "goal", botName: bot?.name ?? "",
+              setupHint: group ? null : setupRequestPlaceholder(bot, threadId),
+            })}
+            aria-label={t("composer.placeholder.bot", { name: group ? group.name : (bot?.name ?? "") })}
             className={cn(
               "block max-h-[9rem] w-full resize-none overflow-y-auto bg-transparent focus:outline-none",
               advanced ? "placeholder:text-ink-secondary" : "placeholder:text-ink-tertiary",
               !simpleDock && "px-1 text-[15px]",
               simpleDock ? "min-h-7 px-0.5 py-1 text-[14px] leading-5" : "min-h-6 py-1 leading-6",
             )}
-          />
+            />
           <div data-composer-actions className={cn("flex items-center", simpleDock ? "gap-2" : "gap-1", !singleRow && !simpleDock && "@max-[30rem]/composer:ml-auto")}>
           {(simpleDock ? stoppable : busy) && !locked && (
           <button

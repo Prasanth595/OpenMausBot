@@ -25,11 +25,39 @@ export function hasActiveConnection(state: ConnectorStatus | undefined): boolean
   return accounts.length ? accounts.some((account) => ACTIVE.test(account.status)) : state?.connected === true;
 }
 
-/** True only when the inventory is complete and every app on it is connected and settled. */
-export function everyAppConnected(services: Record<string, ConnectorStatus>, authoritative: boolean): boolean {
-  if (!authoritative) return false;
-  const states = Object.values(services);
-  return states.length > 0 && states.every((state) => hasActiveConnection(state) && state.pending !== true);
+/** One app outside the Composio inventory: Whop, HighLevel or X. */
+export interface NativeAppConnection {
+  slug: string;
+  /** false when it is not connected, or when it could not be asked. Either way the pill stays. */
+  connected: boolean;
+}
+
+/** True only when the catalogue names at least one app and every one of them has an ACTIVE, settled connection.
+ *  The inventory endpoint lists only connected apps, so an app missing from `services` is unconnected, not unknown:
+ *  the catalogue is the universe, the inventory only says which entries are satisfied. */
+export function everyCatalogueAppConnected(
+  services: Record<string, ConnectorStatus>,
+  authoritative: boolean,
+  catalogue: readonly string[] | null,
+): boolean {
+  if (!authoritative || !catalogue || catalogue.length === 0) return false;
+  return catalogue.every((slug) => {
+    const state = services[slug];
+    return hasActiveConnection(state) && state?.pending !== true;
+  });
+}
+
+/** The whole Apps universe: every catalogue app plus the native Whop, HighLevel and X cards. Native apps are required,
+ *  because leaving them out would hide the pill while one of them is still unconnected. */
+export function everyAppConnected(
+  services: Record<string, ConnectorStatus>,
+  authoritative: boolean,
+  catalogue: readonly string[] | null,
+  native: readonly NativeAppConnection[],
+): boolean {
+  return native.length > 0
+    && native.every((app) => app.connected)
+    && everyCatalogueAppConnected(services, authoritative, catalogue);
 }
 
 export function needsReconnect(account: ConnectorAccount): boolean {
