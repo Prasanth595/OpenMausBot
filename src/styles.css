@@ -1424,36 +1424,36 @@ body {
   }
 }
 
-/* Simple Settings: cards and fields edge in one faint ink line. In Midnight and Daylight the sheet is opaque, in the
-   page colour, with no shadow; every other skin keeps its glass. */
-[data-settings-look="simple"] {
+/* Settings: cards and fields edge in one faint ink line. In Midnight and Daylight the sheet is opaque, in the page
+   colour, with no shadow; every other skin keeps its glass. */
+[data-settings-look] {
   --settings-edge: color-mix(in srgb, var(--color-ink) 8%, transparent);
 }
-:root[data-skin="midnight"] [data-settings-look="simple"] {
+:root[data-skin="midnight"] [data-settings-look] {
   --settings-edge: color-mix(in srgb, var(--color-ink) 6%, transparent);
 }
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-surface {
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface {
   background: var(--color-app);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   border: 1px solid color-mix(in srgb, var(--color-ink) 12%, transparent);
   box-shadow: none;
 }
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-rail {
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-rail {
   background: transparent;
   border-right: 0.5px solid var(--settings-edge);
 }
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-surface .bg-card {
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .glass-surface .bg-card {
   background-color: var(--color-menu);
 }
-:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .bg-inset {
+:root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look] .bg-inset {
   background-color: transparent;
   border-color: var(--settings-edge);
 }
-:root[data-skin="midnight"] [data-settings-look="simple"] > .glass-scrim {
+:root[data-skin="midnight"] [data-settings-look] > .glass-scrim {
   background: rgb(0 0 0 / 0.7);
 }
-:root[data-skin="daylight"] [data-settings-look="simple"] > .glass-scrim {
+:root[data-skin="daylight"] [data-settings-look] > .glass-scrim {
   background: rgb(0 0 0 / 0.5);
 }
 @media (min-width: 768px) {
