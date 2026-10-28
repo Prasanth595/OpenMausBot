@@ -432,6 +432,26 @@ async function switcherBesideRail() {
   });
 }
 
+/** The place the sidebar's switcher names. Advanced mode: its switcher button. Simple mode (a new install's default): the
+ * profile menu, whose first rows are the place on screen and Switch to… (the native Server menu). */
+async function switcherPlace(entry = null, shotName = null) {
+  const { page } = current;
+  const account = page.locator("[data-sidebar-account]").first();
+  if (!await account.isVisible().catch(() => false)) {
+    const drawn = await switcherOnScreen();
+    return { mode: "advanced", place: drawn.map((item) => item.text).find(Boolean) ?? null, drawn };
+  }
+  await account.click();
+  const menu = page.locator("[role='menu']").filter({ has: page.locator("[data-menu-key]") }).last();
+  await menu.waitFor({ state: "visible", timeout: 5_000 });
+  const place = (await menu.locator("[data-menu-key='place']").first().textContent().catch(() => null))?.trim() ?? null;
+  const keys = await menu.locator("[data-menu-key]").evaluateAll((items) => items.map((item) => item.getAttribute("data-menu-key")));
+  if (entry && shotName) await shot(entry, shotName);
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => {});
+  return { mode: "simple", place, keys };
+}
+
 /** Which server this page really is: its address, and the identity and sign-in the server itself answers there. */
 async function pageIdentity() {
   return current.page.evaluate(async () => {
@@ -456,6 +476,7 @@ let shots = 0;
 async function shot(entry, name) {
   shots += 1;
   const file = `${String(shots).padStart(2, "0")}-${name}.png`;
+  await current.page.waitForTimeout(400);
   await current.page.screenshot({ path: join(OUT, file) });
   entry.screenshots.push(file);
   return file;
@@ -488,6 +509,18 @@ async function closeSettings() {
   }
 }
 
+/** The place's colour in its own Settings: the profile menu's Settings, then Appearance (Advanced) or More looks (Simple). */
+async function openPlaceLookSettings() {
+  const { page } = current;
+  await page.locator("[data-sidebar-account]").first().click();
+  await page.locator("[data-menu-key='settings']").first().click();
+  await page.locator(SETTINGS).first().waitFor({ state: "visible" });
+  const appearance = page.locator("[data-settings-section='appearance']");
+  if (await appearance.isVisible().catch(() => false)) await appearance.click();
+  else await page.locator("xpath=//*[normalize-space(text())='More looks']/ancestor::*[.//button][1]//button[normalize-space(.)='Change']").first().click();
+  await page.locator("[data-place-look]").waitFor({ state: "visible", timeout: 15_000 });
+}
+
 /** The app's own Connect flow: Settings → Servers → Connect to a server, with the server's pairing link and a name. */
 async function pairThroughConnect(entry, server) {
   const { page } = current;
@@ -509,17 +542,19 @@ async function openCircle(server, id) {
 }
 
 /** The window shows this server: its address, the server's own identity there, signed in, and the Server menu's tick. */
-async function expectShowing(entry, server) {
+async function expectShowing(entry, server, menuShot = null) {
   const seen = await pageIdentity();
   const menu = await serverMenu();
   const title = await windowTitle();
-  const switcher = await switcherOnScreen();
+  const named = await current.page.getByText(server.label, { exact: true }).first().isVisible().catch(() => false);
+  if (!named) finding("place-unnamed", "In Simple mode (a new install's default) a server's own page names it nowhere on screen: no rail there, and the switcher is the profile menu, whose first row names the place only once it is opened. The window title (OpenMausBot — Hosted: …) does name it.", { page: server.origin });
+  const switcher = await switcherPlace(entry, menuShot);
   check(entry, `the window shows ${server.label}'s address`, seen.origin === server.origin, { shown: seen.origin, expected: server.origin });
   check(entry, `the page is ${server.label} itself (the environment id it answers)`, seen.environmentId === server.environmentId, { shown: seen.environmentId, expected: server.environmentId });
   check(entry, `signed in to ${server.label}, not its sign-in page`, seen.session?.kind === "session" && seen.path !== "/pair", seen.session);
   check(entry, `the Server menu ticks ${server.label}`, ticked(menu).length === 1 && ticked(menu)[0].startsWith(`${server.label} — `), ticked(menu));
   check(entry, `the window's title names ${server.label}`, typeof title === "string" && title.includes(server.label), title);
-  check(entry, `the sidebar's switcher says ${server.label}`, switcher.some((item) => `${item.label} ${item.title} ${item.text}`.includes(server.label)), switcher);
+  check(entry, `the sidebar's switcher names ${server.label}`, switcher.place === server.label, switcher);
   return seen;
 }
 
@@ -584,13 +619,13 @@ async function main() {
     const rail = await railOnScreen();
     const listed = await railPlacesFromMain();
     const menu = await serverMenu();
-    const switcher = await switcherOnScreen();
     check(entry, "no rail on screen", !rail.present, rail);
     check(entry, "main lists no places for the rail", Array.isArray(listed?.places) && listed.places.length === 0, listed);
-    check(entry, "the sidebar keeps its switcher", switcher.length > 0, switcher);
-    check(entry, "the Server menu has This computer alone, ticked", ticked(menu).join() === "This computer" && radios(menu).length === 1, menu);
-    entry.notes.push(`what ＋ would offer here: ${JSON.stringify(listed?.add)}`);
     await shot(entry, "fresh");
+    const switcher = await switcherPlace(entry, "fresh-switcher");
+    check(entry, "the sidebar keeps its switcher, on This computer", switcher.place === "This computer" && (switcher.mode === "advanced" || switcher.keys.includes("switch-place")), switcher);
+    check(entry, "the Server menu has This computer alone, ticked", ticked(menu).join() === "This computer" && radios(menu).length === 1, menu);
+    entry.notes.push(`what ＋ would offer here: ${JSON.stringify(listed?.add)}; switcher: ${switcher.mode}`);
   });
 
   await scenario("pair-a", `Pair ${A.label} through Settings → Servers → Connect`, async (entry) => {
@@ -628,10 +663,13 @@ async function main() {
     check(entry, "This computer, the place on screen, is marked and ringed", computer?.active && computer.ring && !first?.active && !second?.active, rail.circles.map(({ label, active, ring }) => ({ label, active, ring })));
     check(entry, "＋ comes last", rail.add);
     const aside = await switcherBesideRail();
-    check(entry, "beside the rail (wide window) the sidebar's switcher steps aside", aside.kept > 0 && aside.drawn === 0, aside);
+    check(entry, "beside the rail (wide window) the sidebar's switcher is not drawn", aside.drawn === 0, aside);
     if (first && second && first.letters === second.letters) finding("same-initials", `Two servers whose names start alike get the same letters (${first.letters}): only the tooltip tells them apart.`, { a: first.label, b: second.label });
     if (first && second && first.fill === second.fill) finding("no-colour", "A server connected by hand has no colour (until it gets one), so every such server is the same plain circle in the rail.", { fill: first.fill });
     await shot(entry, "rail-three-circles");
+    const menu = await switcherPlace(entry, "rail-and-profile-menu");
+    entry.notes.push(`switcher beside the rail: ${JSON.stringify(menu)}`);
+    if (menu.mode === "simple" && menu.keys.includes("switch-place")) finding("simple-switch-stays", "In Simple mode the profile menu keeps its place row and Switch to… (the native Server menu) beside the rail: two ways to switch on screen at once. The PR's step-aside applies to Advanced mode's switcher only.", { keys: menu.keys });
   });
 
   await scenario("switch", "Each circle opens its place: the window, the menu tick and the marked circle agree", async (entry) => {
@@ -643,7 +681,7 @@ async function main() {
       check(entry, `before ${server.label}: This computer is the marked circle`, before.circles[0]?.active === true && before.circles.filter((circle) => circle.active).length === 1, before.circles.map(({ label, active }) => ({ label, active })));
       check(entry, `before ${server.label}: the Server menu ticks This computer`, ticked(await serverMenu()).join() === "This computer", ticked(await serverMenu()));
       await openCircle(server, ids[server.key]);
-      await expectShowing(entry, server);
+      await expectShowing(entry, server, `on-${server.key}-switcher`);
       const rail = await railOnScreen();
       const listed = await railPlacesFromMain();
       // PR #3725's trust rule: a server's own page gets no list, so it draws no rail; the native menu is its switcher.
@@ -715,25 +753,28 @@ async function main() {
     await openCircle(A, ids.a);
     const supported = await page.evaluate(() => typeof window.ogb?.workspaces?.look === "function" && typeof window.ogb?.workspaces?.color === "function");
     if (!supported) throw new Skip("The place colour (workspaces.look / workspaces.color) is not in this build of feat/cloud-rail yet.");
-    await page.locator("[data-sidebar-account]").first().click();
-    await page.getByText("Settings", { exact: true }).first().click();
-    await page.locator("[data-settings-section='appearance']").click();
+    entry.notes.push(`${A.label}'s look before: ${JSON.stringify(await page.evaluate(() => window.ogb.workspaces.look()))}`);
+    await openPlaceLookSettings();
     const card = page.locator("[data-place-look]");
-    await card.waitFor({ state: "visible" });
     check(entry, `${A.label}'s colour can be changed here (this app keeps it)`, await card.getAttribute("data-place-look") === "local", await card.getAttribute("data-place-look"));
     await card.locator("[data-swatch='violet']").click();
     await card.locator("[data-swatch='violet'][aria-checked='true']").waitFor({ state: "visible", timeout: 10_000 });
     await shot(entry, "tint-chosen");
     await closeSettings();
+    const look = await page.evaluate(() => window.ogb.workspaces.look());
+    check(entry, "main keeps the colour for this place", look?.color === "purple" && look?.swatch === "violet", look);
     const tint = await sidebarTint();
     check(entry, `${A.label}'s sidebar takes the tint`, Boolean(tint?.value?.includes("purple")), tint);
     await shot(entry, "tint-on-a");
     await backToThisComputer();
     const rail = await railOnScreen();
     const circleA = rail.circles.find((item) => item.id === ids.a), circleB = rail.circles.find((item) => item.id === ids.b);
-    check(entry, `${A.label}'s circle takes the colour`, Boolean(circleA?.fill) && circleA.fill !== circleB?.fill, { a: circleA?.fill, b: circleB?.fill });
+    check(entry, `${A.label}'s circle takes the colour; ${B.label}'s stays plain`, Boolean(circleA?.fill) && circleA.fill !== circleB?.fill, { a: circleA?.fill, b: circleB?.fill });
     check(entry, "this computer's own page has no tint", !(await sidebarTint()), await sidebarTint());
     await shot(entry, "tint-in-rail");
+    await openCircle(B, ids.b);
+    check(entry, `${B.label}, with no colour, has no tint`, !(await sidebarTint()), await sidebarTint());
+    await backToThisComputer();
     await openCircle(A, ids.a);
     const again = await sidebarTint();
     check(entry, `back on ${A.label}, its tint is still there`, Boolean(again?.value?.includes("purple")), again);
@@ -760,10 +801,18 @@ async function main() {
     }
     entry.notes.push(`after View → Zoom In: the page is ${width} CSS px wide`);
     const rail = await railOnScreen();
-    const aside = await switcherBesideRail();
     check(entry, `below ${RAIL_BREAKPOINT} CSS px the rail hides`, width < RAIL_BREAKPOINT && rail.present && !rail.visible, { width, present: rail.present, visible: rail.visible });
-    check(entry, "the switcher stays, in the rail's place", aside.drawn > 0, { ...aside, switchers: await switcherOnScreen() });
     await shot(entry, "narrow");
+    // The sidebar is a drawer at this width: open it, as the person would, and find the switcher there.
+    await page.getByRole("button", { name: "Open bot list" }).click();
+    await page.waitForTimeout(600);
+    const drawer = await page.evaluate(() => [...document.querySelectorAll("[data-switcher-beside-rail] [data-tour='server-switcher'], [data-switcher-beside-rail] button")].map((element) => {
+      const box = element.getBoundingClientRect();
+      return { text: element.textContent?.trim().slice(0, 60) ?? "", label: element.getAttribute("aria-label"), onScreen: box.width > 0 && box.right > 0 && box.left < window.innerWidth && box.bottom > 0 && box.top < window.innerHeight };
+    }));
+    check(entry, "the switcher stays: in the sidebar drawer, in the rail's place, naming This computer", drawer.some((item) => item.onScreen && `${item.text} ${item.label}`.includes("This computer")), drawer);
+    await shot(entry, "narrow-drawer");
+    await page.keyboard.press("Escape");
     await chooseMenuItem({ role: "resetzoom" }).catch(() => setWindow({ zoomLevel: 0 }));
     await setWindow({ bounds: { x: 40, y: 30, width: 1440, height: 900 }, zoomLevel: 0 });
     await page.waitForTimeout(800);
@@ -806,7 +855,8 @@ async function main() {
     check(entry, `${B.label} is gone from the Server menu, ${A.label} stays`, !radios(menu).some((label) => label.startsWith(`${B.label} — `)) && radios(menu).some((label) => label.startsWith(`${A.label} — `)), radios(menu));
     // The brief expected two circles here; under PR #3725's rule one server besides this computer is no rail.
     check(entry, "one server besides this computer: no rail (the PR's rule)", !rail.present, rail);
-    check(entry, "the switcher is back in the sidebar", (await switcherOnScreen()).length > 0, await switcherOnScreen());
+    const back = await switcherPlace();
+    check(entry, "the switcher is back in the sidebar, on This computer", back.place === "This computer", back);
     if (B.sessions) {
       const after = await B.sessions();
       check(entry, `${B.label} signed this desktop out (its session is gone there)`, before.some((session) => session.id === sessionIds.b) && !after.some((session) => session.id === sessionIds.b), { session: sessionIds.b, before: before.map((session) => session.id), after: after.map((session) => session.id) });
@@ -820,7 +870,8 @@ async function main() {
     const menu = await serverMenu();
     check(entry, "no rail", !rail.present, rail);
     check(entry, "the Server menu is This computer alone, ticked", ticked(menu).join() === "This computer" && radios(menu).length === 1, radios(menu));
-    check(entry, "the switcher is there, as on a fresh app", (await switcherOnScreen()).length > 0, await switcherOnScreen());
+    const back = await switcherPlace();
+    check(entry, "the switcher is there, on This computer, as on a fresh app", back.place === "This computer", back);
     await shot(entry, "forgot-a");
   });
 }
