@@ -151,7 +151,10 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(turn(), "/data/.claude/projects/p/s.jsonl")).toBe("rw");
   });
 
-  it.each(["/var/lib/openmausbot", "/opt/omb", "/etc/omb", "/usr/local/share/omb", "/app/data", "/srv/omb"])("hides %s outside HOME after enclosing mounts and restores only allowed folders", (dataDir) => {
+  // macOS links /etc and /var into /private, so there the plan names their physical paths; the box runs only on Linux.
+  const outsideHome = ["/var/lib/openmausbot", "/opt/omb", "/etc/omb", "/usr/local/share/omb", "/app/data", "/srv/omb"]
+    .filter((dir) => process.platform !== "darwin" || !/^\/(etc|var)\//.test(dir));
+  it.each(outsideHome)("hides %s outside HOME after enclosing mounts and restores only allowed folders", (dataDir) => {
     const cwd = join(dataDir, "task-workspaces", "b", "t");
     const plan = planBox({ ...setup(), dataDir, home: "/home/maus", engineRoots: engineInstallRoots(dataDir) }, {
       command: "/usr/bin/x", args: [], cwd, env: {}, rw: [join(dataDir, "perm.sock")],

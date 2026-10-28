@@ -1,4 +1,4 @@
-import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -182,15 +182,17 @@ describe("the box a bot's Chrome runs in", () => {
     await box.start({ dataDir, home, port: 8799, denyEnv: new Set(), env: {}, log: () => {}, detect: () => ({ box: "bwrap", reason: null, tools: { bwrap: "/usr/bin/bwrap", socat: null } }) });
     const uploads = join(dataDir, "browser-uploads");
     const browser = box.browserBox(9, [uploads])!;
+    // The plan names physical paths, and macOS links its temp folder through /private.
+    const realData = realpathSync(dataDir), realUploads = join(realData, "browser-uploads");
     expect(browser.bwrap).toBe("/usr/bin/bwrap");
     const bind = (target: string) => browser.options.some((arg, i) => arg === "--bind" && browser.options[i + 2] === target);
     expect(bind(home), "HOME is not the browser's").toBe(false);
-    expect(browser.options.join(" ")).toContain(`--tmpfs ${dataDir}`);
+    expect(browser.options.join(" ")).toContain(`--tmpfs ${realData}`);
     expect(browser.options.join(" "), "the engines are the turns' only").not.toContain(join(dataDir, "tools"));
     expect(browser.options).not.toContain("--unshare-net");
     expect(browser.options).toEqual(expect.arrayContaining(["--unshare-user", "--unshare-pid", "--die-with-parent"]));
-    expect(browser.options.join(" ")).toContain(`${uploads} ${uploads}`);
-    expect(browser.options.slice(browser.options.indexOf(uploads) - 1)[0]).toMatch(/^--ro-bind/u);
+    expect(browser.options.join(" ")).toContain(`${realUploads} ${realUploads}`);
+    expect(browser.options.slice(browser.options.indexOf(realUploads) - 1)[0]).toMatch(/^--ro-bind/u);
     if (browser.seccomp) expect(browser.options.join(" ")).toContain("--seccomp 9");
   });
 });
