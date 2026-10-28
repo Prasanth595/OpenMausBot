@@ -35,6 +35,33 @@ describe("savedStepsEnabled", () => {
 });
 
 describe("createSavedSteps", () => {
+  it("runs the AI when the thread has no turn generation to keep the request from saving", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-saved-steps-facade-"));
+    dirs.push(dir);
+    const events: RuntimeEvent[] = [];
+    const slots = new Map<string, ProviderInstance>();
+    const steps = createSavedSteps({
+      enabled: () => true,
+      publish: (event) => events.push(event),
+      engines: { get: (threadId) => slots.get(threadId), set: (threadId, engine) => { slots.set(threadId, engine); } },
+      stopped: () => false,
+      generation: () => undefined,
+      folder: (botId) => join(dir, botId),
+    });
+    steps.recipes.save("b1", RECIPE);
+    const engine = { instanceId: "claude", driverKind: "claudeAgent", adapter: { provider: "claudeAgent" } } as unknown as ProviderInstance;
+    const start = vi.fn(async (_input: SendTurnInput): Promise<TurnStartResult> => ({ turnId: "e1" }));
+    const input: SendTurnInput = { threadId: "t1", botId: "b1", text: REQUEST, approvalMode: "full",
+      integrations: { localComputer: { command: process.execPath, args: ["--experimental-strip-types", FAKE], env: {}, scope: "local-computer" } } };
+
+    expect(await steps.dispatch.sendTurn(engine, { botId: "b1", message: { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST }, turnText: REQUEST }, input, start))
+      .toEqual({ turnId: "e1" });
+    expect(start).toHaveBeenCalledWith(input);
+    expect(events).toEqual([]);
+    expect(slots.size).toBe(0);
+    expect(steps.recipes.find("b1", RECIPE.key)?.id).toBe(RECIPE.id);
+  });
+
   it("replays from the bot's own store on the turn's computer and keeps the request from saving", async () => {
     const dir = mkdtempSync(join(tmpdir(), "omb-saved-steps-facade-"));
     dirs.push(dir);
@@ -53,7 +80,7 @@ describe("createSavedSteps", () => {
     const start = vi.fn(async (_input: SendTurnInput): Promise<TurnStartResult> => ({ turnId: "e1" }));
     const computer = { command: process.execPath, args: ["--experimental-strip-types", FAKE], env: {}, scope: "local-computer" as const };
 
-    const { turnId } = await steps.dispatch.sendTurn(engine, { botId: "b1", message: { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST } },
+    const { turnId } = await steps.dispatch.sendTurn(engine, { botId: "b1", message: { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST }, turnText: REQUEST },
       { threadId: "t1", botId: "b1", text: REQUEST, approvalMode: "full", integrations: { localComputer: computer } }, start);
 
     expect(steps.journal.take("t1", new Set(["g1"]))).toEqual({ calls: [], complete: true, tainted: true });

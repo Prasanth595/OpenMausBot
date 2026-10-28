@@ -10,7 +10,12 @@ import { personTextRequest, recipeFitsRequest, stepLabel, type Recipe } from "./
 import type { RecipeStore } from "./store.ts";
 
 export interface EngineSlots { get(threadId: string): ProviderInstance | undefined; set(threadId: string, engine: ProviderInstance): void }
-export interface ReplayRequest { botId: string; message: Message }
+export interface ReplayRequest {
+  botId: string;
+  message: Message;
+  /** The person's words this turn sends: several queued lines arrive as one turn, under the last line's message. */
+  turnText: string;
+}
 export interface DispatchDeps {
   recipes: Pick<RecipeStore, "find" | "forget">;
   enabled(): boolean;
@@ -18,8 +23,9 @@ export interface DispatchDeps {
   engines: EngineSlots;
   stopped(threadId: string): boolean;
   openCaller(computer: LocalComputerSpec, signal: AbortSignal): Promise<ComputerCaller & { close(): Promise<void> }>;
-  /** The request whose turn begins with a replay saves no steps: the screen it starts from is not the one the steps did. */
-  taint(threadId: string): void;
+  /** The request whose turn begins with a replay saves no steps: the screen it starts from is not the one the steps did.
+   * False when the request cannot be marked, and then no replay runs. */
+  taint(threadId: string): boolean;
 }
 
 type Start = (input: SendTurnInput) => Promise<TurnStartResult>;
@@ -55,7 +61,7 @@ export class SavedStepsDispatch {
     this.runs.delete(input.threadId);
     const computer = input.integrations?.localComputer;
     const recipe = request && computer ? this.recipeFor(request, input) : undefined;
-    if (!request || !computer || !recipe) return start(input);
+    if (!request || !computer || !recipe || !this.deps.taint(input.threadId)) return start(input);
     const { threadId } = input;
     const run: Run = {
       turnId: newId(), threadId, botId: request.botId, recipe, engine, controller: new AbortController(), phase: "replay", finished: Promise.resolve(),
@@ -77,13 +83,14 @@ export class SavedStepsDispatch {
       resolvedQuestion: () => {},
     });
     this.runs.set(threadId, run);
-    this.deps.taint(threadId);
     this.deps.engines.set(threadId, this.standIn(run, approval, asked));
     // After dispatch binds this turn id to the request, so no event of the replay comes before its turn is known.
     run.finished = new Promise((resolve) => {
       setImmediate(() => {
         this.replay(run, computer, input, start, approval).then(resolve, (error: unknown) => {
           console.warn(`saved steps on ${threadId} ended early: ${errorText(error)}`);
+          run.controller.abort();
+          if (this.runs.get(threadId) === run && run.phase === "replay") this.end(run, { kind: "error", message: errorText(error) });
           resolve();
         });
       });
@@ -111,8 +118,8 @@ export class SavedStepsDispatch {
 
   private recipeFor(request: ReplayRequest, input: SendTurnInput): Recipe | undefined {
     if (!this.deps.enabled() || input.approvalMode !== "full" || input.integrations?.localComputer?.scope !== "local-computer") return undefined;
-    if (!personTextRequest(request.message)) return undefined;
-    const text = request.message.text ?? "";
+    if (!personTextRequest(request.message) || request.turnText !== request.message.text) return undefined;
+    const text = request.turnText;
     const recipe = this.deps.recipes.find(request.botId, requestKey(text));
     return recipe && recipeFitsRequest(recipe, text) ? recipe : undefined;
   }
@@ -172,17 +179,20 @@ export class SavedStepsDispatch {
   private async fallBack(run: Run, failed: Failed, input: SendTurnInput, start: Start): Promise<void> {
     this.forget(run);
     if (run.controller.signal.aborted || this.deps.stopped(run.threadId)) return this.end(run, STOPPED);
-    run.phase = "fallback";
     this.deps.engines.set(run.threadId, run.engine);
     const note = fallbackNote(failed);
     const noted = (text: string) => `${text}\n\n${note}`;
+    const handed = { ...input, text: noted(input.text), ...(input.recoveryText !== undefined ? { recoveryText: noted(input.recoveryText) } : {}) };
+    run.phase = "fallback";
+    let sent: TurnStartResult;
     try {
-      const sent = await start({ ...input, text: noted(input.text), ...(input.recoveryText !== undefined ? { recoveryText: noted(input.recoveryText) } : {}) });
-      run.retryTurnId ??= sent.turnId;
-      if (this.deps.stopped(run.threadId)) void run.engine.adapter.interruptTurn(run.threadId).catch(() => {});
+      sent = await start(handed);
     } catch (error) {
       if (this.runs.get(run.threadId) === run) this.end(run, { kind: "error", message: errorText(error) });
+      return;
     }
+    run.retryTurnId ??= sent.turnId;
+    if (this.deps.stopped(run.threadId)) void run.engine.adapter.interruptTurn(run.threadId).catch(() => {});
   }
 
   private end(run: Run, outcome: Exclude<RunOutcome, Failed>): void {

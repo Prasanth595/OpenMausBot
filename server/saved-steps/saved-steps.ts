@@ -44,7 +44,9 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
     openCaller: openComputerCaller,
     taint: (threadId) => {
       const generation = deps.generation(threadId);
-      if (generation !== undefined) journal.taint({ threadId, generation });
+      if (generation === undefined) return false;
+      journal.taint({ threadId, generation });
+      return true;
     },
   });
   return {

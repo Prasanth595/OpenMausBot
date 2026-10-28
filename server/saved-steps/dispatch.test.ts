@@ -29,7 +29,8 @@ const FAILED = { kind: "failed", done: 1, total: 2, tool: "type_text", label: LA
 const COMPUTER = { command: "gated-computer", args: ["--turn"], env: { OMB_CONTROL_TOKEN: "turn-token" }, platform: "darwin" as const, scope: "local-computer" as const };
 const INPUT: SendTurnInput = { threadId: "t1", botId: "b1", text: REQUEST, approvalMode: "full", integrations: { localComputer: COMPUTER } };
 const MESSAGE: Message = { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST };
-const REQ: ReplayRequest = { botId: "b1", message: MESSAGE };
+const REQ: ReplayRequest = { botId: "b1", message: MESSAGE, turnText: REQUEST };
+const reworded = (text: string): ReplayRequest => ({ ...REQ, message: { ...MESSAGE, text }, turnText: text });
 const OBSERVATIONS = new Set(["list_apps", "list_windows", "get_window_state"]);
 
 type Answer = "allow" | "deny" | undefined;
@@ -61,7 +62,7 @@ let start: Mock<(input: SendTurnInput) => Promise<TurnStartResult>>;
 let close: Mock<() => Promise<void>>;
 let recipes: { find: Mock<(botId: string, key: string) => Recipe | undefined>; forget: Mock<(botId: string, recipeId: string) => boolean> };
 let openCaller: Mock<DispatchDeps["openCaller"]>;
-let taint: Mock<(threadId: string) => void>;
+let taint: Mock<(threadId: string) => boolean>;
 let deps: DispatchDeps;
 let stopped: boolean;
 let dispatch: SavedStepsDispatch;
@@ -105,7 +106,7 @@ beforeEach(() => {
   close = vi.fn(async () => {});
   recipes = { find: vi.fn((botId: string, key: string) => (botId === "b1" && key === RECIPE.key ? RECIPE : undefined)), forget: vi.fn(() => true) };
   openCaller = vi.fn(async () => ({ ...computer(), close }));
-  taint = vi.fn();
+  taint = vi.fn(() => true);
   deps = {
     recipes,
     enabled: () => true,
@@ -131,14 +132,25 @@ describe("SavedStepsDispatch.sendTurn", () => {
     ["no host computer", REQ, { ...INPUT, integrations: {} }],
     ["another computer", REQ, { ...INPUT, integrations: { localComputer: { ...COMPUTER, scope: undefined } } }],
     ["spoken", { ...REQ, message: { ...REQ.message, via: "call" } }, INPUT],
-    ["no saved steps", { ...REQ, message: { ...REQ.message, text: "open notes" } }, INPUT],
-    ["new words", { ...REQ, message: { ...REQ.message, text: "open textedit and type hello, world" } }, INPUT],
+    ["no saved steps", reworded("open notes"), INPUT],
+    ["new words", reworded("open textedit and type hello, world"), INPUT],
+    ["two queued lines sent as one turn", { ...REQ, turnText: `save it to the Desktop\n\n${REQUEST}` }, { ...INPUT, text: `save it to the Desktop\n\n${REQUEST}` }],
   ])("passes through: %s", async (_, request, input) => {
     expect(await dispatch.sendTurn(engine, request as never, input as SendTurnInput, start)).toEqual({ turnId: "e1" });
     expect(start).toHaveBeenCalledWith(input);
     expect(events).toEqual([]);
     expect(openCaller).not.toHaveBeenCalled();
     expect(taint).not.toHaveBeenCalled();
+    expect(slots.get("t1")).toBe(engine);
+  });
+
+  it("runs the AI when the request cannot be kept from saving", async () => {
+    taint.mockReturnValueOnce(false);
+    expect(await dispatch.sendTurn(engine, REQ, INPUT, start)).toEqual({ turnId: "e1" });
+    expect(taint).toHaveBeenCalledWith("t1");
+    expect(start).toHaveBeenCalledWith(INPUT);
+    expect(openCaller).not.toHaveBeenCalled();
+    expect(events).toEqual([]);
     expect(slots.get("t1")).toBe(engine);
   });
 
@@ -388,6 +400,61 @@ describe("SavedStepsDispatch.sendTurn", () => {
       { type: "turn.completed", turnId, ok: false, stopReason: "the fixture computer broke" },
     ]);
     expect(recipes.forget).toHaveBeenCalledWith("b1", RECIPE.id);
+  });
+
+  it("ends the turn when the replay itself breaks", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let broke = false;
+    dispatch = new SavedStepsDispatch({ ...deps, publish: (event) => {
+      if (event.type === "turn.started" && !broke) {
+        broke = true;
+        throw new Error("the bus is down");
+      }
+      deps.publish(event);
+    } });
+    const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
+    await vi.waitFor(() => expect(turnCompleted()).toHaveLength(1));
+    expect(events).toMatchObject([
+      { type: "runtime.error", turnId, message: "the bus is down" },
+      { type: "turn.completed", turnId, ok: false, stopReason: "the bus is down" },
+    ]);
+    expect(openCaller).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("the bus is down"));
+    warn.mockRestore();
+  });
+
+  it("ends the turn when handing the request to the AI breaks before the AI starts", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    failAt = "type_text";
+    dispatch = new SavedStepsDispatch({ ...deps, engines: { get: (threadId) => slots.get(threadId), set: (threadId, instance) => {
+      if (instance === engine) throw new Error("the engine slot is gone");
+      slots.set(threadId, instance);
+    } } });
+    const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
+    await vi.waitFor(() => expect(turnCompleted()).toHaveLength(1));
+    expect(events.slice(-2)).toMatchObject([
+      { type: "runtime.error", turnId, message: "the engine slot is gone" },
+      { type: "turn.completed", turnId, ok: false, stopReason: "the engine slot is gone" },
+    ]);
+    expect(start).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("leaves the AI's turn alone when the replay breaks after the AI started", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    failAt = "type_text";
+    dispatch = new SavedStepsDispatch({ ...deps, stopped: () => {
+      if (start.mock.calls.length > 0) throw new Error("the request owner is gone");
+      return false;
+    } });
+    const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining("the request owner is gone")));
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(turnCompleted()).toEqual([]);
+    expect(dispatch.take(ev("turn.completed", "e1"))).toBe(true);
+    expect(turnCompleted()).toMatchObject([{ turnId, ok: true }]);
+    warn.mockRestore();
   });
 
   it("forgets an earlier turn's fallback when the next turn starts", async () => {
