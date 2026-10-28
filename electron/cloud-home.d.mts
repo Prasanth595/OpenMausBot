@@ -23,13 +23,6 @@ export interface CloudMachine {
    * keeps its own copy. Absent while none can be chosen: every computer comes home. */
   hold?: { until: number; homecoming?: { installationId: string; name: string } };
 }
-/**
- * The account's own plan's renewal, as the Admin says it for the account that pays (display only): a free trial (`trial`), its
- * renewal off (`cancelled`), when it renews (`renewsAt`) or, once cancelled, ends (`endsAt`; null: the end of the period paid
- * for), how many days its files are kept once it stops (`keptDays`, parts of a day allowed; null: not known), and a Team Cloud's
- * name (`team`), which stops for everyone in it.
- */
-export interface CloudRenewal { trial: boolean; cancelled: boolean; renewsAt: number | null; endsAt: number | null; keptDays: number | null; team?: string }
 /** A payment received but not yet linked to this account: nobody pays twice. */
 export interface CloudPurchase { state: "confirming" | "held"; tier?: string; paidAt?: number }
 export type CloudTrialState = "active" | "ending" | "processing" | "late" | "ended";
@@ -132,7 +125,6 @@ export declare function cloudUnreachableText(state: unknown, origin?: string | n
 export declare function parseCloudPurchase(input: unknown): CloudPurchase | null;
 export declare const CLOUD_TRIAL_STATES: readonly CloudTrialState[];
 export declare function parseCloudTrial(input: unknown): CloudTrial | null;
-export declare function parseCloudRenewal(clouds: unknown): (CloudRenewal & { cloudId: string }) | null;
 export declare function parseCloudCredit(input: unknown): CloudCredit | null;
 export declare const CLOUD_USAGE_KINDS: readonly CloudUsageKind[];
 export declare function parseCloudUsage(input: unknown): CloudUsage | null;

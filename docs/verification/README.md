@@ -146,6 +146,10 @@ Admin server, including cancellation, revocation and unchanged normal startup.
 The [personal Cloud account smoke](cloud-account.md) checks optional browser
 sign-in, server-verified Pro status and sign-out in a disposable Electron profile.
 
+The [rail of Clouds](cloud-rail.md) checks the session's list of Clouds, which
+pages may read the rail, opening a place by its id, and buying another Cloud,
+with a loopback Admin and the real app in a disposable preview.
+
 The [embedded server recovery smoke](desktop-server-recovery.md) crashes real
 Electron-owned fixture servers, verifies bounded recovery and private access,
 and proves quit cancels recovery without replaying an interrupted fixture turn.
@@ -226,6 +230,10 @@ per-thread models, simultaneous direct conversations and thread-scoped Stop.
 The [custom ACP model fixture](custom-acp-models.md) checks native model and
 thinking choices, independent bot defaults and thread overrides, and retained
 settings and catalogs after restart with an offline ACP engine.
+
+The [GitHub Copilot engine checks](copilot-engine.md) cover its ACP catalog,
+model and effort selection, sign-in detection, and moving a bot or conversation
+between Claude, Copilot and a custom ACP agent with fake engines.
 
 The [mobile generated-image checks](mobile-generated-images.md) cover native image
 attachments and message-scoped download authorization using isolated fixtures.

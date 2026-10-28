@@ -4,7 +4,7 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import { createCloudAccountClient } from "./cloud-account.mjs";
-import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, isCloudHomeEntry, parseCloudCredit, parseCloudOffer, parseCloudPower, parseCloudPurchase, parseCloudRenewal, parseCloudSummary, parseCloudTeams, teamRoleLabel, CLOUD_TEAM_ROLES, parseCloudTrial, parsePairingGrant, parsePublicOffer, rememberedCloudHome, savedCloudHomeOrigin, withCloudHome, withoutTrial } from "./cloud-home.mjs";
+import { CLOUD_HOME_NAME, cloudHomeConnectUrl, cloudPlanDisk, cloudUnreachableText, isCloudHomeEntry, parseCloudCredit, parseCloudOffer, parseCloudPower, parseCloudPurchase, parseCloudSummary, parseCloudTeams, teamRoleLabel, CLOUD_TEAM_ROLES, parseCloudTrial, parsePairingGrant, parsePublicOffer, rememberedCloudHome, savedCloudHomeOrigin, withCloudHome, withoutTrial } from "./cloud-home.mjs";
 import environments from "./environments.cjs";
 
 const NOW = 1_800_000_000_000;
@@ -499,21 +499,4 @@ test("the session's teams are read with their role and their Cloud as the machin
   for (const none of [undefined, null, {}, "x", 3]) assert.deepEqual(parseCloudTeams(none), [], String(none));
   assert.deepEqual(CLOUD_TEAM_ROLES, ["owner", "admin", "member"]);
   assert.deepEqual(["owner", "admin", "member", "x", undefined].map(teamRoleLabel), ["Super admin", "Admin", "User", "User", "User"]);
-});
-
-test("the plan's renewal is the account's own primary Cloud's, only as the Admin says it; anything malformed is none", () => {
-  const id = "3f1c2b4a-5d6e-4f70-8a9b-0c1d2e3f4a5b", own = { id, name: "My Cloud", role: "owner", teamId: null, primary: true, renewsAt: 1_900_000_000_000,
-    cancelAtPeriodEnd: false, renewal: { trial: false, endsAt: null, keptDays: 1 } };
-  const member = { id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", name: "Acme", role: "member", teamId: "t", primary: false, renewsAt: null, cancelAtPeriodEnd: false };
-  assert.deepEqual(parseCloudRenewal([member, own]), { cloudId: id, trial: false, cancelled: false, renewsAt: 1_900_000_000_000, endsAt: null, keptDays: 1 });
-  assert.deepEqual(parseCloudRenewal([{ ...own, cancelAtPeriodEnd: true, renewsAt: null, renewal: { trial: true, endsAt: 1_900_000_000_000, keptDays: 0.5 } }]),
-    { cloudId: id, trial: true, cancelled: true, renewsAt: null, endsAt: 1_900_000_000_000, keptDays: 0.5 });
-  // A Team Cloud the account pays for names its team, which stops with it.
-  assert.equal(parseCloudRenewal([{ ...own, name: " Acme   Studio ", teamId: "t" }]).team, "Acme Studio");
-  assert.equal(parseCloudRenewal([{ ...own, renewal: { ...own.renewal, keptDays: null } }]).keptDays, null);
-  for (const clouds of [undefined, null, "clouds", {}, [], [member], [{ ...own, primary: false }], [{ ...own, renewal: undefined }], [{ ...own, renewal: null }],
-    [{ ...own, id: "not-a-cloud" }], [{ ...own, renewal: { ...own.renewal, trial: "yes" } }], [{ ...own, renewal: { ...own.renewal, endsAt: -1 } }],
-    [{ ...own, renewal: { ...own.renewal, keptDays: 61 } }], [{ ...own, renewal: { ...own.renewal, keptDays: "1" } }]]) {
-    assert.equal(parseCloudRenewal(clouds), null, JSON.stringify(clouds)?.slice(0, 80));
-  }
 });
