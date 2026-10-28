@@ -50,7 +50,7 @@ const message = (id: string, minutes: number, fields: Partial<Message>): Message
 /** The other cards that share the question card's shell: a key, a sign-in, a connection and a first-run choice. */
 const others = (): Message[] => [
   message("secret", 1, { kind: "secret", text: "Securely provide the OpenAI API key.", secret: { target: "openaiImageApiKey", label: "OpenAI API key",
-    description: "Generate a key at platform.openai.com. Biber can use it but never read it back.", placeholder: "sk-…", requestKey: "request-key-1" } }),
+    description: "Generate a key at platform.openai.com. Biber can use it but never read it back.", placeholder: "sk-…", helpUrl: "https://platform.openai.com/api-keys", requestKey: "request-key-1" } }),
   message("signin", 2, { kind: "signin", signIn: { url: "https://example.com/login", site: "example.com", place: "browser", reason: "The report is behind a login." } }),
   message("connector", 3, { kind: "connector", connector: { slug: "github", label: "GitHub", description: "Read pull requests", status: "required", resumeKey: "resume1" } }),
   message("quiz", 4, { kind: "options", card: { title: "Wie soll ich dich nennen?", subtitle: "", options: ["Philipp", "Phil", "Herr Huber"] } }),
