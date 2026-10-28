@@ -3,14 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 
-const hooks = vi.hoisted(() => ({ beforeRead: null as ((input: number) => void) | null, redirect: null as { source: string; target: string } | null }));
+const hooks = vi.hoisted(() => ({
+  beforeRead: null as ((input: number) => void) | null,
+  redirect: null as { source: string; target: string } | null,
+  openFlags: null as ((path: fs.PathLike, flags: fs.OpenMode) => fs.OpenMode) | null,
+}));
 vi.mock("node:fs", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:fs")>();
   return {
     ...original,
     openSync: (...args: Parameters<typeof original.openSync>) => {
       const redirected = hooks.redirect && args[0] === hooks.redirect.source ? hooks.redirect.target : args[0];
-      return original.openSync(redirected, args[1], args[2]);
+      return original.openSync(redirected, hooks.openFlags?.(args[0], args[1]) ?? args[1], args[2]);
     },
     readSync: (...args: Parameters<typeof original.readSync>) => {
       hooks.beforeRead?.(args[0]);
@@ -28,8 +32,31 @@ const dirs: string[] = [];
 afterEach(() => {
   hooks.beforeRead = null;
   hooks.redirect = null;
+  hooks.openFlags = null;
   vi.unstubAllGlobals();
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+it.each(["darwin", "linux", "win32"])("stages a regular file with valid %s open flags", async (platform) => {
+  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-flags-")));
+  dirs.push(base);
+  const source = join(base, "report.txt");
+  fs.writeFileSync(source, "report");
+  vi.stubGlobal("process", { ...process, platform });
+  const flags: fs.OpenMode[] = [];
+  hooks.openFlags = (path, mode) => {
+    if (path !== source) return mode;
+    flags.push(mode);
+    if (platform === "darwin" && typeof mode === "number") {
+      if ((mode & 0x20000000) && (mode & fs.constants.O_NOFOLLOW)) throw Object.assign(new Error("EINVAL"), { code: "EINVAL" });
+      return (mode & ~0x20000000) | fs.constants.O_NOFOLLOW;
+    }
+    return mode;
+  };
+  const [staged] = await namedUploadPaths([{ file: source, name: "Report.txt" }], join(base, "uploads"));
+  expect(flags).toEqual([platform === "darwin" ? fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | 0x20000000
+    : platform === "linux" ? fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW : fs.constants.O_RDONLY]);
+  expect(fs.readFileSync(staged!, "utf8")).toBe("report");
 });
 
 it.skipIf(process.platform === "win32")("pins both sources before a directory is swapped while the first file copies", async () => {
