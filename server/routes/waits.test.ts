@@ -17,8 +17,8 @@ const waits = {
 
 const readBody = vi.fn(async (): Promise<unknown> => undefined);
 
-async function call(method: string, path: string, body?: unknown, overrides: Partial<Parameters<ReturnType<typeof createWaitRoutes>>[0]> = {}, cloudHome = false) {
-  const route = createWaitRoutes({ waits, home: () => HOME, cloudHome });
+async function call(method: string, path: string, body?: unknown, overrides: Partial<Parameters<ReturnType<typeof createWaitRoutes>>[0]> = {}, cloudHome = false, sleeps = cloudHome) {
+  const route = createWaitRoutes({ waits, home: () => HOME, cloudHome, sleeps });
   const json = vi.fn();
   const outcome = await route({
     method, path, res: {} as never, json, botId: "bot-1", threadId: "thread-1", readBody: async () => { readBody(); return body; },
@@ -54,6 +54,11 @@ describe("the waits route", () => {
     expect(cloud).toContain("lands in this chat, and you will then do what you wrote in follow_up in a run that reports in its own results chat, not this one.");
     expect(cloud).toContain(" Checks pause while My Cloud sleeps, so the message can come late: tell the person that too. Tell the person in one sentence;");
     expect((await call("POST", "/api/internal/waits", FILE_WAIT, {}, true)).payload.text).toContain("lands in this chat. Checks pause while My Cloud sleeps");
+  });
+  it("never says a Team Cloud sleeps: its plan never does", async () => {
+    const team = (await call("POST", "/api/internal/waits", { ...FILE_WAIT, follow_up: "Deploy it." }, {}, true, false)).payload.text!;
+    expect(team).toContain("in a run that reports in its own results chat, not this one.");
+    expect(team).not.toContain("sleeps");
   });
   it("answers 200 for a condition already true and the manager's status for a refusal, and appends a note", async () => {
     waits.create.mockResolvedValueOnce({ state: "already", text: "It exists already." } as never);

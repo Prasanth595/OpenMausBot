@@ -149,7 +149,8 @@ export interface WaitRouteContext {
   peer: (nameOrId: string) => { id: string; name: string } | "self" | null;
 }
 
-export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "list" | "cancel">; home?: () => string; cloudHome?: boolean }) {
+/** `sleeps`: the home is a personal My Cloud, whose plan sleeps when idle; a Team Cloud never sleeps. */
+export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "list" | "cancel">; home?: () => string; cloudHome?: boolean; sleeps?: boolean }) {
   const home = deps.home ?? homedir;
   return async (ctx: WaitRouteContext): Promise<typeof PASS | void> => {
     const { res, json } = ctx;
@@ -208,7 +209,7 @@ export function createWaitRoutes(deps: { waits: Pick<WaitManager, "create" | "li
     if (result.state === "already") return void json(res, 200, { text: result.text });
     const { wait, note } = result;
     const then = request.followUp ? `, and you will then do what you wrote in follow_up${deps.cloudHome ? " in a run that reports in its own results chat, not this one" : ""}` : "";
-    const sleeps = deps.cloudHome ? " Checks pause while My Cloud sleeps, so the message can come late: tell the person that too." : "";
+    const sleeps = deps.sleeps ? " Checks pause while My Cloud sleeps, so the message can come late: tell the person that too." : "";
     const text = `Waiting for ${wait.label} (wait id ${wait.id}): plain checks, no AI, until ${iso(wait.expiresAt)}. When it happens a message lands in this chat${then}.${sleeps} Tell the person in one sentence; do not keep checking yourself.`;
     return void json(res, 201, { text: note ? `${text}\n\n${note}` : text });
   };
