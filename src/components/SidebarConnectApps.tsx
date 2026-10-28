@@ -1,5 +1,5 @@
 import { Puzzle, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 
 import { cn } from "@/lib/cn";
 import { dismissConnectAppsPill, useConnectAppsPillDismissed } from "@/lib/connect-apps-pill";
@@ -76,7 +76,7 @@ function AppFaceIcon({ face, className }: { face: AppFace; className?: string })
 const FAN = ["motion-safe:group-hover/apps:-translate-x-[3px] motion-safe:group-hover/apps:-rotate-[8deg]", "", "motion-safe:group-hover/apps:translate-x-[3px] motion-safe:group-hover/apps:rotate-[8deg]"];
 
 /** `circle` is the collapsed rail's round button. */
-export function SidebarConnectAppsButton({ circle = false, faces, open, onOpen, onDismiss, settled = true }: {
+export function SidebarConnectAppsButton({ circle = false, faces, open, onOpen, onDismiss, settled = true, buttonRef }: {
   circle?: boolean;
   faces: readonly AppFace[];
   open: boolean;
@@ -84,14 +84,17 @@ export function SidebarConnectAppsButton({ circle = false, faces, open, onOpen, 
   onDismiss?: () => void;
   /** false before the first inventory answer: the button is in the tree for its footer slot but never painted. */
   settled?: boolean;
+  buttonRef?: Ref<HTMLButtonElement>;
 }) {
   const label = t("sidebar.connectApps");
   return (
     <span className={circle ? "flex shrink-0 flex-col items-center gap-1" : "flex min-w-0 flex-1 items-center gap-1"}>
       <button
+        ref={buttonRef}
         type="button"
         data-tour="nav-apps"
         data-sidebar-nav="apps"
+        data-connect-apps-pill
         hidden={!settled}
         aria-pressed={open}
         aria-label={circle ? label : undefined}
@@ -115,7 +118,7 @@ export function SidebarConnectAppsButton({ circle = false, faces, open, onOpen, 
           aria-label={t("sidebar.hideConnectApps")}
           title={t("sidebar.hideConnectApps")}
           onClick={onDismiss}
-          className="flex size-5 shrink-0 items-center justify-center rounded-full bg-menu text-ink-tertiary ring-1 ring-hairline transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="flex size-6 shrink-0 items-center justify-center rounded-full bg-menu text-ink-tertiary ring-1 ring-hairline transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           <X size={11} strokeWidth={2.5} aria-hidden="true" />
         </button>
@@ -124,17 +127,58 @@ export function SidebarConnectAppsButton({ circle = false, faces, open, onOpen, 
   );
 }
 
+/** What a dismissal leaves in the pill's slot: the same 36px control, icon-only, so the Apps panel stays reachable in
+ *  Simple mode. It is an entry, not a prompt: the label moves to `aria-label` and nothing asks to connect. */
+function SidebarConnectAppsCompact({ circle, open, onOpen, buttonRef }: {
+  circle: boolean;
+  open: boolean;
+  onOpen: () => void;
+  buttonRef: Ref<HTMLButtonElement>;
+}) {
+  const label = t("sidebar.connectApps");
+  return (
+    <span className={circle ? "flex shrink-0 flex-col items-center gap-1" : "flex min-w-0 flex-1 items-center gap-1"}>
+      <button
+        ref={buttonRef}
+        type="button"
+        data-tour="nav-apps"
+        data-sidebar-nav="apps"
+        data-connect-apps-compact
+        aria-pressed={open}
+        aria-label={label}
+        title={label}
+        onClick={onOpen}
+        className={SIMPLE_TOP_BUTTON}
+      >
+        <Puzzle size={18} strokeWidth={1.5} aria-hidden="true" />
+      </button>
+    </span>
+  );
+}
+
 export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
   const { state, dispatch } = useStore();
   const dismissed = useConnectAppsPillDismissed();
   const result = useAppFaces();
-  if (dismissed || result?.nothingToConnect) return null;
+  const pillRef = useRef<HTMLButtonElement>(null);
+  const compactRef = useRef<HTMLButtonElement>(null);
+  const wasDismissed = useRef(dismissed);
+  useEffect(() => {
+    if (wasDismissed.current === dismissed) return;
+    wasDismissed.current = dismissed;
+    // Dismissing or restoring removes the control that had focus: land on its replacement, never on <body>.
+    (dismissed ? compactRef : pillRef).current?.focus();
+  }, [dismissed]);
+  const openPanel = () => dispatch({ type: "togglePlugins", open: true });
+  if (dismissed) return <SidebarConnectAppsCompact circle={circle} open={state.pluginsOpen} onOpen={openPanel} buttonRef={compactRef} />;
+  if (result?.nothingToConnect) return null;
   return <SidebarConnectAppsButton
     circle={circle}
     faces={result?.faces ?? appFaces([], new Map())}
     open={state.pluginsOpen}
-    onOpen={() => dispatch({ type: "togglePlugins", open: true })}
+    onOpen={openPanel}
     onDismiss={dismissConnectAppsPill}
     settled={result !== null || state.pluginsOpen}
+    buttonRef={pillRef}
   />;
 }

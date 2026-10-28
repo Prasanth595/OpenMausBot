@@ -73,7 +73,8 @@ function memoryStorage(failWrites = false): Storage {
   };
 }
 
-const pill = () => host.querySelector<HTMLElement>('[data-sidebar-nav="apps"]');
+const pill = () => host.querySelector<HTMLElement>("[data-connect-apps-pill]");
+const compact = () => host.querySelector<HTMLElement>("[data-connect-apps-compact]");
 /** The pill only counts as shown once it is in the tree without the hidden attribute. */
 const shown = () => {
   const element = pill();
@@ -143,6 +144,15 @@ describe("the Connect apps pill against the catalogue", () => {
     expect(shown()).not.toBeNull();
   });
 
+  it("stays when a partial catalogue hides slugs it could not page in", async () => {
+    // Without the complete guard this hides the pill: every named app is connected and the list looks finished.
+    fixture.inventory = { services: { gmail: { connected: true }, slack: { connected: true } }, authoritative: true };
+    fixture.catalogue = { cards: new Map(), slugs: ["gmail", "slack"], complete: false };
+    flushSync(() => root.render(createElement(SidebarConnectApps)));
+    await settle();
+    expect(shown()).not.toBeNull();
+  });
+
   it("stays when the server could not read the full inventory", async () => {
     fixture.inventory = { services: { gmail: { connected: true }, slack: { connected: true } }, authoritative: false };
     fixture.catalogue = { cards: new Map(), slugs: ["gmail", "slack"], complete: true };
@@ -179,6 +189,8 @@ describe("dismissing the Connect apps pill", () => {
     expect(pill()!.contains(dismiss)).toBe(false);
     flushSync(() => dismiss.click());
     expect(pill()).toBeNull();
+    // The entry stays: an icon-only button in the slot the pill occupied, never nothing.
+    expect(compact()).not.toBeNull();
     expect(window.localStorage.getItem(CONNECT_APPS_PILL_KEY)).toBe("1");
 
     // A fresh mount is the restart: the saved flag must still hold.
@@ -186,6 +198,7 @@ describe("dismissing the Connect apps pill", () => {
     root = createRoot(host);
     renderWithRestore();
     await settle();
+    expect(compact()).not.toBeNull();
     expect(pill()).toBeNull();
 
     const restore = host.querySelector<HTMLElement>("[data-show-connect-apps]");
@@ -204,6 +217,7 @@ describe("dismissing the Connect apps pill", () => {
     expect(dismiss?.getAttribute("aria-label")).toBe("Hide Connect apps");
     flushSync(() => dismiss!.click());
     expect(pill()).toBeNull();
+    expect(compact()?.getAttribute("aria-label")).toBe("Connect apps");
   });
 
   it("keeps the pill settled on a fresh mount while the panel is already open", () => {

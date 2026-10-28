@@ -3,11 +3,14 @@ import { Puzzle } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { restoreConnectAppsPill, useConnectAppsPillDismissed } from "@/lib/connect-apps-pill";
 import { t } from "@/lib/i18n";
+import { useAdvancedMode } from "@/lib/interface-mode";
 
-/** The way back from a dismissed sidebar pill: clears the saved flag and the sidebar listens for the change. */
+/** The way back from a dismissed sidebar pill: clears the saved flag and the sidebar listens for the change. Simple
+ *  mode only: Advanced has no sidebar pill, so the control would restore a preference with nothing to show. */
 export function ConnectAppsPillRestore({ className }: { className?: string }) {
   const dismissed = useConnectAppsPillDismissed();
-  if (!dismissed) return null;
+  const advanced = useAdvancedMode();
+  if (advanced || !dismissed) return null;
   return (
     <button
       type="button"
