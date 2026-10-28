@@ -1,4 +1,5 @@
 import skins from "./skin-overlay.cjs";
+import { createCloudTalkServer } from "./talk-cloud.mjs";
 import { createTalkPanel } from "./talk-panel.mjs";
 import { createTalkServer } from "./talk-server.mjs";
 import { createTalkSession } from "./talk-session.mjs";
@@ -6,14 +7,38 @@ import { createCallPresence, createTalkShortcut, TALK_SHORTCUT_UNAVAILABLE } fro
 
 export { isTalkPanel } from "./talk-panel.mjs";
 
+/** Each ask's chat stays with the server that found it, should home change before it is sent. */
+function routeAsks(pick) {
+  const owners = new WeakMap();
+  return {
+    prepare(onWaking) {
+      const server = pick();
+      return server.prepare(onWaking).then(chat => { owners.set(chat, server); return chat; });
+    },
+    ask: input => (owners.get(input.chat) ?? pick()).ask(input),
+  };
+}
+
 /**
  * The microphone's IPC for this app's pages (dictation, calls, the talk setting), then the talk shortcut once the app
  * is ready. `speech`: speech.mjs's start/stop/finish/busy. `packaged`: asks go to `localRequest`, this computer's own
- * server; in development to `devUrl`, whose Vite /api proxy reaches `pnpm dev:server`.
+ * server; in development to `devUrl`, whose Vite /api proxy reaches `pnpm dev:server`. Once home is My Cloud they go
+ * there. `cloudPage(event)`: the sender is My Cloud's own verified page in the main window; the talk setting answers it
+ * only while My Cloud is home at that origin.
  */
-export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech, speech, packaged, devUrl, nativeImage, iconPath, openLink, reveal, log, fetch = globalThis.fetch }) {
+export function installTalk({ ipcMain, localOnly, localOrHome, cloudPage = () => false, BrowserWindow, appleSpeech, speech, packaged, devUrl, nativeImage, iconPath, openLink, reveal, log, fetch = globalThis.fetch }) {
   const callPresence = createCallPresence();
   let shortcut = null, session = null, panel = null, theme = null;
+  /** My Cloud's verified origin while it is home, once the shortcut is set up; else null. */
+  let myCloudHome = () => null;
+  const myCloudPage = event => {
+    try { return Boolean(myCloudHome()) && cloudPage(event) === true; } catch { return false; }
+  };
+  /** This app's page, or My Cloud's own page while it is home: the talk setting only, never the microphone. */
+  const localOrMyCloud = (channel, handler) => {
+    const local = localOnly(channel, handler);
+    return (event, ...args) => (myCloudPage(event) ? handler : local)(event, ...args);
+  };
 
   ipcMain.handle("speech:start", localOnly("speech:start", (event, options) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -30,11 +55,12 @@ export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, ap
   ipcMain.handle("speech:finish", localOnly("speech:finish", (event) => {
     if (appleSpeech) speech.finish(BrowserWindow.fromWebContents(event.sender));
   }));
-  ipcMain.handle("talk-shortcut:state", localOnly("talk-shortcut:state", () => shortcut?.state() ?? TALK_SHORTCUT_UNAVAILABLE));
-  ipcMain.handle("talk-shortcut:set", localOnly("talk-shortcut:set", (_event, change) => shortcut?.set({
+  ipcMain.handle("talk-shortcut:state", localOrMyCloud("talk-shortcut:state", () => shortcut?.state() ?? TALK_SHORTCUT_UNAVAILABLE));
+  ipcMain.handle("talk-shortcut:set", localOrMyCloud("talk-shortcut:set", (_event, change) => shortcut?.set({
     enabled: typeof change?.enabled === "boolean" ? change.enabled : undefined,
     key: typeof change?.key === "string" ? change.key : undefined,
   }) ?? TALK_SHORTCUT_UNAVAILABLE));
+  ipcMain.on("talk-shortcut:page", event => { event.returnValue = myCloudPage(event); });
   ipcMain.handle("call:active", localOrHome("call:active", (event, active) => {
     callPresence.set(event.sender, active === true);
   }));
@@ -45,28 +71,39 @@ export function installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, ap
   };
 
   return {
-    /** `remote()`: this desktop is a remote client of another computer. `away()`: this computer's bots moved to My Cloud,
-     * so its own copy is frozen. `starting()`: this computer's server is on its way up. `dataDir()`: the data folder
-     * this process runs. */
-    start({ globalShortcut, screen, prefs, remote, away, starting, localRequest, dataDir }) {
+    /** `remote()`: this desktop is a remote client of another computer. `home()`: home as last worked out
+     * (`{ kind: "computer" | "cloud" | "signin", origin? }`). `starting()`: this computer's server is on its way up.
+     * `dataDir()`: the data folder this process runs. `myCloud`: how to reach My Cloud, while it is home: `mine()` its
+     * verified origin, `fetch` the window's own session's, `reconnect(origin)` signs the window in there again, `power`
+     * the gate Files and lending share, `account()` the MausBot Cloud sign-in that wakes it. */
+    start({ globalShortcut, screen, prefs, remote, home, starting, localRequest, dataDir, myCloud = null }) {
       const request = (route, init) => (packaged ? localRequest(route, init) : fetch(new URL(route, devUrl), init));
+      const kind = () => home().kind;
+      myCloudHome = () => {
+        const at = home();
+        return myCloud && at.kind === "cloud" && at.origin && at.origin === myCloud.mine() ? at.origin : null;
+      };
       try {
         panel = createTalkPanel({ BrowserWindow, screen, nativeImage, iconPath, theme, onOpen: logged("open", () => session.open()), onDismiss: logged("dismiss", () => session.dismiss()) });
+        const here = createTalkServer({ request, prefs, starting, serverKey: () => (packaged ? dataDir() : devUrl) ?? "local" });
+        const there = myCloud && createCloudTalkServer({ origin: () => myCloudHome(), fetch: myCloud.fetch, reconnect: myCloud.reconnect, power: myCloud.power, account: myCloud.account, prefs });
         session = createTalkSession({
           speech,
-          server: createTalkServer({ request, prefs, starting, serverKey: () => (packaged ? dataDir() : devUrl) ?? "local" }),
+          server: routeAsks(() => (there && kind() === "cloud" ? there : here)),
           panel,
           voiceInUse: () => speech.busy() || callPresence.active(),
           release: () => shortcut.releaseModifiers(),
           openChat: chat => (chat ? openLink(`openmausbot://thread/${encodeURIComponent(chat.threadId)}?bot=${encodeURIComponent(chat.botId)}`) : reveal()),
         });
-        shortcut = createTalkShortcut({ globalShortcut, prefs, available: () => appleSpeech && !remote() && !away(), onPress: logged("press", () => session.press()) });
+        // Teams and other Clouds are places the window shows, never home; a home that needs a sign-in takes no asks.
+        const reachable = () => kind() === "computer" || (Boolean(there) && kind() === "cloud");
+        shortcut = createTalkShortcut({ globalShortcut, prefs, available: () => appleSpeech && !remote() && reachable(), onPress: logged("press", () => session.press()) });
       } catch (error) {
         session = null;
         log(`talk shortcut unavailable: ${error?.message ?? error}`);
       }
     },
-    /** Home changed (My Cloud, or this computer again): the key is let go or taken again to match. */
+    /** Home changed (My Cloud, a sign-in it needs, or this computer again): the key is let go or taken again to match. */
     homeChanged: logged("home change", () => shortcut?.refresh()),
     /** A page painted the app's skin (its id, resolved from the Theme setting): the box takes its light or dark. */
     skin(id) {

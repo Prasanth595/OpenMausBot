@@ -2436,7 +2436,7 @@ ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
   return true;
 }));
 
-const talk = installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions.appleSpeech,
+const talk = installTalk({ ipcMain, localOnly, localOrHome, cloudPage: event => cloudPageAsking(event) === "cloud", BrowserWindow, appleSpeech: nativeActions.appleSpeech,
   speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy }, packaged: app.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog });
 
 ipcMain.handle("companion:state", localOnly("companion:state", () => desktopCompanionState()));
@@ -3037,7 +3037,8 @@ app.whenReady().then(async () => {
       chromeRail.send("desktop-language:changed", language);
     },
     page: event => senderIsLocal(event) ? "local" : cloudPageAsking(event) ?? (workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin()) ? "server" : null) });
-  talk.start({ globalShortcut, screen, prefs: desktopPrefs, remote: () => Boolean(desktopRemoteAccess), away: () => homeWindow.current().kind !== "computer", starting: () => !serverReady, localRequest: localServerRequest, dataDir: () => runningDataDir });
+  talk.start({ globalShortcut, screen, prefs: desktopPrefs, remote: () => Boolean(desktopRemoteAccess), home: () => homeWindow.current(), starting: () => !serverReady, localRequest: localServerRequest, dataDir: () => runningDataDir,
+    myCloud: { mine: myCloud, fetch: (...args) => session.defaultSession.fetch(...args), reconnect: reconnectCloud, power: cloudPower, account: () => cloudAccount } });
   // Before the window, so the harness has the CUA descriptor on first render.
   cuaReady =
     !desktopRemoteAccess && (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32")

@@ -2,8 +2,10 @@ import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import vm from "node:vm";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createCloudPowerGate } from "./cloud-power.mjs";
 import { createDesktopPrefs } from "./desktop-prefs.mjs";
 import { installTalk, isTalkPanel } from "./talk-main.mjs";
 import { TALK_SHORTCUT_UNAVAILABLE } from "./talk-shortcut.mjs";
@@ -14,10 +16,13 @@ const preload = readFileSync(join(here, "preload.cjs"), "utf8");
 const settle = async () => { for (let i = 0; i < 10; i += 1) await new Promise(resolve => setImmediate(resolve)); };
 const json = body => Promise.resolve(new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } }));
 const names = windows => windows.map(win => win?.name ?? null);
+const CLOUD = "https://home.example.test";
+const HOME_HERE = Object.freeze({ kind: "computer" }), HOME_CLOUD = Object.freeze({ kind: "cloud", origin: CLOUD });
 
-function harness({ packaged = true, appleSpeech = true, remote = false, register, serve = () => undefined } = {}) {
-  const h = { handlers: new Map(), guards: new Map(), started: [], stopped: [], finished: [], requests: [], links: [], reveals: 0, log: [],
-    registered: new Map(), windows: [], busy: false, fail: {}, away: false, starting: false };
+/** `serve(route, where)`: an answer for this computer's server ("local", "dev") or My Cloud ("cloud"), else none yet. */
+function harness({ packaged = true, appleSpeech = true, remote = false, register, serve = () => undefined, myCloud = true } = {}) {
+  const h = { handlers: new Map(), listeners: new Map(), guards: new Map(), started: [], stopped: [], finished: [], requests: [], links: [], reveals: 0, log: [],
+    registered: new Map(), windows: [], busy: false, fail: {}, home: HOME_HERE, mine: CLOUD, cloudPower: null, wakes: 0, reconnects: [], starting: false };
   const owners = new Map();
   class FakeBrowserWindow {
     static fromWebContents(contents) { return owners.get(contents) ?? null; }
@@ -43,11 +48,18 @@ function harness({ packaged = true, appleSpeech = true, remote = false, register
     if (h.fail[name]) throw new Error(h.fail[name]);
     return run(...args);
   };
-  const answer = route => serve(route) ?? new Promise(() => {});
-  const guard = kind => (channel, handler) => { h.guards.set(channel, kind); return handler; };
+  const answer = (route, where) => serve(route, where) ?? new Promise(() => {});
+  // A page of another server (`remote`) is refused here as main's own guards refuse it.
+  const guard = kind => (channel, handler) => {
+    h.guards.set(channel, kind);
+    return (event, ...args) => {
+      if (event?.remote) throw new Error(`${channel} is only available in this app's window`);
+      return handler(event, ...args);
+    };
+  };
   h.talk = installTalk({
-    ipcMain: { handle: (channel, handler) => h.handlers.set(channel, handler) },
-    localOnly: guard("localOnly"), localOrHome: guard("localOrHome"), BrowserWindow: FakeBrowserWindow, appleSpeech,
+    ipcMain: { handle: (channel, handler) => h.handlers.set(channel, handler), on: (channel, listener) => h.listeners.set(channel, listener) },
+    localOnly: guard("localOnly"), localOrHome: guard("localOrHome"), cloudPage: event => event?.cloudPage === true, BrowserWindow: FakeBrowserWindow, appleSpeech,
     speech: {
       start: (target, options) => { h.started.push([target, options]); },
       stop: failing("stop", owner => { h.stopped.push(owner); }),
@@ -57,17 +69,31 @@ function harness({ packaged = true, appleSpeech = true, remote = false, register
     packaged, devUrl: "http://127.0.0.1:5199", iconPath: join(here, "resources", "app-icon.png"),
     nativeImage: { createFromPath: () => ({ isEmpty: () => false, resize: () => ({ toPNG: () => Buffer.from("png") }) }) },
     openLink: link => { h.links.push(link); }, reveal: failing("reveal", () => { h.reveals += 1; }), log: line => { h.log.push(line); },
-    fetch: url => { h.requests.push(["dev", String(url)]); return answer(`${url.pathname}${url.search}`); },
+    fetch: url => { h.requests.push(["dev", String(url)]); return answer(`${url.pathname}${url.search}`, "dev"); },
   });
+  h.power = createCloudPowerGate({ power: () => h.cloudPower });
+  const account = {
+    power: () => h.cloudPower,
+    wakeHome: async () => { h.wakes += 1; h.cloudPower = { state: "awake", since: 2, sleeps: true }; h.power.changed(); return "awake"; },
+    setWaking: () => {},
+  };
+  h.cloudFetch = (url, init = {}) => {
+    const at = new URL(url);
+    h.requests.push(["cloud", String(url), init]);
+    return answer(`${at.pathname}${at.search}`, "cloud");
+  };
   const globalShortcut = {
     register: register ?? ((accelerator, press) => { h.registered.set(accelerator, press); return true; }),
     unregister: accelerator => { h.registered.delete(accelerator); },
   };
   const screen = { getCursorScreenPoint: () => ({ x: 0, y: 0 }), getDisplayNearestPoint: () => ({ workArea: { x: 0, y: 25, width: 1440, height: 875 } }) };
   h.start = () => h.talk.start({ globalShortcut, screen, prefs: createDesktopPrefs({ read: () => null, write: () => {} }), remote: () => remote,
-    away: failing("away", () => h.away), starting: () => h.starting,
-    localRequest: route => { h.requests.push(["local", route]); return answer(route); }, dataDir: () => "/Users/a/.openmausbot" });
+    home: failing("home", () => h.home), starting: () => h.starting,
+    localRequest: route => { h.requests.push(["local", route]); return answer(route, "local"); }, dataDir: () => "/Users/a/.openmausbot",
+    ...(myCloud ? { myCloud: { mine: () => h.mine, fetch: h.cloudFetch, reconnect: async at => { h.reconnects.push(at); return false; }, power: h.power, account: () => account } } : {}) });
   h.handle = (channel, event, ...args) => h.handlers.get(channel)(event, ...args);
+  h.sync = (channel, event) => { h.listeners.get(channel)(event); return event.returnValue; };
+  h.where = () => h.requests.map(([where, url]) => [where, url]);
   h.press = () => h.registered.get("Control+Alt+Space")();
   h.page = name => new FakeBrowserWindow({ name });
   h.box = () => h.windows.findLast(win => isTalkPanel(win));
@@ -84,9 +110,9 @@ test("every list of the app's windows leaves the talk box out", () => {
 });
 
 test("main hands the talk wiring its speech sinks, this computer's own server and window, and closes it first on quit", () => {
-  assert.match(main, /const talk = installTalk\(\{ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions\.appleSpeech,\s*speech: \{ start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy \},/);
+  assert.match(main, /const talk = installTalk\(\{ ipcMain, localOnly, localOrHome, cloudPage: event => cloudPageAsking\(event\) === "cloud", BrowserWindow, appleSpeech: nativeActions\.appleSpeech,\s*speech: \{ start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy \},/);
   assert.match(main, /packaged: app\.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog \}\);/);
-  assert.match(main, /talk\.start\(\{ globalShortcut, screen, prefs: desktopPrefs, remote: \(\) => Boolean\(desktopRemoteAccess\), away: \(\) => homeWindow\.current\(\)\.kind !== "computer", starting: \(\) => !serverReady, localRequest: localServerRequest, dataDir: \(\) => runningDataDir \}\);/);
+  assert.match(main, /talk\.start\(\{ globalShortcut, screen, prefs: desktopPrefs, remote: \(\) => Boolean\(desktopRemoteAccess\), home: \(\) => homeWindow\.current\(\), starting: \(\) => !serverReady, localRequest: localServerRequest, dataDir: \(\) => runningDataDir,\s*myCloud: \{ mine: myCloud, fetch: \(\.\.\.args\) => session\.defaultSession\.fetch\(\.\.\.args\), reconnect: reconnectCloud, power: cloudPower, account: \(\) => cloudAccount \} \}\);/);
   assert.match(main, /app\.on\("before-quit", \(e\) => \{\s*talk\.close\(\);/);
   assert.doesNotMatch(main, /ipcMain\.handle\("(?:speech|talk-shortcut|call):/);
 });
@@ -101,16 +127,72 @@ test("the talk bridge keys stay off other servers' pages; a call can be reported
   const list = name => preload.match(new RegExp(`const ${name} = (?:new Set\\()?\\[([^\\]]*)\\]`))[1];
   assert.doesNotMatch(list("REMOTE_SAFE"), /talkShortcut|callActive/);
   assert.match(list("HOME_PAGE"), /"callActive"/);
-  assert.doesNotMatch(list("HOME_PAGE"), /talkShortcut/);
+  assert.doesNotMatch(list("HOME_PAGE"), /talkShortcut/, "a team's page is a home page too");
+  assert.deepEqual(list("MY_CLOUD_PAGE"), `"talkShortcut"`);
+});
+
+/** The real preload as `origin`'s page: `home` answers home:page, `talk` answers talk-shortcut:page. */
+function preloadAt(origin, { home = false, talk = false } = {}) {
+  let bridge; const synced = [];
+  vm.runInNewContext(preload, {
+    process: { platform: "darwin", argv: ["--omb-local-origin=http://127.0.0.1:4242"] },
+    location: { origin }, navigator: { userActivation: { isActive: false } }, TextEncoder, localStorage: { getItem: () => null }, queueMicrotask,
+    require: () => ({ webUtils: {}, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
+      ipcRenderer: { on() {}, removeListener() {}, send() {}, invoke: () => Promise.resolve(),
+        sendSync: channel => { synced.push(channel); return channel === "home:page" ? home : channel === "talk-shortcut:page" ? talk : null; } } }),
+  });
+  return { bridge, synced };
+}
+
+test("the Settings row's bridge reaches My Cloud's own page while it is home, and no other server's page", () => {
+  const mine = preloadAt(CLOUD, { home: true, talk: true });
+  assert.equal(typeof mine.bridge.talkShortcut?.state, "function");
+  assert.ok(mine.synced.includes("talk-shortcut:page"));
+  const team = preloadAt("https://team.example.test", { home: true, talk: false });
+  assert.equal(team.bridge.talkShortcut, undefined, "a team's page is a home page, never the talk bridge's");
+  const other = preloadAt("https://bots.example.test", { home: false, talk: true });
+  assert.equal(other.bridge.talkShortcut, undefined);
+  assert.equal(other.synced.includes("talk-shortcut:page"), false, "only a home page asks");
+  const local = preloadAt("http://127.0.0.1:4242");
+  assert.equal(typeof local.bridge.talkShortcut?.set, "function");
+  assert.equal(local.synced.includes("talk-shortcut:page"), false, "this app's page never needs to ask");
+});
+
+test("main lets My Cloud's own page read and change the shortcut only while My Cloud is home, at the verified origin", () => {
+  const h = harness();
+  const mine = { remote: true, cloudPage: true }, team = { remote: true, cloudPage: false };
+  h.home = HOME_CLOUD;
+  assert.equal(h.sync("talk-shortcut:page", { ...mine }), false, "nothing before the shortcut is set up");
+  assert.throws(() => h.handle("talk-shortcut:state", mine), /only available/);
+  h.start();
+  assert.equal(h.sync("talk-shortcut:page", { ...mine }), true);
+  assert.equal(h.handle("talk-shortcut:state", mine).available, true);
+  assert.equal(h.handle("talk-shortcut:set", mine, { enabled: false }).enabled, false);
+  assert.equal(h.handle("talk-shortcut:state", {}).enabled, false, "the same setting as this app's page");
+  assert.equal(h.sync("talk-shortcut:page", { ...team }), false);
+  assert.throws(() => h.handle("talk-shortcut:set", team, { enabled: true }), /only available/);
+  h.mine = "https://other.example.test";
+  assert.equal(h.sync("talk-shortcut:page", { ...mine }), false, "home's origin is not the verified My Cloud");
+  assert.throws(() => h.handle("talk-shortcut:state", mine), /only available/);
+  h.mine = CLOUD;
+  h.home = HOME_HERE;
+  assert.equal(h.sync("talk-shortcut:page", { ...mine }), false, "My Cloud before the move made it home");
+  assert.throws(() => h.handle("talk-shortcut:state", mine), /only available/);
+  h.home = { kind: "signin" };
+  assert.throws(() => h.handle("talk-shortcut:state", mine), /only available/);
+  h.fail.home = "home unknown";
+  assert.equal(h.sync("talk-shortcut:page", { ...mine }), false);
+  h.talk.close();
 });
 
 test("every microphone channel answers only this computer's page; a call can be reported from My Cloud's page too", () => {
-  const { guards, handlers } = harness();
+  const { guards, handlers, listeners } = harness();
   assert.deepEqual(Object.fromEntries(guards), {
     "speech:start": "localOnly", "speech:stop": "localOnly", "speech:finish": "localOnly",
     "talk-shortcut:state": "localOnly", "talk-shortcut:set": "localOnly", "call:active": "localOrHome",
   });
   assert.deepEqual([...handlers.keys()], [...guards.keys()]);
+  assert.deepEqual([...listeners.keys()], ["talk-shortcut:page"]);
 });
 
 test("a page's speech stop and finish name that page's own window, so they touch only the session it started", () => {
@@ -246,26 +328,123 @@ test("clicking the box opens its chat by a link with both ids escaped, or else j
   h.talk.close();
 });
 
-test("while home is My Cloud or this computer's copy is frozen the shortcut is unavailable and the key free; home here again takes it back", () => {
+test("while home needs a sign-in the shortcut is unavailable and the key free; home on My Cloud or here again takes it back", () => {
   const h = harness();
-  h.away = true;
+  h.home = { kind: "signin" };
   h.start();
   assert.equal(h.handle("talk-shortcut:state", {}).available, false);
   assert.deepEqual([...h.registered.keys()], []);
   assert.equal(h.handle("talk-shortcut:set", {}, { enabled: false }).available, false, "a change does nothing meanwhile");
-  h.away = false;
+  h.home = HOME_CLOUD;
   h.talk.homeChanged();
   assert.equal(h.handle("talk-shortcut:state", {}).available, true);
   assert.deepEqual([...h.registered.keys()], ["Control+Alt+Space"]);
-  h.away = true;
+  h.home = HOME_HERE;
+  h.talk.homeChanged();
+  assert.deepEqual([...h.registered.keys()], ["Control+Alt+Space"], "kept from My Cloud to this computer");
+  h.home = { kind: "signin", other: true };
   h.talk.homeChanged();
   assert.deepEqual([...h.registered.keys()], []);
-  h.fail.away = "home unknown";
+  h.fail.home = "home unknown";
   assert.doesNotThrow(() => h.talk.homeChanged());
   assert.deepEqual(h.log, ["talk home change failed: home unknown"]);
   const early = harness();
   assert.doesNotThrow(() => early.talk.homeChanged(), "before start");
   h.talk.close();
+
+  const bare = harness({ myCloud: false });
+  bare.home = HOME_CLOUD;
+  bare.start();
+  assert.equal(bare.handle("talk-shortcut:state", {}).available, false, "no way to reach My Cloud, no shortcut there");
+  bare.talk.close();
+});
+
+test("a press while home is My Cloud asks MausBot there over the window's own session, never this computer's server", async () => {
+  const h = harness({ serve: (route, where) => {
+    if (where !== "cloud") return undefined;
+    if (route === "/api/bots?messages=0") return json({ bots: [{ id: "b?1&x", defaultBot: {}, tasks: [] }] });
+    if (route === "/api/bots/b%3F1%26x/tasks") return Promise.resolve(Response.json({ task: { threadId: "t 1/x" } }, { status: 201 }));
+    return undefined;
+  } });
+  h.home = HOME_CLOUD;
+  h.start();
+  h.press();
+  await settle();
+  assert.deepEqual(h.where(), [["cloud", `${CLOUD}/api/bots?messages=0`], ["cloud", `${CLOUD}/api/bots/b%3F1%26x/tasks`]]);
+  const [, , init] = h.requests[0];
+  assert.equal(init.credentials, "include");
+  assert.equal(init.headers.origin, CLOUD);
+  const [sink] = h.started.at(-1);
+  sink.transcript({ text: "what's on today" });
+  sink.end({ code: 0, reason: "completed" });
+  await settle();
+  assert.deepEqual(h.where().at(-1), ["cloud", `${CLOUD}/api/events?screens=off`]);
+  h.click("open");
+  assert.deepEqual(h.links, ["openmausbot://thread/t%201%2Fx?bot=b%3F1%26x"], "the chat on My Cloud's page, ids escaped as before");
+  assert.equal(h.requests.some(([where]) => where === "local"), false);
+  h.talk.close();
+});
+
+test("home's origin that is not the verified My Cloud asks nothing and says it couldn't reach My Cloud", async () => {
+  const h = harness();
+  h.home = HOME_CLOUD;
+  h.mine = "https://other.example.test";
+  h.start();
+  h.press();
+  await settle();
+  assert.deepEqual(h.requests, []);
+  assert.deepEqual((await h.painted()).at(-1), { state: "error", text: "Couldn't reach My Cloud. Try again in a moment." });
+  h.talk.close();
+});
+
+test("a press while My Cloud sleeps wakes it through the Admin, and the box says so once the words are let go", async () => {
+  const h = harness({ serve: (route, where) => (where === "cloud" && route === "/api/auth/session" ? json({ kind: "session" }) : undefined) });
+  h.home = HOME_CLOUD;
+  h.cloudPower = { state: "asleep", since: 1, sleeps: true };
+  h.start();
+  h.press();
+  const [sink] = h.started.at(-1);
+  sink.transcript({ text: "hello" });
+  sink.end({ code: 0, reason: "completed" });
+  assert.deepEqual((await h.painted()).at(-1), { state: "waking", text: "hello" });
+  assert.equal(h.wakes, 1);
+  assert.deepEqual(h.where(), [["cloud", `${CLOUD}/api/auth/session`], ["cloud", `${CLOUD}/api/bots?messages=0`]]);
+  assert.equal(h.talk.busy(), true);
+  h.talk.close();
+});
+
+test("an ask stays with the server that found its chat when home changes before it is sent", async () => {
+  const serve = (route, where) => {
+    if (route === "/api/bots?messages=0") return json({ bots: [{ id: "m", defaultBot: {}, tasks: [] }] });
+    if (route === "/api/bots/m/tasks") return Promise.resolve(Response.json({ task: { threadId: `t-${where}` } }, { status: 201 }));
+    return undefined;
+  };
+  const send = async h => {
+    const [sink] = h.started.at(-1);
+    sink.transcript({ text: "hello" });
+    sink.end({ code: 0, reason: "completed" });
+    await settle();
+  };
+  const here = harness({ serve });
+  here.start();
+  here.press();
+  await settle();
+  here.home = HOME_CLOUD;
+  await send(here);
+  assert.deepEqual(here.where().at(-1), ["local", "/api/events?screens=off"]);
+  assert.equal(here.requests.some(([where]) => where === "cloud"), false, "this computer's chat never goes to My Cloud");
+  here.talk.close();
+
+  const there = harness({ serve });
+  there.home = HOME_CLOUD;
+  there.start();
+  there.press();
+  await settle();
+  there.home = HOME_HERE;
+  await send(there);
+  assert.equal(there.requests.some(([where]) => where === "local"), false, "My Cloud's chat never goes to this computer");
+  assert.deepEqual((await there.painted()).at(-1), { state: "error", text: "Couldn't reach My Cloud. Try again in a moment." });
+  there.talk.close();
 });
 
 test("a press while this computer's server is still starting says so", async () => {

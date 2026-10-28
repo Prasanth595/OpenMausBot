@@ -287,7 +287,7 @@ const __APP_VERSION__: string;
       speechStop(): Promise<void>;
       /** Finish capture and emit the recognizer's final transcript. */
       speechFinish?(): Promise<void>;
-      /** This computer's page only: Settings → General's talk shortcut. */
+      /** This computer's page, or My Cloud's own page while it is home: Settings → General's talk shortcut. */
       talkShortcut?: import("../../electron/talk-shortcut.mjs").TalkShortcutBridge;
       /** A call holds the microphone, so the talk shortcut waits. */
       callActive?(active: boolean): Promise<void>;

@@ -64,11 +64,16 @@ if (typeof window !== "undefined") {
 const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudAdd", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "onOpenAppSettings", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
+/** My Cloud's own page while it is home, and never a team's (main checks again): the talk shortcut's setting. */
+const MY_CLOUD_PAGE = ["talkShortcut"];
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
 function homePage() {
   try { return ipcRenderer.sendSync("home:page") === true; } catch { return false; }
+}
+function talkShortcutPage() {
+  try { return ipcRenderer.sendSync("talk-shortcut:page") === true; } catch { return false; }
 }
 function reloadedForUpdate() {
   try { return ipcRenderer.sendSync("home:updating") === true; } catch { return false; }
@@ -88,7 +93,8 @@ ipcRenderer.on("desktop-language:changed", (_event, language) => {
   for (const listener of languageListeners) listener(language);
 });
 const onHomePage = !isLocalPage && homePage();
-const remoteKeys = isLocalPage ? REMOTE_SAFE : new Set([...REMOTE_SAFE, ...(updaterOffered() ? ["updater"] : []), ...(onHomePage ? HOME_PAGE : [])]);
+const remoteKeys = isLocalPage ? REMOTE_SAFE : new Set([...REMOTE_SAFE, ...(updaterOffered() ? ["updater"] : []), ...(onHomePage ? HOME_PAGE : []),
+  ...(onHomePage && talkShortcutPage() ? MY_CLOUD_PAGE : [])]);
 
 // Keep in parity with shared/workspace-backup-client.ts (a sandboxed preload cannot import it).
 const COMPANY_BACKUP_CLIENT_KEYS = [

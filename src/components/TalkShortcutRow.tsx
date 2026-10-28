@@ -4,7 +4,8 @@ import { t } from "@/lib/i18n";
 import { Select } from "./Select";
 import { SettingRow, Switch } from "./SettingsPrimitives";
 
-/** Settings search finds the talk shortcut only where its row can show: this Mac app's own page. */
+/** Settings search finds the talk shortcut only where its row can show: this Mac app's own page, or My Cloud's own page
+ * while it is home (the only server page main gives the talk bridge). */
 export function talkShortcutKeywords(ogb: Window["ogb"] = typeof window === "undefined" ? undefined : window.ogb): string[] {
   return ogb?.platform === "darwin" && ogb.talkShortcut ? ["talk", "voice", "shortcut", "hotkey", "hold to talk", "push to talk", "quick asks"] : [];
 }
