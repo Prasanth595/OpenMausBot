@@ -165,14 +165,14 @@ export class WaitManager {
   }
 
   async create(input: NewWait): Promise<CreateWaitResult> {
-    const full = this.limitRefusal(input.botId);
+    const full = this.limitRefusal(input);
     if (full) return full;
     const condition = await this.startingCondition(input.condition);
     const verdict = await this.probe(condition, undefined);
     if (verdict.gone) return { state: "refused", status: 400, error: `${(condition as { botName: string }).botName} no longer exists.` };
     if (verdict.page && !verdict.page.ok && verdict.page.refused) return { state: "refused", status: 400, error: verdict.page.error };
     if (verdict.met) return { state: "already", text: `${describeCondition(condition)} already. Nothing was set up: tell the person now.` };
-    const crowded = this.limitRefusal(input.botId);
+    const crowded = this.limitRefusal(input);
     if (crowded) return crowded;
     const now = this.now();
     const wait: WaitRecord = {
@@ -200,10 +200,15 @@ export class WaitManager {
     return { state: "created", wait: cloneWait(wait), ...(note ? { note } : {}) };
   }
 
-  private limitRefusal(botId: string): CreateWaitResult | null {
+  private limitRefusal({ botId, threadId }: Pick<NewWait, "botId" | "threadId">): CreateWaitResult | null {
     const mine = this.waits.filter((w) => w.botId === botId && !w.ending);
     if (mine.length >= WAIT_LIMITS.perBot) {
-      return { state: "refused", status: 409, error: `You already keep ${WAIT_LIMITS.perBot} waits, the most one bot may:\n${waitList(mine)}\nCancel one with cancel_wait first.` };
+      const here = mine.filter((w) => w.threadId === threadId), others = mine.length - here.length;
+      const full = `You already keep ${WAIT_LIMITS.perBot} waits, the most one bot may`;
+      const error = here.length
+        ? `${full}. In this chat:\n${waitList(here)}${others ? `\n${others} more in other chats.` : ""}\nCancel one with cancel_wait first.`
+        : `${full}, all in other chats. Ask the person to stop one in the chat it was made in.`;
+      return { state: "refused", status: 409, error };
     }
     if (this.waits.length >= WAIT_LIMITS.total) {
       return { state: "refused", status: 409, error: `This computer already keeps ${WAIT_LIMITS.total} waits, the most it holds. Ask the person which ones to stop.` };

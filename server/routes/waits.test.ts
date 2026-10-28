@@ -121,7 +121,7 @@ describe("the waits route", () => {
     const mine = { id: "w1", label: "the build", threadId: "thread-1", condition: { kind: "process_gone", process: "make" }, createdAt: 0, expiresAt: 0 } as WaitRecord;
     const elsewhere = { ...mine, id: "w9", label: "other chat", threadId: "thread-A" } as WaitRecord;
     waits.list.mockReturnValue([mine, elsewhere]);
-    expect(await call("POST", "/api/internal/waits/cancel", { id: "w9" })).toMatchObject({ status: 404, payload: { error: WAIT_MESSAGES.noWait } });
+    expect(await call("POST", "/api/internal/waits/cancel", { id: "w9" })).toMatchObject({ status: 404, payload: { error: "None of your waits in this chat has that id. Use list_waits." } });
     expect(waits.cancel).not.toHaveBeenCalled();
     waits.cancel.mockReturnValueOnce(mine);
     expect(await call("POST", "/api/internal/waits/cancel", { id: "w1" })).toMatchObject({ status: 200, payload: { text: "Stopped waiting for the build." } });
@@ -130,7 +130,7 @@ describe("the waits route", () => {
     expect(listed).toContain("w1 · the build");
     expect(listed).not.toContain("w9");
     expect(waits.list).toHaveBeenCalledWith("bot-1");
-    expect(await call("GET", "/api/internal/waits", undefined, { threadId: "thread-B" })).toMatchObject({ status: 200, payload: { text: WAIT_MESSAGES.none } });
+    expect(await call("GET", "/api/internal/waits", undefined, { threadId: "thread-B" })).toMatchObject({ status: 200, payload: { text: "You are not waiting for anything in this chat." } });
     expect(await call("POST", "/api/internal/waits/cancel", { id: "w1" }, { threadId: "thread-B" })).toMatchObject({ status: 404 });
     waits.list.mockReturnValue([]);
   });

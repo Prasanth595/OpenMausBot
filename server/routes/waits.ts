@@ -22,8 +22,8 @@ export const WAIT_MESSAGES = {
   otherComputer: "You work on another computer this turn (a Local VM or a cloud computer), and file and program waits look at the one OpenMausBot runs on. Use url_contains, url_missing or bot_idle.",
   noPeer: "No bot you can reach goes by that name. Use a name or id from list_bots.",
   self: "You cannot wait for yourself to finish.",
-  noWait: "None of your waits has that id. Use list_waits.",
-  none: "You are not waiting for anything.",
+  noWait: "None of your waits in this chat has that id. Use list_waits.",
+  none: "You are not waiting for anything in this chat.",
 } as const;
 
 export interface WaitRequest {

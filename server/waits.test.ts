@@ -43,8 +43,8 @@ function harness(options: Partial<WaitManagerOptions> = {}) {
     settleCard: vi.fn(),
     manager: undefined as unknown as WaitManager,
     reload: () => build(),
-    create(condition: NewWaitCondition, extra: { label?: string; followUp?: string; botId?: string; hours?: number } = {}) {
-      return h.manager.create({ botId: extra.botId ?? "bot-1", threadId: "t-1", label: extra.label ?? "the report is ready", condition, followUp: extra.followUp, hours: extra.hours });
+    create(condition: NewWaitCondition, extra: { label?: string; followUp?: string; botId?: string; threadId?: string; hours?: number } = {}) {
+      return h.manager.create({ botId: extra.botId ?? "bot-1", threadId: extra.threadId ?? "t-1", label: extra.label ?? "the report is ready", condition, followUp: extra.followUp, hours: extra.hours });
     },
     waitOf(id: string): WaitRecord {
       const found = JSON.parse(readFileSync(file, "utf8")).waits.find((w: WaitRecord) => w.id === id);
@@ -117,6 +117,19 @@ describe("WaitManager", () => {
     expect(h.manager.owners()).toHaveLength(9);
     const total = await h.create({ kind: "file_exists", path: "/h" }, { botId: "bot-99" });
     expect(total).toEqual({ state: "refused", status: 409, error: "This computer already keeps 50 waits, the most it holds. Ask the person which ones to stop." });
+  });
+
+  it("names only this chat's waits when the bot is full, and counts the others", async () => {
+    const h = harness();
+    for (let i = 0; i < 6; i++) await h.create({ kind: "file_exists", path: `/here${i}` }, { label: `here ${i}` });
+    for (let i = 0; i < 4; i++) await h.create({ kind: "file_exists", path: `/away${i}` }, { label: `away ${i}`, threadId: "t-2" });
+    const full = await h.create({ kind: "file_exists", path: "/more" }) as { error: string };
+    expect(full.error).toMatch(/^You already keep 10 waits, the most one bot may\. In this chat:\n- /);
+    expect(full.error).toContain("here 5");
+    expect(full.error).not.toContain("away");
+    expect(full.error).toMatch(/\n4 more in other chats\.\nCancel one with cancel_wait first\.$/);
+    const elsewhere = await h.create({ kind: "file_exists", path: "/more" }, { threadId: "t-3" });
+    expect(elsewhere).toEqual({ state: "refused", status: 409, error: "You already keep 10 waits, the most one bot may, all in other chats. Ask the person to stop one in the chat it was made in." });
   });
 
   it("refuses a page at a private address, and keeps checking a page that only failed to load", async () => {
