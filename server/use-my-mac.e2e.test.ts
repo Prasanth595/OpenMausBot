@@ -275,7 +275,7 @@ it("My Cloud offers the device link, and a fresh Mac signed in to it lends its i
   await expect.poll(() => mac.connector.cloudState(mac.env).link, { timeout: 8000 }).toBe("on");
   expect(mac.connector.cloudState(mac.env)).toMatchObject({ enabled: true, folders: [], screen: false, terminal: false, internet: true });
   const known = (await api("GET", "/api/shared-computers", { token: owner })).body.known;
-  expect(known).toEqual([expect.objectContaining({ online: true, lent: true, scopes: { folders: 0, terminal: false, screen: false, internet: true } })]);
+  expect(known).toEqual([expect.objectContaining({ online: true, lent: true, scopes: { folders: 0, terminal: false, screen: false, internet: true, chrome: false } })]);
 }, hostTimeout(30_000));
 
 posixOnly("a bot's browser on My Cloud reaches Instagram from the Mac's own connection: the website sees the Mac, not My Cloud", async () => {
@@ -410,7 +410,7 @@ it("the person's own Off survives a restart of the app: nothing is lent again, n
     ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => Promise<any>) => handlers.set(channel, handler) },
     localOnly: (_channel: string, handler: unknown) => handler, cloudPage: (_channel: string, handler: unknown) => handler,
     snapshot: async () => ({ available: true, screenAvailable: false, state: again.connector.cloudState(again.env) }),
-    environment: () => again.env, save: (target: typeof again.env, choice: never) => again.connector.saveCloud(target, choice), stop: () => again.connector.revoke(again.env),
+    environment: () => again.env, beginSave: (target: typeof again.env) => again.connector.beginCloudSave(target), save: (target: typeof again.env, choice: never, version: number) => again.connector.saveCloud(target, choice, version), stop: () => again.connector.revoke(again.env),
     chooseFolder: async () => null, defaults: () => usualFolders(["Desktop", "Documents", "Downloads"].map((name) => join(root, name)), validateSharedFolders), validate: validateSharedFolders,
   });
   expect(await useMyMac.lendByDefault({ projects: [root] })).toBeNull();
