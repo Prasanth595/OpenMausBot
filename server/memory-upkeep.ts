@@ -274,6 +274,8 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   const tidying = new Map<string, Promise<TidyReport>>();
   const dreaming = new Map<string, Promise<DreamReport>>();
   let timer: ReturnType<typeof setInterval> | null = null;
+  let first: ReturnType<typeof setTimeout> | null = null;
+  let generation = 0;
   let paused = false;
   // Flushed chats wait here, also through a backup; one worker drains it, one capture call at a time.
   const queue: Waiting[] = [];
@@ -841,14 +843,19 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
           log(`memory upkeep: could not queue turns saved at the last shutdown: ${(error as Error).message}`);
         }
       }
-      timer = setInterval(() => void tick(), TIDY_CHECK_MS);
+      const started = ++generation;
+      const scheduledTick = () => { if (started === generation) void tick(); };
+      timer = setInterval(scheduledTick, TIDY_CHECK_MS);
       timer.unref?.();
-      const first = setTimeout(() => void tick(), 60_000);
+      first = setTimeout(scheduledTick, 60_000);
       first.unref?.();
     },
     stop() {
+      generation++;
       if (timer) clearInterval(timer);
       timer = null;
+      if (first) clearTimeout(first);
+      first = null;
       const queued = queue.splice(0);
       for (const entry of queued) entry.done?.resolve({ at: now().getTime(), added: 0, topics: 0, aboutMe: 0, note: "kept for the next start" });
       const waiting = [...queued.map((entry) => entry.batch), ...buffer.drain()];
