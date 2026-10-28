@@ -481,7 +481,15 @@ async function shot(entry, name) {
   shots += 1;
   const file = `${String(shots).padStart(2, "0")}-${name}.png`;
   await current.page.waitForTimeout(400);
-  await current.page.screenshot({ path: join(OUT, file) });
+  // Zoomed in, Playwright clips the page's picture to its CSS size and cuts off its right side: take what the window
+  // shows from main instead.
+  const zoomed = await current.electronApp.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id)?.webContents.getZoomLevel() ?? 0, current.windowId);
+  if (zoomed) {
+    const png = await current.electronApp.evaluate(async ({ BrowserWindow }, id) => (await BrowserWindow.fromId(id).webContents.capturePage()).toPNG().toString("base64"), current.windowId);
+    writeFileSync(join(OUT, file), Buffer.from(png, "base64"));
+  } else {
+    await current.page.screenshot({ path: join(OUT, file) });
+  }
   entry.screenshots.push(file);
   return file;
 }
