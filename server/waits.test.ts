@@ -132,6 +132,18 @@ describe("WaitManager", () => {
     expect(elsewhere).toEqual({ state: "refused", status: 409, error: "You already keep 10 waits, the most one bot may, all in other chats. Ask the person to stop one in the chat it was made in." });
   });
 
+  it("refuses a program wait where this computer can't list its programs, and keeps one whose later listing fails", async () => {
+    const h = harness();
+    const processes = vi.fn(async (): Promise<ProcessEntry[]> => { throw new Error("spawn ps ENOENT"); });
+    h.manager = new WaitManager({ file: h.file, now: h.now, probes: { processes }, sourceAlive: () => true, botBusy: () => false, post: h.post, followUp: h.followUp, showCard: h.showCard, settleCard: h.settleCard });
+    expect(await h.create({ kind: "process_gone", process: "make" })).toEqual({ state: "refused", status: 400, error: "This computer can't list its programs, so I can't wait for one." });
+    expect(h.manager.owners()).toEqual([]);
+    processes.mockResolvedValueOnce([{ pid: 1, name: "make" }]);
+    expect(await h.create({ kind: "process_gone", process: "make" })).toMatchObject({ state: "created" });
+    h.advance(5_000); await h.manager.tick();
+    expect([h.posts, h.manager.list("bot-1").length]).toEqual([[], 1]);
+  });
+
   it("refuses a page at a private address, and keeps checking a page that only failed to load", async () => {
     const h = harness();
     const error = "x.test points at this computer or a private network, which waits never check.";

@@ -22,6 +22,7 @@ import {
 
 export const WAIT_LIMITS = { perBot: 10, total: 50 } as const;
 export const WAIT_TICK_MS = 5_000, URL_CHECK_MS = 60_000, URL_BACKOFF_MAX_MS = 15 * 60_000;
+export const NO_PROCESS_LIST = "This computer can't list its programs, so I can't wait for one.";
 
 export type NewWaitCondition =
   | { kind: "url_contains" | "url_missing"; url: string; text: string }
@@ -128,7 +129,7 @@ function cloneWait(wait: WaitRecord): WaitRecord {
   return structuredClone(wait);
 }
 
-type Verdict = { met: boolean; gone?: boolean; page?: { ok: true } | { ok: false; refused: boolean; error: string } };
+type Verdict = { met: boolean; gone?: boolean; unlisted?: boolean; page?: { ok: true } | { ok: false; refused: boolean; error: string } };
 
 export class WaitManager {
   private readonly file: string;
@@ -170,6 +171,7 @@ export class WaitManager {
     const condition = await this.startingCondition(input.condition);
     const verdict = await this.probe(condition, undefined);
     if (verdict.gone) return { state: "refused", status: 400, error: `${(condition as { botName: string }).botName} no longer exists.` };
+    if (verdict.unlisted) return { state: "refused", status: 400, error: NO_PROCESS_LIST };
     if (verdict.page && !verdict.page.ok && verdict.page.refused) return { state: "refused", status: 400, error: verdict.page.error };
     if (verdict.met) return { state: "already", text: `${describeCondition(condition)} already. Nothing was set up: tell the person now.` };
     const crowded = this.limitRefusal(input);
@@ -373,7 +375,7 @@ export class WaitManager {
           const running = processRunning(await (processes ?? (() => this.probes.processes()))(), condition.process);
           return { met: condition.kind === "process_running" ? running : !running };
         } catch {
-          return { met: false };
+          return { met: false, unlisted: true };
         }
       }
       case "bot_idle": {
