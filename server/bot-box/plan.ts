@@ -1,5 +1,4 @@
-// The bot box's plan: what one boxed process sees, as a list of mounts and the bubblewrap argv that makes it. Pure, so
-// tests can check the list itself (and that removing a line opens exactly the hole it guards).
+// The bot box's plan: what one boxed process sees, as a list of mounts and the bubblewrap argv that makes it.
 //
 // What the box sees:
 //   - the image's code read-only: /usr (with /bin, /lib, /lib64 and /sbin as the links a merged-/usr Debian has), /etc,
@@ -15,7 +14,8 @@
 //   - a network namespace with loopback only. Two loopback ports inside are bridged to unix sockets bound in from outside:
 //     the egress gate (every connection to the internet goes through it) and the harness gate (only /api/internal/
 //     routes of this server). Nothing else on the server's loopback is reachable.
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type BoxNet = "isolated" | "shared";
 
@@ -85,6 +85,15 @@ export const IN_BOX_SOCKET_DIR = "/run/omb";
 export const BOX_HOSTNAME = "omb-box";
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
 
+function physicalPath(path: string): string {
+  const full = resolve(path);
+  try { return realpathSync(full); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    const parent = dirname(full);
+    return parent === full ? full : join(physicalPath(parent), basename(full));
+  }
+}
+
 /** `child` is `parent` or below it. */
 export function under(child: string, parent: string): boolean {
   const rel = relative(parent, child);
@@ -93,7 +102,7 @@ export function under(child: string, parent: string): boolean {
 
 /** The bot and conversation of a task workspace (`<data>/task-workspaces/<bot>/<thread>`), or null. */
 export function taskWorkspaceIds(cwd: string, dataDir: string): { botId: string; threadId: string } | null {
-  const rel = relative(join(dataDir, "task-workspaces"), cwd).split(sep);
+  const rel = relative(join(physicalPath(dataDir), "task-workspaces"), physicalPath(cwd)).split(sep);
   if (rel.length < 2 || !ID.test(rel[0]!) || !ID.test(rel[1]!) || rel[0] === ".." ) return null;
   return { botId: rel[0]!, threadId: rel[1]! };
 }
@@ -116,7 +125,7 @@ const PRIVATE_INSIDE = ["/tmp", "/var/tmp", "/run", "/dev", "/proc"];
 
 export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   const mutate = setup.mutate ?? new Set<BoxMutation>();
-  const dataDir = resolve(setup.dataDir), home = resolve(setup.home);
+  const dataDir = physicalPath(setup.dataDir), home = resolve(setup.home);
   const net: BoxNet = mutate.has("share-net") ? "shared" : request.net ?? "isolated";
   const mounts: Mount[] = [
     { kind: "ro", source: "/usr", target: "/usr" },

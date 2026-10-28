@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
-import { closeSync, mkdirSync, openSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { BotBox } from "../bot-box/box.ts";
+import { bwrapArgs, planBox, type BoxRequest } from "../bot-box/plan.ts";
 
 const scenario = process.argv[2];
 const realData = "/var/lib/openmausbot";
@@ -21,6 +22,7 @@ const probe = (options: string[], script: string, seccomp?: string | null) => {
   } finally { if (fd !== null) closeSync(fd); }
 };
 const setup = { dataDir: realData, home, codeRoots: [], engineRoots: [], bridges: [] };
+const request: BoxRequest = { command: "/bin/sh", args: [], env: {}, net: "shared" };
 
 if (scenario === "browser") {
   const uploads = "/srv/browser-uploads";
@@ -35,4 +37,14 @@ if (scenario === "browser") {
     console.log(JSON.stringify(probe(browser.options,
       'for file in /var/lib/openmausbot/messages.db /home/fixture/private.txt; do if test -r "$file"; then echo exposed; else echo hidden; fi; done; cat /srv/browser-uploads/upload.txt', browser.seccomp)));
   } finally { await box.stop(); }
+} else if (scenario === "symlink") {
+  symlinkSync(realData, "/srv/omb");
+  const cwd = "/srv/omb/task-workspaces/bot-a/thread-1";
+  mkdirSync(cwd, { recursive: true });
+  writeFileSync(join(cwd, "task.txt"), "task fixture\n");
+  mkdirSync(join(realData, "workspaces", "bot-a"), { recursive: true });
+  writeFileSync(join(realData, "workspaces", "bot-a", "memory.txt"), "memory fixture\n");
+  const plan = planBox({ ...setup, dataDir: "/srv/omb" }, { ...request, cwd });
+  console.log(JSON.stringify({ botId: plan.botId, files: probe(bwrapArgs(plan),
+    'for file in /srv/omb/messages.db /var/lib/openmausbot/messages.db; do if test -r "$file"; then echo exposed; else echo hidden; fi; done; cat task.txt; cat /var/lib/openmausbot/workspaces/bot-a/memory.txt') }));
 } else throw new Error("Unknown mount fixture");

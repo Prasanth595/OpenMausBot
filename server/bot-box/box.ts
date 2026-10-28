@@ -88,8 +88,8 @@ export class BoxRunner {
     const request: BoxRequest = lent.length ? { ...given, rw: [...(given.rw ?? []), ...lent] } : given;
     const extraFds: number[] = [];
     const seccomp = this.options.seccompFile && !this.options.setup.mutate?.has("no-seccomp") ? this.options.seccompFile : null;
-    if (seccomp) extraFds.push(openSync(seccomp, "r"));
     const plan = planBox({ ...this.options.setup, seccompFd: seccomp ? BOX_SECCOMP_FD : undefined }, request);
+    if (seccomp) extraFds.push(openSync(seccomp, "r"));
     const mutate = this.options.setup.mutate;
     const env = mutate?.has("env-all")
       ? Object.fromEntries(Object.entries(request.env).filter((entry): entry is [string, string] => entry[1] !== undefined))

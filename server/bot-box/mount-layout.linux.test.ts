@@ -35,4 +35,8 @@ describe.skipIf(detection.box !== "bwrap")("synthetic filesystem layouts inside 
   it("keeps browser data hidden below /var/lib while restoring only its uploads", () => {
     expect(layout("browser")).toEqual(["hidden", "hidden", "upload fixture"]);
   });
+
+  it("hides data through its symlink and real path while preserving the turn's workspace", () => {
+    expect(layout("symlink")).toEqual({ botId: "bot-a", files: ["hidden", "hidden", "task fixture", "memory fixture"] });
+  });
 });
