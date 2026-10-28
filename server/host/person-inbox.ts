@@ -127,12 +127,15 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   const file = join(deps.dataDir, PERSON_INBOX_FILE);
   let { homes, items } = team ? loadPersonInboxState(deps.dataDir) : { homes: {}, items: [] };
   store.backfillPrivateTasks([...Object.values(homes), ...items]);
+  let savePending = false;
   const save = () => {
+    savePending = true;
     // Keep the durable classification evidence until the registry has saved the private flags.
     if (!store.privateTasksSaved) return;
     items = items.filter((item) => now() - item.at < KEEP_MS).slice(-MAX_ITEMS);
     try {
       writeFileAtomic(file, `${JSON.stringify({ version: 1, homes, items })}\n`, { mode: 0o600 });
+      savePending = false;
     } catch (error) {
       console.warn(`person inbox: could not save ${file}: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -349,7 +352,9 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   }
 
   const unsubscribe = team ? store.onChange((change: StoreChange) => {
-    if (change.type === "message.patch" && change.message.card?.requestId && !change.message.inbox) {
+    if (change.type === "private.tasks.saved") {
+      if (savePending) save();
+    } else if (change.type === "message.patch" && change.message.card?.requestId && !change.message.inbox) {
       const card = change.message.card;
       for (const item of items) {
         if (item.requestId !== card.requestId || item.origin?.threadId !== change.threadId) continue;

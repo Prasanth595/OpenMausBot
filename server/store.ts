@@ -42,6 +42,8 @@ import { initialGreetingMessage } from "./initial-greeting.ts"; import { createD
 import { appsFromCreator } from "./inherited-apps.ts";
 import { ThreadCache, type ThreadState } from "./thread-cache.ts";
 import { backfillPrivateTasks, persistedBots, persistedPin } from "./store-tasks.ts";
+import type { StoreChange } from "./store-change.ts";
+export type { StoreChange } from "./store-change.ts";
 export type {
   BotActivity, ConnectorCardData, GroupDefaultResponder, OptionCardData,
   SecretRequestCardData, Surface, TaskClosedBy, TaskOpenedBy, TaskUsage,
@@ -116,19 +118,6 @@ function mirrorActiveGroupTask(group: GroupRecord, task: GroupTaskRecord): void 
 }
 
 export const ACTIVITY_BUSY: ReadonlySet<BotActivity> = new Set(["working", "waiting-on-you", "no-signal"]);
-
-export type StoreChange =
-  | { type: "sections" }
-  | { type: "message"; threadId: string; message: Message }
-  | { type: "message.patch"; threadId: string; message: Message }
-  | { type: "thread"; threadId: string; activeLeafId: string }
-  | { type: "thread.deleted"; threadId: string }
-  | { type: "bot"; botId: string }
-  | { type: "bot.deleted"; botId: string }
-  /** The fleet was reordered as a whole; the broadcast carries every id in its new place. */
-  | { type: "bots.order" }
-  | { type: "group"; groupId: string }
-  | { type: "group.deleted"; groupId: string };
 
 export const UNTITLED_TASK = "New task";
 export const UNTITLED_THREAD = "New thread";
@@ -704,7 +693,9 @@ export class Store {
   private saveBots(bots: BotRecord[] = this.bots, registerSections = true) {
     if (registerSections) this.rememberSections([...this.bots, ...bots].map((bot) => bot.section));
     writeFileAtomicIfChanged(BOTS_FILE, persistedBots(bots), { mode: 0o600 });
+    if (!this.unsavedPrivateTasks) return;
     this.unsavedPrivateTasks = false;
+    this.emit({ type: "private.tasks.saved" });
   }
 
   private saveGroups(groups: GroupRecord[] = this.groups, registerSections = true) {

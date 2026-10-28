@@ -6,6 +6,7 @@ import type { Notification } from "../../shared/notification.ts";
 import * as atomic from "../atomic.ts";
 import { audienceIncludes, memberAudience } from "../audience.ts";
 import { DATA_DIR } from "../config.ts";
+import type { RequestAuth } from "../request-auth.ts";
 import { personKey } from "../person-key.ts";
 import { Store, type BotRecord } from "../store.ts";
 import { ThreadStarters } from "../thread-starters.ts";
@@ -135,6 +136,37 @@ describe("private message ownership", () => {
       for (const person of [ADA, BOB, CARL]) expect(again.sees(person.email, at.threadId)).toBe(false);
     }
     expect(JSON.parse(readFileSync(stateFile, "utf8")).items).toHaveLength(recovers ? 1 : f.destinations.length + 1);
+  });
+
+  it("flushes a deferred read when the following registry save succeeds and keeps it read after restart", () => {
+    const f = legacyFixture("items");
+    const stateFile = join(DATA_DIR, "person-inbox.json");
+    const state = JSON.parse(readFileSync(stateFile, "utf8"));
+    state.items.push({ id: "ada-waiting", person: key(ADA.email), botId: f.botId, threadId: f.origin, kind: "message", from: "Bob", text: "Update", at: Date.now() });
+    const before = JSON.stringify(state);
+    writeFileSync(stateFile, before);
+    let failSave = true;
+    const write = atomic.writeFileAtomicIfChanged;
+    vi.spyOn(atomic, "writeFileAtomicIfChanged").mockImplementation((file, ...args) => {
+      if (file === f.botsFile && failSave) throw new Error("synthetic registry save failure");
+      return write(file, ...args);
+    });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const restarted = f.open();
+    const auth = { kind: "session", session: { id: "ada", email: ADA.email } } as RequestAuth;
+    expect(restarted.team.needsYou(auth)).toHaveLength(1);
+    restarted.team.seen(auth, f.origin);
+    expect(() => restarted.store.patchTask(f.botId, f.origin, { unread: false })).toThrow();
+    expect(readFileSync(stateFile, "utf8")).toBe(before);
+    expect(restarted.store.privateTasksSaved).toBe(false);
+    failSave = false;
+    restarted.team.seen(auth, f.origin);
+    restarted.store.patchTask(f.botId, f.origin, { unread: false });
+    expect(JSON.parse(readFileSync(stateFile, "utf8")).items).toEqual([expect.objectContaining({ id: "ada-waiting", seen: true })]);
+    restarted.team.stop();
+    const again = f.open();
+    expect(again.team.needsYou(auth)).toEqual([]);
+    for (const at of f.destinations) expect(again.sees(BOB.email, at.threadId)).toBe(false);
   });
 
   it.each(["homes", "items"])("isolates an untouched ownerless legacy inbox from %s before engine-home migration", (records) => {
