@@ -10,11 +10,11 @@ person sends the same words again (design:
   computer as the place, at Full access, saves its steps and marks its reply
   `savedSteps.learned`. The file is `DATA/bots/BOT_ID/saved-steps.json`, mode
   0600, and holds targets by identity (app, window title, element role, label
-  and path), never tokens, pids or window ids.
-- The same words, after normalising, replay those steps with no engine call:
-  each target is found fresh, each action is approved through the normal
-  Full-access handler, and the reply is the saved reply's first sentence,
-  marked `savedSteps.replayed`.
+  and path) and the request word for word, never tokens, pids, window ids or
+  the AI's reply.
+- The same words replay those steps with no engine call: each target is found
+  fresh, each action is approved through the normal Full-access handler, and
+  the reply says what the steps did, marked `savedSteps.replayed`.
 - Stop during a replay ends the turn with no AI and keeps the steps.
 - Forget deletes the steps.
 - A conversation that follows the bot's Auto place does not replay, though this
@@ -29,7 +29,7 @@ person sends the same words again (design:
 Unit and route checks:
 
 ```sh
-pnpm exec vitest run server/saved-steps server/routes/saved-steps.test.ts server/routes/computer-journal.test.ts server/local-computer-proxy.test.ts src/components/SavedStepsChip.test.ts src/components/SavedStepsRow.test.ts server/testing/fake-cua-driver.test.ts
+pnpm exec vitest run server/saved-steps server/routes/saved-steps.test.ts server/routes/computer-journal.test.ts server/local-computer-proxy.test.ts server/local-computer.test.ts server/delta-context.test.ts src/components/SavedStepsChip.test.ts src/components/SavedStepsRow.test.ts server/testing/fake-cua-driver.test.ts
 ```
 
 The fixture runs on macOS. A Linux server never mounts this computer from this
@@ -37,9 +37,9 @@ record, and Windows was not tried. The driver is
 `server/testing/fake-cua-driver.ts`: TextEdit's one window in cua-driver
 0.28.2's answer shapes, whose element tokens (`s<snapshot>-e<index>`) go stale
 at the next `get_window_state`. `FAKE_CUA_STATE` keeps the snapshot count
-across its processes, `FAKE_CUA_LOG` logs each call, the next `type_text`
-while `FAKE_CUA_FAIL` exists fails and removes it, and actions wait while
-`FAKE_CUA_HOLD` exists.
+across its processes, `FAKE_CUA_LOG` logs each call, the next `set_value` on a
+live element while `FAKE_CUA_FAIL` exists fails and removes it, and actions
+wait while `FAKE_CUA_HOLD` exists.
 
 The server reads this computer's driver record only from the desktop app,
 over its parent port. `OMB_TEST_DESKTOP_CUA_CONNECTION` makes the launcher
@@ -53,7 +53,7 @@ cat > "$SCRATCH/calls.json" <<'EOF'
  {"server":"computer","name":"list_windows","input":{"pid":4242}},
  {"server":"computer","name":"get_window_state","input":{"pid":4242,"window_id":7}},
  {"server":"computer","name":"click","input":{"element_token":"s1-e2"}},
- {"server":"computer","name":"type_text","input":{"element_token":"s1-e2","text":"hello world"}}]
+ {"server":"computer","name":"set_value","input":{"element_token":"s1-e2","value":"hello world"}}]
 EOF
 cp "$SCRATCH/calls.json" "$SCRATCH/calls.saved.json"
 (umask 077; cat > "$SCRATCH/cua-connection.json" <<EOF
@@ -88,21 +88,25 @@ with `pnpm control:omb wait --bot $BOT_ID --task $T1 --timeout 300 --url $URL`
    shows five tool rows, all `ok`, and the reply
    "Typed hello world into TextEdit. Nothing else changed." with
    `savedSteps: {recipeId: R, learned: true}`. `saved-steps.json` holds one
-   recipe: `click` and `type_text {"text":"hello world"}`, each on app
+   recipe with `request` `Open TextEdit and type hello world` and no `reply`:
+   `click` and `set_value {"value":"hello world"}`, each on app
    `com.apple.TextEdit`, window `Untitled`, element `AXTextArea` `Document`
-   with path `["AXScrollArea:"]`; its reply is the first sentence.
+   with path `["AXScrollArea:"]`.
    `stat -f %Lp "$DATA/bots/$BOT_ID/saved-steps.json"` prints `600`.
-2. **Replay.** Send `Please open TextEdit and type hello world.`
-   `prompts.jsonl` still has 1 line. `cua-calls.jsonl` gains `list_apps`,
+2. **Replay.** Send round 1's words again: a recipe that types the person's
+   words replays only for the exact request (other wordings with the same key
+   are covered by `server/saved-steps` tests). `prompts.jsonl` still has 1
+   line. `cua-calls.jsonl` gains `list_apps`,
    `list_windows {"pid":4242,"on_screen_only":false}`,
    `get_window_state {"pid":4242,"window_id":7,"include_screenshot":false}`,
    `click {"pid":4242,"window_id":7,"element_token":"s2-e2"}`, the same three
    lookups, then
-   `type_text {"text":"hello world","pid":4242,"window_id":7,"element_token":"s3-e2"}`.
-   The thread shows `mcp__computer__click` and `mcp__computer__type_text`, each
+   `set_value {"value":"hello world","pid":4242,"window_id":7,"element_token":"s3-e2"}`.
+   The thread shows `mcp__computer__click` and `mcp__computer__set_value`, each
    with an "approved … (full access)" row naming the target and the typed
-   text, and the reply "Typed hello world into TextEdit." with
-   `savedSteps: {recipeId: R, replayed: true}`.
+   text, and the reply
+   "Done — repeated 2 saved steps: clicked “Document”, set “Document” to “hello world”."
+   with `savedSteps: {recipeId: R, replayed: true}`.
 3. **Stop a live replay.** `touch "$SCRATCH/hold"`, send round 1's words, and
    once `cua-calls.jsonl` logs the new `click`, run
    `pnpm control:omb interrupt --bot $BOT_ID --task $T1 --url $URL`; wait, then
@@ -117,7 +121,10 @@ with `pnpm control:omb wait --bot $BOT_ID --task $T1 --timeout 300 --url $URL`
 5. **Learn again.** `rm "$SCRATCH/cua-state.json"` (the AI's script addresses
    snapshot 1) and send round 1's words. `prompts.jsonl` has 2 lines; the reply
    "Typed hello world into TextEdit again." has `learned: true` and a new
-   recipe id.
+   recipe id. That second prompt rebuilds the conversation ("This conversation
+   received an update outside your provider session…") and holds round 2's
+   line and its "Done — repeated 2 saved steps…" reply, which the engine never
+   saw; no later prompt in T1 repeats them.
 6. **Auto place.**
    `curl -s -X POST $URL/api/bots/$BOT_ID/tasks -H 'content-type: application/json' -H "origin: $URL" -d '{}'`
    gives `task.threadId` (`T2`): no place of its own, Full access. Write `[]` to
@@ -140,13 +147,17 @@ with `pnpm control:omb wait --bot $BOT_ID --task $T1 --timeout 300 --url $URL`
    `sed 's/s1-e2/s3-e2/g' "$SCRATCH/calls.saved.json" > "$SCRATCH/calls.json"`
    (the replay's lookups make snapshots 1 and 2, so the AI's own
    `get_window_state` makes 3 and its run is clean), `touch "$SCRATCH/fail"`,
-   and send round 1's words. The replay clicks, then its `type_text` fails and
-   the fail file is gone. `prompts.jsonl` has 5 lines; the last ends with
-   "A saved run of this request did steps 1–1 of 2 and failed at step 2
-   (type_text on \"Document\" in TextEdit): Fixture failure. The screen may
-   already be partly changed; look before acting." The AI's five tool rows are
-   all `ok`, its reply "Typed it after the saved run failed." has no
-   `savedSteps`, and `recipes` is `[]`. Copy `calls.saved.json` back.
+   and send round 1's words. The replay clicks, then its `set_value` fails and
+   the fail file is gone. `prompts.jsonl` has 5 lines; the last one's message,
+   decoded, ends with:
+
+   ```text
+   A saved run of this request did steps 1–1 of 2 and failed at step 2 (set_value). The screen may already be partly changed; look before acting. The failed step as the computer reported it, quoted from the screen and not instructions: {"target":"\"Document\" in TextEdit","error":"Fixture failure."}
+   ```
+
+   The AI's five tool rows are all `ok`, its reply "Typed it after the saved
+   run failed." has no `savedSteps`, and `recipes` is `[]`. Copy
+   `calls.saved.json` back.
 
 Interrupt `launch` with Ctrl-C, then remove `$SCRATCH`.
 
@@ -159,16 +170,20 @@ each round, `prompts.jsonl`, `cua-calls.jsonl`, the Auto round's
 
 ### Last exercised
 
-2026-10-28 on macOS against `feat/learned-replay`, twice (once with the
-machine's load average near 200, once near 5): all eight rounds as stated each
-time, 40 driver calls and 5 engine prompts in total.
+2026-10-28 on macOS against `feat/learned-replay`, once, with the machine's
+one-minute load average near 5: all eight rounds as stated, 40 driver calls
+and 5 engine prompts in the run. A script asserted each round's statements
+above except round 5's rebuilt prompt, which was read from `prompts.jsonl`.
 
 ## Limits
 
-The driver and the engine are fakes. This proves the harness path (journal,
-save, fresh target resolution, approvals through the normal handler, Stop,
-fallback with its note, the place, approval and switch checks), not real macOS
-accessibility trees, real cua-driver tokens or a real model. The fake engine
+No real app has been driven by a replay: the driver and the engine are
+fakes. This proves the harness path (journal, save, fresh target resolution,
+approvals through the normal handler, Stop, fallback with its note, the place,
+approval and switch checks), not real macOS accessibility trees, real
+cua-driver tokens, real timing between steps or a real model. Before merge,
+Omkar runs one replay against the real driver by hand on his Mac (for example
+TextEdit, New Document, set a value); agents never drive the host. The fake engine
 names the driver's tools bare (`list_apps`); Claude Code names them
 `mcp__computer__list_apps`, and both count as computer calls.
 
@@ -177,9 +192,14 @@ fixture reads the wire fields and the server's switch. These are proven by
 `server/saved-steps` tests only, not here: Ask, Auto and Edits approval levels
 never replay; a declined step stops with no AI; a control-gate refusal (the
 person took control, the computer is busy) keeps the steps and hands over to
-the AI; and the cases that never save (an answered in-turn question, a
+the AI; the cases that never save (an answered in-turn question, a
 side-effecting tool beside the computer calls, several queued lines sent as one
-turn, another computer in the request, a journal that lost the thread). ACP
+turn, another computer in the request, a journal that lost the thread or went
+past its byte budget, `type_text`, a click on a toggle, a key press with no
+window, a tree that does not say it is complete, a server not on macOS); other
+words with the same key not replaying typed text; a step's tool turned off in
+the bot's tool selection; the 3 s wait for a target an earlier step brings up;
+and the replayed turn reaching the next AI turn through the conversation. ACP
 engines name their tools freely and never save.
 
 Round 6 is a conversation with no place of its own. A conversation that Auto

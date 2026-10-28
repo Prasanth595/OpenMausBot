@@ -22,7 +22,7 @@
 - cua-driver's MCP wire uses snake_case (`element_index`, `element_token`, `parent_index`, `window_id`, `window_title`, `app_name`, `bundle_id`); `node_modules/@trycua/cua-driver/dist/native/cua_driver_contract.d.ts` (`WindowElement` ~1379, `WindowStateOutput` ~1404, `AppInfo` ~90, `WindowInfo` ~935) gives the same fields in camelCase. The contract types no `launch_app` output: read its `pid`, `bundle_id`, `name` defensively.
 - Element values (`value`, `valueDescription`), frames, screenshots and all `content` never leave the bridge.
 - Recipe file: `DATA_DIR/bots/<botId>/saved-steps.json`, mode `0o600`, written with `writeFileAtomic` (`server/atomic.ts`); at most 200 recipes per bot; a recipe unused for 60 days is dropped.
-- 1 to 40 action steps per recipe; a replayed step's call times out after 30 000 ms.
+- 1 to 40 action steps per recipe; a replayed step's call times out after 60 000 ms (past the control gate's 45 s hold).
 - Replay runs only when the turn's `approvalMode === "full"`, the setting is on, the turn is a direct text-only person turn and `integrations.localComputer.scope === "local-computer"`.
 - Approval per replayed action: `request.opened` with `tool: "mcp__computer__<name>"`, `approvalScope: "local-computer"`, `allowSession: false`.
 - Key normalising: NFKC, lowercase, punctuation and symbols to spaces, filler phrases dropped as whole words (`please`, `can you`, `could you`, `hey`, `just`, `now`, `quickly`), spaces collapsed. Moment words: `this`, `that`, `it`, `here`, `there`, `these`, `those`, `them`.
@@ -547,7 +547,7 @@ git commit -m "feat(saved-steps): resolve a saved step's target on the live scre
 **Interfaces:**
 - Consumes: `ComputerCaller`, `CallOutcome`, `resolveStep` (Task 6); `Recipe`, `stepLabel` (Task 4); `ChatMcpClient` (`call(method, params, signal, timeout)`, `tools(signal)`, `close()`); `RuntimeEvent`, `newId` (`server/contracts.ts`).
 - Produces (computer-client.ts):
-  - `const STEP_TIMEOUT_MS = 30_000`
+  - `const STEP_TIMEOUT_MS = 60_000`
   - `type LocalComputerSpec = { command: string; args: string[]; env: Record<string, string> }`
   - `openComputerCaller(computer: LocalComputerSpec, signal: AbortSignal): Promise<ComputerCaller & { close(): Promise<void> }>`
   - `callOutcome(result: unknown): CallOutcome`
