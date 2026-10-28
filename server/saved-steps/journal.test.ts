@@ -152,11 +152,12 @@ describe("computer journal", () => {
     expect(hostScope({ ...scope, kind: "browser" })).toBeNull();
   });
 
-  it("counts gate checks only for host computer turns", () => {
+  it("counts gate checks only for host computer turns, and taints a turn that gates another computer", () => {
     const saved = createSavedSteps({ enabled: () => true, publish: () => {}, engines: { get: () => undefined, set: () => {} }, stopped: () => false, generation: () => "g1", patchMessage: () => {} });
-    saved.gateChecked({ ...scope, kind: "computer", boxId: null });
     saved.gateChecked({ ...scope, kind: "browser" });
     expect(saved.journal.take("t1", new Set(["g1"]))).toBeNull();
+    saved.gateChecked({ ...scope, kind: "computer", boxId: null });
+    expect(saved.journal.take("t1", new Set(["g1"]))).toEqual({ calls: [], complete: true, tainted: true });
     saved.gateChecked({ ...scope, kind: "computer" });
     saved.journal.record(scope, CLICK);
     expect(saved.journal.take("t1", new Set(["g1"]))!.complete).toBe(true);

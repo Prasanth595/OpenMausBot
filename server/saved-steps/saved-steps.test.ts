@@ -249,11 +249,13 @@ describe("SavedSteps.requestSettled", () => {
   const toolLine = (name: string, at: number): Message => ({ id: `tool-${at}`, at, role: "bot", kind: "activity", tool: { name, ok: true, itemId: `item-${at}` } });
   const COMPUTER_LINES = [toolLine("mcp__computer__get_window_state", 10), toolLine("mcp__computer__click", 11), toolLine("mcp__computer__type_text", 12)];
 
-  it.each(["Read", "Glob", "Grep", "LS", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch"])("saves a computer run that also used %s", (tool) => {
+  it.each(["Read", "Glob", "Grep", "LS", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch", "mcp__agents__select_computer", "select_computer", "web_search"])(
+    "saves a computer run that also used %s", (tool) => {
     record(textEditJournal().calls);
     steps.requestSettled(settled({ after: [toolLine(tool, 9), ...COMPUTER_LINES, REPLY] }));
     expect(saved()?.steps).toHaveLength(2);
-  });
+  },
+  );
 
   it("saves a select_computer hand-off whose second turn did the computer work", () => {
     record(textEditJournal().calls.map((call) => ({ ...call, generation: "g2" })));
@@ -261,10 +263,33 @@ describe("SavedSteps.requestSettled", () => {
     expect(saved()?.steps).toHaveLength(2);
   });
 
-  it("saves a run whose engine names the computer's tools without their server prefix", () => {
+  it.each([
+    ["without their server prefix", ""],
+    ["with a single-underscore server prefix", "computer_"],
+  ])("saves a run whose engine names the computer's tools %s", (_, prefix) => {
     record(textEditJournal().calls);
-    const bare = ["list_apps", "list_windows", "get_window_state", "click", "type_text"].map((name, index) => toolLine(name, 20 + index));
-    steps.requestSettled(settled({ after: [...bare, REPLY] }));
+    const named = ["list_apps", "list_windows", "get_window_state", "click", "type_text"].map((name, index) => toolLine(`${prefix}${name}`, 20 + index));
+    steps.requestSettled(settled({ after: [...named, REPLY] }));
+    expect(saved()?.steps).toHaveLength(2);
+  });
+
+  it.each([
+    ["Local VM", { localVmTarget: { kind: "vm" } }],
+    ["Cloud Boat", { boxId: "bx_1" }],
+    ["Cloud Boat not created yet", { boxId: null }],
+    ["team computer", { teamComputerId: "tc_1" }],
+  ])("saves nothing when the request also used a %s", (_, place) => {
+    steps.gateChecked({ botId: "b1", threadId: "t1", generation: "g1", kind: "computer", ...place });
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
+    expect(saved()).toBeUndefined();
+    expect(patches).toEqual([]);
+  });
+
+  it("a browser call leaves the request saveable", () => {
+    steps.gateChecked({ botId: "b1", threadId: "t1", generation: "g1", kind: "browser" });
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
     expect(saved()?.steps).toHaveLength(2);
   });
 
@@ -275,7 +300,8 @@ describe("SavedSteps.requestSettled", () => {
     expect(saved()?.steps).toHaveLength(2);
   });
 
-  it.each(["Bash", "Write", "Edit", "NotebookEdit", "mcp__gmail__send_email", "mcp__browser__navigate", "mcp__agents__use_tool", "Task", "apply_patch", "edit", "rm -rf ~/Desktop/notes"])(
+  it.each(["Bash", "Write", "Edit", "NotebookEdit", "mcp__gmail__send_email", "mcp__browser__navigate", "mcp__agents__use_tool", "Task", "apply_patch", "edit", "rm -rf ~/Desktop/notes",
+    "computer_x_click", "computer_computer_click", "computer_exec", "computer_click_2"])(
     "saves nothing when the run also used %s",
     (tool) => {
       record(textEditJournal().calls);

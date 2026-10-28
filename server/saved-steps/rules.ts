@@ -73,11 +73,13 @@ export function personTextRequest(message: Message): boolean {
 }
 
 const HARMLESS_TOOLS: ReadonlySet<string> = new Set([
-  "Read", "Glob", "Grep", "LS", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch", "mcp__agents__select_computer",
+  "Read", "Glob", "Grep", "LS", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch", "mcp__agents__select_computer", "select_computer", "web_search",
 ]);
 const COMPUTER_TOOL_PREFIX = "mcp__computer__";
 
-const computerTool = (name: string): boolean => name.startsWith(COMPUTER_TOOL_PREFIX) || isActionTool(name) || OBSERVATION_TOOLS.has(name);
+const driverTool = (name: string): boolean => isActionTool(name) || OBSERVATION_TOOLS.has(name);
+const computerTool = (name: string): boolean =>
+  name.startsWith(COMPUTER_TOOL_PREFIX) || driverTool(name) || (name.startsWith("computer_") && driverTool(name.slice("computer_".length)));
 
 export function otherToolsHarmless(lines: readonly Message[]): boolean {
   return lines.every(({ tool }) => tool?.itemId === undefined || computerTool(tool.name) || HARMLESS_TOOLS.has(tool.name));

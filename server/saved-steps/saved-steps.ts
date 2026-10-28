@@ -94,6 +94,7 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
     gateChecked(capability) {
       const scope = hostScope(capability);
       if (scope) journal.gateChecked(scope);
+      else if (capability.kind === "computer") journal.taint({ threadId: capability.threadId, generation: capability.generation });
     },
     journalRoutes: (internal) => createComputerJournalRoutes({ ...internal, record: (scope, entry) => journal.record(scope, entry) }),
     requestSettled(settled) {
