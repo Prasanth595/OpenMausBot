@@ -39,15 +39,20 @@ include`, an `origin` header, no background header, no token of its own) and
 never to this computer's frozen server; no verified origin asks nothing; an
 ended session signs the window in again once, a failed sign-in says so; an
 asleep My Cloud is woken at the press through the Admin (`openSleepingCloud`),
-two presses share one wake, a "going to sleep" answer wakes it and tries once
-more, a wake that fails or passes 45 s says so and asks nothing; the message
-goes once after hello (a 401 repeat keeps its send id); a server that refuses
+two presses share one wake, My Cloud's own asleep answer to a read wakes it
+and reads once more (no other failure is retried, and the chat's creation is
+never repeated), a wake that fails or passes 45 s says so and asks nothing;
+home moving during a re-sign-in asks nothing more; the message goes once after
+hello (a 401 repeat keeps its send id); the reply's 120 s start at the send,
+and words never sent say so; a server that refuses
 `select` makes the chat without it; "Waking My Cloud…" shows after the words
 are let go and presses are ignored meanwhile; an ask stays with the server that
 found its chat when home changes; the box link keeps its escaped ids; the
 Settings bridge and its channels reach My Cloud's own page only while it is
-home at the verified origin, never a team's or another server's page. The e2e
-test asks a real server over a cookie redeemed from a one-time code: answered,
+home at the verified origin and from a frame with that real origin (an opaque
+origin is refused), never a team's or another server's page, and on that page
+only turning it off goes without a click. The e2e test asks a real server over
+a cookie redeemed from a one-time owner code: answered,
 Quick asks not opened, another origin refused, an ended session renewed once,
 one that can't be renewed says sign in.
 They do not prove Electron's cookie jar, a real My Cloud behind its proxy, its
@@ -164,8 +169,11 @@ Quick asks chat the open one there once).
     Cloud. Try again in a moment."
 21. **Session ended.** Sign this app out on My Cloud's page only (its own
     sign-out), then press: the window's session there is renewed by itself and
-    the ask goes through. With the MausBot Cloud sign-in also ended: "Sign in to
-    My Cloud again, then try again."
+    the ask goes through. "Sign in to My Cloud again, then try again." shows only
+    when that renewal fails while this app is still signed in to MausBot Cloud
+    (the Admin refuses or can't give a new code); signing out of MausBot Cloud
+    instead makes home need a sign-in and lets the key go (step 15). The
+    automated tests cover the failed renewal; there is no by-hand step for it.
 22. **Settings row.** On My Cloud's page, Settings → General shows "Talk to
     MausBot from any app"; turning it off frees the key and this app's own
     Settings shows it off too. On a team's Cloud page and on another own

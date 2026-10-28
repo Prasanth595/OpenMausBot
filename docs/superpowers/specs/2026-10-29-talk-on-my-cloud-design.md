@@ -60,8 +60,12 @@ Cloud awake while MausBot answers. No new credential, token or scope is introduc
   `openSleepingCloud` (`electron/cloud-power.mjs:86`) with the Admin's `wakeHome()` and `setWaking()`, exactly as the
   window opens a sleeping My Cloud (`electron/home-window.mjs:404`). Its check is My Cloud answering at all
   (`GET /api/auth/session`); a signed-out session is the next request's 401, which signs in again.
-- A request answered "asleep" (503 with `x-omb-cloud-power: asleep`) holds the gate and the preparation wakes My Cloud
-  and tries once more. Only reads and the chat's creation are tried again; a 503 means neither happened.
+- My Cloud's own "asleep" answer (503 with `x-omb-cloud-power: asleep`) holds the gate. Only such an answer to a read
+  (the bot listing) makes the preparation wake My Cloud and read once more: the error carries that marker, and the
+  gate's state when something failed never does. The chat's creation is never repeated after a failure (a timeout may
+  have made it). Today My Cloud sends that answer only on Files' and shared computers' long polls
+  (`server/routes/cloud-sync.ts:73`, `:78`; `shared-computers.ts:69`, `:71`), so for talk this is a guard, and the wake
+  at the press is what matters.
 - The wake has 45 s; past that, or when My Cloud never answered, the box says "My Cloud didn't wake up. Try again in a
   moment." and nothing was sent.
 - A woken My Cloud releases the gate's hold (`power.woke()`), as opening it in the window does.
@@ -69,9 +73,14 @@ Cloud awake while MausBot answers. No new credential, token or scope is introduc
   until My Cloud answers, then "Sending to MausBot…", "MausBot is thinking…" and the reply as before. A press during
   "Waking My Cloud…" is ignored like any ask under way, and it counts as busy for the quiet update.
 
-Nothing is sent twice: the message goes once, after the event stream says hello, with its send id. The only repeat of
-a POST is after a 401, which the server refused before reading it, and the server also drops a second message with the
-same send id (`server/send-idempotency.ts`).
+Nothing is sent or made twice: the message goes once, after the event stream says hello, with its send id. The only
+repeat of a POST is after a 401, which the server refused before reading it, and the server also drops a second message
+with the same send id (`server/send-idempotency.ts`). After signing in again, home must still be My Cloud at the same
+origin, or nothing more is asked.
+
+The reply's 120 s ("Still working · Open chat") start when the words are sent, not when the key is let go, so a wake
+does not use them up. If nothing was sent 120 s after letting go, the box says "That didn't reach MausBot. Try again
+in a moment." and the words are dropped.
 
 `select: false` on the chat's creation: My Cloud may run a server from before it. Such a server ignores the field (the
 handler before `646d48da8` read only `title`, `projectId`, `approvalMode` and `cwd`), so the chat is made and becomes
@@ -85,6 +94,7 @@ MausBot's open chat there once. A server that refused the field with a 400 gets 
 | `cloud-waking` (asleep or waking when a request failed) | My Cloud is still waking. Try again in a moment. |
 | `wake-failed` (the wake failed or passed 45 s) | My Cloud didn't wake up. Try again in a moment. |
 | `cloud-signin` (401, and signing in again failed) | Sign in to My Cloud again, then try again. |
+| nothing sent 120 s after letting go | That didn't reach MausBot. Try again in a moment. |
 | `no-mausbot`, `refused`, `lost`, timeouts | as on this Mac |
 
 This Mac's "moved" notice (a press while the move froze this Mac but before home became My Cloud) now reads "MausBot
@@ -100,9 +110,15 @@ only: **My Cloud's own page while it is home**. Two checks, both in main:
   `talk-shortcut:state`/`talk-shortcut:set` handlers allow a sender that is this app's page (`localOnly`), or My
   Cloud's page by `cloudPageAsking(event) === "cloud"` (`electron/main.mjs:2625` →
   `cloudPageSenderAllowed`, `electron/cloud-home.mjs:317`: the main window's main frame, at the Admin-verified origin,
-  open as the active server) **and** home is My Cloud at that same origin.
+  open as the active server) **and** home is My Cloud at that same origin **and** the sending frame's own origin
+  (`senderFrame.origin`) is that origin. The shared check compares the frame's URL, which a page with an opaque origin
+  (a sandboxed file served by My Cloud) also passes; talk adds the frame's real origin without changing the shared
+  check.
 - A team's Cloud, another Cloud of the person's own, a subframe, another window or an arbitrary server page fails the
   first check; My Cloud's page before the move made it home fails the second.
+
+On My Cloud's page, turning the shortcut on or changing its key needs the person's click
+(`navigator.userActivation`), as Open at login does; turning it off does not.
 
 Why this is safe enough: My Cloud is the person's own server, already trusted with everything the shortcut sends it;
 the two channels only read and switch the shortcut and its key preset, never speech, files or a credential. `HOME_PAGE`
@@ -116,13 +132,16 @@ no row.
 - Teams, other own Clouds, a sign-in-needed home, remote clients, Windows/Linux, no Apple speech.
 - Speech, composer dictation and calls on My Cloud's page: the microphone channels stay `localOnly`.
 - The Quick asks chat moved from this Mac is not looked up on My Cloud by title; My Cloud gets its own on first use.
+- Talk's re-sign-in at My Cloud reuses `signInCloudSession`, whose session label is fixed to "OpenMausBot app
+  (lending)" (`electron/cloud-home.mjs:236`). A talk label would need a new parameter there; left as is.
 - Development builds (`pnpm dev:desktop`) never have My Cloud as home, so the cloud path is packaged-only.
 
 ## Testing
 
 - `electron/talk-cloud.node-test.mjs`: the window-session request (origin header, include, no background header),
   401 → sign in again → once more, a failed sign-in, an asleep answer holding the gate, the wake (waking said, Admin
-  wake, check, gate released), a failed and a slow wake, an asleep answer mid-prepare → wake → one retry, two
+  wake, check, gate released), a failed and a slow wake, an asleep answer to a read → wake → one retry, a failure
+  while the gate says asleep (no retry, the create never repeated), home moving during a re-sign-in, two
   prepares → one wake, no verified origin.
 - `electron/talk-server.node-test.mjs`: a request's own TalkServerError passes through; the 400 `select` fallback.
 - `server/talk-cloud.e2e.test.ts`: a real server standing in for My Cloud, asked over a cookie redeemed from a

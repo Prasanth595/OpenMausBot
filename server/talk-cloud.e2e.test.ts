@@ -1,6 +1,6 @@
-// A real server standing in for My Cloud, asked the way the talk shortcut asks My Cloud: over a browser sign-in's
-// cookie that the app window holds (redeemed from a one-time code with `cookie: true`), never a token, with the
-// server's own same-origin rules for such a session.
+// A real server standing in for My Cloud, asked the way the talk shortcut asks My Cloud: over the cookie the app window
+// holds there, redeemed with `cookie: true` from a one-time owner pairing code (not a browser sign-in), never a token,
+// under the server's own same-origin rule for a cookie.
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import { createCloudPowerGate } from "../electron/cloud-power.mjs";
