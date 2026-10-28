@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { completeWindowState, windowState } from "../testing/saved-steps-fixtures.ts";
 import type { WireElement } from "./driver-wire.ts";
 import type { RecipeStep } from "./rules.ts";
-import { matchApp, matchElement, matchWindow, resolveStep, type CallOutcome, type ComputerCaller } from "./resolve.ts";
+import { matchApp, matchElement, matchWindow, POLL_MS, resolveStep, resolveStepSoon, RETRY_MS, type CallOutcome, type ComputerCaller, type Patience } from "./resolve.ts";
 
 const TEXTEDIT = { bundleId: "com.apple.TextEdit", name: "TextEdit" };
 const DOCUMENT = { role: "AXTextArea", label: "Document", path: ["AXScrollArea:"] };
@@ -109,7 +109,7 @@ describe("resolveStep", () => {
   });
 
   it("fails a renamed element with words a person can read", async () => {
-    expect(await resolveStep(CLICK_DOCUMENT, caller(renamed), signal)).toEqual({ ok: false, error: 'no "Document" (AXTextArea) in Untitled' });
+    expect(await resolveStep(CLICK_DOCUMENT, caller(renamed), signal)).toEqual({ ok: false, error: 'no "Document" (AXTextArea) in Untitled', missing: true });
   });
 
   it("fails on two elements with the same role, label and path", async () => {
@@ -123,7 +123,7 @@ describe("resolveStep", () => {
     ["the app has no window", windows()],
     ["only another app has a window with the saved title", windows({ ...UNTITLED, pid: 1 })],
   ])("fails without looking inside when %s", async (_case, listed) => {
-    expect(await resolveStep(CLICK_DOCUMENT, caller(state(), { list_windows: listed }), signal)).toEqual({ ok: false, error: 'no window titled "Untitled"' });
+    expect(await resolveStep(CLICK_DOCUMENT, caller(state(), { list_windows: listed }), signal)).toEqual({ ok: false, error: 'no window titled "Untitled"', missing: true });
     expect(tools()).toEqual(["list_apps", "list_windows"]);
   });
 
@@ -138,7 +138,7 @@ describe("resolveStep", () => {
     ["list_apps lists the app as not running", apps({ ...TEXTEDIT_APP, running: false })],
     ["list_apps lists the app without a process", apps({ ...TEXTEDIT_APP, pid: 0 })],
   ])("fails when %s", async (_case, listed) => {
-    expect(await resolveStep(CLICK_DOCUMENT, caller(state(), { list_apps: listed }), signal)).toEqual({ ok: false, error: "TextEdit is not running" });
+    expect(await resolveStep(CLICK_DOCUMENT, caller(state(), { list_apps: listed }), signal)).toEqual({ ok: false, error: "TextEdit is not running", missing: true });
     expect(tools()).toEqual(["list_apps"]);
   });
 
@@ -170,7 +170,7 @@ describe("resolveStep", () => {
 
   it("refuses a key step whose window was renamed rather than send it to another window", async () => {
     const close: RecipeStep = { tool: "hotkey", args: { keys: ["cmd", "w"] }, app: TEXTEDIT, window: { title: "Invoice.pdf" } };
-    expect(await resolveStep(close, caller(), signal)).toEqual({ ok: false, error: 'no window titled "Invoice.pdf"' });
+    expect(await resolveStep(close, caller(), signal)).toEqual({ ok: false, error: 'no window titled "Invoice.pdf"', missing: true });
   });
 
   it("refuses a key step saved without its window", async () => {
@@ -270,4 +270,65 @@ describe("matchElement", () => {
     ["one unreadable entry beside a match", [...ELEMENTS, { element_index: 5, role: "AXButton", label: 3, depth: 1 }]],
     ["a repeated element index", [...ELEMENTS, ELEMENTS[1]]],
   ])("reads nothing from %s", (_case, list) => expect(matchElement(list, DOCUMENT)).toEqual({ ok: false, reason: "none" }));
+});
+
+describe("resolveStepSoon", () => {
+  let clock: number;
+  let slept: number[];
+  const patience: Patience = { now: () => clock, sleep: async (ms) => { slept.push(ms); clock += ms; } };
+  beforeEach(() => {
+    clock = 0;
+    slept = [];
+  });
+
+  function appearing(after: number, lookup: Lookup, early: CallOutcome): ComputerCaller {
+    const real = caller();
+    let seen = 0;
+    return { async call(tool, args, callSignal) {
+      calls.push([tool, args]);
+      if (tool === lookup && seen++ < after) return early;
+      return real.call(tool, args, callSignal);
+    } };
+  }
+
+  it.each<[string, Lookup, CallOutcome]>([
+    ["an app that is still starting", "list_apps", apps(NOTES_INSTALLED)],
+    ["a window that is still opening", "list_windows", windows()],
+    ["an element that is still being drawn", "get_window_state", ok(renamed)],
+  ])("waits for %s", async (_case, lookup, early) => {
+    expect(await resolveStepSoon(CLICK_DOCUMENT, appearing(2, lookup, early), signal, patience)).toEqual({ ok: true, args: { pid: 4242, window_id: 7, element_token: "s2-e2" } });
+    expect(slept).toEqual([POLL_MS, POLL_MS]);
+  });
+
+  it("gives up once the wait is over", async () => {
+    const quit = caller(state(), { list_apps: apps(NOTES_INSTALLED) });
+    expect(await resolveStepSoon(CLICK_DOCUMENT, quit, signal, patience)).toEqual({ ok: false, error: "TextEdit is not running", missing: true });
+    expect(slept.reduce((sum, ms) => sum + ms, 0)).toBe(RETRY_MS);
+    expect(tools()).toHaveLength(RETRY_MS / POLL_MS + 1);
+  });
+
+  it.each<[string, Partial<Record<Lookup, CallOutcome>>, object]>([
+    ["two apps match", { list_apps: apps(TEXTEDIT_APP, { ...TEXTEDIT_APP, pid: 4343 }) }, state()],
+    ["two windows match", { list_windows: windows(UNTITLED, { ...UNTITLED, window_id: 8 }) }, state()],
+    ["two elements match", {}, state([...ELEMENTS, { ...ELEMENTS[2]!, element_index: 4, element_token: "s2-e4" }])],
+    ["the tree is cut", {}, state(ELEMENTS, { elements_complete: false })],
+    ["a lookup fails", { list_apps: { ok: false, error: "the driver crashed" } }, state()],
+  ])("never waits when %s", async (_case, answers, tree) => {
+    expect((await resolveStepSoon(CLICK_DOCUMENT, caller(tree, answers), signal, patience)).ok).toBe(false);
+    expect(slept).toEqual([]);
+  });
+
+  it("stops waiting when the replay is stopped", async () => {
+    const controller = new AbortController();
+    const stopping: Patience = { now: () => clock, sleep: async () => { controller.abort(); } };
+    const quit = caller(state(), { list_apps: apps(NOTES_INSTALLED) });
+    expect(await resolveStepSoon(CLICK_DOCUMENT, quit, controller.signal, stopping)).toMatchObject({ ok: false, missing: true });
+    expect(tools()).toEqual(["list_apps", "list_apps"]);
+  });
+
+  it("waits in real time when given no clock", async () => {
+    const started = Date.now();
+    expect(await resolveStepSoon(CLICK_DOCUMENT, appearing(1, "list_apps", apps(NOTES_INSTALLED)), signal)).toMatchObject({ ok: true });
+    expect(Date.now() - started).toBeGreaterThanOrEqual(POLL_MS - 5);
+  });
 });

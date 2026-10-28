@@ -47,7 +47,11 @@ beforeEach(() => {
   acted = [];
   asked = [];
   events = [];
-  deps = { caller: computer(), approval: approveAll, publish: (event) => events.push(event), signal: new AbortController().signal };
+  let clock = 0;
+  deps = {
+    caller: computer(), approval: approveAll, publish: (event) => events.push(event), signal: new AbortController().signal,
+    patience: { now: () => clock, sleep: async (ms) => { clock += ms; } },
+  };
 });
 
 describe("runSteps", () => {
@@ -117,6 +121,13 @@ describe("runSteps", () => {
     expect(asked).toEqual([]);
     expect(acted).toEqual([]);
     expect(events).toEqual([]);
+  });
+
+  it("waits for a target an earlier step brings up", async () => {
+    let lookups = 0;
+    const opening = computer((tool) => (tool === "list_windows" && lookups++ < 3 ? { ok: true, structured: { windows: [] } } : undefined));
+    expect(await runSteps(RECIPE, TURN, { ...deps, caller: opening })).toEqual({ kind: "done" });
+    expect(acted.map(([tool]) => tool)).toEqual(["click", "set_value"]);
   });
 
   it("stops when the signal aborts during an approval", async () => {

@@ -1,5 +1,5 @@
 import { newId, type RuntimeEvent } from "../contracts.ts";
-import { resolveStep, type CallOutcome, type ComputerCaller } from "./resolve.ts";
+import { resolveStepSoon, type CallOutcome, type ComputerCaller, type Patience } from "./resolve.ts";
 import { stepLabel, type Recipe, type RecipeStep } from "./rules.ts";
 
 export interface ReplayTurn { threadId: string; turnId: string; provider: string; providerInstanceId: string }
@@ -34,9 +34,9 @@ function approvalSummary(step: RecipeStep, label: string): string {
 export async function runSteps(
   recipe: Recipe,
   turn: ReplayTurn,
-  deps: { caller: ComputerCaller; approval: StepApproval; publish(event: RuntimeEvent): void; signal: AbortSignal },
+  deps: { caller: ComputerCaller; approval: StepApproval; publish(event: RuntimeEvent): void; signal: AbortSignal; patience?: Patience },
 ): Promise<ReplayOutcome> {
-  const { caller, approval, publish, signal } = deps;
+  const { caller, approval, publish, signal, patience } = deps;
   const total = recipe.steps.length;
   const base = (itemId: string) => ({
     eventId: newId(), createdAt: new Date().toISOString(), itemId,
@@ -47,7 +47,7 @@ export async function runSteps(
     const label = stepLabel(step);
     const failed = ({ error, gate }: Extract<CallOutcome, { ok: false }>): ReplayOutcome =>
       (signal.aborted ? STOPPED : { kind: "failed", done, total, tool: step.tool, label, error, ...(gate ? { gate } : {}) });
-    const target = await resolveStep(step, caller, signal);
+    const target = await resolveStepSoon(step, caller, signal, patience);
     if (!target.ok) return failed(target);
     const tool = engineToolName(step.tool);
     const summary = stepSummary(step.tool, label);

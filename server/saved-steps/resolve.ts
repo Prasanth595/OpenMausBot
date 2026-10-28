@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { elementPath, type WireElement } from "./driver-wire.ts";
 import { KEY_TOOLS, type AppIdentity, type ElementIdentity, type RecipeStep } from "./rules.ts";
 
@@ -5,7 +6,8 @@ import { KEY_TOOLS, type AppIdentity, type ElementIdentity, type RecipeStep } fr
 export type CallOutcome = { ok: true; structured: Record<string, unknown> } | { ok: false; error: string; gate?: true };
 export interface ComputerCaller { call(tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<CallOutcome> }
 export type Match<T> = { ok: true; value: T } | { ok: false; reason: "none" | "ambiguous" };
-type Resolved = { ok: true; args: Record<string, unknown> } | Extract<CallOutcome, { ok: false }>;
+type Resolved = { ok: true; args: Record<string, unknown> } | (Extract<CallOutcome, { ok: false }> & { missing?: true });
+export interface Patience { now(): number; sleep(ms: number, signal: AbortSignal): Promise<void> }
 
 type Kind = "string" | "number" | "boolean";
 interface Shape { required: Record<string, Kind>; optional: Record<string, Kind>; id?: string }
@@ -106,6 +108,20 @@ const treeDegraded = (state: Record<string, unknown>) => state.degraded === true
 
 const appName = (app: AppIdentity) => app.name || app.bundleId || "the app";
 const fail = (error: string): Resolved => ({ ok: false, error });
+const missing = (error: string): Resolved => ({ ok: false, error, missing: true });
+
+export const RETRY_MS = 3_000;
+export const POLL_MS = 250;
+const REAL_TIME: Patience = { now: Date.now, sleep: (ms, signal) => delay(ms, undefined, { signal }).catch(() => {}) };
+
+export async function resolveStepSoon(step: RecipeStep, caller: ComputerCaller, signal: AbortSignal, patience: Patience = REAL_TIME): Promise<Resolved> {
+  const deadline = patience.now() + RETRY_MS;
+  for (;;) {
+    const target = await resolveStep(step, caller, signal);
+    if (target.ok || !target.missing || signal.aborted || patience.now() + POLL_MS > deadline) return target;
+    await patience.sleep(POLL_MS, signal);
+  }
+}
 
 export async function resolveStep(step: RecipeStep, caller: ComputerCaller, signal: AbortSignal): Promise<Resolved> {
   const { app, window, element } = step;
@@ -117,14 +133,14 @@ export async function resolveStep(step: RecipeStep, caller: ComputerCaller, sign
   const apps = await caller.call("list_apps", {}, signal);
   if (!apps.ok) return apps;
   const pid = matchApp(apps.structured.apps, app);
-  if (!pid.ok) return fail(pid.reason === "none" ? `${name} is not running` : `more than one ${name} app is running`);
+  if (!pid.ok) return pid.reason === "none" ? missing(`${name} is not running`) : fail(`more than one ${name} app is running`);
   const args: Record<string, unknown> = { ...step.args, pid: pid.value };
   if (!window) return { ok: true, args };
 
   const windows = await caller.call("list_windows", { pid: pid.value, on_screen_only: false }, signal);
   if (!windows.ok) return windows;
   const windowId = matchWindow(windows.structured.windows, pid.value, window);
-  if (!windowId.ok) return fail(`${windowId.reason === "none" ? "no window" : "more than one window"} titled "${window.title}"`);
+  if (!windowId.ok) return windowId.reason === "none" ? missing(`no window titled "${window.title}"`) : fail(`more than one window titled "${window.title}"`);
   args.window_id = windowId.value;
   if (!element) return { ok: true, args };
 
@@ -137,7 +153,7 @@ export async function resolveStep(step: RecipeStep, caller: ComputerCaller, sign
   const found = matchElement(tree.elements, element);
   if (!found.ok) {
     const target = `"${element.label}" (${element.role}) in ${window.title}`;
-    return fail(found.reason === "none" ? `no ${target}` : `more than one ${target}`);
+    return found.reason === "none" ? missing(`no ${target}`) : fail(`more than one ${target}`);
   }
   const { element_token: token, element_index: index } = found.value;
   return { ok: true, args: token === undefined ? { ...args, element_index: index } : { ...args, element_token: token } };
