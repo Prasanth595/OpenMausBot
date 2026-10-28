@@ -382,6 +382,25 @@ describe("the model picker in Simple mode", () => {
     expect(String(advanced.props.title)).toContain("High effort");
   });
 
+  it("puts the header chip on an opaque surface, so scrolled transcript text cannot read through it", () => {
+    const classes = () => String(render(bot()).nodes.find((node) => node.props["data-tour"] === "model")!.props.className);
+    expect(classes().split(" ")).toEqual(expect.arrayContaining(["bg-composer", "ring-[0.5px]", "shadow-(--shadow-float)"]));
+    expect(classes()).not.toMatch(/hover:bg-ink|aria-expanded:bg-ink/);
+    fixture.advanced = true;
+    try {
+      expect(classes().split(" ")).toEqual(expect.arrayContaining(["bg-composer", "shadow-(--shadow-float)"]));
+      expect(classes()).not.toMatch(/hover:bg-ink|aria-expanded:bg-ink/);
+    } finally {
+      fixture.advanced = false;
+    }
+  });
+
+  it("leaves a contained picker on its settings row unchanged, with no floating surface", () => {
+    const chip = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
+    expect(String(chip.props.className)).not.toContain("bg-composer");
+    expect(String(chip.props.className)).not.toContain("shadow-(--shadow-float)");
+  });
+
   it("lets the contained trigger shrink inside the bot panel's Model row, and the loose one keep its size", () => {
     const contained = render(bot(), { contained: true }).nodes.find((node) => node.props["data-tour"] === "model")!;
     expect(String(contained.props.className)).toContain("min-w-0 max-w-[58%]");
@@ -494,6 +513,24 @@ describe("the model picker in Simple mode", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
       type: "setModel", botId: "scout", threadId: "thread-scout", updateBotDefault: true,
       selection: expect.objectContaining({ model: "claude-haiku-4-5-20251001" }),
+    }));
+  });
+
+  it("lets a contained Antigravity picker return a named variant to the session setting", () => {
+    const variants = [{ id: "low", label: "Low" }, { id: "high", label: "High" }];
+    fixture.instances = [{ ...engine("antigravity", "antigravityAgent", "Google Gemini", "subscription", [
+      { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash", variants },
+    ]), capabilities: { modelVariants: true } }];
+    const forBot = { ...bot(undefined, "antigravity", "gemini-3.8-flash"), modelSelection: {
+      instanceId: "antigravity", model: "gemini-3.8-flash", variant: "high",
+    } };
+    const opened = open(forBot, { contained: true });
+    const simple = pane(opened)!;
+    expect(opened.html).toContain("Use session setting");
+    expect((simple.props as { onResetVariant?: () => void }).onResetVariant).toBeTypeOf("function");
+    (simple.props as { onResetVariant: () => void }).onResetVariant();
+    expect(fixture.dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "setModel", selection: { instanceId: "antigravity", model: "gemini-3.8-flash" },
     }));
   });
 
