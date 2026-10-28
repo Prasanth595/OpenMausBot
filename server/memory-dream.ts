@@ -35,8 +35,11 @@ export interface DreamConversation {
 export interface DreamSource {
   tasks(botId: string): readonly { threadId: string; title?: string; askedAt?: number; routineRunId?: string }[];
   activePath(threadId: string): readonly {
+    id?: string;
     role: string;
     kind: string;
+    requestMessageId?: string;
+    automation?: unknown;
     text?: string;
     sender?: ResolvedSender;
     peerAsk?: unknown;
@@ -66,11 +69,18 @@ export function dreamConversations(source: DreamSource, botId: string, since: nu
   for (const task of threads) {
     const lines: DreamLine[] = [];
     let size = 0;
-    const path = source.activePath(task.threadId);
+    const excludedRequests = new Set<string>();
+    const path = source.activePath(task.threadId).filter((message) => {
+      if (message.automation || (message.role === "user" && (!isOwner(message.sender) || message.peerAsk || message.aside || message.webhookPost || message.relayed || message.via === "api"))) {
+        if (message.id) excludedRequests.add(message.id);
+        return false;
+      }
+      return true;
+    });
     for (let i = path.length - 1; i >= 0; i--) {
       const message = path[i]!;
       if (message.kind !== "text" || !message.text?.trim()) continue;
-      if (message.role === "user" && (!isOwner(message.sender) || message.peerAsk || message.aside || message.webhookPost || message.relayed || message.via === "api")) continue;
+      if (message.role === "bot" && message.requestMessageId && excludedRequests.has(message.requestMessageId)) continue;
       if (message.role !== "user" && message.role !== "bot") continue;
       const line: DreamLine = message.role === "user"
         ? { by: "person", text: clean(message.text, LINE_CHARS) }
