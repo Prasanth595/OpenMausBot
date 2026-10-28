@@ -270,8 +270,11 @@ suite("S4 pages, tabs and page state on real Chrome", () => {
     await open(`<div id="box" style="margin:40px;width:200px;height:100px;background:red"></div><div style="height:3000px"></div>`);
     expect(await read("[innerWidth, innerHeight]")).toEqual([1280, 720]);
     const viewport = await page.screenshot();
-    expect(pngSize(viewport.data)).toEqual({ width: 1280, height: 720 });
-    expect(viewport).toMatchObject({ scale: 1, region: { width: 1280, height: 720 } });
+    // The viewport's width: 1280 where scrollbars overlay the page (macOS), less a 15-16 px classic scrollbar elsewhere.
+    expect(viewport).toMatchObject({ scale: 1, region: { height: 720 }, width: viewport.region.width, height: 720 });
+    expect(viewport.region.width).toBeGreaterThanOrEqual(1_260);
+    expect(viewport.region.width).toBeLessThanOrEqual(1_280);
+    expect(pngSize(viewport.data)).toEqual({ width: viewport.region.width, height: 720 });
     const element = await page.screenshot({ target: { selector: "#box" } });
     expect(pngSize(element.data)).toEqual({ width: 200, height: 100 });
     const full = await page.screenshot({ fullPage: true });

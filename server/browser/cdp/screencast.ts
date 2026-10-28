@@ -120,7 +120,10 @@ interface LayoutMetrics {
   cssContentSize: { width: number; height: number };
 }
 
-/** One picture pixel per CSS pixel within PICTURE_LIMITS; a capture at a smaller scale repaints, so callers pause a live screencast first. */
+/**
+ * One picture pixel per CSS pixel within PICTURE_LIMITS, of the region it names: the viewport without a classic
+ * scrollbar, the whole page, or a clip. The capture is always clipped and so repaints: callers pause a live screencast first.
+ */
 export async function captureScreenshot(session: CdpSession, devicePixelRatio: number, options: ScreenshotOptions = {}): Promise<Screenshot> {
   const format = options.format ?? "png";
   const metrics = await session.send<LayoutMetrics>("Page.getLayoutMetrics");
@@ -130,13 +133,11 @@ export async function captureScreenshot(session: CdpSession, devicePixelRatio: n
       ? { x: 0, y: 0, width: Math.ceil(metrics.cssContentSize.width), height: Math.min(Math.ceil(metrics.cssContentSize.height), 16_384) }
       : { x: viewport.pageX, y: viewport.pageY, width: viewport.clientWidth, height: viewport.clientHeight });
   const scale = pictureScale(region);
-  // Chrome draws a clip at its scale times the device pixel ratio (measured on 156).
-  const clipScale = scale / devicePixelRatio;
-  const needsClip = options.clip !== undefined || options.fullPage === true || clipScale !== 1;
   const { data } = await session.send<{ data: string }>("Page.captureScreenshot", {
     format,
     ...(format === "jpeg" ? { quality: Math.min(100, Math.max(1, Math.round(options.quality ?? 80))) } : {}),
-    ...(needsClip ? { clip: { ...region, scale: clipScale } } : {}),
+    // Chrome draws a clip at its scale times the device pixel ratio (measured on 156).
+    clip: { ...region, scale: scale / devicePixelRatio },
     ...(options.fullPage ? { captureBeyondViewport: true } : {}),
   });
   return {
