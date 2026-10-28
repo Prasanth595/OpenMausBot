@@ -12,9 +12,11 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
   const showThreads = useShowThreads();
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef(0);
-  const hitsRevision = useRef(navigationRevision.current);
   const [query, setQuery] = useState("");
-  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [result, setResult] = useState<{ hits: SearchHit[]; request: number; revision: number }>({
+    hits: [], request: 0, revision: navigationRevision.current,
+  });
+  const { hits } = result;
   const [index, setIndex] = useState(0);
   const [loading, setLoading] = useState(false);
 
@@ -28,7 +30,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
     const request = ++requestRef.current;
     const revision = navigationRevision.current;
     if (!trimmed) {
-      setHits([]);
+      setResult({ hits: [], request, revision });
       setIndex(0);
       setLoading(false);
       return;
@@ -38,13 +40,12 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
       void api(`/api/search?q=${encodeURIComponent(trimmed)}&limit=100&threadId=${encodeURIComponent(threadId)}`)
         .then((body) => {
           if (request !== requestRef.current) return;
-          hitsRevision.current = revision;
-          setHits(Array.isArray(body?.hits) ? body.hits : []);
+          setResult({ hits: Array.isArray(body?.hits) ? body.hits : [], request, revision });
           setIndex(0);
         })
         .catch((error) => {
           if (request !== requestRef.current) return;
-          setHits([]);
+          setResult({ hits: [], request, revision });
           dispatch({ type: "error", message: error instanceof Error ? error.message : t("chat.find.failed") });
         })
         .finally(() => {
@@ -68,9 +69,9 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
   };
 
   useEffect(() => {
-    if (hits[0] && navigationRevision.current === hitsRevision.current) land(0);
+    if (hits[0] && result.request === requestRef.current && navigationRevision.current === result.revision) land(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hits]);
+  }, [result]);
 
   return (
     <div className="w-full px-5 pb-2">

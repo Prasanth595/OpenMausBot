@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { createElement, type Dispatch } from "react";
+import { act, createElement, type Dispatch } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -162,6 +162,46 @@ describe("search-hit navigation replies", () => {
     await answer(findPath, { hits: [hit] });
     expect(shownBot().threadId).toBe("one");
     expect(seen.focusMessage).toMatchObject({ threadId: "one", messageId: "second" });
+  });
+
+  it("automatically lands the newer query when earlier Find hits are queued for rendering", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    try {
+      const queued = Promise.withResolvers<void>();
+      const firstHits = [hit];
+      const response = new Response();
+      vi.spyOn(response, "json").mockResolvedValue({ get hits() { queued.resolve(); return firstHits; } });
+      let revisionBeforeRender = -1;
+      await act(async () => {
+        typeFind("first");
+        vi.advanceTimersByTime(180);
+        const request = held.splice(held.findIndex((candidate) => candidate.path === findPath), 1)[0]!;
+        expect(request.path).toBe(findPath);
+        request.resolve(response);
+        await queued.promise;
+        expect(seen.focusMessage).toBeNull();
+
+        const input = host.querySelector("input")!;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "second");
+        flushSync(() => input.dispatchEvent(new Event("input", { bubbles: true })));
+        revisionBeforeRender = navigationRevision.current;
+      });
+      const revisionAfterRender = navigationRevision.current;
+      await act(async () => {
+        vi.advanceTimersByTime(180);
+        const path = "/api/search?q=second&limit=100&threadId=one";
+        const request = held.splice(held.findIndex((candidate) => candidate.path === path), 1)[0]!;
+        expect(request.path).toBe(path);
+        request.resolve(new Response(JSON.stringify({ hits: [{ ...hit, messageId: "second" }] })));
+      });
+
+      expect(seen.focusMessage).toMatchObject({ threadId: "one", messageId: "second" });
+      expect(revisionBeforeRender).toBe(0);
+      expect(revisionAfterRender).toBe(0);
+    } finally {
+      vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", false);
+    }
   });
 
   it("automatically lands a new Find query typed after a manual switch", async () => {
