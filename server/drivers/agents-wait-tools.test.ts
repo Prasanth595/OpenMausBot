@@ -41,4 +41,12 @@ describe("wait tools", () => {
     expect(JSON.stringify(WAIT_TOOL_DEFINITIONS)).not.toMatch(/"then"|with then|give then/);
     expect(waitUntil.description).toContain("with follow_up, you also carry out follow_up here");
   });
+
+  it("asks for a noun-phrase label, says checks pause while My Cloud sleeps, and that only this chat's waits are listed", () => {
+    const [waitUntil, list] = WAIT_TOOL_DEFINITIONS;
+    const properties = (waitUntil!.inputSchema as unknown as { properties: Record<string, { description?: string }> }).properties;
+    expect(properties.label!.description).toBe('A noun phrase in the person\'s words, e.g. "the build".');
+    expect(waitUntil!.description).toContain("On My Cloud, checks pause while it sleeps.");
+    expect(list!.description).toMatch(/^Your waits in this chat that have not ended/);
+  });
 });
