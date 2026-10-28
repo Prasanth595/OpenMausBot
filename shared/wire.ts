@@ -12,7 +12,7 @@ import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
-import type { WebhookRequestCardData } from "./webhook-request.ts";
+import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardData } from "./wait-request.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
@@ -653,14 +653,6 @@ export function nextOpenThread<T extends OpenThreadCandidate>(tasks: readonly T[
   const open = own.filter((task) => task.archivedAt === undefined);
   const listed = open.filter((task) => task.pinned === true || !(task.closedBy || task.openedBy || isSnoozed(task, now)));
   return [listed, open, own].map((candidates) => orderedThreadList(candidates)[0]).find((task) => task !== undefined);
-}
-
-/** A wait with a follow-up a bot set up from chat; Cancel stops it until it settles. */
-export interface WaitCardData {
-  waitId: string;
-  label: string;
-  followUp: string;
-  settled?: "fired" | "expired" | "cancelled";
 }
 
 export interface OptionCardData {
