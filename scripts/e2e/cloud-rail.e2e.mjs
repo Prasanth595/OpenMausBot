@@ -693,6 +693,24 @@ async function main() {
     check(entry, "back on this computer's page", new URL(page.url()).origin === localOrigin, page.url());
   });
 
+  await scenario("advanced", "Advanced mode: beside the rail, the sidebar's switcher steps aside", async (entry) => {
+    const { page } = current;
+    await backToThisComputer();
+    // What Settings → Advanced mode writes, then the page as it comes up in that mode.
+    await page.evaluate(() => localStorage.setItem("omb-advanced-mode", "1"));
+    await page.reload();
+    await waitForApp(page, "this computer's page in Advanced mode");
+    await page.locator("[data-places-rail]").waitFor({ state: "visible", timeout: 15_000 });
+    const aside = await switcherBesideRail();
+    check(entry, "the switcher is kept beside the rail, not drawn on a wide window", aside.kept > 0 && aside.drawn === 0, aside);
+    const rail = await railOnScreen();
+    check(entry, "the same three circles, This computer marked", rail.circles.map((circle) => circle.id).join() === ["local", ids.a, ids.b].join() && rail.circles[0]?.active === true, rail.circles.map(({ id, active }) => ({ id, active })));
+    await shot(entry, "rail-advanced");
+    await page.evaluate(() => localStorage.setItem("omb-advanced-mode", "0"));
+    await page.reload();
+    await waitForApp(page, "this computer's page in Simple mode");
+  });
+
   await scenario("add-own-server", "＋ → Add your own server shows its steps", async (entry) => {
     const { page } = current;
     await backToThisComputer();
