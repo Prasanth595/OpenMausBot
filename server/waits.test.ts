@@ -30,6 +30,7 @@ function harness(options: Partial<WaitManagerOptions> = {}) {
     pageInFlight: 0,
     pageMaxInFlight: 0,
     pageDelayMs: 0,
+    pageGate: null as Promise<void> | null,
     busy: new Map<string, boolean>(),
     alive: true,
     postOk: true,
@@ -67,6 +68,7 @@ function harness(options: Partial<WaitManagerOptions> = {}) {
           h.pageMaxInFlight = Math.max(h.pageMaxInFlight, h.pageInFlight);
           try {
             if (h.pageDelayMs) await new Promise((resolve) => setTimeout(resolve, h.pageDelayMs));
+            if (h.pageGate) await h.pageGate;
             return h.page;
           } finally { h.pageInFlight--; }
         },
@@ -272,6 +274,23 @@ describe("WaitManager", () => {
     expect(h.pageMaxInFlight).toBe(1);
     h.pageDelayMs = 0; await h.manager.tick();
     expect(h.pageCalls).toBe(2);
+  });
+
+  it("reads a slow page outside the ticking window, and posts nothing it found once stopped until started again", async () => {
+    const h = harness();
+    h.page = { ok: true, text: "building" };
+    await h.create({ kind: "url_contains", url: "https://x.test/", text: "shipped" }, { label: "the page" });
+    let open!: () => void;
+    h.pageGate = new Promise((resolve) => { open = resolve; });
+    h.page = { ok: true, text: "shipped" }; h.advance(60_000);
+    const ticking = h.manager.tick();
+    await vi.waitFor(() => expect(h.pageInFlight).toBe(1), { interval: 1 });
+    expect(h.manager.isTicking).toBe(false);
+    h.manager.stop(); open(); await ticking;
+    expect([h.posts, h.manager.list("bot-1").length]).toEqual([[], 1]);
+    h.pageGate = null; h.manager.start();
+    await vi.waitFor(() => expect(h.posts).toEqual([{ status: "fired", text: "the page: done. https://x.test/ now says “shipped”." }]), { interval: 1 });
+    h.manager.stop();
   });
 
   it("waits for another bot to start and then finish, even a turn shorter than a tick", async () => {

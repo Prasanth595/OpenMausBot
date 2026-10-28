@@ -138,6 +138,8 @@ export class WaitManager {
   private readonly options: WaitManagerOptions;
   private waits: WaitRecord[] = [];
   private timer: ReturnType<typeof setInterval> | null = null;
+  private running = false;
+  private stopped = false;
   private ticking = false;
   private pageTail: Promise<unknown> = Promise.resolve();
   private pagesQueued = 0;
@@ -264,9 +266,11 @@ export class WaitManager {
     });
   }
 
+  /** True while a tick decides and posts; its checks, a slow page among them, run before that. */
   get isTicking(): boolean { return this.ticking; }
 
   start(): void {
+    this.stopped = false;
     if (this.timer) return;
     this.runTick();
     this.timer = setInterval(() => this.runTick(), WAIT_TICK_MS);
@@ -278,13 +282,14 @@ export class WaitManager {
   }
 
   stop(): void {
+    this.stopped = true;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }
 
   async tick(): Promise<void> {
-    if (this.ticking) return;
-    this.ticking = true;
+    if (this.running) return;
+    this.running = true;
     try {
       const alive = this.waits.filter((w) => this.options.sourceAlive(w.botId, w.threadId));
       if (alive.length !== this.waits.length) {
@@ -304,7 +309,15 @@ export class WaitManager {
         chain(),
         ...due.filter((w) => !isPage(w.condition)).map(async (w) => { verdicts.set(w, await this.probe(w.condition, readProcesses)); }),
       ]);
+      if (!this.stopped) this.settle(now, verdicts);
+    } finally {
+      this.running = false;
+    }
+  }
 
+  private settle(now: number, verdicts: ReadonlyMap<WaitRecord, Verdict>): void {
+    this.ticking = true;
+    try {
       let decided = false;
       for (const wait of this.waits.slice()) {
         if (wait.ending) continue;
