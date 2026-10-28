@@ -1,5 +1,5 @@
 import { elementPath, type WireElement } from "./driver-wire.ts";
-import type { AppIdentity, ElementIdentity, RecipeStep } from "./rules.ts";
+import { KEY_TOOLS, type AppIdentity, type ElementIdentity, type RecipeStep } from "./rules.ts";
 
 /** `gate`: the computer's control gate refused the call (a person holds it, another turn has it): the step was not tried. */
 export type CallOutcome = { ok: true; structured: Record<string, unknown> } | { ok: false; error: string; gate?: true };
@@ -111,7 +111,7 @@ export async function resolveStep(step: RecipeStep, caller: ComputerCaller, sign
   const { app, window, element } = step;
   if (step.tool === "launch_app") return { ok: true, args: step.args };
   if (!app) return fail("the saved step does not name its app");
-  if (element && !window) return fail("the saved step does not name its window");
+  if ((element || KEY_TOOLS.has(step.tool)) && !window) return fail("the saved step does not name its window");
   const name = appName(app);
 
   const apps = await caller.call("list_apps", {}, signal);

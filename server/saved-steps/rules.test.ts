@@ -127,13 +127,22 @@ describe("buildRecipe", () => {
     expect(build(withCall(action("set_value", { element_token: "s1-e2", value: text })))).toEqual({ ok: false, reason: "typed-text-not-in-request" });
   });
 
-  it("keeps app and window targets for bring_to_front and pid hotkeys", () => {
+  it("keeps app and window targets for bring_to_front and window hotkeys", () => {
     const out = build(withCall(action("bring_to_front", { pid: 4242, window_id: 7 })));
     if (!out.ok) throw new Error(out.reason);
     expect(out.recipe.steps.at(-1)).toEqual({ tool: "bring_to_front", args: {}, app: { bundleId: "com.apple.TextEdit", name: "TextEdit" }, window: { title: "Untitled" } });
-    const hotkey = build(withCall(action("hotkey", { keys: ["cmd", "s"], pid: 4242 })));
-    expect(hotkey.ok && hotkey.recipe.steps.at(-1)).toEqual({ tool: "hotkey", args: { keys: ["cmd", "s"] }, app: { bundleId: "com.apple.TextEdit", name: "TextEdit" } });
+    const hotkey = build(withCall(action("hotkey", { keys: ["cmd", "s"], pid: 4242, window_id: 7 })));
+    expect(hotkey.ok && hotkey.recipe.steps.at(-1)).toEqual({
+      tool: "hotkey", args: { keys: ["cmd", "s"] }, app: { bundleId: "com.apple.TextEdit", name: "TextEdit" }, window: { title: "Untitled" } });
+    expect(build(withCall(action("bring_to_front", { pid: 4242 }))).ok).toBe(true);
     expect(build(withCall(action("bring_to_front", { pid: 9999 })))).toEqual({ ok: false, reason: "unknown-target" });
+  });
+
+  it.each([
+    ["hotkey", action("hotkey", { keys: ["cmd", "w"], pid: 4242 })],
+    ["press_key", action("press_key", { key: "return", pid: 4242 })],
+  ])("refuses a %s sent to an app with no window, which lands in whichever window is in front", (_name, call) => {
+    expect(build(withCall(call))).toEqual({ ok: false, reason: "key-without-window" });
   });
 
   it.each([
@@ -142,8 +151,8 @@ describe("buildRecipe", () => {
   ])("refuses a %s with no app to send it to", (_name, call) => expect(build(withCall(call))).toEqual({ ok: false, reason: "unknown-target" }));
 
   it.each<[string, Record<string, unknown>]>([
-    ["hotkey", { keys: ["cmd", "s"], pid: 4242 }],
-    ["press_key", { key: "return", pid: 4242 }],
+    ["hotkey", { keys: ["cmd", "s"], pid: 4242, window_id: 7 }],
+    ["press_key", { key: "return", pid: 4242, window_id: 7 }],
     ["press_key", { key: "return", element_token: "s1-e2" }],
     ["click", { element_token: "s1-e2" }],
   ])("keeps a %s only when it is scoped to its window", (tool, args) => {

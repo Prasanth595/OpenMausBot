@@ -163,9 +163,21 @@ describe("resolveStep", () => {
     expect(await resolveStep(front, caller(), signal)).toEqual({ ok: true, args: { pid: 4242, window_id: 7 } });
     expect(calls).toStrictEqual(LOOKUPS.slice(0, 2));
     calls = [];
-    const save: RecipeStep = { tool: "hotkey", args: { keys: ["cmd", "s"] }, app: TEXTEDIT };
-    expect(await resolveStep(save, caller(), signal)).toStrictEqual({ ok: true, args: { keys: ["cmd", "s"], pid: 4242 } });
-    expect(calls).toStrictEqual(LOOKUPS.slice(0, 1));
+    const save: RecipeStep = { tool: "hotkey", args: { keys: ["cmd", "s"] }, app: TEXTEDIT, window: { title: "Untitled" } };
+    expect(await resolveStep(save, caller(), signal)).toStrictEqual({ ok: true, args: { keys: ["cmd", "s"], pid: 4242, window_id: 7 } });
+    expect(calls).toStrictEqual(LOOKUPS.slice(0, 2));
+  });
+
+  it("refuses a key step whose window was renamed rather than send it to another window", async () => {
+    const close: RecipeStep = { tool: "hotkey", args: { keys: ["cmd", "w"] }, app: TEXTEDIT, window: { title: "Invoice.pdf" } };
+    expect(await resolveStep(close, caller(), signal)).toEqual({ ok: false, error: 'no window titled "Invoice.pdf"' });
+  });
+
+  it("refuses a key step saved without its window", async () => {
+    for (const tool of ["hotkey", "press_key"] as const) {
+      expect(await resolveStep({ tool, args: {}, app: TEXTEDIT }, caller(), signal)).toEqual({ ok: false, error: "the saved step does not name its window" });
+    }
+    expect(calls).toEqual([]);
   });
 
   it.each<[string, RecipeStep]>([

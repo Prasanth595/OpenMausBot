@@ -3,7 +3,7 @@ import { basename, join } from "node:path";
 import { z } from "zod";
 import { writeFileAtomic } from "../atomic.ts";
 import { exactRequest } from "./key.ts";
-import { ELEMENT_TOOLS, KEPT_ARGS, flipsToggle, holdsPersonWords, recipeFitsRequest, windowScoped, type Recipe } from "./rules.ts";
+import { ELEMENT_TOOLS, KEPT_ARGS, KEY_TOOLS, flipsToggle, holdsPersonWords, recipeFitsRequest, windowScoped, type Recipe } from "./rules.ts";
 
 export const MAX_RECIPES = 200;
 export const UNUSED_MS = 60 * 24 * 60 * 60 * 1000;
@@ -23,6 +23,7 @@ const ADDRESSING_KEYS = new Set(["x", "y", "element_token", "element_index", "pi
 const argsFitTool = (tool: keyof typeof KEPT_ARGS, args: Record<string, unknown>) =>
   Object.keys(args).every((name) => !ADDRESSING_KEYS.has(name) && KEPT_ARGS[tool].includes(name));
 const targetsFitTool = (entry: z.infer<typeof step>) => (!ELEMENT_TOOLS.has(entry.tool) || (entry.element !== undefined && entry.app !== undefined))
+  && (!KEY_TOOLS.has(entry.tool) || (entry.app !== undefined && entry.window !== undefined))
   && !(entry.element && flipsToggle(entry.tool, entry.element.role));
 const safeBotId = (botId: string) => botId !== "" && botId !== "." && botId !== ".." && basename(botId) === botId && !/[\\/]/.test(botId);
 

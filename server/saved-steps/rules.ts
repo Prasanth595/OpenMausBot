@@ -19,13 +19,13 @@ export interface Recipe { id: string; key: string; request: string; steps: Recip
 export type Refusal =
   | "moment-words" | "several-turns" | "incomplete-journal" | "denied" | "tool-error" | "unknown-tool" | "pixel-or-drag" | "extra-arguments"
   | "unknown-target" | "stale-element" | "unlabelled-element" | "ambiguous-element" | "typed-text-not-in-request" | "url-not-in-request" | "no-steps" | "too-many-steps"
-  | "typing-appends" | "toggle-element";
+  | "typing-appends" | "toggle-element" | "key-without-window";
 
 const MAX_STEPS = 40;
 const ADDRESSING = new Set(["element_token", "element_index", "pid", "window_id", "session"]);
 const PIXEL_TOOLS = new Set(["drag", "move_cursor", "zoom"]);
 export const ELEMENT_TOOLS: ReadonlySet<ActionTool> = new Set<ActionTool>(["click", "double_click", "right_click", "type_text", "set_value", "scroll"]);
-const KEY_TOOLS: ReadonlySet<ActionTool> = new Set<ActionTool>(["press_key", "hotkey"]);
+export const KEY_TOOLS: ReadonlySet<ActionTool> = new Set<ActionTool>(["press_key", "hotkey"]);
 export const KEPT_ARGS: Record<ActionTool, readonly string[]> = {
   click: ["button", "count", "modifier", "action", "delivery_mode", "scope"],
   double_click: ["delivery_mode"],
@@ -241,7 +241,7 @@ export function buildRecipe(input: { request: string; journal: RequestJournal; i
         const title = windowsById.get(windowId);
         if (title === undefined) return refuse("unknown-target");
         step.window = { title };
-      }
+      } else if (KEY_TOOLS.has(tool)) return refuse("key-without-window");
     }
     steps.push(step);
   }

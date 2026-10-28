@@ -131,13 +131,17 @@ describe("RecipeStore", () => {
         withStep("neither", { tool: "set_value", args: { value: "hi" } }),
         withStep("both", { tool: "click", args: {}, app, element }),
         withStep("key alone", { tool: "press_key", args: { key: "return" } }),
+        withStep("key to an app", { tool: "hotkey", args: { keys: ["cmd", "w"] }, app }),
+        withStep("key to a window", { tool: "hotkey", args: { keys: ["cmd", "w"] }, app, window: { title: "Invoice" } }),
       ],
     }));
     expect(store.find("b1", "no element")).toBeUndefined();
     expect(store.find("b1", "no app")).toBeUndefined();
     expect(store.find("b1", "neither")).toBeUndefined();
     expect(store.find("b1", "both")!.id).toBe("both");
-    expect(store.find("b1", "key alone")!.id).toBe("key alone");
+    expect(store.find("b1", "key alone")).toBeUndefined();
+    expect(store.find("b1", "key to an app")).toBeUndefined();
+    expect(store.find("b1", "key to a window")!.id).toBe("key to a window");
   });
 
   it("drops key and element steps scoped wider than their window and keeps the rest of the file", () => {
@@ -154,8 +158,8 @@ describe("RecipeStore", () => {
         withStep("desktop hotkey", { tool: "hotkey", args: { keys: ["cmd", "s"], scope: "desktop" }, app }),
         withStep("desktop key", { tool: "press_key", args: { key: "return", scope: "desktop" }, app }),
         withStep("window click", { tool: "click", args: { scope: "window" }, app, element }),
-        withStep("window hotkey", { tool: "hotkey", args: { keys: ["cmd", "s"], scope: "window" }, app }),
-        withStep("unscoped key", { tool: "press_key", args: { key: "return" }, app }),
+        withStep("window hotkey", { tool: "hotkey", args: { keys: ["cmd", "s"], scope: "window" }, app, window: { title: "Notes" } }),
+        withStep("unscoped key", { tool: "press_key", args: { key: "return" }, app, window: { title: "Notes" } }),
       ],
     }));
     for (const dropped of ["desktop click", "screen scroll", "null scope", "desktop hotkey", "desktop key"]) expect(store.find("b1", dropped)).toBeUndefined();
