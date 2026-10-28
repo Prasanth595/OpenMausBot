@@ -11,7 +11,7 @@ test.afterEach(() => mock.timers.reset());
 
 const CHAT = { botId: "m", threadId: "t1" };
 function harness({ busy = false, prepare = async () => CHAT, ask } = {}) {
-  const h = { views: [], closed: 0, hovered: false, renderFails: false, startFails: false, releaseFails: false, starts: [], stops: [], finishes: [], opened: [], asks: [], prepares: 0, sink: null };
+  const h = { views: [], closed: 0, hovered: false, renderFails: false, closeFails: false, hoverFails: false, startFails: false, releaseFails: false, starts: [], stops: [], finishes: [], opened: [], asks: [], prepares: 0, sink: null };
   h.session = createTalkSession({
     speech: {
       start: (sink, options) => { h.sink = sink; h.starts.push(options); if (h.startFails) throw new Error("spawn failed"); },
@@ -24,8 +24,8 @@ function harness({ busy = false, prepare = async () => CHAT, ask } = {}) {
     },
     panel: {
       render: view => { h.views.push(view); if (h.renderFails) throw new Error("render failed"); },
-      close: () => { h.closed += 1; },
-      hovered: () => h.hovered,
+      close: () => { h.closed += 1; if (h.closeFails) throw new Error("close failed"); },
+      hovered: () => { if (h.hoverFails) throw new Error("hovered failed"); return h.hovered; },
     },
     voiceInUse: () => busy,
     release: () => { if (h.releaseFails) throw new Error("no key"); return ["control", "option"]; },
@@ -50,6 +50,9 @@ test("the box's words and timings are fixed", () => {
   assert.deepEqual(TALK_TEXT, {
     busy: "Voice is in use in MausBot",
     serverDown: "Open MausBot to talk",
+    starting: "MausBot is still starting. Try again in a moment.",
+    noMausbot: "Set up MausBot first, then try again.",
+    moved: "MausBot lives on My Cloud now — talk to it there",
     permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
     dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again.",
     unavailable: "Talking couldn't start. Try again.",
@@ -157,11 +160,11 @@ test("words heard before a recognizer error are still sent", async () => {
   assert.deepEqual(h.views.at(-1), { state: "reply", text: "Hi" });
 });
 
-test("permission and setup problems say what to fix", async () => {
+test("permission and setup problems say what to fix, in the composer's words: only a refused permission asks for access", async () => {
   const problems = [
     ["speech-not-authorized", TALK_TEXT.permission],
-    ["mic-failed", TALK_TEXT.permission],
-    ["recognizer-unavailable", TALK_TEXT.permission],
+    ["mic-failed", TALK_TEXT.unavailable],
+    ["recognizer-unavailable", TALK_TEXT.unavailable],
     ["dictation-disabled", TALK_TEXT.dictationOff],
     ["helper-build-failed", TALK_TEXT.unavailable],
     ["helper-start-failed", TALK_TEXT.unavailable],
@@ -176,15 +179,21 @@ test("permission and setup problems say what to fix", async () => {
   }
 });
 
-test("the server not running says Open MausBot to talk and stops listening", async () => {
-  for (const code of ["server-down", "no-mausbot"]) {
+test("a server that can't take asks says why and stops listening: down, still starting, no MausBot, or moved to My Cloud", async () => {
+  const notices = [
+    ["server-down", "Open MausBot to talk"],
+    ["starting", TALK_TEXT.starting],
+    ["no-mausbot", TALK_TEXT.noMausbot],
+    ["moved", "MausBot lives on My Cloud now — talk to it there"],
+  ];
+  for (const [code, text] of notices) {
     const h = harness({ prepare: async () => { throw new TalkServerError(code); } });
     h.session.press(); await flush();
     assert.deepEqual(h.stops, [true], code);
-    assert.deepEqual(h.views.at(-1), { state: "error", text: "Open MausBot to talk" }, code);
+    assert.deepEqual(h.views.at(-1), { state: "error", text }, code);
     say(h, "too late"); release(h); await flush();
     assert.equal(h.asks.length, 0, code);
-    assert.deepEqual(h.views.at(-1), { state: "error", text: "Open MausBot to talk" }, code);
+    assert.deepEqual(h.views.at(-1), { state: "error", text }, code);
     mock.timers.tick(3_999); assert.equal(h.closed, 0, code);
     mock.timers.tick(1); assert.equal(h.closed, 1, code);
   }
@@ -205,6 +214,43 @@ test("a server that goes away as the words are sent says Open MausBot to talk", 
   gone.session.press(); say(gone, "hello"); release(gone); await flush();
   assert.deepEqual(gone.views.at(-1), { state: "error", text: TALK_TEXT.serverDown });
   mock.timers.tick(TALK_TIMING.noticeHideMs); assert.equal(gone.closed, 1);
+
+  const moved = harness({ ask: async () => { throw new TalkServerError("moved"); } });
+  moved.session.press(); say(moved, "hello"); release(moved); await flush();
+  assert.deepEqual(moved.views.at(-1), { state: "error", text: TALK_TEXT.moved });
+  mock.timers.tick(TALK_TIMING.noticeHideMs); assert.equal(moved.closed, 1);
+});
+
+test("busy while listening, sending or thinking; not once a reply, a notice or nothing shows", async () => {
+  const { inputs, ask } = holdAsk([]);
+  const h = harness({ ask });
+  assert.equal(h.session.busy(), false);
+  h.session.press();
+  assert.equal(h.session.busy(), true, "listening");
+  say(h, "hello"); release(h); await flush();
+  assert.equal(h.views.at(-1).state, "sending");
+  assert.equal(h.session.busy(), true, "sending");
+  inputs[0].onUpdate({ kind: "thinking" });
+  assert.equal(h.session.busy(), true, "thinking");
+  inputs[0].onUpdate({ kind: "reply", text: "Hi" });
+  assert.equal(h.session.busy(), false, "reply");
+  h.session.dismiss();
+  assert.equal(h.session.busy(), false, "closed");
+
+  const refused = harness({ busy: true });
+  refused.session.press();
+  assert.equal(refused.session.busy(), false, "a notice");
+});
+
+test("a box that fails to close or to say where the pointer is still hides, and the next press works", async () => {
+  const h = harness(); h.session.press(); say(h, "hello"); release(h); await flush();
+  h.hoverFails = true; h.closeFails = true;
+  assert.doesNotThrow(() => mock.timers.tick(TALK_TIMING.replyHideMs));
+  assert.equal(h.closed, 1);
+  h.closeFails = false;
+  h.session.press();
+  assert.equal(h.starts.length, 2);
+  assert.deepEqual(h.views.at(-1), { state: "listening", text: "" });
 });
 
 test("needs-you shows and hides like a reply", async () => {

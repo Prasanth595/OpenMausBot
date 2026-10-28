@@ -6,6 +6,9 @@ export const TALK_TIMING = Object.freeze({ replyHideMs: 12_000, noticeHideMs: 4_
 export const TALK_TEXT = Object.freeze({
   busy: "Voice is in use in MausBot",
   serverDown: "Open MausBot to talk",
+  starting: "MausBot is still starting. Try again in a moment.",
+  noMausbot: "Set up MausBot first, then try again.",
+  moved: "MausBot lives on My Cloud now — talk to it there",
   permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
   dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again.",
   unavailable: "Talking couldn't start. Try again.",
@@ -14,12 +17,19 @@ export const TALK_TEXT = Object.freeze({
 
 const SPEECH_PROBLEMS = new Map([
   ["speech-not-authorized", TALK_TEXT.permission],
-  ["mic-failed", TALK_TEXT.permission],
-  ["recognizer-unavailable", TALK_TEXT.permission],
+  ["mic-failed", TALK_TEXT.unavailable],
+  ["recognizer-unavailable", TALK_TEXT.unavailable],
   ["dictation-disabled", TALK_TEXT.dictationOff],
   ["helper-build-failed", TALK_TEXT.unavailable],
   ["helper-start-failed", TALK_TEXT.unavailable],
   ["unsupported-platform", TALK_TEXT.unavailable],
+]);
+
+const SERVER_NOTICES = new Map([
+  ["server-down", TALK_TEXT.serverDown],
+  ["starting", TALK_TEXT.starting],
+  ["no-mausbot", TALK_TEXT.noMausbot],
+  ["moved", TALK_TEXT.moved],
 ]);
 
 const UNDER_WAY = new Set(["listening", "sending", "thinking"]);
@@ -49,7 +59,9 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     clearTimeout(ask.hideTimer);
     clearTimeout(ask.answerTimer);
     ask.controller.abort();
-    panel.close();
+    try {
+      panel.close();
+    } catch {}
   }
 
   function cancel(ask) {
@@ -57,11 +69,19 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     closeBox(ask);
   }
 
+  function hovered() {
+    try {
+      return panel.hovered();
+    } catch {
+      return false;
+    }
+  }
+
   function hideIn(ask, ms) {
     clearTimeout(ask.hideTimer);
     const check = () => {
       if (current !== ask) return;
-      if (panel.hovered()) ask.hideTimer = setTimeout(check, TALK_TIMING.hoverRecheckMs);
+      if (hovered()) ask.hideTimer = setTimeout(check, TALK_TIMING.hoverRecheckMs);
       else closeBox(ask);
     };
     ask.hideTimer = setTimeout(check, ms);
@@ -81,7 +101,7 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
   function failed(ask, error) {
     const code = error instanceof TalkServerError ? error.code : null;
     if (code === "lost") stillWorking(ask);
-    else if (code === "server-down" || code === "no-mausbot") settle(ask, "error", TALK_TEXT.serverDown, TALK_TIMING.noticeHideMs);
+    else if (SERVER_NOTICES.has(code)) settle(ask, "error", SERVER_NOTICES.get(code), TALK_TIMING.noticeHideMs);
     else settle(ask, "error", TALK_TEXT.failed, TALK_TIMING.replyHideMs);
   }
 
@@ -172,5 +192,7 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     },
     dismiss,
     close: dismiss,
+    /** Listening, or an ask on its way that has not been answered yet. */
+    busy: () => Boolean(current && UNDER_WAY.has(current.state)),
   };
 }
