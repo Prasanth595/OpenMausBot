@@ -2,7 +2,7 @@ import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffec
 import { useAdvancedMode } from "@/lib/interface-mode";
 import { PHONE_LAYOUT, useMediaQuery } from "@/lib/use-media-query";
 import { ThreadLinkContext } from "@/components/ThreadLinkMenu";
-import { useShowThreads } from "@/lib/thread-preferences";
+import { useShowThreads, useShowThreadsChoice } from "@/lib/thread-preferences";
 import { AlertTriangle, ChevronLeft, ChevronRight, Copy, Monitor, RefreshCw, Reply, Square, Webhook } from "lucide-react";
 import { WorkingDots } from "@/components/WorkingIndicator";
 import { ACTION_ICON, CopyButton, MESSAGE_ROW, MessageActions, messageActionClass, ReplyAction, type MessageMenuItem } from "@/components/MessageActions";
@@ -828,6 +828,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const bot = useMemo(() => currentTaskBot(profile), [profile]);
   const { state, dispatch } = useStore();
   const showThreads = useShowThreads();
+  // The strip is a chat-header control, not a panel: it follows the person's threads preference rather than Advanced
+  // mode, so Simple mode can still switch threads without opening the bot panel.
+  const threadsWanted = useShowThreadsChoice();
   const remoteClient = window.ogb?.remoteClient?.active === true;
   const { dragProps: headerDragProps, noDragStyle: headerNoDragStyle, controlsShiftStyle } = useCaptionChrome();
   const composerDockRef = useRef<HTMLDivElement>(null);
@@ -836,7 +839,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const phone = useMediaQuery(PHONE_LAYOUT);
   const phoneMenu = phone && !remoteClient;
   const [threadTabWidth, setThreadTabWidth] = useState(0);
-  const threadTabsVisible = showThreads && !phone && threadTabsShown(profile);
+  const threadTabsVisible = threadsWanted && !phone && threadTabsShown(profile);
   // A strip hidden by the header's container query has zero width; only a measured, visible strip may label the panel.
   const threadPanelVisible = threadTabsVisible && threadTabWidth > 0;
   const simpleHead = !advanced && !remoteClient;

@@ -10,7 +10,7 @@ import { failedTurnTool } from "../../shared/failed-turn";
 const fixture = vi.hoisted(() => {
   vi.stubGlobal("window", {});
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: () => {} });
-  return { showThreads: true, advanced: true, phone: false, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
+  return { showThreads: true, threadsWanted: true, advanced: true, phone: false, menus: [] as { ariaLabel: string; items: { key: string; disabled?: boolean; heading?: string; active?: boolean }[] }[], dispatch: vi.fn(), canWrite: null as boolean | null, showToolCalls: false, platform: "other", localReasonCode: "cua-driver-unavailable", localMessage: "", model: null as ComponentProps<typeof ModelPicker> | null,
     approval: null as ComponentProps<typeof ApprovalModeSelector> | null };
 });
 vi.mock("@/state/store", async (importOriginal) => {
@@ -30,6 +30,7 @@ vi.mock("@/lib/analytics", () => ({ track: vi.fn() }));
 vi.mock("@/lib/thread-preferences", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/lib/thread-preferences")>(),
   useShowThreads: () => fixture.advanced && fixture.showThreads,
+  useShowThreadsChoice: () => fixture.threadsWanted,
 }));
 vi.mock("@/lib/interface-mode", () => ({ useAdvancedMode: () => fixture.advanced, setAdvancedMode: vi.fn() }));
 // Only the phone breakpoint varies here; every other query answers as it does without a matchMedia.
@@ -153,7 +154,8 @@ describe("the Simple header", () => {
     fixture.advanced = false;
     try {
       const simple = renderToStaticMarkup(createElement(ChatView, { bot: busyElsewhere }));
-      const identity = simple.slice(simple.indexOf("data-chathead-identity"), simple.indexOf("data-chathead-controls"));
+      const tabsAt = simple.indexOf("data-chathead-tabs");
+      const identity = simple.slice(simple.indexOf("data-chathead-identity"), tabsAt === -1 ? simple.indexOf("data-chathead-controls") : tabsAt);
       const pill = identity.match(/<button[^>]*data-chathead-pill="true"[^>]*>([\s\S]*?)<\/button>/)!;
       expect(identity.replace(pill[0], "").replace(/<span role="status"[^>]*>[^<]*<\/span>/, "")).not.toMatch(/<(button|a|span)[\s>]/);
       expect(pill[1]).toContain(">Pepper</span>");
@@ -748,13 +750,14 @@ describe("thread tabs in the chat header", () => {
     expect(controls).not.toContain("data-chathead-tabs");
   });
 
-  it("leaves the header alone in Simple mode", () => {
+  it("shows the same tabs in Simple mode, where the panel list is unavailable", () => {
     fixture.advanced = false;
     try {
       const markup = renderToStaticMarkup(createElement(ChatView, { bot: threaded }));
-      expect(markup).not.toContain("data-chathead-tabs");
-      expect(markup).not.toContain('role="tabpanel"');
-      expect(markup).not.toContain('aria-controls="chat-thread-panel"');
+      expect(markup).toContain("data-chathead-tabs");
+      expect(markup).toContain('role="tablist"');
+      expect(markup).toContain('data-thread-tab="selected"');
+      expect(markup).toContain('data-thread-tab="launch"');
     } finally {
       fixture.advanced = true;
     }
@@ -780,14 +783,14 @@ describe("thread tabs in the chat header", () => {
   });
 
   it("leaves the header alone when threads are switched off", () => {
-    fixture.showThreads = false;
+    fixture.threadsWanted = false;
     try {
       const markup = renderToStaticMarkup(createElement(ChatView, { bot: threaded }));
       expect(markup).not.toContain("data-chathead-tabs");
       expect(markup).not.toContain('role="tabpanel"');
       expect(markup).not.toContain('aria-controls="chat-thread-panel"');
     } finally {
-      fixture.showThreads = true;
+      fixture.threadsWanted = true;
     }
   });
 });
