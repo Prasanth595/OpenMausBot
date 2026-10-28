@@ -21,6 +21,7 @@ const pages: Record<string, { messages: Message[]; hasMore: boolean }> = {
 };
 
 let actions: Action[];
+const navigationRevision = { current: 0 };
 const dispatch = (action: Action) => { actions.push(action); };
 const state = { bots: [bot], groups: [group], transcriptGeneration: { t: 3, rt: 5 } } as unknown as AppState;
 
@@ -32,7 +33,7 @@ beforeEach(() => {
 
 describe("landing on a search hit older than the loaded page", () => {
   it("loads earlier pages of the open bot thread until the hit is there, then focuses it", async () => {
-    await landOnSearchHit({ ...hit, botId: "scout", threadId: "t" }, state, dispatch, true);
+    await landOnSearchHit({ ...hit, botId: "scout", threadId: "t" }, state, dispatch, true, navigationRevision);
     expect(fixture.api.mock.calls.map(([path]) => path)).toEqual([
       "/api/threads/t/messages?limit=200&before=m400",
       "/api/threads/t/messages?limit=200&before=m200",
@@ -42,19 +43,19 @@ describe("landing on a search hit older than the loaded page", () => {
   });
 
   it("does the same in the room's open thread", async () => {
-    await landOnSearchHit({ ...hit, groupId: "room", threadId: "rt" }, state, dispatch, true);
-    expect(actions[1]).toMatchObject({ type: "olderMessages", threadId: "rt", generation: 5, hasMore: false });
-    expect(actions[2]).toMatchObject({ type: "focusMessage", threadId: "rt", messageId: "m50" });
+    await landOnSearchHit({ ...hit, groupId: "room", threadId: "rt" }, state, dispatch, true, navigationRevision);
+    expect(actions[2]).toMatchObject({ type: "olderMessages", threadId: "rt", generation: 5, hasMore: false });
+    expect(actions[3]).toMatchObject({ type: "focusMessage", threadId: "rt", messageId: "m50" });
   });
 
   it("stops at the page that holds the hit", async () => {
-    await landOnSearchHit({ ...hit, botId: "scout", threadId: "t", messageId: "m300" }, state, dispatch, true);
+    await landOnSearchHit({ ...hit, botId: "scout", threadId: "t", messageId: "m300" }, state, dispatch, true, navigationRevision);
     expect(fixture.api).toHaveBeenCalledOnce();
     expect(actions[1]).toEqual({ type: "olderMessages", threadId: "t", generation: 3, messages: range(200, 400), hasMore: true });
   });
 
   it("asks for nothing when the hit is already loaded", async () => {
-    await landOnSearchHit({ ...hit, botId: "scout", threadId: "t", messageId: "m450" }, state, dispatch, true);
+    await landOnSearchHit({ ...hit, botId: "scout", threadId: "t", messageId: "m450" }, state, dispatch, true, navigationRevision);
     expect(fixture.api).not.toHaveBeenCalled();
     expect(actions.map((action) => action.type)).toEqual(["select", "focusMessage"]);
   });
@@ -82,16 +83,16 @@ describe("choosing another search hit while one is still landing", () => {
   });
 
   it("does not focus the earlier hit when its older pages arrive after the newer one landed", async () => {
-    const earlier = landOnSearchHit({ ...hit, groupId: "room", threadId: "rt" }, state, dispatch, true);
-    await landOnSearchHit(loaded, state, dispatch, true);
+    const earlier = landOnSearchHit({ ...hit, groupId: "room", threadId: "rt" }, state, dispatch, true, navigationRevision);
+    await landOnSearchHit(loaded, state, dispatch, true, navigationRevision);
     await answerAll();
     await earlier;
     expect(focused()).toEqual(["m450"]);
   });
 
   it("does not switch the bot to the earlier hit's thread when the newer hit landed first", async () => {
-    const earlier = landOnSearchHit(elsewhere, state, dispatch, true);
-    await landOnSearchHit(loaded, state, dispatch, true);
+    const earlier = landOnSearchHit(elsewhere, state, dispatch, true, navigationRevision);
+    await landOnSearchHit(loaded, state, dispatch, true, navigationRevision);
     await answerAll();
     await earlier;
     expect(types()).not.toContain("taskSwitched");
@@ -100,8 +101,8 @@ describe("choosing another search hit while one is still landing", () => {
   });
 
   it("with threads hidden, lands on the newer hit when the earlier one answers first", async () => {
-    const earlier = landOnSearchHit(elsewhere, state, dispatch, false);
-    const newer = landOnSearchHit({ ...elsewhere, threadId: "other", messageId: "o1" }, state, dispatch, false);
+    const earlier = landOnSearchHit(elsewhere, state, dispatch, false, navigationRevision);
+    const newer = landOnSearchHit({ ...elsewhere, threadId: "other", messageId: "o1" }, state, dispatch, false, navigationRevision);
     await answerFirst();
     await earlier;
     await answerAll();

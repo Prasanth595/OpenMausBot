@@ -19,7 +19,7 @@ describe("provider key rows", () => {
         ...store.initialState.config, openaiCompat: { configured: true, url: "https://openrouter.ai/api/v1" },
       } as store.ConfigStatus },
       dispatch: vi.fn(),
-      flushBotPatches: vi.fn(),
+      navigationRevision: { current: 0 }, flushBotPatches: vi.fn(),
       refreshInstances: vi.fn(),
       refreshModels: vi.fn(),
     });
@@ -70,7 +70,7 @@ describe("provider key rows", () => {
     const withBox = (box: store.ConfigStatus["box"]) => vi.spyOn(store, "useStore").mockReturnValue({
       state: { ...store.initialState, config: { ...store.initialState.config, box } as store.ConfigStatus },
       dispatch: vi.fn(),
-      flushBotPatches: vi.fn(),
+      navigationRevision: { current: 0 }, flushBotPatches: vi.fn(),
       refreshInstances: vi.fn(),
       refreshModels: vi.fn(),
     });
@@ -91,7 +91,7 @@ describe("provider key rows", () => {
     const withAnthropic = (everyClaudeBot: boolean) => vi.spyOn(store, "useStore").mockReturnValue({
       state: { ...store.initialState, config: { ...store.initialState.config, anthropic: { configured: true, everyClaudeBot } } as store.ConfigStatus },
       dispatch: vi.fn(),
-      flushBotPatches: vi.fn(),
+      navigationRevision: { current: 0 }, flushBotPatches: vi.fn(),
       refreshInstances: vi.fn(),
       refreshModels: vi.fn(),
     });
@@ -114,7 +114,7 @@ describe("provider key rows", () => {
     const withKeys = (providerKeys: string[] | undefined) => vi.spyOn(store, "useStore").mockReturnValue({
       state: { ...store.initialState, config: { ...store.initialState.config, opencodeGo: { configured: false, providerKeys } } as store.ConfigStatus },
       dispatch: vi.fn(),
-      flushBotPatches: vi.fn(),
+      navigationRevision: { current: 0 }, flushBotPatches: vi.fn(),
       refreshInstances: vi.fn(),
       refreshModels: vi.fn(),
     });

@@ -8,7 +8,7 @@ import { useShowThreads } from "@/lib/thread-preferences";
 import { api, useStore } from "@/state/store";
 
 export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: () => void }) {
-  const { state, dispatch } = useStore();
+  const { state, dispatch, navigationRevision } = useStore();
   const showThreads = useShowThreads();
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef(0);
@@ -55,7 +55,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
     const hit = hits[next];
     if (!hit) return;
     setIndex(next);
-    void landOnSearchHit(hit, state, dispatch, showThreads).catch((error) =>
+    void landOnSearchHit(hit, state, dispatch, showThreads, navigationRevision).catch((error) =>
       dispatch({ type: "error", message: error instanceof Error ? error.message : t("chat.find.unavailable") }),
     );
   };

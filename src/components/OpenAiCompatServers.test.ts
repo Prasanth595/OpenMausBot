@@ -32,7 +32,7 @@ function render(instances: store.InstanceInfo[]) {
   vi.spyOn(store, "useStore").mockReturnValue({
     state: { ...store.initialState, instances },
     dispatch: vi.fn(),
-    flushBotPatches: vi.fn(),
+    navigationRevision: { current: 0 }, flushBotPatches: vi.fn(),
     refreshInstances: vi.fn(),
     refreshModels: vi.fn(),
   });
@@ -75,7 +75,7 @@ describe("adding another OpenAI-compatible server", () => {
   function form() {
     vi.stubGlobal("window", {});
     vi.spyOn(store, "useStore").mockReturnValue({
-      state: { ...store.initialState, instances: [] }, dispatch: vi.fn(), flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
+      state: { ...store.initialState, instances: [] }, dispatch: vi.fn(), navigationRevision: { current: 0 }, flushBotPatches: vi.fn(), refreshInstances: vi.fn(), refreshModels: vi.fn(),
     });
     const added = nodes(OtherOpenAiCompatServers()).find((node) => node.props.servers !== undefined)!;
     fixture.counting = true;

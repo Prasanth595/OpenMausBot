@@ -36,6 +36,7 @@ export async function landOnSearchHit(
   state: Pick<AppState, "bots" | "groups" | "transcriptGeneration">,
   dispatch: React.Dispatch<Action>,
   threadsShown: boolean,
+  navigationRevision: Readonly<{ current: number }>,
 ): Promise<void> {
   const ownerId = hit.botId ?? hit.groupId;
   const bot = hit.botId ? state.bots.find((candidate) => candidate.id === hit.botId) : undefined;
@@ -45,24 +46,28 @@ export async function landOnSearchHit(
   const choice = ++latestChoice;
   const switchAlone = bot && bot.threadId !== hit.threadId && !threadsShown ? bot : undefined;
   if (!switchAlone) dispatch({ type: "select", id: ownerId });
+  if (group) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: hit.threadId, whole: true });
+  const revision = navigationRevision.current;
+  const current = () => choice === latestChoice && navigationRevision.current === revision;
   if (bot && bot.threadId !== hit.threadId && !switchAlone) {
     const result = await api(`/api/bots/${bot.id}/tasks/${hit.threadId}`, { method: "POST" });
-    if (choice !== latestChoice) return;
+    if (!current()) return;
     if (result?.bot) dispatch({ type: "taskSwitched", bot: result.bot });
   }
-  if (group && group.threadId !== hit.threadId) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: hit.threadId, whole: true });
   const open = bot?.threadId === hit.threadId ? bot : group?.threadId === hit.threadId ? group : undefined;
   if (open) await loadThroughMessage(open, hit.messageId, state.transcriptGeneration[hit.threadId] ?? 0, dispatch);
+  if (!current()) return;
   if (bot && !hit.onActivePath) {
     const branch = await api(`/api/bots/${bot.id}/active-branch`, {
       method: "POST",
       body: JSON.stringify({ messageId: hit.messageId, threadId: hit.threadId }),
     });
+    if (!current()) return;
     if (branch?.activeLeafId) {
       dispatch({ type: "threadActive", threadId: hit.threadId, activeLeafId: branch.activeLeafId });
     }
   }
-  if (choice !== latestChoice) return;
+  if (!current()) return;
   if (switchAlone) dispatch({ type: "switchTask", botId: switchAlone.id, threadId: hit.threadId, whole: true });
   dispatch({
     type: "focusMessage",
