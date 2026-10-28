@@ -1071,7 +1071,11 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
       }
     } catch {}
   }
-  return { cards: CURATED, source: "curated" };
+  return {
+    cards: CURATED,
+    source: "curated",
+    pagination: { items: CURATED.length, stalled: false, complete: true },
+  };
 }
 
 export async function toolkitCard(cfg: AppConfig, slug: string): Promise<ToolkitCard> {

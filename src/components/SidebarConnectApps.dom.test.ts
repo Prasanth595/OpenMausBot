@@ -6,6 +6,7 @@ import { createElement } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CONNECT_APPS_PILL_KEY, restoreConnectAppsPill } from "@/lib/connect-apps-pill";
 
 type ConnectorState = { connected: boolean; pending?: boolean };
 
@@ -17,14 +18,16 @@ const fixture = vi.hoisted(() => ({
     { slug: "highlevel", connected: true },
     { slug: "x", connected: true },
   ] as Array<{ slug: string; connected: boolean }>,
+  pluginsOpen: false,
 }));
 
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: { pluginsOpen: false }, dispatch: vi.fn() }) }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ state: { pluginsOpen: fixture.pluginsOpen }, dispatch: vi.fn() }) }));
 vi.mock("./PluginsPanel", () => ({ preloadConnectedApps: () => Promise.resolve(fixture.inventory) }));
 vi.mock("./bot-settings/useBotApps", () => ({ loadAppCatalogue: () => Promise.resolve(fixture.catalogue) }));
 vi.mock("@/lib/native-app-connections", () => ({ loadNativeAppConnections: () => Promise.resolve(fixture.native) }));
 
 const { SidebarConnectApps } = await import("./SidebarConnectApps");
+const { ConnectAppsPillRestore } = await import("./ConnectAppsPillRestore");
 
 let host: HTMLDivElement;
 let root: Root;
@@ -40,6 +43,10 @@ beforeEach(() => {
     { slug: "highlevel", connected: true },
     { slug: "x", connected: true },
   ];
+  fixture.pluginsOpen = false;
+  Object.defineProperty(window, "localStorage", { configurable: true, value: memoryStorage() });
+  restoreConnectAppsPill();
+  window.localStorage.clear();
 });
 
 afterEach(() => {
@@ -50,6 +57,22 @@ afterEach(() => {
 const settle = async () => {
   for (let i = 0; i < 8; i++) await new Promise((resolve) => setTimeout(resolve, 0));
 };
+
+function memoryStorage(failWrites = false): Storage {
+  const values = new Map<string, string>();
+  return {
+    get length() { return values.size; },
+    clear: () => { values.clear(); },
+    getItem: (key: string) => values.get(key) ?? null,
+    key: (index: number) => [...values.keys()][index] ?? null,
+    removeItem: (key: string) => { values.delete(key); },
+    setItem: (key: string, value: string) => {
+      if (failWrites) throw new Error("storage blocked");
+      values.set(key, String(value));
+    },
+  };
+}
+
 const pill = () => host.querySelector<HTMLElement>('[data-sidebar-nav="apps"]');
 /** The pill only counts as shown once it is in the tree without the hidden attribute. */
 const shown = () => {
@@ -134,5 +157,60 @@ describe("the Connect apps pill against the catalogue", () => {
     flushSync(() => root.render(createElement(SidebarConnectApps, { circle: true })));
     await settle();
     expect(shown()?.getAttribute("aria-label")).toBe("Connect apps");
+  });
+});
+
+describe("dismissing the Connect apps pill", () => {
+  const renderWithRestore = () => flushSync(() => root.render(createElement("div", null,
+    createElement(SidebarConnectApps),
+    createElement(ConnectAppsPillRestore),
+  )));
+
+  it("hides at once, survives a restart, and the panel control brings it back", async () => {
+    fixture.inventory = { services: { gmail: { connected: true } }, authoritative: true };
+    fixture.catalogue = { cards: new Map(), slugs: ["gmail", "slack"], complete: true };
+    renderWithRestore();
+    await settle();
+    expect(shown()).not.toBeNull();
+
+    const dismiss = host.querySelector<HTMLElement>("[data-connect-apps-dismiss]")!;
+    expect(dismiss.getAttribute("aria-label")).toBe("Hide Connect apps");
+    // A sibling of the pill, never inside it, so the main click stays the main click.
+    expect(pill()!.contains(dismiss)).toBe(false);
+    flushSync(() => dismiss.click());
+    expect(pill()).toBeNull();
+    expect(window.localStorage.getItem(CONNECT_APPS_PILL_KEY)).toBe("1");
+
+    // A fresh mount is the restart: the saved flag must still hold.
+    flushSync(() => root.unmount());
+    root = createRoot(host);
+    renderWithRestore();
+    await settle();
+    expect(pill()).toBeNull();
+
+    const restore = host.querySelector<HTMLElement>("[data-show-connect-apps]");
+    expect(restore).not.toBeNull();
+    flushSync(() => restore!.click());
+    expect(shown()).not.toBeNull();
+    expect(window.localStorage.getItem(CONNECT_APPS_PILL_KEY)).toBeNull();
+  });
+
+  it("offers the dismiss control on the collapsed rail as well", async () => {
+    fixture.inventory = { services: { gmail: { connected: true } }, authoritative: true };
+    fixture.catalogue = { cards: new Map(), slugs: ["gmail", "notion"], complete: true };
+    flushSync(() => root.render(createElement(SidebarConnectApps, { circle: true })));
+    await settle();
+    const dismiss = host.querySelector<HTMLElement>("[data-connect-apps-dismiss]");
+    expect(dismiss?.getAttribute("aria-label")).toBe("Hide Connect apps");
+    flushSync(() => dismiss!.click());
+    expect(pill()).toBeNull();
+  });
+
+  it("keeps the pill settled on a fresh mount while the panel is already open", () => {
+    fixture.pluginsOpen = true;
+    fixture.inventory = { services: { gmail: { connected: true } }, authoritative: true };
+    fixture.catalogue = { cards: new Map(), slugs: ["gmail", "slack"], complete: true };
+    flushSync(() => root.render(createElement(SidebarConnectApps)));
+    expect(shown()).not.toBeNull();
   });
 });

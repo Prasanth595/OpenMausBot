@@ -29,15 +29,17 @@ export interface AppCatalogue {
   complete: boolean;
 }
 
+/** A missing pagination block is an older or partial answer, never proof of a complete catalogue. The curated
+ *  fallback is complete by construction and the server says so explicitly. */
+export function catalogueFrom(response: { cards?: ToolkitCard[]; pagination?: { complete?: boolean } }): AppCatalogue {
+  const cards = new Map((response.cards ?? []).map((card) => [card.slug, card]));
+  return { cards, slugs: [...cards.keys()], complete: response.pagination?.complete === true };
+}
+
 let catalogueRequest: Promise<AppCatalogue> | null = null;
 export function loadAppCatalogue(): Promise<AppCatalogue> {
   catalogueRequest ??= api("/api/connectors/catalog")
-    .then((response: { cards?: ToolkitCard[]; pagination?: { complete?: boolean; stalled?: boolean } }) => {
-      const cards = new Map((response.cards ?? []).map((card) => [card.slug, card]));
-      // A marketplace page that stopped early is a partial catalogue, not the whole universe.
-      const complete = response.pagination?.complete !== false;
-      return { cards, slugs: [...cards.keys()], complete };
-    })
+    .then(catalogueFrom)
     .catch(() => {
       catalogueRequest = null;
       return { cards: new Map<string, ToolkitCard>(), slugs: [], complete: false };

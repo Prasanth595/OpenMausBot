@@ -25,6 +25,7 @@ import {
   type ConnectorStatus,
 } from "@/lib/connector-status";
 import { BotAvatar } from "./Avatar";
+import { ConnectAppsPillRestore } from "./ConnectAppsPillRestore";
 import { SidebarPopoverMenu } from "./SidebarPopoverMenu";
 import { appCategoryLabel, CATEGORY_SECTION_SIZE, catalogSections, connectorDescription, inCategory, rankCategories } from "@/lib/app-catalog";
 import { McpServersPanel } from "./McpServersPanel";
@@ -554,6 +555,7 @@ export function PluginsPanel() {
             </div>
           </div>
           <p className="mt-0.5 text-[13px] leading-5 text-ink-secondary">{t("apps.subtitle")}</p>
+          <ConnectAppsPillRestore className="mt-2" />
           </div>
           <div className="flex items-center gap-2">
             <label className="flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-full bg-control/70 px-3.5 focus-within:ring-1 focus-within:ring-accent">

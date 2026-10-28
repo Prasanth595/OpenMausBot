@@ -38,6 +38,13 @@ it("lists exactly the curated apps product analytics may name, in the same order
   expect(CURATED_SLUGS).toEqual([...CURATED_CONNECTOR_SLUGS]);
 });
 
+it("marks the curated fallback as a complete catalogue, so the sidebar can trust its coverage", async () => {
+  await expect(listToolkits({} as AppConfig)).resolves.toMatchObject({
+    source: "curated",
+    pagination: { items: CURATED_SLUGS.length, stalled: false, complete: true },
+  });
+});
+
 it("only sends Session MCP credentials over HTTPS or loopback HTTP", () => {
   const old = process.env.OMB_COMPOSIO_API;
   try {
