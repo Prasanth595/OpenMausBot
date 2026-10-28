@@ -42,6 +42,8 @@ const RECHECK_MS = 5_000;
 const CLOSE_GRACE_MS = 2_000;
 const GONE = "This browser view is no longer available.";
 const PING_MS = 15_000;
+/** The close code of a connection that broke without a close frame. */
+const ABNORMAL_CLOSE = 1006;
 /** Input that arrives while the viewer is still attaching (its control state is already on the wire) waits for it. */
 const EARLY_INPUT_LIMIT = 64;
 
@@ -100,6 +102,8 @@ class StreamSession {
   readonly unacknowledged: Array<() => void> = [];
   viewer: Viewer | null = null;
   closed = false;
+  /** Its connection broke, rather than the panel closing it. */
+  lost = false;
   /** The server is closing this view: nothing the client sends reaches the browser any more. */
   closing = false;
   #early: unknown[] = [];
@@ -218,12 +222,14 @@ class StreamSession {
     setTimeout(() => this.kill(), CLOSE_GRACE_MS).unref();
   }
 
-  /** Releases Chromium from every frame still in flight and lets the viewer go. */
-  ended(): void {
+  /** Releases Chromium from every frame still in flight and lets the viewer go. `lost`: the connection broke rather
+   * than the panel closing it, so a hold of its person waits the grace for their next view. */
+  ended(lost: boolean): void {
     if (this.closed) return;
     this.closed = true;
+    this.lost = lost;
     for (const ack of this.unacknowledged.splice(0)) ack();
-    void this.viewer?.close({ dropped: this.theirs() }).catch(() => undefined);
+    void this.viewer?.close({ dropped: lost && this.theirs() }).catch(() => undefined);
   }
 
   /** Still the view of a person allowed to see this browser: its stream went, not its sign-in. */
@@ -274,11 +280,12 @@ export class StreamV2 {
     ws.on("pong", () => { alive = true; });
     ws.on("message", (data, binary) => session.receive(data, binary, this.#service));
     ws.on("error", () => session.kill());
-    ws.once("close", () => {
+    // 1006: no close frame came, as when a phone goes to the background or the network drops; a panel that closes says so.
+    ws.once("close", (code) => {
       clearInterval(ping);
       clearInterval(recheck);
       this.#sessions.delete(session);
-      session.ended();
+      session.ended(code === ABNORMAL_CLOSE);
     });
     const params = request.params;
     const size = requestedSize(Number(params.get("width")), Number(params.get("height")));
@@ -296,7 +303,7 @@ export class StreamV2 {
     };
     try {
       const viewer = await this.#service.attachViewer(request.target, options, (output) => session.push(output));
-      if (session.closed || session.closing) await viewer.close({ dropped: !session.closing && session.theirs() });
+      if (session.closed || session.closing) await viewer.close({ dropped: session.lost && session.theirs() });
       else session.attached(viewer, this.#service);
     } catch (error) {
       if (error instanceof BrowserHostError) session.close(STREAM_CLOSE.hostSetup, JSON.stringify({ need: error.kind, command: SETUP_COMMAND }));

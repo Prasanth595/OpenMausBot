@@ -264,6 +264,25 @@ describe("the v2 stream", () => {
     expect(fixture.inputs).toEqual([{ type: "takeControl" }]);
   });
 
+  it("ends a hold at once when the panel closes its socket, and waits the grace when the connection breaks", async () => {
+    const closes: Array<{ dropped?: boolean } | undefined> = [];
+    const fixture = await serve({
+      attach: async () => ({ id: "viewer", input: async () => {}, close: async (options?: { dropped?: boolean }) => { closes.push(options); } }) as unknown as Viewer,
+    });
+    const panel = new WebSocket(`ws://${fixture.origin}/api/bots/pepper/browser/stream`);
+    await new Promise((resolve) => panel.addEventListener("open", resolve));
+    await until(() => fixture.attachments.length === 1);
+    panel.close();
+    await until(() => closes.length === 1);
+    expect(closes[0]).toEqual({ dropped: false });
+    const phone = await stubbornStream(fixture);
+    await until(() => fixture.attachments.length === 2);
+    // No close frame: a phone in the background or a network that dropped.
+    phone.destroy();
+    await until(() => closes.length === 2);
+    expect(closes[1]).toEqual({ dropped: true });
+  });
+
   it("checks each message as each v1 action is checked: a person who may no longer see the bot is cut off at once", async () => {
     let current = true;
     const fixture = await serve({ current: () => current });
