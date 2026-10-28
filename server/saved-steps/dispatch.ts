@@ -30,6 +30,10 @@ export interface DispatchDeps {
    * a turn that sends more than the request's own line did work its words do not name.
    * False when the request cannot be marked, and then no replay runs. */
   taint(threadId: string): boolean;
+  /** The engine never sees a replayed turn: what the turn would have handed it stays unreceived; the call returned hands it on if the AI takes over. */
+  withholdHandoff(threadId: string): (turnId: string) => void;
+  /** A replay answered without the engine, so the engine's session must learn that line and its reply from the conversation. */
+  contextChanged(botId: string, threadId: string): void;
 }
 
 type Start = (input: SendTurnInput) => Promise<TurnStartResult>;
@@ -46,6 +50,7 @@ interface Run extends RetriedTurn {
   controller: AbortController;
   phase: "replay" | "fallback";
   finished: Promise<void>;
+  handOn(turnId: string): void;
 }
 
 const STOPPED = { kind: "stopped" } as const satisfies ReplayOutcome;
@@ -76,6 +81,7 @@ export class SavedStepsDispatch {
     const { threadId } = input;
     const run: Run = {
       turnId: newId(), threadId, botId: request.botId, recipe, engine, controller: new AbortController(), phase: "replay", finished: Promise.resolve(),
+      handOn: this.deps.withholdHandoff(threadId),
     };
     const asked = new Set<string>();
     const approval = createChatToolApproval({
@@ -200,6 +206,7 @@ export class SavedStepsDispatch {
     const noted = (text: string) => `${text}\n\n${note}`;
     const handed = { ...input, text: noted(input.text), ...(input.recoveryText !== undefined ? { recoveryText: noted(input.recoveryText) } : {}) };
     run.phase = "fallback";
+    run.handOn(run.turnId);
     let sent: TurnStartResult;
     try {
       sent = await start(handed);
@@ -213,6 +220,7 @@ export class SavedStepsDispatch {
 
   private end(run: Run, outcome: Exclude<RunOutcome, Failed>): void {
     this.forgetRun(run);
+    if (run.phase === "replay") this.deps.contextChanged(run.botId, run.threadId);
     if (outcome.kind === "done") {
       this.answered.delete(run.threadId);
       this.answered.set(run.threadId, { turnId: run.turnId, recipeId: run.recipe.id });

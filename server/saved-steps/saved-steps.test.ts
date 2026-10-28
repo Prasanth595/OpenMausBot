@@ -51,6 +51,8 @@ describe("createSavedSteps", () => {
       stopped: () => false,
       generation: () => undefined,
       patchMessage: () => {},
+      withholdHandoff: () => () => {},
+      contextChanged: () => {},
       folder: (botId) => join(dir, botId),
       platform: "darwin",
     });
@@ -81,6 +83,8 @@ describe("createSavedSteps", () => {
       stopped: () => false,
       generation: (threadId) => (threadId === "t1" ? "g1" : undefined),
       patchMessage: () => {},
+      withholdHandoff: () => () => {},
+      contextChanged: () => {},
       folder: (botId) => join(dir, botId),
       platform: "darwin",
     });
@@ -121,6 +125,8 @@ describe("SavedSteps.requestSettled", () => {
     stopped: () => false,
     generation: (threadId) => (threadId === "t1" ? "g1" : undefined),
     patchMessage: (threadId, messageId, patch) => { patches.push([threadId, messageId, patch]); },
+    withholdHandoff: () => () => {},
+    contextChanged: () => {},
     folder: (botId) => join(folder, botId),
     now: () => NOW,
     platform: "darwin",

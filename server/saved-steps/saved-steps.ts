@@ -7,7 +7,7 @@ import { createSavedStepsRoutes } from "../routes/saved-steps.ts";
 import type { RouteHandler } from "../routes/table.ts";
 import type { Message } from "../store.ts";
 import { openComputerCaller } from "./computer-client.ts";
-import { SavedStepsDispatch, type EngineSlots } from "./dispatch.ts";
+import { SavedStepsDispatch, type DispatchDeps, type EngineSlots } from "./dispatch.ts";
 import { ComputerJournal, hostScope, type JournalCapability, type RequestJournal } from "./journal.ts";
 import { buildRecipe, otherToolsHarmless, personTextRequest } from "./rules.ts";
 import { RecipeStore } from "./store.ts";
@@ -22,6 +22,8 @@ export interface SavedStepsDeps {
   stopped(threadId: string): boolean;
   generation(threadId: string): string | undefined;
   patchMessage(threadId: string, messageId: string, patch: Partial<Message>): void;
+  withholdHandoff: DispatchDeps["withholdHandoff"];
+  contextChanged: DispatchDeps["contextChanged"];
   folder?: (botId: string) => string;
   now?: () => number;
   platform?: NodeJS.Platform;
@@ -82,6 +84,8 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
     stopped: deps.stopped,
     openCaller: openComputerCaller,
     taint,
+    withholdHandoff: deps.withholdHandoff,
+    contextChanged: deps.contextChanged,
   });
 
   const markOrSave = ({ botId, threadId, request, reply, after, automated }: SettledRequest, taken: RequestJournal | null): void => {

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { newId, type ProviderInstance, type RuntimeEvent, type RuntimeEventListener, type SendTurnInput, type TurnStartResult } from "../contracts.ts";
 import { CONTROL_BUSY } from "../control-client.ts";
+import { Handoffs, unseenMessages, type HandedState, type Handoff } from "../delta-context.ts";
 import { EventBus } from "../harness/bus.ts";
 import { QuickModelFallback } from "../quick-model-fallback.ts";
 import type { Message } from "../store.ts";
@@ -65,6 +66,9 @@ let close: Mock<() => Promise<void>>;
 let recipes: { find: Mock<(botId: string, key: string) => Recipe | undefined>; forget: Mock<(botId: string, recipeId: string) => boolean> };
 let openCaller: Mock<DispatchDeps["openCaller"]>;
 let taint: Mock<(threadId: string) => boolean>;
+let handOn: Mock<(turnId: string) => void>;
+let withholdHandoff: Mock<(threadId: string) => (turnId: string) => void>;
+let contextChanged: Mock<(botId: string, threadId: string) => void>;
 let deps: DispatchDeps;
 let stopped: boolean;
 let dispatch: SavedStepsDispatch;
@@ -111,6 +115,9 @@ beforeEach(() => {
   recipes = { find: vi.fn((botId: string, key: string) => (botId === "b1" && key === RECIPE.key ? RECIPE : undefined)), forget: vi.fn(() => true) };
   openCaller = vi.fn(async () => ({ ...computer(), close }));
   taint = vi.fn(() => true);
+  handOn = vi.fn();
+  withholdHandoff = vi.fn(() => handOn);
+  contextChanged = vi.fn();
   deps = {
     recipes,
     enabled: () => true,
@@ -124,6 +131,8 @@ beforeEach(() => {
     stopped: () => stopped,
     openCaller,
     taint,
+    withholdHandoff,
+    contextChanged,
   };
   dispatch = new SavedStepsDispatch(deps);
 });
@@ -152,6 +161,8 @@ describe("SavedStepsDispatch.sendTurn", () => {
     expect(events).toEqual([]);
     expect(openCaller).not.toHaveBeenCalled();
     expect(taint).not.toHaveBeenCalled();
+    expect(withholdHandoff).not.toHaveBeenCalled();
+    expect(contextChanged).not.toHaveBeenCalled();
     expect(slots.get("t1")).toBe(engine);
   });
 
@@ -235,6 +246,43 @@ describe("SavedStepsDispatch.sendTurn", () => {
     await settled();
     expect(start).not.toHaveBeenCalled();
     expect(acted).toEqual(["click", "set_value"]);
+  });
+
+  it("keeps the replayed turn from the engine's session record and has the next AI turn read it from the conversation", async () => {
+    const order: string[] = [];
+    withholdHandoff.mockImplementation(() => { order.push("withheld"); return handOn; });
+    contextChanged.mockImplementation(() => { order.push(`changed:${events.at(-1)?.type}`); });
+    const sent = dispatch.sendTurn(engine, REQ, INPUT, start);
+    expect(withholdHandoff).toHaveBeenCalledExactlyOnceWith("t1");
+    expect(events).toEqual([]);
+    await sent;
+    await settled();
+    expect(contextChanged).toHaveBeenCalledExactlyOnceWith("b1", "t1");
+    expect(order).toEqual(["withheld", "changed:item.completed"]);
+    expect(handOn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["is declined", () => { answer = (event) => (event.tool === "mcp__computer__set_value" ? "deny" : "allow"); }],
+    ["breaks", () => { throwAt = "list_apps"; }],
+  ])("tells the engine's session about a replay that %s", async (_, arrange) => {
+    arrange();
+    await dispatch.sendTurn(engine, REQ, INPUT, start);
+    await settled();
+    expect(contextChanged).toHaveBeenCalledExactlyOnceWith("b1", "t1");
+    expect(handOn).not.toHaveBeenCalled();
+  });
+
+  it("hands the turn's context on to the AI that takes over, under the replay's turn id", async () => {
+    failAt = "set_value";
+    start.mockImplementationOnce(async () => {
+      expect(handOn).toHaveBeenCalledTimes(1);
+      return { turnId: "e1" };
+    });
+    const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
+    await settled();
+    expect(handOn).toHaveBeenCalledExactlyOnceWith(turnId);
+    expect(contextChanged).not.toHaveBeenCalled();
   });
 
   it("drives the turn's own gated computer and closes it", async () => {
@@ -425,6 +473,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
     expect(recipes.forget).not.toHaveBeenCalled();
     expect(engine.adapter.interruptTurn).not.toHaveBeenCalled();
     expect(close).toHaveBeenCalledTimes(1);
+    expect(contextChanged).toHaveBeenCalledExactlyOnceWith("b1", "t1");
   });
 
   it("Stop while the computer is still starting ends the turn interrupted", async () => {
@@ -536,6 +585,70 @@ describe("SavedStepsDispatch.sendTurn", () => {
 function engines() {
   return slots.get("t1");
 }
+
+describe("SavedStepsDispatch with the engine's session record", () => {
+  let order: string[];
+  let records: Map<string, HandedState>;
+  let replies: Map<string, string[]>;
+  let handoffs: Handoffs;
+  const unseen = () => unseenMessages(order.map((id) => ({ id, role: "user" as const, text: id })), order, records.get("claude")!).map((m) => m.id);
+  const begin = (claimId: string, handoff: Partial<Handoff>) => {
+    handoffs.begin("t1", claimId, {
+      botId: "b1", instanceId: "claude", config: "c", resumeCursor: "s", started: { sent: [] }, recovery: { sent: [] },
+      resumed: { sent: [] }, placed: [], carried: [], own: [], ...handoff,
+    });
+    handoffs.dispatching("t1", claimId);
+  };
+  const nextTurnReads = (placed: string[]) => {
+    order.push("m4", "m5");
+    begin("claim-2", { placed, carried: ["m4"], own: ["m4"] });
+    handoffs.bindTurn("t1", "claim-2", "turn-2");
+    replies.set("turn-2", ["m5"]);
+    handoffs.onEvent(ev("item.completed", "turn-2"));
+    handoffs.onEvent(ev("turn.completed", "turn-2"));
+  };
+
+  beforeEach(() => {
+    order = ["m0", "m1", "m2", "m3"];
+    records = new Map([["claude", { session: "s", through: "m1", ids: [] }]]);
+    replies = new Map();
+    handoffs = new Handoffs({
+      order: () => order,
+      read: (_bot, _thread, instance) => records.get(instance),
+      write: (_bot, _thread, instance, state) => { records.set(instance, state); },
+      replies: (_thread, turnId) => replies.get(turnId) ?? [],
+    });
+    const publish = deps.publish;
+    dispatch = new SavedStepsDispatch({ ...deps, withholdHandoff: (threadId) => handoffs.withhold(threadId), publish: (event) => {
+      publish(event);
+      handoffs.onEvent(event);
+    } });
+    begin("claim-1", { carried: ["m2"], own: ["m2"] });
+  });
+
+  it("leaves the replayed line and its reply for the next AI turn to read, once", async () => {
+    const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
+    handoffs.bindTurn("t1", "claim-1", turnId);
+    replies.set(turnId, ["m3"]);
+    await settled();
+    expect(start).not.toHaveBeenCalled();
+    expect(unseen()).toEqual(["m2", "m3"]);
+    nextTurnReads(unseen());
+    expect(unseen()).toEqual([]);
+  });
+
+  it("counts what the AI that took over received, so the next turn is not offered it again", async () => {
+    failAt = "set_value";
+    const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
+    handoffs.bindTurn("t1", "claim-1", turnId);
+    replies.set(turnId, ["m3"]);
+    await settled();
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(dispatch.take(ev("item.completed", "e1"))).toBe(true);
+    expect(dispatch.take(ev("turn.completed", "e1"))).toBe(true);
+    expect(unseen()).toEqual([]);
+  });
+});
 
 describe("SavedStepsDispatch with the quick model fallback", () => {
   let scratch: string;
