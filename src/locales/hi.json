@@ -2547,5 +2547,8 @@
   "placeLook.imageSize": "वह तस्वीर बहुत बड़ी है। कोई छोटी आज़माएँ।",
   "placeLook.imageMoving": "स्थिर तस्वीर लगाएँ।",
   "placeLook.imageFailed": "तस्वीर सेव नहीं हुई। फिर कोशिश करें।",
-  "placeLook.imageSaving": "सेव हो रही है…"
+  "placeLook.imageSaving": "सेव हो रही है…",
+  "notifications.status.notice": "सूचना",
+  "mcp.ownBot": "सिर्फ़ {bot} के लिए: इसकी फ़ाइलें {bot} के अपने फ़ोल्डर में हैं।",
+  "mcp.offFor": "{bots} के लिए बंद है, क्योंकि यह उनके लिए शुरू नहीं होता। इसे अपने-आप फिर से जाँचा जाता है।"
 }

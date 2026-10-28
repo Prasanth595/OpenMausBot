@@ -817,6 +817,7 @@
   "notifications.status.failed": "Başarısız oldu",
   "notifications.status.deferred": "Ertelendi",
   "notifications.status.spend": "Harcama",
+  "notifications.status.notice": "Bilgi",
   "settings.roomTurns.title": "Grup turları",
   "settings.roomTurns.subtitle": "Bir gruptaki bot turu için olağan maksimum süreyi belirleyin. Bir sohbet kendi süresini seçebilir.",
   "settings.roomTurns.label": "Maksimum tur süresi",
@@ -5018,5 +5019,7 @@
   "placeLook.imageSize": "Bu görsel çok büyük. Daha küçük bir görsel deneyin.",
   "placeLook.imageMoving": "Hareketsiz bir görsel kullanın.",
   "placeLook.imageFailed": "Görsel kaydedilmedi. Yeniden deneyin.",
-  "placeLook.imageSaving": "Kaydediliyor…"
+  "placeLook.imageSaving": "Kaydediliyor…",
+  "mcp.ownBot": "Yalnızca {bot} için: dosyaları {bot} botunun kendi klasöründe.",
+  "mcp.offFor": "{bots} için kapalı, çünkü onlarda başlamıyor. Kendiliğinden yeniden denetlenir."
 }

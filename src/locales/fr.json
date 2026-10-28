@@ -2547,5 +2547,8 @@
   "placeLook.imageSize": "Cette image est trop grande. Essayez-en une plus petite.",
   "placeLook.imageMoving": "Utilisez une image fixe.",
   "placeLook.imageFailed": "L'image n'a pas été enregistrée. Réessayez.",
-  "placeLook.imageSaving": "Enregistrement…"
+  "placeLook.imageSaving": "Enregistrement…",
+  "notifications.status.notice": "Info",
+  "mcp.ownBot": "Uniquement pour {bot} : ses fichiers sont dans le dossier de {bot}.",
+  "mcp.offFor": "Désactivé pour {bots}, car il ne démarre pas pour eux. Il est revérifié automatiquement."
 }

@@ -4402,5 +4402,8 @@
   "placeLook.imageSize": "這張圖片太大了。請換一張較小的。",
   "placeLook.imageMoving": "請使用靜態圖片。",
   "placeLook.imageFailed": "圖片沒有儲存。請再試一次。",
-  "placeLook.imageSaving": "正在儲存…"
+  "placeLook.imageSaving": "正在儲存…",
+  "notifications.status.notice": "通知",
+  "mcp.ownBot": "僅限 {bot}：它的檔案在 {bot} 自己的資料夾中。",
+  "mcp.offFor": "已為 {bots} 關閉，因為它在他們那裡無法啟動。會自動再檢查。"
 }

@@ -817,6 +817,7 @@
   "notifications.status.failed": "Thất bại",
   "notifications.status.deferred": "Đã hoãn",
   "notifications.status.spend": "Chi tiêu",
+  "notifications.status.notice": "Thông báo",
   "settings.roomTurns.title": "Lượt trong group",
   "settings.roomTurns.subtitle": "Đặt mức tối đa thông thường cho một lượt của bot trong group. Mỗi cuộc trò chuyện có thể chọn giới hạn riêng.",
   "settings.roomTurns.label": "Thời lượng lượt tối đa",
@@ -5018,5 +5019,7 @@
   "placeLook.imageSize": "Hình ảnh đó quá lớn. Hãy thử hình nhỏ hơn.",
   "placeLook.imageMoving": "Hãy dùng hình ảnh tĩnh.",
   "placeLook.imageFailed": "Chưa lưu được hình ảnh. Hãy thử lại.",
-  "placeLook.imageSaving": "Đang lưu…"
+  "placeLook.imageSaving": "Đang lưu…",
+  "mcp.ownBot": "Chỉ dành cho {bot}: các tệp của nó nằm trong thư mục riêng của {bot}.",
+  "mcp.offFor": "Đã tắt cho {bots} vì nó không khởi động được với họ. Nó sẽ tự được kiểm tra lại."
 }

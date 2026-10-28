@@ -3390,5 +3390,8 @@
   "placeLook.imageSize": "这张图片太大了。请换一张较小的。",
   "placeLook.imageMoving": "请使用静态图片。",
   "placeLook.imageFailed": "图片没有保存。请重试。",
-  "placeLook.imageSaving": "正在保存…"
+  "placeLook.imageSaving": "正在保存…",
+  "notifications.status.notice": "通知",
+  "mcp.ownBot": "仅限 {bot}：它的文件在 {bot} 自己的文件夹中。",
+  "mcp.offFor": "已为 {bots} 关闭，因为它在他们那里无法启动。会自动再次检查。"
 }

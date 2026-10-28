@@ -2565,5 +2565,8 @@
   "placeLook.imageSize": "Dieses Bild ist zu groß. Versuche ein kleineres.",
   "placeLook.imageMoving": "Verwende ein unbewegtes Bild.",
   "placeLook.imageFailed": "Das Bild wurde nicht gespeichert. Versuche es noch einmal.",
-  "placeLook.imageSaving": "Wird gespeichert…"
+  "placeLook.imageSaving": "Wird gespeichert…",
+  "notifications.status.notice": "Hinweis",
+  "mcp.ownBot": "Nur für {bot}: Die Dateien liegen im eigenen Ordner von {bot}.",
+  "mcp.offFor": "Aus für {bots}, weil er dort nicht startet. Er wird von selbst erneut geprüft."
 }
