@@ -3,6 +3,7 @@ import { botFolder } from "../bot-folder.ts";
 import type { AppConfig } from "../config.ts";
 import type { RuntimeEvent } from "../contracts.ts";
 import { createComputerJournalRoutes } from "../routes/computer-journal.ts";
+import { createSavedStepsRoutes } from "../routes/saved-steps.ts";
 import type { RouteHandler } from "../routes/table.ts";
 import type { Message } from "../store.ts";
 import { openComputerCaller } from "./computer-client.ts";
@@ -15,6 +16,7 @@ export { COMPUTER_JOURNAL_PATH } from "./journal-tap.ts";
 
 export interface SavedStepsDeps {
   enabled(): boolean;
+  bot(id: string): unknown;
   publish(event: RuntimeEvent): void;
   engines: EngineSlots;
   stopped(threadId: string): boolean;
@@ -39,6 +41,7 @@ export interface SavedSteps {
   recipes: RecipeStore;
   dispatch: SavedStepsDispatch;
   gateChecked(capability: JournalCapability): void;
+  routes: RouteHandler;
   journalRoutes(internal: { capability: JournalCapability; readBody(): Promise<unknown> }): RouteHandler;
   requestSettled(settled: SettledRequest): void;
   requestEnded(threadId: string, generations: ReadonlySet<string>): void;
@@ -91,6 +94,7 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
     journal,
     recipes,
     dispatch,
+    routes: createSavedStepsRoutes({ bot: deps.bot, forget: (botId, id) => recipes.forget(botId, id) }),
     gateChecked(capability) {
       const scope = hostScope(capability);
       if (scope) journal.gateChecked(scope);

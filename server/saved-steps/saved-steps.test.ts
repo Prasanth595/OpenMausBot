@@ -45,6 +45,7 @@ describe("createSavedSteps", () => {
     const slots = new Map<string, ProviderInstance>();
     const steps = createSavedSteps({
       enabled: () => true,
+      bot: () => ({}),
       publish: (event) => events.push(event),
       engines: { get: (threadId) => slots.get(threadId), set: (threadId, engine) => { slots.set(threadId, engine); } },
       stopped: () => false,
@@ -73,6 +74,7 @@ describe("createSavedSteps", () => {
     const slots = new Map<string, ProviderInstance>();
     const steps = createSavedSteps({
       enabled: () => true,
+      bot: () => ({}),
       publish: (event) => events.push(event),
       engines: { get: (threadId) => slots.get(threadId), set: (threadId, engine) => { slots.set(threadId, engine); } },
       stopped: () => false,
@@ -111,6 +113,7 @@ describe("SavedSteps.requestSettled", () => {
 
   const facade = (change: Partial<SavedStepsDeps> = {}) => createSavedSteps({
     enabled: () => enabled,
+    bot: () => ({}),
     publish: () => {},
     engines: { get: () => undefined, set: () => {} },
     stopped: () => false,

@@ -153,7 +153,7 @@ describe("computer journal", () => {
   });
 
   it("counts gate checks only for host computer turns, and taints a turn that gates another computer", () => {
-    const saved = createSavedSteps({ enabled: () => true, publish: () => {}, engines: { get: () => undefined, set: () => {} }, stopped: () => false, generation: () => "g1", patchMessage: () => {} });
+    const saved = createSavedSteps({ enabled: () => true, bot: () => ({}), publish: () => {}, engines: { get: () => undefined, set: () => {} }, stopped: () => false, generation: () => "g1", patchMessage: () => {} });
     saved.gateChecked({ ...scope, kind: "browser" });
     expect(saved.journal.take("t1", new Set(["g1"]))).toBeNull();
     saved.gateChecked({ ...scope, kind: "computer", boxId: null });
