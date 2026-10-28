@@ -274,7 +274,9 @@ describe("the chat header's pill", () => {
     }
     const untitled = pill({ bot: { ...withTasks, mainThreadId: "other", tasks: [{ ...withTasks.tasks![0]!, title: "New thread" }, withTasks.tasks![1]!] } });
     try {
-      expect(untitled.header.querySelector("[data-chathead-conversation]")!.textContent).toBe("New conversation");
+      // The thread bar names the open conversation, so the pill does not repeat an untitled one.
+      expect(untitled.header.querySelector("[data-chathead-conversation]")).toBeNull();
+      expect(untitled.header.querySelector<HTMLButtonElement>("[data-chathead-pill]")!.getAttribute("aria-label")).toBe("Open Scout's profile");
     } finally {
       untitled.done();
     }

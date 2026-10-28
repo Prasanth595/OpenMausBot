@@ -32,9 +32,9 @@ export function ChatHeadPill({ bot, avatar, privacy, onToggle }: {
     : privacy?.kind === "shared" ? t("team.sharedHeader", { team: privacy.team }) : null;
   const PrivacyIcon = privacy?.kind === "private" ? Lock : Users;
   const title = bot.tasks?.find((task) => task.threadId === bot.threadId)?.title;
-  // Simple mode calls an untitled conversation what it is, never a "thread".
-  const conversation = !awayFromMainThread(bot, false) ? null
-    : !title || title === UNTITLED ? t("task.untitledConversation") : title;
+  // The thread bar already names the conversation on screen, so an untitled one adds nothing here: a duplicate
+  // "New conversation" beside the bot's own name just crowds the pill.
+  const conversation = !awayFromMainThread(bot, false) || !title || title === UNTITLED ? null : title;
   const label = t("chat.openProfileAria", { name: bot.name });
   return (
     <button
