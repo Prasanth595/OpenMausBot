@@ -2,7 +2,7 @@ import type { Notification } from "../shared/notification.ts";
 import { buildNotification } from "./notify.ts";
 import type { RoutineManager, RoutineRun } from "./routines.ts";
 import type { BotRecord, Store } from "./store.ts";
-import type { WaitManagerOptions } from "./waits.ts";
+import type { WaitManager, WaitManagerOptions } from "./waits.ts";
 
 export interface WaitHostDeps {
   store: Pick<Store, "appendMessage" | "patchMessage" | "patchTask" | "messagesFor" | "bot">;
@@ -24,6 +24,27 @@ export function waitRunChat(
 ): string | null {
   if (cloudHome || !run.resultsThreadId) return null;
   return directChat(run.botId, run.resultsThreadId) ? run.resultsThreadId : null;
+}
+
+type CardStore = Pick<Store, "messagesFor" | "patchMessage">;
+
+function settleWaitCard(store: CardStore, threadId: string, messageId: string, how: "fired" | "expired" | "cancelled"): void {
+  const card = store.messagesFor(threadId).find((m) => m.id === messageId)?.card;
+  if (!card?.waitRequest || card.waitRequest.settled) return;
+  store.patchMessage(threadId, messageId, {
+    card: { ...card, ...(how === "cancelled" ? { undone: true } : {}), waitRequest: { ...card.waitRequest, settled: how } },
+  });
+}
+
+/** The card's Cancel: true once it stopped the wait. A wait that already ended settles its card instead, so Cancel goes. */
+export function cancelWaitFromCard(
+  waits: Pick<WaitManager, "cancel">,
+  store: CardStore,
+  card: { botId: string; threadId: string; messageId: string; waitId: string },
+): boolean {
+  if (waits.cancel(card.waitId, card.botId)) return true;
+  settleWaitCard(store, card.threadId, card.messageId, "expired");
+  return false;
 }
 
 export function createWaitHost(deps: WaitHostDeps): Pick<WaitManagerOptions, "sourceAlive" | "botBusy" | "post" | "followUp" | "showCard" | "settleCard"> {
@@ -68,7 +89,7 @@ export function createWaitHost(deps: WaitHostDeps): Pick<WaitManagerOptions, "so
         kind: "options",
         card: {
           title: `Waiting: ${wait.label}`,
-          subtitle: `When ${wait.label}, ${bot.name} will: ${wait.followUp}`,
+          subtitle: `Then ${bot.name} will: ${wait.followUp}`,
           options: [],
           answered: "allow",
           dismissed: true,
@@ -81,13 +102,7 @@ export function createWaitHost(deps: WaitHostDeps): Pick<WaitManagerOptions, "so
       return message.id;
     },
     settleCard(wait, how) {
-      if (!wait.cardMessageId) return;
-      const message = store.messagesFor(wait.threadId).find((m) => m.id === wait.cardMessageId);
-      const card = message?.card;
-      if (!card?.waitRequest) return;
-      store.patchMessage(wait.threadId, wait.cardMessageId, {
-        card: { ...card, ...(how === "cancelled" ? { undone: true } : {}), waitRequest: { ...card.waitRequest, settled: how } },
-      });
+      if (wait.cardMessageId) settleWaitCard(store, wait.threadId, wait.cardMessageId, how);
     },
   };
 }

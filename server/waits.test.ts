@@ -45,7 +45,7 @@ function harness(options: Partial<WaitManagerOptions> = {}) {
     manager: undefined as unknown as WaitManager,
     reload: () => build(),
     create(condition: NewWaitCondition, extra: { label?: string; followUp?: string; botId?: string; threadId?: string; hours?: number } = {}) {
-      return h.manager.create({ botId: extra.botId ?? "bot-1", threadId: extra.threadId ?? "t-1", label: extra.label ?? "the report is ready", condition, followUp: extra.followUp, hours: extra.hours });
+      return h.manager.create({ botId: extra.botId ?? "bot-1", threadId: extra.threadId ?? "t-1", label: extra.label ?? "the report", condition, followUp: extra.followUp, hours: extra.hours });
     },
     waitOf(id: string): WaitRecord {
       const found = JSON.parse(readFileSync(file, "utf8")).waits.find((w: WaitRecord) => w.id === id);
@@ -91,7 +91,7 @@ function harness(options: Partial<WaitManagerOptions> = {}) {
 describe("WaitManager", () => {
   it("creates a wait with a 24-hour default and its first check due, and keeps it across a restart", async () => {
     const h = harness();
-    const created = await h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report is ready", condition: { kind: "file_exists", path: "/r.txt" } });
+    const created = await h.manager.create({ botId: "bot-1", threadId: "t-1", label: "the report", condition: { kind: "file_exists", path: "/r.txt" } });
     expect(created).toMatchObject({ state: "created", wait: { expiresAt: T0 + 24 * 3_600_000, nextCheckAt: T0 + 5_000, errors: 0 } });
     expect(h.reload().list("bot-1")).toHaveLength(1);
     if (process.platform !== "win32") expect(statSync(h.file).mode & 0o777).toBe(0o600);
@@ -170,9 +170,9 @@ describe("WaitManager", () => {
 
   it("fires once: one line, one follow-up, the card settled, and the wait gone", async () => {
     const h = harness();
-    await h.create({ kind: "file_exists", path: "/r.txt" }, { label: "the report is ready", followUp: "Summarise it." });
+    await h.create({ kind: "file_exists", path: "/r.txt" }, { label: "the report", followUp: "Summarise it." });
     h.stamp = { size: 1, mtimeMs: 1 }; h.advance(5_000); await h.manager.tick(); await h.manager.tick();
-    expect(h.posts).toEqual([{ status: "fired", text: "the report is ready: done. /r.txt is there now." }]);
+    expect(h.posts).toEqual([{ status: "fired", text: "the report: done. /r.txt is there now." }]);
     expect(h.followUp).toHaveBeenCalledTimes(1);
     expect(h.settleCard.mock.calls.map(([, how]) => how)).toEqual(["fired"]);
     expect(h.manager.list("bot-1")).toEqual([]);
@@ -326,7 +326,7 @@ describe("WaitManager", () => {
     await h.create({ kind: "file_changed", path: "/log" });
     h.advance(5_000); await h.manager.tick(); expect(h.posts).toEqual([]);
     h.stamp = { size: 2, mtimeMs: 2 }; h.advance(5_000); await h.manager.tick();
-    expect(h.posts).toEqual([{ status: "fired", text: "the report is ready: done. /log changed." }]);
+    expect(h.posts).toEqual([{ status: "fired", text: "the report: done. /log changed." }]);
   });
 
   it("reads the process list once per tick for every process wait", async () => {

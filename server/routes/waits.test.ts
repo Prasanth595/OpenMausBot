@@ -7,7 +7,7 @@ import { createWaitRoutes, findWaitPeer, hostWaitRefusal, parseWaitRequest, wait
 import { PASS } from "./table.ts";
 
 const HOME = "/home/maus";
-const FILE_WAIT = { label: "the report is ready", kind: "file_exists", path: "/r.txt" };
+const FILE_WAIT = { label: "the report", kind: "file_exists", path: "/r.txt" };
 
 const waits = {
   create: vi.fn(async (input: NewWait) => ({ state: "created", wait: { id: "w1", label: input.label, expiresAt: 0 } }) as never),
@@ -35,8 +35,8 @@ describe("the waits route", () => {
   });
   it("makes a wait for the capability's bot and chat, never ids from the body", async () => {
     waits.create.mockClear();
-    const { status, payload } = await call("POST", "/api/internal/waits", { label: "the report is ready", kind: "file_exists", path: "~/r.txt", botId: "evil", threadId: "evil" });
-    expect(waits.create).toHaveBeenCalledWith({ botId: "bot-1", threadId: "thread-1", label: "the report is ready", condition: { kind: "file_exists", path: join(HOME, "r.txt") }, hours: 24 });
+    const { status, payload } = await call("POST", "/api/internal/waits", { label: "the report", kind: "file_exists", path: "~/r.txt", botId: "evil", threadId: "evil" });
+    expect(waits.create).toHaveBeenCalledWith({ botId: "bot-1", threadId: "thread-1", label: "the report", condition: { kind: "file_exists", path: join(HOME, "r.txt") }, hours: 24 });
     expect([status, payload.text]).toEqual([201, expect.stringContaining("(wait id w1)")]);
   });
   it("carries follow_up as followUp and says so in the answer", async () => {

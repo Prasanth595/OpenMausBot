@@ -702,7 +702,7 @@ export interface OptionCardData {
   routineRequest?: RoutineRequestCardData;
   /** A webhook trigger a bot made or changed from chat. */
   webhookRequest?: WebhookRequestCardData;
-  /** A wait with a follow-up a bot set up from chat (wait_until); Undo cancels it. */
+  /** A wait with a follow-up a bot set up from chat (wait_until); its Cancel stops it. */
   waitRequest?: WaitCardData;
   /** An app-event automation a bot made or changed from chat. */
   appTriggerRequest?: AppTriggerRequestCardData;

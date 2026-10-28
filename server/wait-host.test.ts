@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Notification } from "../shared/notification.ts";
 import type { Message } from "./store.ts";
-import { createWaitHost, waitRunChat, type WaitHostDeps } from "./wait-host.ts";
+import { cancelWaitFromCard, createWaitHost, waitRunChat, type WaitHostDeps } from "./wait-host.ts";
 import type { WaitRecord } from "./waits.ts";
 
 const NOW = 1_700_000_000_000;
@@ -76,10 +76,24 @@ describe("the store side of waits", () => {
   it("shows a card with the follow-up, and settles it", () => {
     const id = host.showCard({ ...wait, followUp: "Deploy it." });
     expect(store.message(id!)).toMatchObject({ role: "bot", kind: "options", card: {
-      title: "Waiting: the build", subtitle: "When the build, Pepper will: Deploy it.", options: [], answered: "allow", dismissed: true,
+      title: "Waiting: the build", subtitle: "Then Pepper will: Deploy it.", options: [], answered: "allow", dismissed: true,
       autoApplied: true, requestId: "w1", tool: "wait_until", waitRequest: { waitId: "w1", label: "the build", followUp: "Deploy it." } } });
     host.settleCard({ ...wait, cardMessageId: id }, "cancelled");
     expect(store.message(id!).card).toMatchObject({ undone: true, waitRequest: { settled: "cancelled" } });
+    host.settleCard({ ...wait, cardMessageId: id }, "fired");
+    expect(store.message(id!).card?.waitRequest?.settled, "a card settles once").toBe("cancelled");
+  });
+
+  it("settles a card whose wait already ended when its Cancel finds nothing to stop, and only stops a wait that is there", () => {
+    const id = host.showCard({ ...wait, followUp: "Deploy it." })!;
+    const card = { botId: "bot-1", threadId: "t-1", messageId: id, waitId: "w1" };
+    const cancel = vi.fn((): WaitRecord | null => wait);
+    expect(cancelWaitFromCard({ cancel }, store, card)).toBe(true);
+    expect([cancel.mock.calls, store.message(id).card?.waitRequest?.settled]).toEqual([[["w1", "bot-1"]], undefined]);
+    cancel.mockReturnValue(null);
+    expect(cancelWaitFromCard({ cancel }, store, card)).toBe(false);
+    expect(store.message(id).card).toMatchObject({ waitRequest: { settled: "expired" } });
+    expect(store.message(id).card).not.toHaveProperty("undone");
   });
 
   it("queues the follow-up as an outside event that joins the chat, except on a Cloud home", () => {

@@ -480,7 +480,7 @@ import { listenWebhookIngress, type WebhookIngress } from "./webhook-ingress.ts"
 import { addressFor } from "./webhook-address.ts";
 import { assertModelVariantSupported, memberTurnSelection } from "./member-turn.ts";
 import { WebhookManager } from "./webhooks.ts";
-import { tieAutomationsToBots } from "./bot-automations.ts"; import { WaitManager } from "./waits.ts"; import { createWaitHost, waitRunChat } from "./wait-host.ts"; import { createWaitRoutes, findWaitPeer, hostWaitRefusal, waitSourceRefusal, type WaitRouteContext } from "./routes/waits.ts";
+import { tieAutomationsToBots } from "./bot-automations.ts"; import { WaitManager } from "./waits.ts"; import { cancelWaitFromCard, createWaitHost, waitRunChat } from "./wait-host.ts"; import { createWaitRoutes, findWaitPeer, hostWaitRefusal, waitSourceRefusal, type WaitRouteContext } from "./routes/waits.ts";
 import type { WebhookTrigger } from "../shared/webhooks.ts";
 import { AGENTS_NODE_FLAG, SPAWNED_PROXIES } from "./proxy-paths.ts";
 import { AGENTS_PROXY_ENV, agentsProxyLaunch, agentsToolBridgeEnv, applyAgentsBridge, bridgedToolTitle, turnEngine } from "./agents-bridge-switch.ts";
@@ -9661,7 +9661,7 @@ async function undoAppliedChange(res: ServerResponse, threadId: string, requestI
   } else if (card.webhookRequest || card.appTriggerRequest) {
     result = card.webhookRequest ? webhookRequests.undo({ botId, threadId, requestId }) : await appTriggers.undo({ botId, threadId, requestId });
   } else if (card.waitRequest) {
-    result = card.undone ? { claimed: true, state: "already_undone" } : botWaits.cancel(card.waitRequest.waitId, botId) ? { claimed: true, state: "undone" } : { claimed: true, state: "invalid", error: "This wait has already ended.", status: 409 };
+    result = card.undone ? { claimed: true, state: "already_undone" } : cancelWaitFromCard(botWaits, store, { botId, threadId, messageId: message.id, waitId: card.waitRequest.waitId }) ? { claimed: true, state: "undone" } : { claimed: true, state: "invalid", error: "This wait has already ended.", status: 409 };
   } else if (card.profileRequest || card.modelRequest) {
     const undone = (card.profileRequest ? profileRequests : modelRequests).undo({ botId, threadId, requestId });
     if (undone.claimed && undone.state === "undone") {
