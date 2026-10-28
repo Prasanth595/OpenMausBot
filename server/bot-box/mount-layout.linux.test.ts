@@ -59,6 +59,14 @@ describe.skipIf(detection.box !== "bwrap")("synthetic filesystem layouts inside 
     });
   });
 
+  it.each(["env", "rw"].flatMap((grant) => ["data", "bot", "ancestor"].map((target) => `hostile-outside-${grant}-${target}`)))("refuses writable aliases outside HOME into masked data (%s)", (scenario) => {
+    expect(layout(scenario)).toEqual({
+      files: ["hidden", "hidden", "hidden"],
+      hostFiles: ["private fixture", "other bot fixture"],
+      created: [false, false],
+    });
+  });
+
   it("keeps private temporary files hidden when an environment path aliases /tmp", () => {
     expect(layout("symlink-private-env")).toEqual(["hidden"]);
   });

@@ -67,17 +67,18 @@ if (scenario === "browser" || scenario === "browser-read-only") {
     }
   }
   console.log(JSON.stringify(results));
-} else if (["hostile-env-data", "hostile-env-bot", "hostile-rw-data", "hostile-rw-bot"].includes(scenario)) {
-  const otherBot = join(realData, "workspaces", "bot-b"), alias = join(home, ".codex");
+} else if (scenario?.startsWith("hostile-")) {
+  const otherBot = join(realData, "workspaces", "bot-b");
+  const alias = scenario.includes("outside") ? "/srv/granted" : join(home, ".codex");
   const cwd = join(realData, "task-workspaces", "bot-a", "thread-1");
   for (const folder of [otherBot, cwd, join(realData, "workspaces", "bot-a")]) mkdirSync(folder, { recursive: true });
   writeFileSync(join(otherBot, "private.txt"), "other bot fixture");
-  symlinkSync(scenario.endsWith("-data") ? realData : otherBot, alias);
+  symlinkSync(scenario.endsWith("-data") ? realData : scenario.endsWith("-ancestor") ? "/var/lib" : otherBot, alias);
   const plan = planBox(setup, { ...request, cwd,
-    ...(scenario.startsWith("hostile-env-") ? { env: { HOME: home, CODEX_HOME: alias } } : { rw: [alias] }),
+    ...(scenario.includes("-env-") ? { env: { HOME: home, CODEX_HOME: alias } } : { rw: [alias] }),
   });
   const database = join(realData, "messages.db"), otherFile = join(otherBot, "private.txt");
-  const aliasedFile = join(alias, scenario.endsWith("-data") ? "messages.db" : "private.txt");
+  const aliasedFile = join(alias, scenario.endsWith("-data") ? "messages.db" : scenario.endsWith("-ancestor") ? "openmausbot/messages.db" : "private.txt");
   const paths = [database, otherFile, aliasedFile].join(" ");
   const files = probe(bwrapArgs(plan),
     `for file in ${paths}; do if test -r "$file"; then echo exposed; else echo hidden; fi; done; for file in ${paths}; do (echo changed >> "$file") 2>/dev/null || :; done; for folder in ${alias} ${realData} ${otherBot}; do (echo changed > "$folder/alias-write-probe") 2>/dev/null || :; done`);

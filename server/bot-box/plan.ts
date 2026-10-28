@@ -184,12 +184,28 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     rw(join(dataDir, "workspaces"));
     rw(join(dataDir, "task-workspaces"));
   }
+  const approvedPath = (path: string) => {
+    const full = resolve(path);
+    if (under(full, resolve(setup.dataDir))) return join(dataDir, relative(resolve(setup.dataDir), full));
+    if (allowedHome && realHome && under(full, allowedHome)) return join(realHome, relative(allowedHome, full));
+    return full;
+  };
+  const safeWritable = (path: string) => {
+    const source = physicalPath(path);
+    if (under(dataDir, source)) return false;
+    if (!under(source, dataDir) || under(source, approvedPath(path))) return true;
+    return mounts.some((mount) => {
+      if (mount.kind !== "bind") return false;
+      const allowed = physicalPath(mount.source);
+      return under(allowed, dataDir) && under(source, allowed);
+    });
+  };
   for (const name of PATH_ENV_NAMES) {
     const value = request.env[name];
     // A temp folder stays the box's own private one; anything else the engine writes is put back.
-    if (value && isAbsolute(value) && !covered(resolve(value)) && !PRIVATE_INSIDE.some((base) => under(resolve(value), base))) rw(resolve(value));
+    if (value && isAbsolute(value) && !covered(resolve(value)) && !PRIVATE_INSIDE.some((base) => under(resolve(value), base)) && safeWritable(value)) rw(resolve(value));
   }
-  for (const path of request.rw ?? []) if (!covered(resolve(path))) rw(resolve(path));
+  for (const path of request.rw ?? []) if (!covered(resolve(path)) && safeWritable(path)) rw(resolve(path));
   if (ownHome) {
     for (const file of request.shared ?? []) {
       if (under(resolve(file.target), ownHome)) mounts.push({ kind: "bind", source: resolve(file.source), target: resolve(file.target), optional: true });
