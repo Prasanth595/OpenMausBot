@@ -35,12 +35,12 @@ describe("t", () => {
     expect(t("engines.cloud")).toBe("Cloud");
   });
 
-  it("keeps new team lifecycle labels available in partial packs, with interpolated names and counts", () => {
+  it("keeps new department lifecycle labels available in partial packs, with interpolated names and counts", () => {
     setLocale("de");
-    expect(t("team.create")).toBe("Create team");
+    expect(t("team.create")).toBe("Create department");
     expect(t("team.moveTo", { name: "Research" })).toBe("Move bots to Research");
     expect(t("team.moveMany", { count: 2 })).toBe("Move 2 bots");
-    expect(t("team.deleteTitle", { name: "Research" })).toBe("Delete Research team?");
+    expect(t("team.deleteTitle", { name: "Research" })).toBe("Delete Research department?");
     expect(t("team.instructionsTitle", { name: "Research" })).toBe("Research shared instructions");
   });
 
@@ -69,6 +69,8 @@ describe("t", () => {
     expect(resolveLocale("pt-PT", available)).toBe("pt");
     expect(resolveLocale("hi-IN", available)).toBe("hi");
     expect(resolveLocale("tr-TR", available)).toBe("tr");
+    expect(resolveLocale("ru-RU", available)).toBe("ru");
+    expect(resolveLocale("ru-RU-x-custom", available)).toBe("ru");
   });
 
   it("every registered pack carries only known keys with non-empty values", () => {
@@ -163,7 +165,7 @@ describe("page language", () => {
 
   it("names every picker language with a valid BCP-47 tag", () => {
     expect(localeChoices.map(({ code }) => documentLanguage(code))).toEqual([
-      "en", "de", "es", "fr", "hi", "ja", "pt-BR", "zh", "zh-TW", "uk", "vi", "tr",
+      "en", "de", "es", "fr", "hi", "ja", "pt-BR", "zh", "zh-TW", "uk", "vi", "tr", "pl", "ru", "it",
     ]);
     for (const { code } of localeChoices) {
       expect(Intl.getCanonicalLocales(documentLanguage(code))).toEqual([documentLanguage(code)]);

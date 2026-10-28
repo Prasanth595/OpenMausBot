@@ -30,7 +30,7 @@ const renderOnCloud = (element: ReturnType<typeof createElement>) => {
   const value = { state: { ...initialState, config }, dispatch: vi.fn(), flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} };
   return renderToStaticMarkup(createElement(BotEditorStore, { value, children: element }));
 };
-const CLOUD_DISCLOSURE = `A Live call sends your voice to OpenAI, along with the chat&#x27;s recent messages, the bot&#x27;s answers and the details of any approval it asks for. The OpenAI key stays on My Cloud.`;
+const CLOUD_DISCLOSURE = `A Live call sends your voice to OpenAI, along with the chat&#x27;s recent messages, the bot&#x27;s answers and the details of any approval it asks for. The OpenAI key stays in the Cloud.`;
 
 afterEach(() => {
   resetLiveMedia();
@@ -102,6 +102,20 @@ describe("LiveCallBar", () => {
     expect(markup).toContain(text);
     expect(markup).toContain(`aria-label="${action}"`);
     expect(markup).not.toContain(`aria-label="${other}"`);
+  });
+
+  it("offers Open System Settings with a microphone this computer refused", async () => {
+    const permOpenSettings = vi.fn(async () => {});
+    vi.stubGlobal("window", { ogb: { speechStop: vi.fn(async () => {}), permOpenSettings } });
+    configureLiveMedia({
+      getUserMedia: async () => { throw new DOMException("denied", "NotAllowedError"); },
+      capabilities: () => ({ dictation: { available: true, engine: "none", onDevice: false } }) as unknown as DesktopCapabilities,
+      pageMicrophone: async () => undefined,
+    });
+    await startLiveCall({ botId: bot.id, threadId: bot.threadId });
+    const markup = render(createElement(LiveCallBar, { bot }));
+    expect(markup).toContain('data-open-system-settings="mic"');
+    expect(markup).toContain("Open System Settings");
   });
 
   it("names the keyboard chords on the mute and hang-up buttons", () => {

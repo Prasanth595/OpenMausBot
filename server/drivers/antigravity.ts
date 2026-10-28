@@ -45,7 +45,8 @@ const managedAsset = resolveAntigravityReleaseAsset();
 
 const support: AcpSupport = {
   driverKind: "antigravityAgent",
-  displayName: "Antigravity",
+  // Named for what people look for: Google moved personal Gemini subscriptions (free, AI Pro, AI Ultra) from Gemini CLI to Antigravity on 2026-06-18.
+  displayName: "Google Gemini (Antigravity)",
   models: STATIC_ANTIGRAVITY_MODELS,
   defaultCli: "agy", // migration alias: resolveAntigravityRuntime treats it as managed
   nativeSource: "antigravity.acp",
@@ -59,7 +60,7 @@ const support: AcpSupport = {
   images: true,
   spawnArgs: () => [],
   selectModel: { configId: "model" },
-  // Google's server reads its new-session default from this variable (agy_acp_server 1.1.1
+  // Google's server reads its new-session default from this variable (agy_acp_server 1.4.3
   // model_selection.get_default_model_id); a later switch re-fetches the model list (1.3-1.8 s).
   sessionModelEnv: "AGY_ACP_DEFAULT_MODEL",
   sessionScopedApproval: true,

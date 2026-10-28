@@ -1,28 +1,62 @@
 # CI job selection
 
-Every PR still runs the workflow and its static checks: locale validation,
-typecheck, lint, Electron checks, the UI build, CI-selection tests and the
-verification-documentation checks. Selection never skips the entire workflow.
+Every PR still runs the workflow, its `static` job and the `CI` gate: locale
+validation, lint, the CI-selection tests and the verification-documentation
+checks always run. Selection never skips the entire workflow.
 
-- Root Markdown files, Markdown under `docs/`, and `.github/FUNDING.yml` alone
-  do not run the runtime jobs.
-- Any other change runs the runtime suite.
-- A push to main is scoped by its own commits (`before..after`): docs only,
-  or a `package.json` change that only bumps `"version"` (the release bump),
-  skips the runtime jobs. It does so only when the commit before the push has
-  a green CI run of its own. Main's waiting run is replaced by each push, so
-  without that check a replaced run's code would never be tested.
+`scripts/ci-scope.mjs` sorts a pull request's changed files (a local
+merge-base diff, rename detection off, so a moved file selects its old path
+too) into areas, and runs only the jobs some area can affect:
+
+| Area | Paths | What runs |
+| --- | --- | --- |
+| docs | `*.md` at the root, everything under `docs/` and `apps/docs/`, `.github/FUNDING.yml` | lint, the docs tests (the three vitest files that read the docs) on Linux |
+| locales | `src/locales/*.json` except `en.json`, `src/locales/*.test.ts` | the build, the locale tests: every `src/` test and `scripts/generate-locale.test.mjs` in two Linux shards, with the Electron node tests |
+| web | the rest of `src/`, `public/`, the root `*-preview.html` pages | the build, the eight Linux shards, the renderer smoke |
+| script tests | `scripts/**/*.test.*` | the Linux and Windows shards, the renderer smoke, browser identity |
+| server | `server/`, `shared/`, `enterprise/`, `companion/`, `evals/`, `skills/`, `deploy/`, the composio broker, the Dockerfile, and the renderer files the server or a smoke loads | the build, Linux and Windows shards, behavior evals, packaged server, open-source edition, the macOS smokes, renderer smoke, browser identity, browser driver, Linux package |
+| desktop | `electron/`, `build/`, `electron-builder.yml`, `index.html` | the same as server |
+| control plane | `cloudflare/control-plane/` | the control-plane job |
+| everything | anything else: `.github/` workflows, `package.json`, the lockfile and workspace, tsconfig, vite and vitest config, `third_party/`, `scripts/` code, unknown paths | every job |
+
+The build is static's typecheck, Electron syntax check and UI build. Several
+areas run the union of their jobs. Why the mapping is what it is:
+
+- The server imports a few renderer files (`SRC_OUTSIDE_RENDERER`), and the
+  renderer imports Electron modules, so a server or desktop change can affect
+  the renderer smoke, and those renderer files count as server.
+  `scripts/ci-scope.test.ts` holds the list equal to the import graph.
+- The macOS smokes run the packaged server inside Electron (approval modes,
+  app frames, phone relay, login handoff), so a server change runs them.
+- A renderer change runs no Windows or macOS shard: the renderer's tests read
+  the platform from the desktop bridge, never the host. Main still runs both.
+- English (`en.json`) is the text every test reads, so it is web. Other
+  catalogs are read only by `src/` tests, the locale generator's test and an
+  Electron node test; `scripts/ci-scope.test.ts` fails if another test starts
+  reading them, or the docs, without being listed.
+- Windows CUA and the Linux ARM64 cloudflared installer test only their own
+  scripts and pinned downloads, so only `scripts/` and dependency changes run
+  them.
+
+Pushes to main, merge groups, manual runs (the release branch's CI, which
+`prepare-release.yml` starts, and the release lane) never use the areas:
+
+- A push to main is scoped by its own commits (`before..after`): docs only
+  (root Markdown, Markdown under `docs/`, `.github/FUNDING.yml`), or a
+  `package.json` change that only bumps `"version"` (the release bump), skips
+  the runtime jobs. It does so only when the commit before the push has a green
+  CI run of its own. Main's waiting run is replaced by each push, so without
+  that check a replaced run's code would never be tested. Every other push runs
+  everything.
 - Merge groups and manual runs always run all jobs. Empty or unreadable diffs,
   and a previous commit whose CI cannot be read, also fall back to all jobs.
 
-PR selection uses a local merge-base diff with rename detection disabled, so
-moving a source file into documentation still selects its original runtime
-path. There is no changed-files API truncation or new action dependency.
-
-The single `CI` gate keeps the existing required dependencies. It accepts a
-skipped runtime job only when static validation passed and explicitly selected
-the docs-only path. Failures, cancellations, missing selection and unexpected
-skips fail the gate. Existing advisory jobs remain advisory.
+The single `CI` gate keeps the existing required dependencies. `static`
+outputs the selected job ids; the gate wants each required job to have passed
+when it was selected and to have been skipped when it was not. Failures,
+cancellations, a missing or malformed selection and unexpected runs or skips
+fail the gate. Advisory jobs remain advisory. A new push to a PR cancels that
+PR's older run; main's concurrency is unchanged (see Main and releases).
 
 The separate shared-terminal smoke workflow is manual-only: its tests already
 run in the Windows Vitest/Electron jobs.
@@ -30,22 +64,49 @@ run in the Windows Vitest/Electron jobs.
 ## Vitest shards
 
 The suite runs one file at a time, so a shard takes as long as its files added
-up. Vitest's own `--shard` deals out equal numbers of files, and in October
-2026 that put three of the four slowest e2e files in one shard: about 24
-minutes of tests on Windows against 13 to 16 for the others, and every PR
-waited for it. `scripts/testing/duration-sequencer.ts` deals the files out by
-recorded time instead, slowest first, each to the shard with the least time so
-far. The times are `scripts/testing/vitest-shard-weights.json`: each file's
-median seconds on the Windows runners, for every file over five seconds and
-every e2e file. A file not in it counts one second, or the median e2e time if
-it is an e2e file. Every file still runs exactly once, and each shard job logs
-a `duration-sequencer:` line with its share.
+up, and the slowest shard sets how long a PR and a release wait. Linux and
+Windows run eight shards each, macOS four (main, merge groups and manual runs
+only); `scripts/ci-scope.mjs` builds the matrix.
 
-Refresh the times from a few recent green runs when shards drift apart:
+**Which files run where.** Linux runs every file. Most e2e files drive
+OMB's own logic through a real server and fake engines, which is the same on
+every OS, and they were 70% of a Windows shard's time, so only Linux runs
+them: the Windows and macOS shards set `OMB_VITEST_E2E=host`, and
+`vite.config.ts` then leaves out every e2e file not listed in
+`scripts/testing/host-e2e.ts`. The list keeps an e2e file on every host when
+it has a test that never runs on Linux (Auto on the person's own desktop, the
+built-in Mac voices) or depends on the OS (PowerShell and Windows process
+trees, junctions, a running process's folder, Windows paths, Chrome behind the
+egress gate). Every unit and API test file runs on every host. A new e2e file
+with a test Linux skips fails `scripts/testing/host-e2e.test.ts` until it is
+listed. The packaged-server, Windows CUA host, browser identity and browser
+driver jobs are separate and unchanged.
+
+**Balance.** Vitest's own `--shard` deals out equal numbers of files, and in
+October 2026 that put three of the four slowest e2e files in one shard.
+`scripts/testing/duration-sequencer.ts` deals the files out by recorded time
+instead, slowest first, each to the shard with the least time so far. The
+times are `scripts/testing/vitest-shard-weights.json`: for each platform
+(`linux`, `win32`, `darwin`), each file's median seconds on that platform's
+runners, for every file over five seconds and every e2e file. A file not in it
+counts one second, or the median e2e time if it is an e2e file. Every file
+still runs exactly once, and each shard job logs a `duration-sequencer:` line
+with its share.
+
+Refresh the times from a few recent main runs (they have all three platforms)
+when shards drift apart:
 
 ```sh
 node scripts/testing/update-shard-weights.mjs --run <run id> --run <run id> --run <run id>
 ```
+
+To run one CI shard locally, use the same OS, `--shard` and `OMB_VITEST_E2E`:
+`OMB_VITEST_E2E=host pnpm exec vitest run --shard=3/8` is Windows shard 3 on a
+Windows machine.
+The locale and docs tests are the same command with their files first:
+`pnpm exec vitest run src/ scripts/generate-locale.test.mjs --shard=1/2` is
+locale tests 1/2 (those jobs set `OMB_VITEST_SUBSET`, so the sequencer does not
+warn that most weighted files are missing).
 
 Deleting or renaming a test file in the weights fails
 `scripts/testing/duration-sequencer.test.ts` until its entry is removed or
@@ -60,8 +121,8 @@ simulator suite). With 25 open PRs the macOS jobs waited a median of six and a
 half hours. Now:
 
 - A PR runs the Vitest shards on Ubuntu and Windows; main pushes, merge groups
-  and manual runs add the macOS shards. Only a couple of test blocks are
-  macOS-only.
+  and manual runs add four macOS shards, which run the host e2e files only.
+  Only a couple of test blocks are macOS-only.
 - Every PR's macOS checks are one job: the packaged-server smoke and the
   Electron smokes.
 - `ci-stop-closed.yml` cancels a PR's CI run when the PR is merged or closed. PR runs share a group named by the PR number (`ci-pr-<n>`), never by `github.ref`: a merged PR's closed event reports the base branch as `github.ref`, which made every merge cancel main's CI (fixed Oct 3 2026).
@@ -90,8 +151,9 @@ HTTP sign-in, a person's hold, restart and idle close) and
 at the screen's device scale, resizes, presets, acknowledged frames, a
 scroll ending on a sharp frame, and the phone's v1 live view against its
 golden from agent-browser), `server/browser/passkey-wall.e2e.test.ts` (a
-sign-in shaped like Google's that stops at a passkey: the bot's notice, and
-the page still usable while the passkey request waits) and
+sign-in shaped like Google's that stops at a passkey or a security key: the
+bot's notice, the request ending at once as unavailable, Try another way, the
+options and a code, and no passkey registered) and
 `server/browser/viewers/stream-v2.e2e.test.ts`
 (the panel's WebSocket stream through its routes: a 1600x1000 panel getting a
 1600x1000 page and 3200x2000 frames on a 2x screen, the page's file picker
@@ -107,6 +169,17 @@ to it, the page's cursor and copied text).
   Testing, with `OMB_BROWSER_SANDBOX=0` because the image has no setuid
   sandbox helper yet.
 - It is advisory, outside the `CI` gate, until it has run green for a while.
+- The latency targets hold wherever Chrome itself can meet them. The suite
+  also times Chrome alone in the same run (the same binary started bare and
+  showing a page; a frame and the same mouse events with none of the driver's
+  checks), and where Chrome alone is slower, as on GitHub's macOS VM (0.7-1.5
+  s to start, 60-75 ms to click, against 0.3 s and 33 ms on a Mac), the driver
+  may add only its budget to that.
+- On macOS the job locks the runner's Google Chrome app before the suites and
+  fails if its version changed: the image's Chrome is older than Google's
+  release, and the GoogleUpdater it starts swaps the new version into the app
+  about a minute and a half after Chrome first runs, in the middle of the
+  suites.
 - Locally: `OMB_CDP_CHROME=<chrome executable> pnpm exec vitest run
   server/browser/cdp/s4- server/browser/checklist.e2e server/browser/passkey-wall.e2e
   server/browser/viewers/viewers.e2e server/browser/viewers/stream-v2.e2e` (or

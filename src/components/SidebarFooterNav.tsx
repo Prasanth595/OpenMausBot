@@ -1,4 +1,4 @@
-import { FolderOpen, Network, Puzzle, Zap } from "lucide-react";
+import { FolderOpen, Puzzle, UsersRound, Zap } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { useAppTriggers } from "@/lib/app-triggers";
@@ -11,6 +11,7 @@ import { useSidebarToolsLayout, type SidebarDensity } from "@/lib/sidebar-prefer
 import { useStore } from "@/state/store";
 
 import { SidebarSectionHeader } from "./SidebarSectionHeader";
+import { UpdateIndicator } from "./UpdateIndicator";
 
 
 function NavRow({
@@ -74,12 +75,28 @@ export function SidebarAppsButton() {
       title={label}
       aria-pressed={state.pluginsOpen}
       className={cn(
-        "flex size-[46px] shrink-0 items-center justify-center rounded-xl transition-colors",
+        "flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors",
         state.pluginsOpen ? "bg-raised text-accent" : "text-ink-secondary hover:bg-raised/50 hover:text-ink",
       )}
     >
       <Puzzle size={18} />
     </button>
+  );
+}
+
+/** An unseen failed run, or an app trigger in trouble. */
+export function useAutomationsNeedYou(): boolean {
+  const { state } = useStore();
+  const appTriggers = useAppTriggers();
+  return state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt) || appTriggers.triggers.some((trigger) => trigger.enabled && trigger.problem);
+}
+
+export function SidebarBottomButtons() {
+  return (
+    <div data-sidebar-bottom-buttons="" className="flex shrink-0 items-center gap-0.5">
+      <SidebarAppsButton />
+      <UpdateIndicator />
+    </div>
   );
 }
 
@@ -101,14 +118,12 @@ export function SidebarFooterNav({
   const toolbar = advanced && !iconsOnly && toolsLayout === "toolbar";
   const iconSize = iconsOnly && !rail ? 20 : 18;
   const tone = (active: boolean) => (active ? "text-accent" : "text-ink-secondary");
-  const appTriggers = useAppTriggers();
-  const automationsNeedYou = state.routineRuns.some((run) => isRoutineProblemRun(run) && !run.seenAt) || appTriggers.triggers.some((trigger) => trigger.enabled && trigger.problem);
+  const automationsNeedYou = useAutomationsNeedYou();
   const automationsRow = <NavRow
     id="automations"
     label={t("sidebar.nav.automations")}
     tourId="nav-automations"
     iconsOnly={iconsOnly || toolbar}
-    rail={rail}
     active={state.activeView === "routines"}
     attention={automationsNeedYou}
     icon={(active) => <Zap size={iconSize} className={tone(active)} />}
@@ -123,30 +138,31 @@ export function SidebarFooterNav({
     icon={(active) => <FolderOpen size={iconSize} className={tone(active)} />}
     onClick={() => dispatch({ type: "showFiles" })}
   />;
-  // Simple mode keeps Automations and Files, without the Tools header.
-  if (!advanced && !iconsOnly) return <nav aria-label={t("sidebar.tools")} className="flex flex-col gap-0.5">{automationsRow}{filesRow}</nav>;
+  if (!advanced && !iconsOnly) return null;
+  const appsRow = iconsOnly && <NavRow
+    id="apps"
+    label={t("sidebar.nav.apps")}
+    tourId="nav-apps"
+    iconsOnly={iconsOnly}
+    rail={rail}
+    active={state.pluginsOpen}
+    icon={(active) => <Puzzle size={iconSize} className={tone(active)} />}
+    onClick={() => dispatch({ type: "togglePlugins", open: true })}
+  />;
+  if (rail) return <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col items-center gap-0.5">{appsRow}</nav>;
 
   const rows = (
     <>
       {automationsRow}
-      {iconsOnly && <NavRow
-        id="apps"
-        label={t("sidebar.nav.apps")}
-        tourId="nav-apps"
-        iconsOnly={iconsOnly}
-        rail={rail}
-        active={state.pluginsOpen}
-        icon={(active) => <Puzzle size={iconSize} className={tone(active)} />}
-        onClick={() => dispatch({ type: "togglePlugins", open: true })}
-      />}
-      {advanced && (
+      {appsRow}
+      {(advanced || iconsOnly) && (
         <NavRow
           id="team-map"
           label={t("sidebar.nav.teamMap")}
           tourId="team-tools"
           iconsOnly={iconsOnly || toolbar}
           active={state.activeView === "team-map"}
-          icon={(active) => <Network size={iconSize} className={tone(active)} />}
+          icon={(active) => <UsersRound size={iconSize} className={tone(active)} />}
           onClick={() => dispatch({ type: "showTeamMap" })}
         />
       )}
@@ -155,7 +171,7 @@ export function SidebarFooterNav({
   );
 
   if (iconsOnly) {
-    return <nav data-tour="tools" aria-label={t("sidebar.tools")} className={cn("flex flex-col items-center", rail ? "gap-0.5" : "gap-1")}>{rows}</nav>;
+    return <nav data-tour="tools" aria-label={t("sidebar.tools")} className="flex flex-col items-center gap-1">{rows}</nav>;
   }
   return (
     <div data-tour="tools">

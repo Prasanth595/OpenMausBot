@@ -46,6 +46,25 @@ export interface WidgetAction {
   payload?: JsonValue;
 }
 
+/** The shape of a thread id a widget action may name. */
+export const THREAD_ID = /^[\w-]{1,128}$/;
+
+/** `open_thread` is handled on the device. The ids are written by a bot: untrusted, and only their shape is checked here. */
+export function threadActionTarget(action: WidgetAction): { botId?: string; groupId?: string; threadId: string } | undefined {
+  if (action.type !== "open_thread" || !isRecord(action.payload)) return undefined;
+  const { botId, groupId, threadId } = action.payload;
+  if (typeof threadId !== "string" || !THREAD_ID.test(threadId)) return undefined;
+  if (typeof botId === "string" && THREAD_ID.test(botId) && groupId === undefined) return { botId, threadId };
+  if (typeof groupId === "string" && THREAD_ID.test(groupId) && botId === undefined) return { groupId, threadId };
+  return undefined;
+}
+
+export const isThreadAction = (action: WidgetAction): boolean => threadActionTarget(action) !== undefined;
+
+/** `open_phone_pairing` opens the app's own phone pairing (the QR code and link) on the device. */
+export const PHONE_PAIRING_ACTION = "open_phone_pairing";
+const CLIENT_ACTION = (action: WidgetAction): boolean => action.type === "open_url" || action.type === "open_thread" || action.type === PHONE_PAIRING_ACTION;
+
 /** `confirm` and `cancel` on a root: the buttons under the card. */
 export interface WidgetButtonSpec {
   label: string;
@@ -298,11 +317,17 @@ const action: Reader = (raw, path) => {
   if (out.type === "open_url" && !isWebUrl(isRecord(out.payload) ? out.payload.url : undefined, ["http:", "https:"])) {
     return fail(`${path}.payload.url`, "open_url needs an http or https url");
   }
+  if (out.type === "open_thread" && !threadActionTarget(out)) {
+    return fail(`${path}.payload`, "open_thread needs {botId, threadId} or {groupId, threadId}");
+  }
   return out;
 };
 
+/** The longest url a widget action or image may carry. */
+export const WEB_URL_MAX = 2_000;
+
 function isWebUrl(value: unknown, protocols: string[]): value is string {
-  if (typeof value !== "string" || value.length > 2_000) return false;
+  if (typeof value !== "string" || value.length > WEB_URL_MAX) return false;
   try {
     return protocols.includes(new URL(value).protocol);
   } catch {
@@ -670,7 +695,7 @@ export interface WidgetActionEntry {
   action: WidgetAction;
   /** Present when the press settles the widget. */
   tone?: "confirm" | "cancel" | "submit";
-  /** Handled on the device and never sent (open_url). */
+  /** Handled on the device and never sent (open_url, open_thread, open_phone_pairing). */
   client?: true;
   kind: "button" | "item" | "confirm" | "cancel";
 }
@@ -703,7 +728,7 @@ function collectActions(root: WidgetRoot, strict: boolean): WidgetActionEntry[] 
   for (const entry of found) counts.set(entry.label, (counts.get(entry.label) ?? 0) + 1);
   return found.map(({ row, ...entry }) => ({
     ...entry,
-    ...(entry.action.type === "open_url" ? { client: true as const } : {}),
+    ...(CLIENT_ACTION(entry.action) ? { client: true as const } : {}),
     label: row && entry.label && (counts.get(entry.label) ?? 0) > 1 ? `${entry.label}: ${row}`.slice(0, WIDGET_LIMITS.label * 2) : entry.label,
   }));
 }
@@ -870,9 +895,9 @@ export function resolveWidgetAction(payload: WidgetPayload, ref: string, values:
 }
 
 /** A word to the bot about a widget that parses but does not do what it
- * looks like it is for: rows to choose between and no way to choose, or a
- * time, date or days the person is asked to type. Undefined when there is
- * nothing to say. */
+ * looks like it is for: rows to choose between and no way to choose, or one
+ * time, date or set of days typed in a one-line field (a Textarea may list
+ * several). Undefined when there is nothing to say. */
 export function widgetAdvice(root: WidgetRoot): string | undefined {
   const notes: string[] = [];
   const rows = Array.isArray(root.children) ? root.children.length : 0;
@@ -889,7 +914,7 @@ export function widgetAdvice(root: WidgetRoot): string | undefined {
     const unsent = fields.filter((field) => !sent.has(field.name)).map((field) => JSON.stringify(field.label));
     if (unsent.length) notes.push(`${unsent.join(", ")} sits outside the Form whose button is the only way to send, so it is never sent. Call update_widget with it inside that Form, or with confirm on the Card.`);
   }
-  const typed = fields.filter((field) => field.type === "Input" || field.type === "Textarea");
+  const typed = fields.filter((field) => field.type === "Input");
   // "each time", "every time" and "how many times" are not a time of day
   const phrase = (field: WidgetField) => `${field.name} ${field.label} ${widgetString(field.node, "placeholder") ?? ""}`
     .replace(/\b(each|every|this|next|first|last|any|some|one|other|same|spare|free|full|part|lead|over|down)[\s-]+times?\b/gi, " ")

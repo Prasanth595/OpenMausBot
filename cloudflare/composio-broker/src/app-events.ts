@@ -1,12 +1,14 @@
 import { z } from "zod";
 
 import {
+  actingUser,
   CLOUD_DAILY_EVENTS,
   DAY_MS,
   eventLimits,
   json,
   QUEUE_MAX_BYTES,
   QUEUE_MAX_EVENTS,
+  readBoundedBody,
   readJsonBody,
   sha256,
   utcDay,
@@ -25,9 +27,10 @@ export const POLL_MAX_WAIT_S = 25;
 export const POLL_RECHECK_MS = 2_000;
 export const POLL_MAX_LIMIT = 50;
 export const POLL_LEASE_MS = 90_000;
+export const WAKE_EVERY_MS = 60_000;
+const WAKE_TIMEOUT_MS = 20_000;
 const POLL_LEASE_MARGIN_MS = 5_000;
 const COUNT_RETENTION_DAYS = 90;
-const SWEEP_INSTALLATIONS = 10;
 const SWEEP_CALL_BUDGET = 40;
 const POLLER_ID = /^[A-Za-z0-9_-]{8,64}$/;
 const CLOUD_GRANT = /^v1\.([A-Za-z0-9][A-Za-z0-9_-]{2,127})\.([A-Za-z0-9_-]{43})$/;
@@ -37,6 +40,8 @@ type DropReason = "daily_limit" | "queue_full";
 type DayColumn = "queued" | "delivered" | "duplicate" | "dropped_daily_limit" | "dropped_queue_full" | "expired" | "unrouted";
 type Owner = Pick<EventInstallation, "id" | "composio_user_id" | "cloud_machine_id">;
 export type EnqueueResult = { status: "queued"; seq: number } | { status: "duplicate" } | { status: "dropped"; reason: DropReason };
+/** Work that may finish after the answer: `ctx.waitUntil` in the Worker. */
+export type Background = (work: Promise<unknown>) => void;
 
 const envelopeSchema = z.object({
   id: z.string().min(1).max(200),
@@ -67,14 +72,18 @@ function base64Bytes(value: string, url: boolean) {
   }
 }
 
-async function hmacKey(secret: string) {
-  return crypto.subtle.importKey("raw", utf8(secret), { name: "HMAC", hash: "SHA-256" }, false, ["verify"]);
+async function hmacKey(secret: string, usage: "sign" | "verify" = "verify") {
+  return crypto.subtle.importKey("raw", utf8(secret), { name: "HMAC", hash: "SHA-256" }, false, [usage]);
+}
+
+function base64Url(bytes: ArrayBuffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(bytes))).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 }
 
 /** Composio V3 deliveries (Standard Webhooks headers): the HMAC-SHA256 key is the secret's UTF-8 bytes as Composio
  *  shows it, the signed text is `${webhook-id}.${webhook-timestamp}.${body}`, and `webhook-signature` holds one or
  *  more space-separated `v1,<base64>` values. */
-export async function verifyComposioSignature(headers: Headers, raw: string, secret: string, nowMs: number) {
+function signatureHeaders(headers: Headers, nowMs: number) {
   const id = headers.get("webhook-id");
   const timestamp = headers.get("webhook-timestamp");
   const signatures = headers.get("webhook-signature");
@@ -82,6 +91,14 @@ export async function verifyComposioSignature(headers: Headers, raw: string, sec
   if (!/^\d{1,12}$/.test(timestamp) || Math.abs(nowMs / 1000 - Number(timestamp)) > SIGNATURE_TOLERANCE_S) {
     return { ok: false as const, error: "stale or invalid webhook-timestamp" };
   }
+  return { ok: true as const, id, timestamp, signatures };
+}
+
+async function verifyComposioSignature(
+  { id, timestamp, signatures }: { id: string; timestamp: string; signatures: string },
+  raw: string,
+  secret: string,
+) {
   const key = await hmacKey(secret);
   const signed = utf8(`${id}.${timestamp}.${raw}`);
   for (const part of signatures.split(" ")) {
@@ -140,6 +157,7 @@ export async function enqueue(
   owner: Owner,
   event: { eventId: string; kind: EventKind; triggerId: string | null; body: string },
   now: number,
+  background?: Background,
 ): Promise<EnqueueResult> {
   const capped = event.kind === "message" || event.kind === "test";
   const bytes = utf8(event.body).byteLength;
@@ -159,6 +177,9 @@ export async function enqueue(
     .first<{ seq: number }>();
   if (inserted) {
     if (capped) await dayCount(env, day, owner.id, "queued").run();
+    const waking = wakeCloud(env, owner, now);
+    if (background) background(waking);
+    else await waking;
     return { status: "queued", seq: inserted.seq };
   }
   const state = await env.DB.prepare(
@@ -182,9 +203,56 @@ export async function enqueue(
   return { status: "dropped", reason };
 }
 
+export function cloudWakeMessage(timestamp: number, machineId: string) {
+  return `omb-cloud-wake:v1\n${timestamp}\n${machineId}`;
+}
+
+/** `v1=<base64url HMAC-SHA256(CLOUD_GRANT_SECRET, cloudWakeMessage(timestamp, machine id))>`, which the Cloud Admin
+ *  checks on `POST /api/cloud/machines/wake`. */
+export async function cloudWakeSignature(secret: string, timestamp: number, machineId: string) {
+  return `v1=${base64Url(await crypto.subtle.sign("HMAC", await hmacKey(secret, "sign"), utf8(cloudWakeMessage(timestamp, machineId))))}`;
+}
+
+function adminWakeUrl(value: string | undefined) {
+  try {
+    const url = value ? new URL("/api/cloud/machines/wake", value) : null;
+    return url?.protocol === "https:" ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A Cloud on a plan that sleeps collects its events only while awake: when one is queued for a Cloud installation
+ *  that isn't polling, the Admin starts it, asked at most once a minute. Off unless CLOUD_GRANT_SECRET and
+ *  CLOUD_ADMIN_URL are both set. It never fails the event, a database without migration 0003 included. */
+async function wakeCloud(env: Env, owner: Owner, now: number) {
+  const secret = env.CLOUD_GRANT_SECRET, url = adminWakeUrl(env.CLOUD_ADMIN_URL), machineId = owner.cloud_machine_id;
+  if (!secret || !url || !machineId) return;
+  try {
+    const asked = await env.DB.prepare(
+      `UPDATE installations SET wake_requested_at = ?1
+       WHERE id = ?2 AND cloud_machine_id = ?3 AND (poll_lease_until IS NULL OR poll_lease_until < ?1)
+         AND (wake_requested_at IS NULL OR wake_requested_at <= ?4)`,
+    ).bind(now, owner.id, machineId, now - WAKE_EVERY_MS).run();
+    if (!asked.meta.changes) return;
+    const timestamp = Math.floor(now / 1000);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-omb-wake-timestamp": String(timestamp), "x-omb-wake-signature": await cloudWakeSignature(secret, timestamp, machineId) },
+      body: JSON.stringify({ machineId }),
+      signal: AbortSignal.timeout(WAKE_TIMEOUT_MS),
+    });
+    await response.body?.cancel();
+    if (!response.ok) console.warn(JSON.stringify({ message: "cloud wake refused", installationId: owner.id, status: response.status }));
+  } catch (error) {
+    console.warn(JSON.stringify({ message: "cloud wake failed", installationId: owner.id, error: error instanceof Error ? error.message : String(error) }));
+  }
+}
+
 interface OwnerRow {
   id: string;
   composio_user_id: string;
+  shared_user_id?: string | null;
   cloud_machine_id: string | null;
   binding_disabled_at: number | null;
   installation_disabled_at: number | null;
@@ -192,7 +260,7 @@ interface OwnerRow {
 
 async function triggerOwners(env: Env, triggerId: string) {
   const { results } = await env.DB.prepare(
-    `SELECT i.id, i.composio_user_id, i.cloud_machine_id, b.disabled_at AS binding_disabled_at, i.disabled_at AS installation_disabled_at
+    `SELECT i.*, b.disabled_at AS binding_disabled_at, i.disabled_at AS installation_disabled_at
      FROM trigger_bindings b JOIN installations i ON i.id = b.installation_id
      WHERE b.composio_trigger_id = ?`,
   ).bind(triggerId).all<OwnerRow>();
@@ -201,7 +269,7 @@ async function triggerOwners(env: Env, triggerId: string) {
 
 async function accountOwners(env: Env, accountId: string) {
   const { results } = await env.DB.prepare(
-    `SELECT DISTINCT i.id, i.composio_user_id, i.cloud_machine_id, NULL AS binding_disabled_at, i.disabled_at AS installation_disabled_at
+    `SELECT DISTINCT i.*, NULL AS binding_disabled_at, i.disabled_at AS installation_disabled_at
      FROM trigger_bindings b JOIN installations i ON i.id = b.installation_id
      WHERE b.connected_account_id = ?`,
   ).bind(accountId).all<OwnerRow>();
@@ -216,13 +284,13 @@ function unrouted(env: Env, now: number, why: string, triggerId?: string) {
 /** Bindings route by trigger or account id; the Composio user named in the event must also be the installation's,
  *  so a mixed-up binding can never hand one person's events to another installation. */
 function refusal(owner: OwnerRow, userId: unknown) {
-  if (userId !== undefined && userId !== null && userId !== owner.composio_user_id) return "user mismatch";
+  if (userId !== undefined && userId !== null && userId !== actingUser(owner)) return "user mismatch";
   if (owner.installation_disabled_at !== null) return "installation disabled";
   return undefined;
 }
 
 /** Composio retries any non-2xx, so an event no installation can take is answered 200 and only counted. */
-async function routeEnvelope(env: Env, envelope: Envelope, now: number) {
+async function routeEnvelope(env: Env, envelope: Envelope, now: number, background?: Background) {
   const metadata = envelope.metadata ?? {};
   const data = envelope.data ?? {};
   if (envelope.type === "composio.trigger.message") {
@@ -233,7 +301,7 @@ async function routeEnvelope(env: Env, envelope: Envelope, now: number) {
     for (const owner of owners) {
       const refused = refusal(owner, userId) ?? (owner.binding_disabled_at !== null ? "trigger paused" : undefined);
       if (refused) await unrouted(env, now, refused, triggerId);
-      else await enqueue(env, owner, { eventId: envelope.id, kind: "message", triggerId, body: messageBody(envelope) }, now);
+      else await enqueue(env, owner, { eventId: envelope.id, kind: "message", triggerId, body: messageBody(envelope) }, now, background);
     }
     return;
   }
@@ -245,7 +313,7 @@ async function routeEnvelope(env: Env, envelope: Envelope, now: number) {
     for (const owner of owners) {
       const refused = refusal(owner, userId);
       if (refused) await unrouted(env, now, refused, triggerId);
-      else await enqueue(env, owner, { eventId: envelope.id, kind: "trigger_disabled", triggerId, body: statusBody(envelope, "trigger_disabled", { triggerId }) }, now);
+      else await enqueue(env, owner, { eventId: envelope.id, kind: "trigger_disabled", triggerId, body: statusBody(envelope, "trigger_disabled", { triggerId }) }, now, background);
     }
     return;
   }
@@ -258,26 +326,32 @@ async function routeEnvelope(env: Env, envelope: Envelope, now: number) {
     for (const owner of owners) {
       const refused = refusal(owner, userId);
       if (refused) await unrouted(env, now, refused);
-      else await enqueue(env, owner, { eventId: envelope.id, kind: "account_expired", triggerId: null, body: statusBody(envelope, "account_expired", { accountId, toolkit }) }, now);
+      else await enqueue(env, owner, { eventId: envelope.id, kind: "account_expired", triggerId: null, body: statusBody(envelope, "account_expired", { accountId, toolkit }) }, now, background);
     }
     return;
   }
   console.log(JSON.stringify({ message: "composio event type ignored", type: envelope.type }));
 }
 
+function rejectWebhook(error: string) {
+  console.warn(JSON.stringify({ message: "composio webhook rejected", why: error }));
+  return json({ error }, 401);
+}
+
 /** POST /v1/composio/webhook: the one subscription of the managed Composio project. */
-export async function composioWebhook(request: Request, env: Env) {
+export async function composioWebhook(request: Request, env: Env, ctx?: Pick<ExecutionContext, "waitUntil">) {
   const secret = env.COMPOSIO_WEBHOOK_SECRET;
   if (!secret) return json({ error: "app events are not configured" }, 503);
-  if (Number(request.headers.get("content-length") ?? "0") > MAX_WEBHOOK_BODY) return json({ error: "event is too large" }, 413);
-  const raw = await request.text();
-  if (utf8(raw).byteLength > MAX_WEBHOOK_BODY) return json({ error: "event is too large" }, 413);
+  const early = signatureHeaders(request.headers, Date.now());
+  if (!early.ok) return rejectWebhook(early.error);
+  const body = await readBoundedBody(request, MAX_WEBHOOK_BODY);
+  if (!body) return json({ error: "event is too large" }, 413);
   const now = Date.now();
-  const verdict = await verifyComposioSignature(request.headers, raw, secret, now);
-  if (!verdict.ok) {
-    console.warn(JSON.stringify({ message: "composio webhook rejected", why: verdict.error }));
-    return json({ error: verdict.error }, 401);
-  }
+  const signed = signatureHeaders(request.headers, now);
+  if (!signed.ok) return rejectWebhook(signed.error);
+  const raw = new TextDecoder().decode(body);
+  const verdict = await verifyComposioSignature(signed, raw, secret);
+  if (!verdict.ok) return rejectWebhook(verdict.error);
   let envelope: Envelope;
   try {
     envelope = envelopeSchema.parse(JSON.parse(raw));
@@ -285,7 +359,7 @@ export async function composioWebhook(request: Request, env: Env) {
     return json({ error: "not a V3 event envelope" }, 400);
   }
   if (envelope.id !== verdict.webhookId) return json({ error: "envelope id does not match webhook-id" }, 400);
-  await routeEnvelope(env, envelope, now);
+  await routeEnvelope(env, envelope, now, ctx ? (work) => ctx.waitUntil(work) : undefined);
   return json({ received: true });
 }
 
@@ -339,16 +413,23 @@ async function ackThrough(env: Env, installationId: string, after: number, now: 
   if (acked.meta.changes) await dayCount(env, utcDay(now), installationId, "delivered", acked.meta.changes).run();
 }
 
-/** Re-enables at Composio what the 14-day sweep disabled, on the installation's first poll back. A failure here is
- *  caught by the server's reconciliation, which sees `enabled` beside a disabled remote. */
+/** Re-enables at Composio what the 14-day sweep disabled, on the installation's first polls back, up to one sweep
+ *  run's worth per poll. A failure here is caught by the server's reconciliation, which sees `enabled` beside a
+ *  disabled remote. */
 async function resumeSweptTriggers(env: Env, installationId: string) {
   await env.DB.prepare("UPDATE installations SET triggers_swept_at = NULL WHERE id = ?").bind(installationId).run();
   const { results } = await env.DB.prepare(
-    "SELECT composio_trigger_id FROM trigger_bindings WHERE installation_id = ? AND disabled_at IS NULL LIMIT ?",
-  ).bind(installationId, SWEEP_CALL_BUDGET).all<{ composio_trigger_id: string }>();
+    "SELECT composio_trigger_id, disabled_at FROM trigger_bindings WHERE installation_id = ? AND swept_at IS NOT NULL ORDER BY composio_trigger_id LIMIT ?",
+  ).bind(installationId, SWEEP_CALL_BUDGET).all<{ composio_trigger_id: string; disabled_at: number | null }>();
   for (const row of results) {
+    await env.DB.prepare("UPDATE trigger_bindings SET swept_at = NULL WHERE installation_id = ? AND composio_trigger_id = ?")
+      .bind(installationId, row.composio_trigger_id).run();
+    if (row.disabled_at !== null) continue;
     const result = await setRemoteEnabled(env, row.composio_trigger_id, true);
     if (result !== "done") console.warn(JSON.stringify({ message: "re-enabling a swept trigger failed", installationId, triggerId: row.composio_trigger_id }));
+  }
+  if (results.length === SWEEP_CALL_BUDGET) {
+    await env.DB.prepare("UPDATE installations SET triggers_swept_at = ? WHERE id = ?").bind(Date.now(), installationId).run();
   }
 }
 
@@ -404,7 +485,7 @@ export async function queueTestEvent(request: Request, installation: EventInstal
     id: eventId,
     type: "omb.test",
     timestamp: new Date(now).toISOString(),
-    metadata: { trigger_slug: bound.trigger_slug, trigger_id: triggerId, connected_account_id: bound.connected_account_id, user_id: installation.composio_user_id },
+    metadata: { trigger_slug: bound.trigger_slug, trigger_id: triggerId, connected_account_id: bound.connected_account_id, user_id: actingUser(installation) },
     data: boundedData(data),
   });
   const result = await enqueue(env, installation, { eventId, kind: "test", triggerId, body }, now);
@@ -436,45 +517,28 @@ async function expireEvents(env: Env, now: number) {
 }
 
 /** Disables at Composio the triggers of installations that have not polled for 14 days, so deliveries nobody reads
- *  stop costing events. Bindings keep the server's wish; its next poll re-enables them. */
+ *  stop costing events. Bindings keep the server's wish; its next poll re-enables them. Each run handles the next
+ *  bindings not yet swept, so an installation with more of them than one run may disable is finished over several. */
 async function sweepIdleInstallations(env: Env, now: number) {
   const { results } = await env.DB.prepare(
     `SELECT b.installation_id, b.composio_trigger_id,
        (SELECT COUNT(*) FROM trigger_bindings o
         WHERE o.composio_trigger_id = b.composio_trigger_id AND o.installation_id != b.installation_id AND o.disabled_at IS NULL) AS shared
-     FROM trigger_bindings b
-     WHERE b.disabled_at IS NULL AND b.installation_id IN (
-       SELECT i.id FROM installations i
-       WHERE i.triggers_swept_at IS NULL
-         AND EXISTS (SELECT 1 FROM trigger_bindings e WHERE e.installation_id = i.id AND e.disabled_at IS NULL)
-         AND COALESCE(i.events_polled_at, (SELECT MAX(c.created_at) FROM trigger_bindings c WHERE c.installation_id = i.id)) < ?1
-       ORDER BY i.id LIMIT ?2)
-     ORDER BY b.installation_id, b.composio_trigger_id`,
-  ).bind(now - SWEEP_AFTER_MS, SWEEP_INSTALLATIONS).all<{ installation_id: string; composio_trigger_id: string; shared: number }>();
-  const byInstallation = new Map<string, { triggerId: string; shared: number }[]>();
-  for (const row of results) {
-    const list = byInstallation.get(row.installation_id) ?? [];
-    list.push({ triggerId: row.composio_trigger_id, shared: row.shared });
-    byInstallation.set(row.installation_id, list);
-  }
-  let calls = 0;
-  for (const [installationId, triggers] of byInstallation) {
-    let complete = true;
-    for (const { triggerId, shared } of triggers) {
-      if (shared) continue;
-      if (calls >= SWEEP_CALL_BUDGET) {
-        complete = false;
-        break;
-      }
-      calls += 1;
-      const result = await setRemoteEnabled(env, triggerId, false);
-      if (typeof result === "object") {
-        complete = false;
-        console.warn(JSON.stringify({ message: "disabling an idle installation's trigger failed", installationId, triggerId }));
-      }
+     FROM trigger_bindings b JOIN installations i ON i.id = b.installation_id
+     WHERE b.disabled_at IS NULL AND b.swept_at IS NULL
+       AND COALESCE(i.events_polled_at, (SELECT MAX(c.created_at) FROM trigger_bindings c WHERE c.installation_id = i.id)) < ?1
+     ORDER BY b.installation_id, b.composio_trigger_id LIMIT ?2`,
+  ).bind(now - SWEEP_AFTER_MS, SWEEP_CALL_BUDGET).all<{ installation_id: string; composio_trigger_id: string; shared: number }>();
+  for (const { installation_id: installationId, composio_trigger_id: triggerId, shared } of results) {
+    if (!shared && typeof await setRemoteEnabled(env, triggerId, false) === "object") {
+      console.warn(JSON.stringify({ message: "disabling an idle installation's trigger failed", installationId, triggerId }));
+      continue;
     }
-    if (complete) await env.DB.prepare("UPDATE installations SET triggers_swept_at = ? WHERE id = ?").bind(now, installationId).run();
-    if (calls >= SWEEP_CALL_BUDGET) break;
+    await env.DB.batch([
+      env.DB.prepare("UPDATE trigger_bindings SET swept_at = ?1 WHERE installation_id = ?2 AND composio_trigger_id = ?3")
+        .bind(now, installationId, triggerId),
+      env.DB.prepare("UPDATE installations SET triggers_swept_at = ?1 WHERE id = ?2").bind(now, installationId),
+    ]);
   }
 }
 

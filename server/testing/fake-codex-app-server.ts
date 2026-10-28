@@ -18,6 +18,9 @@
 //   FAKE_CODEX_ASYNC_QUESTIONS  async-question mode: JSON replacing the message's `questions`
 //   FAKE_CODEX_ASYNC_QUESTION_GATE  async-question mode: the turn keeps running until this file exists (default 300 ms)
 //   FAKE_CODEX_DUMP  path for {pid, argv, env, calls, decision}
+//   FAKE_CODEX_ECHO_INPUT  "1": echo turn/start's input back as a userMessage item, as codex-cli 0.164.0 does
+//   FAKE_CODEX_PATCH_BYTES  each turn first writes web/index.html by apply_patch, streamed as two
+//     item/fileChange/patchUpdated notifications (codex-cli 0.160.1's schema) of half and all this many bytes
 //   FAKE_CODEX_IGNORE_FEATURES  "1": config/read reports no `-c features.*` override
 //   FAKE_CODEX_SHELL_ENVIRONMENT_POLICY  JSON config/read reports, every field present and null unless set (codex-cli 0.160)
 //   FAKE_CODEX_APPROVAL_REQUEST  JSON {method, params} override in approval mode
@@ -41,11 +44,14 @@
 //   FAKE_CODEX_TEXT_REPLY  `codex exec` reply when no route matches (default "fake background answer")
 //   FAKE_CODEX_TEXT_LOG  `codex exec`: append {argv, cwd, prompt, env} per call
 //   FAKE_CODEX_TEXT_MODE  `codex exec`: ok (default) | fail | exit | hang | tool | noisy
+//   FAKE_CODEX_TEXT_REFUSE  `codex exec`: comma-separated models answered with the 400 a ChatGPT account gets for gpt-5.4-mini
 //   FAKE_CODEX_LUNA  "1": model/list also offers gpt-6-luna
 //   FAKE_CODEX_UPDATED_FILE  while this file exists, the CLI was updated in place: --version answers codex-cli 0.162.1
 //     and model/list also offers gpt-6.1-sol
 //   FAKE_CODEX_MCP_START  "1": on thread/start, start each `-c mcp_servers.*` mount as codex-cli 0.160.1 does
 //     (its initialize, or FAKE_CODEX_MCP_HANDSHAKE) and dump mcpStartup[name]
+//   FAKE_CODEX_ROLLOUT  rollout path thread/start and thread/resume report as `thread.path`; each happy turn appends a
+//     namespace-less function_call for retry_thread and codex's "unsupported call: retry_thread" output to it
 import { spawn } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 
@@ -116,6 +122,13 @@ if (process.argv[2] === "exec") {
   }
   event({ type: "thread.started", thread_id: "fake-exec-thread" });
   event({ type: "turn.started" });
+  const model = process.argv[process.argv.indexOf("--model") + 1] ?? "";
+  if (process.env.FAKE_CODEX_TEXT_REFUSE?.split(",").includes(model)) {
+    const message = `unexpected status 400 Bad Request: {"type":"invalid_request_error","message":"The '${model}' model is not supported when using Codex with a ChatGPT account."}`;
+    event({ type: "error", message });
+    event({ type: "turn.failed", error: { message } });
+    process.exit(1);
+  }
   if (textMode === "fail") {
     event({ type: "error", message: "unexpected status 401 Unauthorized" });
     event({ type: "turn.failed", error: { message: "unexpected status 401 Unauthorized" } });
@@ -307,6 +320,14 @@ const dump = () => {
 };
 
 const finishTurn = () => {
+  const patchBytes = Number(process.env.FAKE_CODEX_PATCH_BYTES);
+  if (patchBytes > 0) {
+    const change = (bytes: number) => [{ path: `${process.cwd()}/web/index.html`, kind: { type: "add" }, diff: "+".repeat(bytes) }];
+    notify("item/started", { item: { id: "p1", type: "fileChange", status: "inProgress", changes: [] } });
+    notify("item/fileChange/patchUpdated", { itemId: "p1", changes: change(Math.floor(patchBytes / 2)) });
+    notify("item/fileChange/patchUpdated", { itemId: "p1", changes: change(patchBytes) });
+    notify("item/completed", { item: { id: "p1", type: "fileChange", status: "completed", changes: change(patchBytes) } });
+  }
   notify("item/completed", { item: { id: "i1", type: "commandExecution", status: "completed", aggregatedOutput: "README.md\nAPI_KEY=codex-output-secret", exitCode: 0 } });
   notify("item/completed", { item: { id: "w1", type: "webSearch", status: "completed" } });
   if (mode === "stream") {
@@ -332,6 +353,12 @@ const finishTurn = () => {
     last: { inputTokens: 7, cachedInputTokens: 4, outputTokens: 3 },
     modelContextWindow: 272000,
   } });
+  if (process.env.FAKE_CODEX_ROLLOUT) {
+    const line = (payload: unknown) => `${JSON.stringify({ timestamp: new Date().toISOString(), type: "response_item", payload })}\n`;
+    appendFileSync(process.env.FAKE_CODEX_ROLLOUT,
+      line({ type: "function_call", name: "retry_thread", arguments: "{}", call_id: "call_unsupported" }) +
+      line({ type: "function_call_output", call_id: "call_unsupported", output: "unsupported call: retry_thread" }));
+  }
   dump();
   if (mode === "late-request") process.stdout.cork();
   notify("turn/completed", { turn: { status: "completed" } });
@@ -519,7 +546,7 @@ process.stdin.on("data", (chunk) => {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32602, message: "experimental API required for permissions" } });
         } else if (mode === "resume" || mode === "review-events" || mode === "helper-events" || mode === "instructions-unsupported" || mode === "config-profile" || mode === "config-profile-unsupported" || mode === "async-question" ||
             (mode === "resume-then-missing" && !existsSync(process.env.FAKE_CODEX_STATE ?? ""))) {
-          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId }, sandbox: resolvedSandbox(msg.params ?? {}) } });
+          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: msg.params?.threadId, ...(process.env.FAKE_CODEX_ROLLOUT ? { path: process.env.FAKE_CODEX_ROLLOUT } : {}) }, sandbox: resolvedSandbox(msg.params ?? {}) } });
         } else {
           out({ jsonrpc: "2.0", id: msg.id, error: { code: -32600, message: `no rollout found for thread id ${msg.params?.threadId}` } });
         }
@@ -574,7 +601,7 @@ process.stdin.on("data", (chunk) => {
           const reply = { jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } };
           void startMcpServers().then((startup) => { mcpStartup = startup; dump(); threadReply(reply); });
         } else {
-          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1" }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } });
+          threadReply({ jsonrpc: "2.0", id: msg.id, result: { thread: { id: "codex-thread-1", ...(process.env.FAKE_CODEX_ROLLOUT ? { path: process.env.FAKE_CODEX_ROLLOUT } : {}) }, model: "fake-codex-model", sandbox: resolvedSandbox(msg.params ?? {}) } });
         }
         break;
       case "turn/start": {
@@ -768,6 +795,11 @@ process.stdin.on("data", (chunk) => {
         if (mode === "early-turn-events") finishTurn();
         out({ jsonrpc: "2.0", id: msg.id, result: { turn: { id: nativeTurnId } } });
         if (mode === "early-turn-events") break;
+        if (process.env.FAKE_CODEX_ECHO_INPUT === "1") {
+          const prompt = { type: "userMessage", id: "u1", content: msg.params?.input ?? [] };
+          notify("item/started", { item: prompt });
+          notify("item/completed", { item: prompt });
+        }
         if (mode === "helper-events") {
           for (const scope of [
             { threadId: "helper-thread", turnId: "helper-turn" },

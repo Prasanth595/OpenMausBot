@@ -450,33 +450,16 @@ access**, choose read-only folders and optionally allow edits. Unrestricted
 terminal and screen/app control are separate opt-ins, confirmed in a native
 dialog. They can access information outside the selected folders. Share only
 with a workspace you trust; its bots and AI providers may receive shared content.
-Folder transfers are limited to 256 KiB per file and do not follow links or
-delete files. Local screen control also needs OS permissions and a supported
+A folder read takes a file of up to 2 MiB and a write at most 256 KiB;
+transfers do not follow links or delete files. Local screen control also needs OS permissions and a supported
 desktop driver. Microphone access is not included.
 
-**Bring this computer's bots and chats.** When the server you just connected
-is empty, its page shows **Bring your bots and chats from this computer**
-with **Copy** and **Not now**; **Copy** takes you to this computer's
-**Settings → Servers → Copy this computer here** for that server, where you
-start it (a server's own page never starts a copy itself). Any time later, that
-button on the server's row replaces what the server has (backed up on the
-server first; **Swap {server} back** puts it back; copying again replaces that
-backup, and the panel says so). On the server's own page, **Settings → Backups
-→ Import from this computer** leads to the same place. No file, no password: the app uploads the encrypted workspace
-backup directly, continues where a dropped connection left it, and the server
-restarts itself to install it. API keys, engine sign-ins and paired devices
-stay where they are on both sides; routines arrive paused. The desktop app must
-be paired with an owner code (not `--client`), and a server whose email sign-in
-lets someone besides you in (a member, a second admin or a whole `@domain`
-added with `openmausbot access add`) never receives one; your own address
-alone is fine. Behind a proxy, allow uploads of at least 1 MB
-(nginx: `client_max_body_size 64m`); smaller parts are tried before the copy
-says so. How each
-way of running the server restarts itself: `openmausbot serve` and
-`service install` start it again in the same process, the Docker and Podman
-images run `server-launcher.js`, which does the same inside the container; a
-server started any other way installs the copy at its next start. Details:
-[docs/copy-workspace.md](copy-workspace.md).
+**Bring this computer's bots and chats.** Export a backup from this computer in
+**Settings → Backups → Export backup**, then import it on the server in
+**Settings → Backups → Import backup**. API keys, engine sign-ins and paired
+devices stay where they are on both sides; routines arrive paused. An older
+desktop app's **Copy this computer here** is answered with "Update OpenMausBot
+to bring your bots here by itself."
 
 Only conversations you start yourself on that server can use what you share;
 other people's bots, routines and webhooks there cannot. Keys and sign-in
@@ -735,15 +718,15 @@ alone.
   its bots allow** (`PATCH /api/groups/:id` with `{"resetAudience": true}`),
   which resets the floor to what the room's current bots allow and is
   recorded in the admin activity log.
-- **Teams.** A team (sidebar section) is listed to a user only when it
+- **Departments.** A department (sidebar section) is listed to a user only when it
   holds a bot or room they can see.
-- **Bots working together.** A bot reaches a teammate (`coordinate_bots`,
-  its roster and `list_bots`, @mentions, a Chief's team) only when exactly
-  the same people can see both: otherwise one bot's thread could carry the
-  other's answers to people who cannot see it. Bots nobody restricted all
+- **Bots working together.** A bot reaches any teammate, in any department
+  (`coordinate_bots`, its roster and `list_bots`, @mentions, a Chief's team),
+  but only when exactly the same people can see both: otherwise one bot's
+  thread could carry the other's answers to people who cannot see it. Bots nobody restricted all
   share "everyone", so nothing changes until an admin restricts one. A bot a
   Chief creates (directly, or in a reviewed team setup) gets exactly the
-  Chief's audience.
+  Chief's audience, and a copy of the Chief's connected apps.
 - **Who sees everything.** Admin sessions, the owner on this machine, and a
   session-less local service (the Slack worker under `service` trust) see
   every bot. A pairing-code device with no email sees only bots everyone
@@ -765,6 +748,15 @@ nothing there changes.
 On the Workspaces screen, creating a client workspace shows the same kind of
 link for that workspace's admin, so a client gets one address, one workspace
 and one link.
+
+## Attachment storage
+
+Files people attach, and pictures a bot shows inline, live in the
+`attachments` folder of the data directory. Nothing there is deleted, since
+old messages still point at it, so the server stops taking new files once the
+folder holds 512 MB. A team fills that sooner: set
+`OMB_ATTACHMENTS_MAX_BYTES` in the server's environment and restart, for
+example `OMB_ATTACHMENTS_MAX_BYTES=4294967296` for 4 GB.
 
 ## Putting a proxy in front
 
@@ -788,9 +780,11 @@ is the reference implementation.
 
 ## Opening a desktop from another device
 
-In a paired admin browser, **Open live desktop** uses the same address as
-OpenMausBot for Local VMs and your own VPS. Shared, per-bot and pool Local VMs
-connect through their managed container's loopback port. VPS desktops connect
+In a paired admin browser, as in the desktop app, **Take control** turns the
+Computer panel's picture into the live desktop for Local VMs and your own VPS,
+through the same address as OpenMausBot; **Full screen** fills the window with
+the same session. Shared, per-bot and pool Local VMs connect through their
+managed container's loopback port. VPS desktops connect
 through an SSH tunnel opened by the server. Neither needs an additional public
 port or viewer origin setting. Keep Local VM VNC ports bound to loopback and
 VPS VNC ports private.
@@ -803,14 +797,13 @@ grant desktop control.
 
 An open Local VM viewer keeps that VM's idle timer active. Remote VPS viewers
 share a tunnel; it closes 30 seconds after the last viewer leaves, allowing
-reconnects during that interval. A native desktop viewer keeps its existing
-explicit-close behavior and maximum tunnel lifetime.
+reconnects during that interval. **Hand control back**, closing the panel or
+leaving the page gives the computer back to the bot.
 
 Use **Keyboard** to send text from a phone and **Clipboard** to exchange text
 with the desktop; clipboard edits sync automatically. The desktop fits the
 window, with fullscreen available when the browser supports it. Hosted Cloud
-keeps its provider-issued viewer. Local owner connections keep their direct
-viewer URLs and the packaged desktop's isolated viewer windows.
+keeps its provider-issued viewer in its own window or tab.
 
 These controls are in the web app. The native phone apps have their own
 computer viewers; use a paired browser for interactive Local VM or VPS access.
@@ -894,6 +887,35 @@ stay where they are, and their message is sent again. Turns nobody typed
 The offer is on by default. To switch it off, start the server with
 `OMB_QUOTA_SWITCH=0`; any other value, or none, leaves it on. It has no
 setting in `config.json` yet.
+
+### Which engine a new bot uses
+
+A saved default model (Settings, `openmausbot setup`, or the New Bot
+defaults) always wins. Without one, new bots get the first engine that can
+run, in this order: a Claude account, a ChatGPT plan, Gemini, Grok, then the
+rest in the order of `instances`; OpenCode running only Zen's free no-login
+models comes last.
+
+The server picks at once at start, then sends the person's own engines one
+tiny test message each in the background ("Reply with the single word OK",
+90 seconds at most), best first, stopping at the first that answers. One
+miss alone doesn't move the default: that engine is tried again two minutes
+later. Two misses in a row move the default to the best engine that
+answered; the engine is tried again ten minutes later, then once an hour.
+An engine that already answered (for example one the welcome checked) can
+take the default after a single miss. An organization's models and the
+trial credit are never tested this way. Results are kept for a day per
+engine and sign-in in `<data dir>/providers/ai-checks.json`, so a restart
+doesn't send them again. On a later start, where the engines are read one at
+a time, nothing is tested or moved until that read ends: never on the status
+the last run recorded.
+
+The first bot the app made follows the default until someone writes to it
+or picks a model for it or one of its conversations: it moves only after a
+test result, only to an engine that answered, and only away from one whose
+latest test missed or that is signed out or turned off, or up to a better
+one. A status read that timed out moves nothing. No other bot ever moves. To stop the
+background test messages, start the server with `OMB_AI_CHECKS=0`.
 
 ### The decision log
 
@@ -1146,6 +1168,27 @@ the bot then answered. With the loop guard on, set `loopGuard.correctiveRounds`
 (0-5, default 0) and such a bot is sent back to re-run the failed call up to
 that many times first; the turn counts as done only if the tools it runs after
 that succeed. A tool call that was denied is never sent back.
+
+## A turn that goes silent
+
+The server stops a turn that has sent it nothing for 20 minutes
+(`OMB_TURN_STALL_MS`) and says why in the chat. Engines report a tool only
+when it starts and when it ends, so while one of the turn's tools is still
+running the turn may stay silent for up to `OMB_TOOL_STALL_MS` (default 2
+hours). Any event from the turn starts the silence over, and time spent waiting
+on a person or a computer never counts. Either way the turn stops with "no
+activity for N minutes".
+
+Both take whole milliseconds. `OMB_TURN_STALL_MS` is never below 60000 (one
+minute) and `OMB_TOOL_STALL_MS` never below `OMB_TURN_STALL_MS`. A value that
+is not a positive finite number (empty, `65m`, `0`, a negative number,
+`Infinity`, `1e309`) leaves the default. Set them in the server's environment
+and restart it; the restart stops every running turn.
+
+A turn in a room also has a work ceiling of its own, `rooms.turnTimeoutMinutes`
+in `config.json` (default 5 minutes, 1-1440, which one conversation can
+replace). It stops a member's turn even while its tool runs, and these two
+settings do not change it.
 
 ## Updating
 

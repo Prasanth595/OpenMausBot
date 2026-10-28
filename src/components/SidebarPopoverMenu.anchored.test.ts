@@ -143,6 +143,47 @@ describe("the anchored menu in a document", () => {
     expect(document.activeElement).toBe(support);
   });
 
+  describe("hovering a row with a submenu", () => {
+    const wait = (ms: number) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
+    const rows = () => [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    const hover = (to: Element, from: Element | null, y: number) => act(async () => {
+      from?.dispatchEvent(new MouseEvent("pointerout", { bubbles: true, relatedTarget: to, clientX: 100, clientY: y }));
+      to.dispatchEvent(new MouseEvent("pointerover", { bubbles: true, relatedTarget: from, clientX: 100, clientY: y }));
+    });
+
+    it("does not open it when the pointer only passes over the row", async () => {
+      await act(async () => trigger().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+      const [usage, support, settings] = rows();
+      await hover(support!, usage!, 60);
+      await wait(100);
+      expect(submenu()).toBeNull();
+      await hover(settings!, support!, 90);
+      await wait(400);
+      expect(submenu()).toBeNull();
+      expect(support!.getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("opens it after the pointer rests on the row, and closes it the moment a sibling row takes the pointer", async () => {
+      await act(async () => trigger().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+      const [usage, support, settings] = rows();
+      await hover(support!, usage!, 60);
+      await wait(320);
+      expect(submenu()).not.toBeNull();
+      expect(support!.classList.contains("bg-menu-hover")).toBe(false);
+      await hover(settings!, support!, 90);
+      expect(submenu()).toBeNull();
+    });
+
+    it("opens it at once on a click, without moving focus into it", async () => {
+      await act(async () => trigger().dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+      const support = rows()[1]!;
+      await act(async () => support.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+      await flush();
+      expect(submenu()).not.toBeNull();
+      expect(submenu()!.contains(document.activeElement)).toBe(false);
+    });
+  });
+
   it("runs a submenu item and closes everything", async () => {
     await act(async () => trigger().click());
     const support = [...sheet()!.querySelectorAll<HTMLElement>('[role="menuitem"]')][1]!;
@@ -212,5 +253,38 @@ describe("the anchored menu in a document", () => {
     expect(sheet()).not.toBeNull();
     await act(async () => document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
     expect(sheet()).toBeNull();
+  });
+});
+
+describe("a menu opening below its trigger", () => {
+  it("shows a submenu the pointer can pick from", async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    const picked: string[] = [];
+    const item = (key: string, extra: Partial<SidebarMenuItem> = {}): SidebarMenuItem => ({ key, label: key, onSelect: () => picked.push(key), ...extra });
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(createElement(SidebarPopoverMenu, {
+        items: [item("Find"), item("All threads", { submenu: [item("Trip plan"), item("Our chat")] })],
+        ariaLabel: "More",
+        placement: "below",
+        renderTrigger: () => "More",
+      }));
+    });
+    await act(async () => host.querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!.click());
+    const row = [...host.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((node) => node.textContent?.includes("All threads"))!;
+    await act(async () => row.click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    const sub = document.querySelector<HTMLElement>("[data-sidebar-popover-submenu]")!;
+    expect(sub).not.toBeNull();
+    expect(sub.style.visibility).not.toBe("hidden");
+    // The submenu sits outside the menu's own box, so pressing on it must not count as a press outside the menu.
+    const pick = sub.querySelector<HTMLElement>('[role="menuitem"]')!;
+    await act(async () => { pick.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })); });
+    await act(async () => pick.click());
+    expect(picked).toEqual(["Trip plan"]);
+    await act(async () => root.unmount());
+    host.remove();
   });
 });

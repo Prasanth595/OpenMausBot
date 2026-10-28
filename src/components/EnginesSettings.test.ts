@@ -56,6 +56,9 @@ describe("Settings → Engines → ChatGPT accounts", () => {
     expect(accountActions("chatgpt", account("chatgpt", true, true))).toEqual({ signOut: true, remove: false });
     expect(accountActions("chatgpt", account("chatgpt-work", true, false))).toEqual({ signOut: false, remove: true });
     expect(accountActions("chatgpt", account("chatgpt-work", false, true))).toEqual({ signOut: false, remove: true });
+    fixture.instances = [{ ...account("chatgpt-work", true, false), cliDefault: "codex" }];
+    fixture.bots = [];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Remove<");
   });
 });
 
@@ -83,7 +86,7 @@ describe("Settings → Engines → Grok", () => {
 
   it("says Grok is connected once it is, in Grok's words", () => {
     const html = renderGrok(true);
-    expect(html).toContain("Grok connected on this server");
+    expect(html).toContain("Grok connected");
     expect(html).not.toContain("ChatGPT");
     expect(html).not.toContain("Sign in to Grok");
   });
@@ -139,6 +142,20 @@ describe("Settings → Engines → setup cards", () => {
     expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain("account email unavailable");
   });
 
+  it("offers removal for an added Antigravity account only", () => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    const account = (instanceId: string): InstanceInfo => ({
+      instanceId, driverKind: "antigravityAgent", displayName: "Google account", cliDefault: "agy_acp_server",
+      snapshot: { state: "available", authenticated: true }, models: { default: "gemini", options: [] },
+    });
+    fixture.instances = [account("antigravity")];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).not.toContain(">Remove<");
+    fixture.instances = [account("antigravity-work")];
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain(">Remove<");
+  });
+
   it("shows every Company provider as read-only while preserving personal controls", () => {
     vi.stubGlobal("window", {});
     fixture.bots = [];
@@ -166,14 +183,14 @@ describe("Settings → Engines → setup cards", () => {
       snapshot: { state: "unavailable" }, models: { default: "model", options: [] },
       install: { server: { package: "kimi-fixture" }, command: { linux: "npm install -g kimi-fixture" } },
     }];
-    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("Install Kimi on this server");
+    expect(renderToStaticMarkup(createElement(EnginesSettings))).toContain("Install Kimi here");
     fixture.instances[0].snapshot = {
       state: "available", authenticated: true,
       update: { title: "Kimi update available", message: "A newer version is available.", command: "npm install -g kimi-fixture@latest" },
     };
     const html = renderToStaticMarkup(createElement(EnginesSettings));
-    expect(html).toContain("Update Kimi on this server");
-    expect(html).not.toContain("Install Kimi on this server");
+    expect(html).toContain("Update Kimi here");
+    expect(html).not.toContain("Install Kimi here");
   });
 
   it("shows a standing warning from the snapshot without a command to run", () => {
@@ -347,6 +364,7 @@ describe("Settings → Engines → Claude accounts", () => {
     expect(accountActions("claude", claude("claude", "Personal", true))).toEqual({ signOut: true, remove: false });
     expect(accountActions("claude", claude("claude-work", "Work", false))).toEqual({ signOut: false, remove: true });
     expect(accountActions("claude", claude("claude-work", "Work", true, { authentication: { method: "paste-code", signOut: false } }))).toEqual({ signOut: false, remove: true });
+    expect(renderClaude(claude("claude-work", "Work", true))).toContain(">Remove<");
   });
 
   it("shows Claude Code's setup instead of accounts while it is missing", () => {
@@ -356,4 +374,38 @@ describe("Settings → Engines → Claude accounts", () => {
     expect(html).toContain("Needs setup");
   });
 
+});
+
+describe("Settings → AI in Simple mode", () => {
+  const engine = (instanceId: string, driverKind: string, authenticated: boolean, extra: Partial<InstanceInfo> = {}): InstanceInfo => ({
+    instanceId, driverKind, displayName: instanceId, cliDefault: instanceId,
+    snapshot: { state: "available", authenticated }, models: { default: "model", options: [] }, ...extra,
+  });
+  const simple = (open = false) => {
+    vi.stubGlobal("window", {});
+    vi.stubGlobal("navigator", { userAgent: "Linux" });
+    fixture.bots = [];
+    return renderToStaticMarkup(createElement(EnginesSettings, { simple: true, more: { id: "ai-more", open, onToggle: () => {} } }));
+  };
+  const rows = (html: string) => [...html.matchAll(/data-simple-engine="([^"]+)"/g)].map((match) => match[1]);
+
+  it("lists each ready provider, and each one signed in by subscription, as a row with Manage or Set up", () => {
+    fixture.instances = [
+      engine("claude", "claudeAgent", true),
+      engine("codex", "codexAgent", false, { authentication: { method: "device-code" } }),
+      engine("kimi", "kimiAgent", false),
+    ];
+    const html = simple();
+    expect(html).toContain(">Your AI</h3>");
+    expect(rows(html)).toEqual(["claude", "codex"]);
+    expect(html).toMatch(/data-simple-engine="claude"[\s\S]*?>Manage<\/button>/);
+    expect(html).toMatch(/data-simple-engine="codex"[\s\S]*?>Set up<\/button>/);
+    expect(html).not.toContain("Model providers and accounts");
+  });
+
+  it("folds every other provider under More AI providers, with the count", () => {
+    fixture.instances = [engine("claude", "claudeAgent", true), engine("kimi", "kimiAgent", false), engine("mistral", "mistral", false)];
+    expect(simple()).toMatch(/aria-expanded="false"[^>]*>[\s\S]*?More AI providers \(2\)/);
+    expect(simple(true)).toContain('data-engine-card="kimi"');
+  });
 });

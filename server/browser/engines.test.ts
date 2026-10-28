@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { BrowserLive } from "../browser-live.ts";
 import { attachesToChrome, type BrowserRuntime } from "../browser-runtime.ts";
@@ -6,14 +9,17 @@ import type { ListenerOwnership } from "./egress/ownership.ts";
 import type { EgressHost } from "./egress/policy.ts";
 import { REDDIT_REFUSAL } from "./egress/reddit.ts";
 import { BrowserEgress, OwnListeners } from "./egress/registry.ts";
-import { CHROME_ENGINE, chromeTarget, LiveRouter, profileKey, RuntimeRouter, type ChromeEngine, type RuntimeRouterOptions } from "./engines.ts";
+import { removeTempDir } from "../testing/cleanup.ts";
+import { ProcessRegistry } from "./chrome/processes.ts";
+import { browserRoot } from "./chrome/profile.ts";
+import { CHROME_ENGINE, ChromeEngine, chromeTarget, LiveRouter, profileKey, RuntimeRouter, type RuntimeRouterOptions } from "./engines.ts";
 
 const AGENT_BROWSER = { command: "/opt/agent-browser", args: ["--session", "s"], env: { AGENT_BROWSER_SESSION: "s" } };
 const CHROME = { command: CHROME_ENGINE, args: ["bot:a"], env: {} };
 
 function engines(options: RuntimeRouterOptions = {}) {
   const old = {
-    agentRpc: vi.fn(async () => "agent-browser"),
+    agentRpc: vi.fn(async (_session: string, _spec: unknown, _method: string, _params: unknown, beforeDispatch?: () => void) => { beforeDispatch?.(); return "agent-browser"; }),
     previewFrame: vi.fn(async (_session: string, capture: () => Promise<unknown>) => capture()),
     withSecretInput: vi.fn(async (_session: string, _spec: unknown, fn: () => Promise<unknown>) => fn()),
     heldBy: vi.fn(() => "person"),
@@ -26,7 +32,7 @@ function engines(options: RuntimeRouterOptions = {}) {
   const oldLive = { open: vi.fn(async () => undefined), action: vi.fn(async () => "agent-browser"), handBack: vi.fn(), closeForSession: vi.fn(), closeForOwner: vi.fn(), closeForBot: vi.fn(), closeAll: vi.fn() };
   const chrome = {
     service: {
-      agentRpc: vi.fn(async () => "chrome"),
+      agentRpc: vi.fn(async (_target: unknown, _method: string, _params: unknown, beforeDispatch?: () => void) => { beforeDispatch?.(); return "chrome"; }),
       previewFrame: vi.fn(async () => ({ png: "frame", format: "jpeg" })),
       withSecretInput: vi.fn(async (_target: unknown, fn: () => Promise<unknown>) => fn()),
       heldBy: vi.fn((): string | null => null),
@@ -91,7 +97,7 @@ describe("the runtime router", () => {
   const onHost = (host: EgressHost) => {
     const egress = new BrowserEgress();
     egress.configure({ host, config: () => ({}), ownership: { botOwned: async () => false } as unknown as ListenerOwnership, listeners: new OwnListeners(host, { env: {}, streamPorts: () => [], devToolsPorts: () => [] }) });
-    return engines({ refusal: (spec, params) => (attachesToChrome(spec.env) ? null : egress.callRefusal(params)) });
+    return engines({ refusal: (_session, spec, params) => (attachesToChrome(spec.env) ? null : egress.callRefusal(params)) });
   };
   const OPENS_REDDIT = [
     { name: "agent_browser_open", arguments: { url: "https://www.reddit.com/r/test/" } },
@@ -126,6 +132,45 @@ describe("the runtime router", () => {
     const { runtime } = onHost("cloud");
     const myChrome = { ...AGENT_BROWSER, env: { ...AGENT_BROWSER.env, AGENT_BROWSER_AUTO_CONNECT: "1" } };
     await expect(runtime.agentRpc("s", myChrome, "tools/call", OPENS_REDDIT[0])).resolves.toBe("agent-browser");
+  });
+
+  it("refusal and afterCall see the session", async () => {
+    const refused: string[] = [];
+    const afterCall = vi.fn((_session: string, _spec: unknown, result: unknown) => ({ after: result }));
+    const { old, runtime } = engines({
+      refusal: (session) => { refused.push(session); return null; },
+      annotate: (_spec, result) => ({ annotated: result }),
+      afterCall,
+    });
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/call", { name: "agent_browser_snapshot" })).resolves.toEqual({ after: { annotated: "agent-browser" } });
+    expect(refused).toEqual(["s1"]);
+    expect(afterCall).toHaveBeenCalledWith("s1", AGENT_BROWSER, { annotated: "agent-browser" });
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/list", {}), "a listing is neither refused nor passed on").resolves.toBe("agent-browser");
+    expect(refused).toEqual(["s1"]);
+    expect(afterCall).toHaveBeenCalledOnce();
+    expect(old.agentRpc).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks afterClaim once beforeDispatch has claimed, and its refusal reaches neither engine", async () => {
+    const order: string[] = [];
+    let refuse: string | null = null;
+    const { old, chrome, runtime } = engines({ afterClaim: (session) => { order.push(`afterClaim ${session}`); return refuse; } });
+    const claim = () => { order.push("claim"); };
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/call", { name: "agent_browser_snapshot" }, claim)).resolves.toBe("agent-browser");
+    expect(order).toEqual(["claim", "afterClaim s1"]);
+    refuse = "Not this conversation.";
+    const refused = { isError: true, content: [{ type: "text", text: "Not this conversation." }] };
+    let reached = 0;
+    old.agentRpc.mockImplementationOnce(async (_session, _spec, _method, _params, beforeDispatch) => { beforeDispatch?.(); reached++; return "agent-browser"; });
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/call", { name: "agent_browser_snapshot" }, claim)).resolves.toEqual(refused);
+    chrome.service.agentRpc.mockImplementationOnce(async (_target, _method, _params, beforeDispatch) => { beforeDispatch?.(); reached++; return "chrome"; });
+    await expect(runtime.agentRpc("s", CHROME, "tools/call", { name: "agent_browser_snapshot" }, claim)).resolves.toEqual(refused);
+    expect(reached, "nothing after the claim ran").toBe(0);
+    order.length = 0;
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/list", {}, claim), "a listing is not judged").resolves.toBe("agent-browser");
+    expect(order).toEqual(["claim"]);
+    const taken = () => { throw new Error("another thread is using this browser"); };
+    await expect(runtime.agentRpc("s1", AGENT_BROWSER, "tools/call", { name: "agent_browser_snapshot" }, taken), "beforeDispatch's own refusal is unchanged").rejects.toThrow("another thread is using this browser");
   });
 
   it("answers who holds a session and what was interrupted across both engines", () => {
@@ -187,5 +232,50 @@ describe("the live view router", () => {
     expect(chrome.service.answerFileChooser).toHaveBeenCalledWith("s", "o", "c", ["/f"]);
     expect(live.download({ session: "s", spec: AGENT_BROWSER }, "d1")).toBeUndefined();
     expect(live.download({ session: "s", spec: CHROME }, "d1")).toEqual({ id: "d1" });
+  });
+});
+
+describe("the new engine's minute", () => {
+  const cleanups: Array<() => Promise<void>> = [];
+  afterEach(async () => {
+    vi.useRealTimers();
+    for (const cleanup of cleanups.splice(0)) await cleanup();
+  });
+
+  function engine() {
+    const dataDir = mkdtempSync(join(tmpdir(), "omb-chrome-engine-"));
+    const value = new ChromeEngine({ dataDir, host: "container", env: {}, platform: "linux", egressPort: async () => 0, idleMs: () => 180_000, egressNotice: () => null });
+    cleanups.push(async () => { await value.close(); await removeTempDir(dataDir); });
+    const closeIdle = vi.spyOn(value.service, "closeIdle").mockResolvedValue([]);
+    const registry = new ProcessRegistry(browserRoot(dataDir));
+    const launched = () => registry.add({ pid: process.pid, startTime: null, userDataDir: join(browserRoot(dataDir), "profiles", "p"), ownerPid: process.pid, launchedAt: new Date().toISOString() });
+    return { value, closeIdle, launched, exited: () => registry.remove(process.pid) };
+  }
+
+  it("closes idle browsers every minute while the engine is in use", async () => {
+    vi.useFakeTimers();
+    const { value, closeIdle } = engine();
+    value.start({ inUse: true, prepare: false });
+    expect(closeIdle).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(closeIdle).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps closing idle browsers once switched off while a Chrome it started still runs, and does nothing once none does", async () => {
+    vi.useFakeTimers();
+    const { value, closeIdle, launched, exited } = engine();
+    value.start({ inUse: false, prepare: false });
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(closeIdle).not.toHaveBeenCalled();
+    launched();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(closeIdle).toHaveBeenCalledTimes(1);
+    value.start({ inUse: true, prepare: false });
+    value.start({ inUse: false, prepare: false });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(closeIdle).toHaveBeenCalledTimes(3);
+    exited();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(closeIdle).toHaveBeenCalledTimes(3);
   });
 });

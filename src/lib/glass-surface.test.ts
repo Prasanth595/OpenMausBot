@@ -35,6 +35,18 @@ describe("glass surface", () => {
     }
   });
 
+  it("is an opaque sheet only for Simple Settings in Midnight and Daylight, 900 by 700 with radius 12", () => {
+    const sheet = rule(':root:is([data-skin="midnight"], [data-skin="daylight"]) [data-settings-look="simple"] .glass-surface');
+    expect(sheet).toContain("background: var(--color-app)");
+    expect(sheet).toContain("backdrop-filter: none");
+    expect(sheet).toContain("box-shadow: none");
+    expect(css.indexOf('[data-settings-look="simple"] .glass-surface {')).toBeGreaterThan(css.indexOf(".glass-surface {"));
+    const size = rule('.glass-popup-frame[data-settings-sheet][data-settings-look="simple"] > .glass-popup');
+    expect(size).toContain("width: min(900px, 100%)");
+    expect(size).toContain("height: min(700px, 100%)");
+    expect(size).toContain("border-radius: 12px");
+  });
+
   it("falls back to the opaque menu colour when transparency is reduced", () => {
     const at = css.indexOf("@media (prefers-reduced-transparency: reduce)");
     expect(at).toBeGreaterThan(0);
@@ -45,7 +57,7 @@ describe("glass surface", () => {
 
   it("lives outside every skin block, and every skin still defines the tokens it reads", () => {
     const blocks = skinBlocks();
-    expect(blocks).toHaveLength(9);
+    expect(blocks).toHaveLength(11);
     for (const block of blocks) {
       expect(block).not.toContain("glass");
       for (const token of ["--color-menu", "--color-card", "--color-ink"]) expect(block).toContain(`${token}:`);

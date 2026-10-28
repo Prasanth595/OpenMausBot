@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/cn";
 import { WorkingTimer } from "@/components/WorkingIndicator";
 import { phraseAt, phraseHoldMs } from "@/lib/live-activity";
+import { t } from "@/lib/i18n";
+import { formatElapsed } from "@/lib/working-time";
 
 const FADE_MS = 320;
 
@@ -37,11 +39,10 @@ export function useRotatingPhrase(
 }
 
 // 2s matches --animate-shimmer.
-function ShimmerPhrase({ text, className, hidden }: { text: string; className?: string; hidden?: boolean }) {
+function ShimmerPhrase({ text, className }: { text: string; className?: string }) {
   const [delay] = useState(() => `-${Date.now() % 2000}ms`);
   return (
     <span
-      aria-hidden={hidden || undefined}
       className={cn("thinking-shimmer animate-shimmer [grid-area:1/1]", className)}
       style={{ animationDelay: `${delay}, 0ms` }}
     >
@@ -50,15 +51,27 @@ function ShimmerPhrase({ text, className, hidden }: { text: string; className?: 
   );
 }
 
+const NOTHING: readonly string[] = [];
+// The spaces keep copied text readable; the flex gap does the spacing on screen.
+const Dot = () => <span aria-hidden="true" className="text-[12px] text-ink-tertiary"> · </span>;
+
+/** The turn's live status line: "Working · 1m 12s · Writing index.html · 14 KB". The lead word and the timer stay for
+ * the whole turn; `phrases` say what is happening now and rotate through their alternates; `size` is how much of the
+ * file is written. With nothing to say the line is the lead and the timer alone. The part that is live shimmers.
+ * `simple` draws Simple mode's quiet line instead: the avatar and one friendly phrase for what is happening now. */
 export function TurnPresence({
   avatar,
   visible,
-  label = "Thinking",
+  label,
   phrases,
   phase,
   seed = "",
   answering = false,
   since = null,
+  size,
+  simple = false,
+  detail,
+  className,
 }: {
   avatar: ReactNode;
   visible: boolean;
@@ -68,6 +81,11 @@ export function TurnPresence({
   seed?: string;
   answering?: boolean;
   since?: number | null;
+  size?: string;
+  simple?: boolean;
+  /** Simple mode: Advanced's wording for what is happening now, kept in the row's tooltip with the timer and size. */
+  detail?: string;
+  className?: string;
 }) {
   const [mounted, setMounted] = useState(visible);
   const [presencePhase, setPhase] = useState<"think" | "answer" | "out">(answering ? "answer" : "think");
@@ -93,38 +111,56 @@ export function TurnPresence({
   }, [visible, answering, mounted]);
 
   const showWorking = presencePhase === "think";
-  const list = phrases && phrases.length > 0 ? phrases : [label];
-  const { current, previous } = useRotatingPhrase(list, phase ?? list[0], seed, mounted && showWorking);
+  const lead = label ?? t("chat.activity.working");
+  const now = phrases && phrases.length > 0 ? phrases : null;
+  const { current, previous } = useRotatingPhrase(now ?? NOTHING, phase ?? now?.[0] ?? "", seed, mounted && showWorking && now !== null);
   if (!mounted) return null;
   return (
-    <div className="turn-presence flex flex-col items-start">
+    <div className={cn("turn-presence flex flex-col items-start", className)}>
       <div
+        title={simple && showWorking ? [lead, since !== null ? formatElapsed(Date.now() - since) : null, detail ?? (now ? current : null), size].filter(Boolean).join(" · ") : undefined}
         className={cn(
-          "flex items-center gap-2",
+          simple ? "flex h-9 items-center gap-2 ps-2" : "flex items-center gap-2",
           presencePhase === "think" && "turn-mascot-in",
           presencePhase === "out" && "turn-mascot-out",
         )}
       >
         {avatar}
-        {showWorking ? (
-          <span className="flex items-baseline gap-2 leading-none">
-            <span className="turn-phrase relative grid text-[13px]">
-              {previous !== null && previous !== current && (
-                <ShimmerPhrase
-                  key={`out:${previous}`}
-                  text={previous}
-                  className="turn-phrase-out absolute start-0 top-0 whitespace-nowrap"
-                  hidden
-                />
-              )}
-              <ShimmerPhrase
-                key={`in:${current}`}
-                text={current}
-                className={previous !== null ? "turn-phrase-in" : undefined}
-              />
-            </span>
+        {showWorking && simple ? (
+          <span className="turn-phrase turn-phrase-quiet relative grid text-[14px] leading-[22px] text-ink-tertiary" data-turn-status data-turn-now={now ? "" : undefined}>
+            {now ? (
+              <ShimmerPhrase key={`in:${current}`} text={current} className={previous !== null ? "turn-phrase-in" : undefined} />
+            ) : (
+              <span>{label ?? t("chat.typing")}</span>
+            )}
+          </span>
+        ) : showWorking ? (
+          <span className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-1 leading-none" data-turn-status>
+            {now ? <span className="text-[13px] text-ink-secondary">{lead}</span> : <ShimmerPhrase text={lead} className="text-[13px]" />}
             {since !== null && (
-              <WorkingTimer since={since} className="text-[11.5px] text-ink-tertiary" />
+              <>
+                <Dot />
+                <WorkingTimer since={since} className="text-[12px] text-ink-tertiary" />
+              </>
+            )}
+            {now && (
+              <>
+                <Dot />
+                {/* One phrase at a time: a fading old phrase sat out of flow and a longer one drew over the size beside it. */}
+                <span className="turn-phrase relative grid text-[13px]" data-turn-now>
+                  <ShimmerPhrase
+                    key={`in:${current}`}
+                    text={current}
+                    className={previous !== null ? "turn-phrase-in" : undefined}
+                  />
+                </span>
+                {size && (
+                  <>
+                    <Dot />
+                    <span className="text-[12px] tabular-nums text-ink-tertiary" data-turn-size>{size}</span>
+                  </>
+                )}
+              </>
             )}
           </span>
         ) : null}

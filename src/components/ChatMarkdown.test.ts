@@ -26,10 +26,18 @@ import {
 } from "./ChatMarkdown";
 import { getSnippetFileName, parseFenceInfo } from "@/lib/code-block";
 import { markdownImageName, markdownImageOpenUrl } from "@/lib/markdown-image";
-import { StoreProvider } from "@/state/store";
+import { BotEditorStore, initialState, StoreProvider } from "@/state/store";
 import { setLocale } from "@/lib/i18n";
 import { ThreadRefsContext } from "./ThreadRefs";
 import * as AttachmentPreview from "./AttachmentPreview";
+
+// Most of this file pins Advanced mode's chrome; the Simple code block has its own tests below.
+const mode = vi.hoisted(() => ({ advanced: true }));
+vi.mock("@/lib/interface-mode", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/interface-mode")>(),
+  useAdvancedMode: () => mode.advanced,
+  readAdvancedMode: () => mode.advanced,
+}));
 
 vi.mock("react", async (importOriginal) => {
   const react = await importOriginal<typeof React>();
@@ -547,6 +555,86 @@ describe("#Title thread links in markdown", () => {
     expect(markup).not.toContain("data-thread-link");
     expect(markup).not.toContain('href="openmausbot://');
     expect(markup).not.toContain('target="_blank"');
+  });
+});
+
+describe("a bot's Use my Mac link", () => {
+  const text = "To let me use your apps, press [Use my Mac](openmausbot://use-my-computer).";
+
+  it("opens this app's own popup from the person's click, and never leaves the app", async () => {
+    const offer = vi.fn(async () => {});
+    window.ogb = { platform: "darwin", cloudLending: { open: async () => {}, offer } } as unknown as typeof window.ogb;
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      await act(async () => root.render(createElement(ChatMarkdown, { text })));
+      const button = host.querySelector<HTMLButtonElement>("button[data-use-my-computer]")!;
+      expect(button.textContent).toBe("Use my Mac");
+      expect(host.querySelector('a[href^="openmausbot:"]')).toBeNull();
+      await act(async () => button.click());
+      expect(offer).toHaveBeenCalledTimes(1);
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+      delete window.ogb;
+    }
+  });
+
+  it("is plain text where there is no popup to open, such as a browser or the phone", () => {
+    const markup = renderToStaticMarkup(createElement(ChatMarkdown, { text }));
+    expect(markup).toContain(">Use my Mac<");
+    expect(markup).not.toContain("<button");
+    expect(markup).not.toContain('href="openmausbot://');
+    expect(chatUrlTransform("openmausbot://use-my-computer")).toBe("openmausbot://use-my-computer");
+  });
+});
+
+describe("a bot's link to a page it published", () => {
+  const PAGE = "https://abcdefghijklmnopqrstuvwxyz.mausbot.page/";
+  const text = `Here is your dashboard: [Sales dashboard](${PAGE})`;
+  async function clickPage(store?: Parameters<typeof BotEditorStore>[0]["value"]) {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      const markdown = createElement(ChatMarkdown, { text });
+      await act(async () => root.render(store ? createElement(BotEditorStore, { value: store, children: markdown }) : markdown));
+      const link = host.querySelector<HTMLAnchorElement>(`a[href="${PAGE}"]`)!;
+      expect(link.textContent).toBe("Sales dashboard");
+      const click = new MouseEvent("click", { bubbles: true, cancelable: true });
+      await act(async () => { link.dispatchEvent(click); });
+      return click;
+    } finally {
+      await act(async () => root.unmount());
+      host.remove();
+    }
+  }
+
+  it("in the desktop app, opens like the card's Open: in the bot's browser panel, never as a message", async () => {
+    const openExternal = vi.fn(async () => {});
+    window.ogb = { platform: "darwin", openExternal } as unknown as typeof window.ogb;
+    const dispatch = vi.fn();
+    try {
+      const state = { ...initialState, selectedId: "pepper", bots: [{ id: "pepper" }], config: { features: { browser: true }, browserEngine: { kind: "engine" } } };
+      const click = await clickPage({ state, dispatch, flushBotPatches: async () => null, refreshInstances: async () => {}, refreshModels: async () => {} } as never);
+      expect(click.defaultPrevented).toBe(true);
+      expect(dispatch.mock.calls).toEqual([[{ type: "toggleComputer", open: true }]]);
+      expect(openExternal).not.toHaveBeenCalled();
+    } finally {
+      delete window.ogb;
+    }
+  });
+
+  it("elsewhere, opens it outside the chat, as any web link", async () => {
+    const opened = vi.spyOn(window, "open").mockReturnValue(null);
+    try {
+      const click = await clickPage();
+      expect(click.defaultPrevented).toBe(true);
+      expect(opened).toHaveBeenCalledWith(PAGE, "_blank", "noopener,noreferrer");
+    } finally {
+      opened.mockRestore();
+    }
   });
 });
 
@@ -1074,7 +1162,7 @@ describe("bidi: message content carries its own direction", () => {
       ].join("\n"),
     }));
 
-    expect(html).toContain('<div dir="rtl" class="mt-2 text-[16px] font-semibold">');
+    expect(html).toContain('<div dir="rtl" class="mt-3 text-[18px] font-semibold">');
     expect(html).toContain('<p dir="rtl">');
     expect(html).toContain('<p dir="ltr">An English paragraph');
     expect(html).toContain('<blockquote dir="rtl"');
@@ -1226,4 +1314,30 @@ it("renders mermaid strictly and serves repeat views from cache", async () => {
     effect.mockImplementation(originalUseEffect);
     vi.doUnmock("mermaid");
   }
+});
+
+describe("Simple mode's code block", () => {
+  const simple = (render: () => string) => {
+    mode.advanced = false;
+    try { return render(); } finally { mode.advanced = true; }
+  };
+
+  it("drops the header bar for a quiet surface, with Copy and a ⋯ menu on a hover plate", () => {
+    const html = simple(() => renderToStaticMarkup(createElement(CodeBlock, { code: "const a = 1;", lang: "js" })));
+    expect(html).toMatch(/class="chat-code-block group\/code relative my-2\.5 overflow-hidden rounded-lg bg-ink\/\[0\.04\]"/);
+    expect(html).not.toContain("border-hairline");
+    expect(html).not.toContain('aria-label="Wrap long lines"');
+    const plate = html.match(/<div data-code-plate="[^"]*" class="([^"]*)"/)?.[1] ?? "";
+    expect(plate.split(" ")).toEqual(expect.arrayContaining(["opacity-0", "group-hover/code:opacity-100", "focus-within:opacity-100", "touch:opacity-100"]));
+    expect(html).toContain('aria-label="Copy code"');
+    expect(html).toContain('aria-label="More"');
+    expect(html).toMatch(/<pre class="[^"]*leading-5 px-3 py-2 text-ink-secondary/);
+  });
+
+  it("gives a diagram the same plate instead of its header", () => {
+    const html = simple(() => renderToStaticMarkup(createElement(ChatMarkdown, { text: "```mermaid\ngraph TD; A-->B\n```" })));
+    expect(html).toContain("data-code-plate");
+    expect(html).toContain('aria-label="Copy diagram source"');
+    expect(html).not.toContain('title="Mermaid diagram"');
+  });
 });

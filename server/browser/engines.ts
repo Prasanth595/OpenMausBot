@@ -8,13 +8,13 @@ import type { BrowserLive } from "../browser-live.ts";
 import type { BrowserRuntime, BrowserSpawnSpec } from "../browser-runtime.ts";
 import type { StepContext } from "../browser-steps.ts";
 import type { FillLoginDeps } from "../login-fill.ts";
-import { acceptLanguageFor, LocalBackend } from "./backends.ts";
+import { LocalBackend } from "./backends.ts";
 import { sandboxDisabled } from "./chrome/host-setup.ts";
 import type { HostKind } from "./chrome/flags.ts";
 import { ChromeLauncher } from "./chrome/launcher.ts";
 import { ProcessRegistry, sweep } from "./chrome/processes.ts";
 import { browserRoot } from "./chrome/profile.ts";
-import { browserLanguage, browserTimeZone } from "./chrome/wrapper.ts";
+import { browserLanguage, browserTimeZone, languageList } from "./chrome/wrapper.ts";
 import { displayScreen } from "./display.ts";
 import type { Download } from "./cdp/downloads.ts";
 import { BrowserService, type BrowserTarget } from "./service.ts";
@@ -61,6 +61,7 @@ export class ChromeEngine {
   readonly #registry: ProcessRegistry;
   readonly #options: ChromeEngineOptions;
   #timer: ReturnType<typeof setInterval> | null = null;
+  #inUse = false;
   #cleared = false;
 
   constructor(options: ChromeEngineOptions) {
@@ -82,7 +83,7 @@ export class ChromeEngine {
       },
       screen: () => (screen ??= displayScreen(options.host, { platform, env })),
       locale: () => locale,
-      acceptLanguages: () => (locale ? acceptLanguageFor(locale).replace(/;q=[\d.]+/gu, "") : "en-US,en"),
+      acceptLanguages: () => languageList(locale ?? undefined),
       timezone: () => browserTimeZone(env, platform) ?? null,
       egressPort: (key) => options.egressPort(key),
       registry: this.#registry,
@@ -114,29 +115,28 @@ export class ChromeEngine {
   }
 
   /**
-   * In use, it prepares Chrome before a bot needs it and closes idle browsers and stray processes every minute. Not in
-   * use, it only clears, once, what an earlier run of the engine left behind, so a server that never turned it on
-   * lists no processes.
+   * In use, it prepares Chrome before a bot needs it. In use, or while a Chrome it started still runs, it closes idle
+   * browsers and stray processes every minute. Otherwise it only clears, once, what an earlier run of the engine left
+   * behind, so a server that never turned it on lists no processes.
    */
   start({ inUse, prepare }: { inUse: boolean; prepare: boolean }): void {
-    const root = browserRoot(this.#options.dataDir);
-    const tick = () => {
-      void this.service.closeIdle().catch(() => undefined);
-      void sweep({ root, registry: this.#registry }).catch(() => undefined);
-    };
-    if (!inUse) {
-      if (this.#timer) clearInterval(this.#timer);
-      this.#timer = null;
-      if (!this.#cleared && this.#everUsed()) tick();
-      this.#cleared = true;
-      return;
-    }
+    const starting = inUse && !this.#inUse;
+    this.#inUse = inUse;
+    if (!inUse && !this.#cleared && this.#everUsed()) this.#tick();
     this.#cleared = true;
-    if (prepare && this.launcher.plan().kind !== "legacy") void this.launcher.prepare();
-    if (this.#timer) return;
-    tick();
-    this.#timer = setInterval(tick, SWEEP_MS);
+    if (inUse && prepare && this.launcher.plan().kind !== "legacy") void this.launcher.prepare();
+    if (starting) this.#tick();
+    this.#timer ??= setInterval(() => { if (this.#inUse || this.#running()) this.#tick(); }, SWEEP_MS);
     this.#timer.unref?.();
+  }
+
+  #tick(): void {
+    void this.service.closeIdle().catch(() => undefined);
+    void sweep({ root: browserRoot(this.#options.dataDir), registry: this.#registry }).catch(() => undefined);
+  }
+
+  #running(): boolean {
+    return this.service.profiles().some((profile) => profile.run || profile.starting) || this.#registry.list().length > 0;
   }
 
   /** Whether this engine ever made a profile in this data folder. */
@@ -182,31 +182,57 @@ export class ChromeEngine {
 
 export interface RuntimeRouterOptions {
   /** What a tool call is told instead of reaching either engine, or null to run it. */
-  refusal?(spec: BrowserSpawnSpec, params: unknown): string | null;
+  refusal?(session: string, spec: BrowserSpawnSpec, params: unknown): string | null;
+  /** Asked each time beforeDispatch ran, so after it claimed the session for this call's turn and before anything reaches
+   * the engine: what a refusal that depends on who is calling tells the call, or null to run it. */
+  afterClaim?(session: string, spec: BrowserSpawnSpec): string | null;
   /** A tool call's answer as the bot gets it, from either engine. */
   annotate?(spec: BrowserSpawnSpec, result: unknown): unknown;
+  /** The annotated answer, last, for what only the session's host knows about it. */
+  afterCall?(session: string, spec: BrowserSpawnSpec, result: unknown): unknown;
 }
+
+/** afterClaim's refusal, thrown out of the engine's dispatch and answered as the call's result. */
+class ClaimRefused extends Error {}
 
 /** BrowserRuntime's API, each call going to the engine its session runs on. */
 export class RuntimeRouter {
   readonly #old: BrowserRuntime;
   readonly #chrome: ChromeEngine;
   readonly #refusal: RuntimeRouterOptions["refusal"];
+  readonly #afterClaim: RuntimeRouterOptions["afterClaim"];
   readonly #annotate: RuntimeRouterOptions["annotate"];
+  readonly #afterCall: RuntimeRouterOptions["afterCall"];
 
   constructor(old: BrowserRuntime, chrome: ChromeEngine, options: RuntimeRouterOptions = {}) {
     this.#old = old;
     this.#chrome = chrome;
     this.#refusal = options.refusal;
+    this.#afterClaim = options.afterClaim;
     this.#annotate = options.annotate;
+    this.#afterCall = options.afterCall;
   }
 
   async agentRpc(session: string, spec: BrowserSpawnSpec, method: "tools/list" | "tools/call", params: unknown, beforeDispatch?: () => void, ctx?: StepContext): Promise<unknown> {
-    const refusal = method === "tools/call" ? this.#refusal?.(spec, params) : null;
+    const refusal = method === "tools/call" ? this.#refusal?.(session, spec, params) : null;
     if (refusal) return { isError: true, content: [{ type: "text", text: refusal }] };
+    const afterClaim = method === "tools/call" ? this.#afterClaim : undefined;
+    const dispatch = afterClaim ? () => {
+      beforeDispatch?.();
+      const text = afterClaim(session, spec);
+      if (text) throw new ClaimRefused(text);
+    } : beforeDispatch;
     const target = chromeTarget(session, spec);
-    const result = await (target ? this.#chrome.service.agentRpc(target, method, params, beforeDispatch) : this.#old.agentRpc(session, spec, method, params, beforeDispatch, ctx));
-    return method === "tools/call" && this.#annotate ? this.#annotate(spec, result) : result;
+    let result: unknown;
+    try {
+      result = await (target ? this.#chrome.service.agentRpc(target, method, params, dispatch) : this.#old.agentRpc(session, spec, method, params, dispatch, ctx));
+    } catch (error) {
+      if (error instanceof ClaimRefused) return { isError: true, content: [{ type: "text", text: error.message }] };
+      throw error;
+    }
+    if (method !== "tools/call") return result;
+    const annotated = this.#annotate ? this.#annotate(spec, result) : result;
+    return this.#afterCall ? this.#afterCall(session, spec, annotated) : annotated;
   }
 
   previewFrame<T>(session: string, capture: () => Promise<T>, spec: { command: string; args?: readonly string[] }): Promise<T | { png: string; format: "jpeg" }> {
@@ -234,6 +260,12 @@ export class RuntimeRouter {
   closeIfIdle(session: string, idleMs: number, spec?: Spec & { args?: readonly string[] }): Promise<boolean> {
     if (chromeTarget(session, spec)) return Promise.resolve(false);
     return this.#old.closeIfIdle(session, idleMs, spec ? { command: spec.command, args: spec.args ?? [], env: spec.env } : undefined);
+  }
+
+  /** Closes a session's browser now unless a call, an agent or a person is using it. */
+  closeUnused(session: string, spec: Spec & { args?: readonly string[] }): Promise<boolean> {
+    if (chromeTarget(session, spec)) return this.#chrome.service.closeUnused(session);
+    return this.#old.closeIfIdle(session, 1, { command: spec.command, args: spec.args ?? [], env: spec.env });
   }
 
   async close(session: string): Promise<void> {
