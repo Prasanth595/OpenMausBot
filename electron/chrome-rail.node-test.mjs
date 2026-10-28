@@ -108,19 +108,19 @@ test("nothing to show: no view is made at all", () => {
 });
 
 /** The app's preload in a page of the window, with what the room needs of the page: its document, size and zoom. */
-function pageWithPreload(origin = "https://bots.example.test") {
+function pageWithPreload(origin = "https://bots.example.test", pathname = "/") {
   const listeners = new Map(), handlers = new Map();
   const head = { children: [], append(node) { this.children.push(node); node.isConnected = true; } };
-  const document = { documentElement: {}, head, createElement: () => ({ textContent: "", isConnected: false, remove() { head.children.splice(head.children.indexOf(this), 1); this.isConnected = false; } }) };
+  const document = { documentElement: { style: { zoom: "" } }, head, createElement: () => ({ textContent: "", isConnected: false, remove() { head.children.splice(head.children.indexOf(this), 1); this.isConnected = false; } }) };
   const frame = { zoom: 1 };
   vm.runInNewContext(readFileSync(new URL("./preload.cjs", import.meta.url), "utf8"), {
     process: { platform: "darwin", argv: ["--omb-local-origin=http://127.0.0.1:8799", "--omb-company-desktop=1"] },
-    location: { origin }, navigator: { userActivation: { isActive: false } }, TextEncoder, localStorage: { getItem: () => null }, queueMicrotask, document,
+    location: { origin, pathname }, navigator: { userActivation: { isActive: false } }, TextEncoder, localStorage: { getItem: () => null }, queueMicrotask, document,
     window: { addEventListener: (type, listener) => listeners.set(type, listener) },
     require: () => ({ webUtils: {}, webFrame: { getZoomFactor: () => frame.zoom }, contextBridge: { exposeInMainWorld() {} },
       ipcRenderer: { on: (channel, handler) => handlers.set(channel, handler), removeListener() {}, send() {}, sendSync: () => null, invoke: () => Promise.resolve() } }),
   });
-  return { head, frame, tell: (width) => handlers.get("rail:beside")({}, width), resize: () => listeners.get("resize")() };
+  return { head, frame, root: document.documentElement, tell: (width) => handlers.get("rail:beside")({}, width), resize: () => listeners.get("resize")() };
 }
 
 test("every page beside the rail, from any server, moves over by the rail's width at any zoom, and back when it goes", () => {
@@ -135,4 +135,20 @@ test("every page beside the rail, from any server, moves over by the rail's widt
   assert.match(page.head.children[0].textContent, /padding-left: 160px/, "never more than 200 points, whatever is sent");
   page.tell(0);
   assert.equal(page.head.children.length, 0, "the page has the whole window again");
+});
+
+test("the rail's own page keeps its size at any zoom of this app's page (Chromium shares a host's zoom); no other page is touched", () => {
+  const rail = pageWithPreload("http://127.0.0.1:8799", "/rail");
+  rail.frame.zoom = 1.25;
+  rail.resize();
+  assert.equal(rail.root.style.zoom, "0.8", "zoomed in, the rail takes the zoom back out");
+  rail.frame.zoom = 1;
+  rail.resize();
+  assert.equal(rail.root.style.zoom, "");
+  for (const [origin, pathname] of [["http://127.0.0.1:8799", "/"], ["https://bots.example.test", "/rail"]]) {
+    const page = pageWithPreload(origin, pathname);
+    page.frame.zoom = 1.25;
+    page.resize();
+    assert.equal(page.root.style.zoom, "", `${origin}${pathname} keeps its zoom`);
+  }
 });

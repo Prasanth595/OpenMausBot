@@ -76,13 +76,22 @@ export function PlaceMark({ place, size = CIRCLE }: { place: RailPlace; size?: n
   </span>;
 }
 
-/** A place's menu opens where it was asked for: at its circle, or its row past eight. */
-type MenuAt = { place: RailPlace; top: number };
+/** A place's menu opens where it was asked for: beside its circle, or its row past eight. */
+type MenuAt = { place: RailPlace; from: HTMLElement };
 /** The right-click (or the keyboard's menu key) on a place with a colour to show opens its menu; elsewhere, nothing. */
 const menuOpener = (place: RailPlace, onMenu: (at: MenuAt) => void) => (event: ReactMouseEvent<HTMLElement>) => {
   event.preventDefault();
-  if (place.paint) onMenu({ place, top: event.currentTarget.getBoundingClientRect().top });
+  if (place.paint) onMenu({ place, from: event.currentTarget });
 };
+
+/** How far down the rail an element of it sits, in the rail's own units (offsets, not the screen's: the rail's page
+ * takes out the zoom it shares with this app's page). */
+export function topWithin(element: HTMLElement, rail: HTMLElement): number {
+  let top = 0;
+  for (let at: HTMLElement | null = element; at && at !== rail; at = at.offsetParent as HTMLElement | null) top += at.offsetTop;
+  for (let up = element.parentElement; up && up !== rail; up = up.parentElement) top -= up.scrollTop;
+  return top;
+}
 
 function PlaceCircle({ place, calm, canPair, onOpen, onMenu }: { place: RailPlace; calm: boolean; canPair: boolean; onOpen: (place: RailPlace) => void; onMenu: (at: MenuAt) => void }) {
   const label = placeLabel(place), acts = placeActs(place, canPair);
@@ -103,8 +112,8 @@ function PlaceCircle({ place, calm, canPair, onOpen, onMenu }: { place: RailPlac
 
 /** A place's own menu on the window's rail: its name and its colour, in the six swatches, saved by main for every place
  * whatever its server runs (on the Admin for a Cloud). A team member sees who may change it. */
-function PlaceMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
-  const { place } = at, paint = place.paint;
+function PlaceMenu({ place, top, onClose }: { place: RailPlace; top: number; onClose: () => void }) {
+  const paint = place.paint;
   const [pending, setPending] = useState<CloudSwatch | null>(null);
   const [outcome, setOutcome] = useState<PlaceColorOutcome | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -118,8 +127,7 @@ function PlaceMenu({ at, onClose }: { at: MenuAt; onClose: () => void }) {
   };
   const note = paint.locked === "member" || outcome === "refused" ? t("placeLook.member") : paint.locked === "signed-out" ? t("placeLook.signedOut")
     : outcome === "unsupported" ? t("placeLook.unsupported") : null;
-  return <div ref={ref} role="dialog" aria-label={name} data-rail-menu={place.id} className={cn("fixed left-[72px] z-50 w-72", MENU_SHEET)}
-    style={{ top: Math.max(8, Math.min(at.top - 6, window.innerHeight - 200)) }}
+  return <div ref={ref} role="dialog" aria-label={name} data-rail-menu={place.id} className={cn("absolute left-full z-50 ml-2 w-72", MENU_SHEET)} style={{ top }}
     onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
     <div className="flex items-center gap-2 px-2 pt-1">
       <PlaceMark place={place} size={22} />
@@ -168,9 +176,10 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   const [more, setMore] = useState(false);
   const [adding, setAdding] = useState(false);
   const [connecting, setConnecting] = useState<string | null>(null);
-  const [menu, setMenu] = useState<MenuAt | null>(null);
+  const [menu, setMenu] = useState<{ place: RailPlace; top: number } | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const navRef = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!more && !menu) return;
     const away = (event: MouseEvent) => {
@@ -196,13 +205,18 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   const noDrag = draggable ? ({ WebkitAppRegion: "no-drag" } as CSSProperties) : undefined;
   const shown = shownPlaces(state.places);
   const canPair = state.add.link || state.add.address, canAdd = state.add.cloud || canPair;
-  return <nav aria-label={t("rail.label")} data-places-rail style={drag}
+  // The menu opens next to the circle or row it was asked from (measured now, while that row is there), within the rail.
+  const openMenu = ({ place, from }: MenuAt) => {
+    const nav = navRef.current;
+    setMenu({ place, top: nav ? Math.max(8, Math.min(topWithin(from, nav) - 6, nav.clientHeight - 200)) : 8 });
+  };
+  return <nav ref={navRef} aria-label={t("rail.label")} data-places-rail style={drag}
     className={cn("relative w-16 shrink-0 flex-col items-center bg-panel", chrome ? "flex h-full" : "hidden md:flex", calm ? "border-r border-ink/[0.04]" : "border-r border-hairline/50")}>
     {/* The macOS traffic lights sit over the rail's top; nothing here takes a click before they end. */}
     <div aria-hidden="true" className={macInset ? "h-[52px] shrink-0" : "h-3 shrink-0"} />
     <ul className="flex min-h-0 flex-col items-center gap-2.5 overflow-y-auto px-1 py-1" style={noDrag}>
       {shown.map((place) => <li key={place.id} className="flex flex-col items-center">
-        <PlaceCircle place={place} calm={calm} canPair={canPair} onOpen={open} onMenu={setMenu} />
+        <PlaceCircle place={place} calm={calm} canPair={canPair} onOpen={open} onMenu={openMenu} />
         {/* The place on screen, named: a server's own page may name it nowhere. */}
         {place.active && <span aria-hidden="true" data-rail-caption className="mt-1 line-clamp-2 w-[60px] break-words text-center text-[11px] leading-tight text-ink-secondary">
           {place.kind === "computer" ? t("rail.thisComputer") : place.name}
@@ -215,14 +229,16 @@ export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
         className="grid size-[38px] place-items-center rounded-full text-ink-secondary hover:bg-ink/[0.06] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus aria-expanded:bg-ink/[0.06]">
         <MoreHorizontal size={18} aria-hidden="true" />
       </button>}
-      {more && <MorePlaces places={state.places} canPair={canPair} onOpen={open} onMenu={setMenu} onClose={() => setMore(false)} />}
+      {more && <MorePlaces places={state.places} canPair={canPair} onOpen={open} onMenu={openMenu} onClose={() => setMore(false)} />}
       {canAdd && <button type="button" aria-label={t("rail.add")} title={t("rail.add")} aria-haspopup="dialog" data-rail-add onClick={() => { track("rail_add", { step: "opened" }); setAdding(true); }}
         className="grid size-[38px] place-items-center rounded-full border border-dashed border-ink/25 text-ink-secondary hover:border-ink/40 hover:bg-ink/[0.04] hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus">
         <Plus size={18} aria-hidden="true" />
       </button>}
     </div>
     {/* The list is read again while it is open: the menu shows the place as main lists it now. */}
-    {menu && <div ref={menuRef} style={noDrag}><PlaceMenu key={menu.place.id} at={{ ...menu, place: state.places.find((entry) => entry.id === menu.place.id) ?? menu.place }} onClose={() => setMenu(null)} /></div>}
+    {menu && <div ref={menuRef} style={noDrag}>
+      <PlaceMenu key={menu.place.id} place={state.places.find((entry) => entry.id === menu.place.id) ?? menu.place} top={menu.top} onClose={() => setMenu(null)} />
+    </div>}
     {adding && <PlaceAddSheet choices={state.add} onClose={() => setAdding(false)} />}
     {connecting !== null && <PlaceAddSheet choices={state.add} connect={{ name: connecting }} onClose={() => setConnecting(null)} />}
   </nav>;
