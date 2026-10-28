@@ -10,7 +10,7 @@ const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) removeTempDir(dir); });
 
 function folders() {
-  const base = realpathSync(mkdtempSync(join(tmpdir(), "omb-upload-")));
+  const base = realpathSync.native(mkdtempSync(join(tmpdir(), "omb-upload-")));
   dirs.push(base);
   const attachments = join(base, "attachments"), workspace = join(base, "workspace"), outside = join(base, "outside");
   for (const dir of [attachments, workspace, outside]) mkdirSync(dir);
@@ -94,7 +94,7 @@ describe.skipIf(process.platform === "win32")("the name a page sees", () => {
 
 describe.skipIf(process.platform === "win32")("the files a boxed browser is given", () => {
   it("copies every file into the one folder the box shows Chrome, under the person's name or its own", async () => {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "omb-boxed-upload-")));
+    const root = realpathSync.native(mkdtempSync(join(tmpdir(), "omb-boxed-upload-")));
     const source = join(root, "work", "report.txt"), stored = join(root, "attachments", "a1b2.pdf");
     mkdirSync(dirname(source), { recursive: true });
     mkdirSync(dirname(stored), { recursive: true });
