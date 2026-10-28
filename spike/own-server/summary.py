@@ -4,7 +4,7 @@ import json
 import os
 import sys
 
-ORDER = ["a", "b", "c", "bc", "bcs", "d", "ds", "dn", "d4", "cs", "dnh", "dnt", "dsx", "e", "ec", "ebc", "ebcs", "eds"]
+ORDER = ["a", "b", "c", "bc", "bcs", "d", "ds", "dn", "dn29", "dn2204", "d4", "cs", "dnh", "dnt", "dsx", "e", "ec", "ebc", "ebcs", "eds"]
 
 root = sys.argv[1]
 results = {}

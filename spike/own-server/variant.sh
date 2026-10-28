@@ -33,6 +33,8 @@ case "$VARIANT" in
   cs)   USERNS=1; PROFILE=omb-home; OPTS=(--security-opt apparmor=omb-home --security-opt seccomp=unconfined --security-opt systempaths=unconfined) ;;
   dnh)  USERNS=1; PROFILE=omb-home-narrow; RESTARTS=1; OPTS=(--security-opt apparmor=omb-home-narrow --security-opt "seccomp=$SECCOMP" --security-opt systempaths=unconfined
           --security-opt no-new-privileges=true --cap-drop ALL --cap-add CHOWN --cap-add SETUID --cap-add SETGID --cap-add KILL --oom-score-adj -800) ;;
+  # The same settings with docker-ce from download.docker.com (what an install today gets), and on Ubuntu 22.04.
+  dn29|dn2204) USERNS=1; PROFILE=omb-home-narrow; RESTARTS=1; OPTS=(--security-opt apparmor=omb-home-narrow --security-opt "seccomp=$SECCOMP" --security-opt systempaths=unconfined) ;;
   dnt)  USERNS=1; PROFILE=omb-home-narrow; ROLE=team; OPTS=(--security-opt apparmor=omb-home-narrow --security-opt "seccomp=$SECCOMP" --security-opt systempaths=unconfined) ;;
   dsx)  USERNS=1; PROFILE=omb-home; OPTS=(--security-opt apparmor=omb-home --security-opt "seccomp=$SECCOMP" --security-opt systempaths=unconfined --cap-add SYS_ADMIN) ;;
   # The same host with kernel.apparmor_restrict_unprivileged_userns=0 (a host-wide change).
@@ -62,6 +64,21 @@ host_facts() {
   echo "docker info: $(docker info --format 'security={{json .SecurityOptions}} cgroup=v{{.CgroupVersion}} driver={{.Driver}} runtime={{.DefaultRuntime}} init={{.InitBinary}}' 2>&1)"
   echo "host unprivileged userns (runner user, unconfined): $(unshare -Ur cat /proc/self/uid_map 2>&1 | tr -s ' \n' ' ')"
 }
+
+if [ "$VARIANT" = dn29 ]; then
+  log "replace the runner's Docker with docker-ce from download.docker.com"
+  {
+    sudo systemctl stop docker.socket docker containerd
+    dpkg-query -W -f '${Package}\n' 'moby-*' 2>/dev/null | xargs -r sudo apt-get remove -y -qq
+    sudo install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | sudo tee /etc/apt/sources.list.d/docker.list
+    sudo apt-get update -qq && sudo apt-get install -y -qq docker-ce docker-ce-cli containerd.io
+    sudo systemctl start docker
+    docker version --format 'now: client {{.Client.Version}} / server {{.Server.Version}}'
+  } > "$OUT/docker-upgrade.txt" 2>&1
+  tail -5 "$OUT/docker-upgrade.txt"
+fi
 
 log "host facts as found"
 host_facts > "$OUT/host-before.txt" 2>&1; cat "$OUT/host-before.txt"
