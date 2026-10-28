@@ -14,8 +14,9 @@ import {
   mouthFrame,
   type Ring,
 } from "./cursor-face-data"
-import { GLYPH_EASE_MS, MOTION, VIEW_SPAN, bodyTransform, faceTravelUnits, morphUnitsPerMs, nextMascotFrame, type BodyMotion } from "./mascot-motion"
+import { GLYPH_EASE_MS, MOTION, VIEW_SPAN, blinkScale, bodyTransform, displayed, displayedGaze, displayedMouth, faceTravelUnits, morphUnitsPerMs, nextMascotFrame, onSphere, type BodyMotion } from "./mascot-motion"
 import { mascotClock, usePrefersReducedMotion, type MascotTicket } from "./mascot-clock"
+import { CarvedFaceParts, carvedEyesFor, carvedMotion, carvedUnitsPerMs, paintCarvedFace, stepCarved, useCarvedGlances, useCarvedParts, type BodyCarvedEyes } from "./cursor-carved-face"
 
 export { MOTION, bodyTransform }
 export type { BodyMotion }
@@ -48,8 +49,6 @@ export const DEFAULT_SILHOUETTE: CursorSilhouette = cursorSilhouette;
 export const DEFAULT_GRADIENT: [string, string, string] = ["#9FE6B5","#3FAE6E","#1C7A4C"]
 
 const VIEW_BOX = `-15 -15 ${VIEW_SPAN} ${VIEW_SPAN}`
-const SPHERE_C = 114.2705
-const SPHERE_R = 105
 
 
 const TAU = Math.PI * 2
@@ -882,10 +881,15 @@ export function mouthPath(frame: { x: number; y: number; angle: number }, spec: 
 export const anchorTransform = (a: { x: number; y: number; scale: number }) =>
   `translate(${a.x} ${a.y}) scale(${a.scale}) translate(${-FACE_CENTRE[0]} ${-FACE_CENTRE[1]})`
 
+/** `traced` morphs between the traced expressions; `carved` draws pill eyes and a smile from a mood. */
+export type CursorFace = 'traced' | 'carved'
+
 
 export interface CursorAvatarProps {
   state?: CursorState
   expression?: number
+  face?: CursorFace
+  carvedEyes?: BodyCarvedEyes
   size?: number | string
   gaze?: { x?: number; y?: number }
   turn?: number
@@ -921,6 +925,8 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     {
       state = 'idle',
       expression,
+      face = 'traced',
+      carvedEyes = carvedEyesFor('cursor'),
       size = 160,
       gaze,
       turn = 0,
@@ -951,6 +957,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     const eye0 = useRef<SVGPathElement | null>(null)
     const eye1 = useRef<SVGPathElement | null>(null)
     const mouth = useRef<SVGPathElement | null>(null)
+    const carved = useCarvedParts()
     const bodyGroup = useRef<SVGGElement | null>(null)
     const bodyContent = useRef<SVGGElement | null>(null)
     const trailLayer = useRef<SVGGElement | null>(null)
@@ -965,6 +972,8 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     const props = {
       state,
       expression,
+      face,
+      carvedEyes,
       gaze,
       turn,
       spring,
@@ -987,6 +996,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       currentGaze: [...GAZE[0]],
       targetGaze: [...GAZE[0]],
       expression: 0,
+      carved: carvedMotion(state),
       morph: 1,
       velocity: 0,
       travel: 0,
@@ -1043,11 +1053,17 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     )
 
     useEffect(() => {
+      if (face === 'carved') return
       selectExpression(expression ?? POOLS[state][0])
-    }, [state, expression])
+    }, [state, expression, face])
+
+    useCarvedGlances(face === 'carved' && autoExpression && !paused && !reduced, state, glance => {
+      engine.current.carved.glance = glance
+      wake()
+    })
 
     useEffect(() => {
-      if (!autoExpression || expression !== undefined || paused || reduced) return
+      if (face === 'carved' || !autoExpression || expression !== undefined || paused || reduced) return
       let timer: ReturnType<typeof setTimeout>
       const tick = () => {
         const [lo, hi] = EXPR_CADENCE[state]
@@ -1064,7 +1080,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
       }
       tick()
       return () => clearTimeout(timer)
-    }, [state, autoExpression, expression, paused, reduced])
+    }, [state, face, autoExpression, expression, paused, reduced])
 
     useEffect(() => {
       const cadence = BLINK[state]
@@ -1084,11 +1100,13 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
     useEffect(() => {
       engine.current.faceStale = true
       wake()
-    }, [state, expression, gaze?.x, gaze?.y, turn, eyeScale, lookAround, paused, reduced, motionStrength, effects, glyphs, paint, showMouth, size])
+    }, [state, expression, face, gaze?.x, gaze?.y, turn, eyeScale, lookAround, paused, reduced, motionStrength, effects, glyphs, paint, showMouth, size])
 
     useEffect(() => {
       const drawFace = (e: typeof engine.current, now: number, spinTurn: number) => {
         const p = e.props
+        const radians = (((p.turn ?? 0) + spinTurn) * Math.PI) / 180
+        if (p.face === 'carved') return paintCarvedFace(carved, p.carvedEyes, e.carved.pose, p.eyeScale ?? 1, x => onSphere(x, radians))
         const g = displayedGaze(e)
         const look = p.lookAround ?? 0.35
         const ox = g[0] * look
@@ -1098,7 +1116,6 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
         )
         const gx = clamp(p.gaze?.x ?? 0, -1, 1) * GAZE_TRAVEL.x
         const gy = clamp(p.gaze?.y ?? 0, -1, 1) * GAZE_TRAVEL.y
-        const radians = (((p.turn ?? 0) + spinTurn) * Math.PI) / 180
         const base = p.eyeScale ?? 1
         const blink = blinkScale(e, now)
 
@@ -1106,14 +1123,11 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           const el = index === 0 ? eye0.current : eye1.current
           if (!el) return
           const c = ringCentre(ring)
-          const baseLongitude = Math.asin(clamp((c[0] - SPHERE_C) / SPHERE_R, -1, 1))
-          const longitude = baseLongitude + radians
-          const depth = Math.cos(longitude)
-          const perspective = Math.max(depth, 0.02) / Math.max(Math.cos(baseLongitude), 0.02)
+          const { x, perspective, shown } = onSphere(c[0], radians)
           el.setAttribute('d', toPath(ring))
           el.setAttribute(
             'transform',
-            `translate(${(SPHERE_C + SPHERE_R * Math.sin(longitude) + gx).toFixed(2)} ${(
+            `translate(${(x + gx).toFixed(2)} ${(
               c[1] + gy
             ).toFixed(2)}) scale(${clamp(perspective * base, 0.02, 2.4).toFixed(4)} ${clamp(
               blink * base,
@@ -1121,27 +1135,24 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
               2.4
             ).toFixed(4)}) translate(${(-c[0]).toFixed(2)} ${(-c[1]).toFixed(2)})`
           )
-          el.style.opacity = depth > 0.02 ? '1' : '0'
+          el.style.opacity = shown ? '1' : '0'
         })
 
         const mouthEl = mouth.current
         if (mouthEl) {
           const spec = displayedMouth(e)
           const frameGeom = mouthFrame(rings, spec)
-          const baseLongitude = Math.asin(clamp((frameGeom.x - SPHERE_C) / SPHERE_R, -1, 1))
-          const longitude = baseLongitude + radians
-          const depth = Math.cos(longitude)
-          const perspective = Math.max(depth, 0.02) / Math.max(Math.cos(baseLongitude), 0.02)
+          const { x, perspective, shown } = onSphere(frameGeom.x, radians)
           mouthEl.setAttribute('d', mouthPath(frameGeom, spec))
           mouthEl.setAttribute(
             'transform',
-            `translate(${(SPHERE_C + SPHERE_R * Math.sin(longitude) + gx).toFixed(2)} ${(
+            `translate(${(x + gx).toFixed(2)} ${(
               frameGeom.y + gy
             ).toFixed(2)}) scale(${clamp(perspective, 0.02, 2.4).toFixed(4)} 1) translate(${(
               -frameGeom.x
             ).toFixed(2)} ${(-frameGeom.y).toFixed(2)})`
           )
-          mouthEl.style.opacity = depth > 0.02 ? '1' : '0'
+          mouthEl.style.opacity = shown ? '1' : '0'
         }
       }
 
@@ -1207,7 +1218,9 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           else spinTurn = 360 * tt
         }
 
-        const faceMoving = () => e.morph < 1 || e.blinkStart !== null || e.spinStart !== null
+        if (p.face === 'carved') stepCarved(e.carved, p.state, p.gaze, dt, 1 - blinkScale(e, now), p.paused || p.reduced)
+
+        const faceMoving = () => e.morph < 1 || e.blinkStart !== null || e.spinStart !== null || e.carved.left > 0
         if (e.faceStale || e.faceMoving || faceMoving()) drawFace(e, now, spinTurn)
         e.faceStale = false
         e.faceMoving = faceMoving()
@@ -1223,7 +1236,7 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           showEffects,
           showGlyphs,
           sizePx: p.sizePx,
-          faceUnitsPerMs: morphUnitsPerMs(e.velocity, e.morph, f, e.travel),
+          faceUnitsPerMs: p.face === 'carved' ? carvedUnitsPerMs(e.carved, p.carvedEyes) : morphUnitsPerMs(e.velocity, e.morph, f, e.travel),
           blinkingOrSpinning: e.blinkStart !== null || e.spinStart !== null,
         })
       }
@@ -1273,16 +1286,22 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
           {picture ? <image href={picture} x="-15" y="-15" width={VIEW_SPAN} height={VIEW_SPAN} preserveAspectRatio="none" /> : <g transform={silhouette.fit || undefined} dangerouslySetInnerHTML={{ __html: body }} />}
           <g clipPath={`url(#${uid}-clip)`} visibility={picture ? 'hidden' : undefined}>
             <g transform={anchorTransform(silhouette.anchor)}>
-              <path ref={eye0} fill={eyeColor} />
-              <path ref={eye1} fill={eyeColor} />
-              {showMouth && (
-                <path
-                  ref={mouth}
-                  fill="none"
-                  stroke={eyeColor}
-                  strokeWidth={mouthStroke}
-                  strokeLinecap="round"
-                />
+              {face === 'carved' ? (
+                <CarvedFaceParts parts={carved} eyes={carvedEyes} ink={eyeColor} showMouth={showMouth} />
+              ) : (
+                <>
+                  <path ref={eye0} fill={eyeColor} />
+                  <path ref={eye1} fill={eyeColor} />
+                  {showMouth && (
+                    <path
+                      ref={mouth}
+                      fill="none"
+                      stroke={eyeColor}
+                      strokeWidth={mouthStroke}
+                      strokeLinecap="round"
+                    />
+                  )}
+                </>
               )}
             </g>
           </g>
@@ -1296,29 +1315,5 @@ export const CursorAvatar = React.forwardRef<CursorAvatarHandle, CursorAvatarPro
   }
 )
 
-
-function displayed(e: { current: Ring[]; target: Ring[]; morph: number }): Ring[] {
-  const m = clamp(e.morph, 0, 1)
-  return e.current.map((ring, eye) =>
-    ring.map((p, i): [number, number] => [
-      p[0] + (e.target[eye][i][0] - p[0]) * m,
-      p[1] + (e.target[eye][i][1] - p[1]) * m,
-    ])
-  )
-}
-
-const towards = (from: number[], to: number[], morph: number) => from.map((v, i) => v + (to[i] - v) * clamp(morph, 0, 1))
-const displayedMouth = (e: { currentMouth: number[]; targetMouth: number[]; morph: number }) => towards(e.currentMouth, e.targetMouth, e.morph)
-const displayedGaze = (e: { currentGaze: number[]; targetGaze: number[]; morph: number }) => towards(e.currentGaze, e.targetGaze, e.morph)
-
-function blinkScale(e: { blinkStart: number | null }, now: number) {
-  if (e.blinkStart === null) return 1
-  const t = (now - e.blinkStart) / 320
-  if (t >= 1) {
-    e.blinkStart = null
-    return 1
-  }
-  return Math.max(t < 0.42 ? 1 - t / 0.42 : (t - 0.42) / 0.58, 0.04)
-}
 
 export default CursorAvatar

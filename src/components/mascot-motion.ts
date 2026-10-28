@@ -223,3 +223,40 @@ export function faceTravelUnits(
   from.mouth.forEach((value, i) => { travel = Math.max(travel, Math.abs(to.mouth[i] - value)); });
   return travel + Math.hypot(to.gaze[0] - from.gaze[0], to.gaze[1] - from.gaze[1]);
 }
+
+const SPHERE_C = 114.2705;
+const SPHERE_R = 105;
+const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
+
+/** Where a face-space column lands on the turning body, how much the turn narrows it, and whether it faces forward. */
+export type SpherePoint = { x: number; perspective: number; shown: boolean };
+
+export function displayed(e: { current: Ring[]; target: Ring[]; morph: number }): Ring[] {
+  const m = clamp(e.morph, 0, 1)
+  return e.current.map((ring, eye) =>
+    ring.map((p, i): [number, number] => [
+      p[0] + (e.target[eye][i][0] - p[0]) * m,
+      p[1] + (e.target[eye][i][1] - p[1]) * m,
+    ])
+  )
+}
+
+const towards = (from: number[], to: number[], morph: number) => from.map((v, i) => v + (to[i] - v) * clamp(morph, 0, 1))
+export const displayedMouth = (e: { currentMouth: number[]; targetMouth: number[]; morph: number }) => towards(e.currentMouth, e.targetMouth, e.morph)
+export const displayedGaze = (e: { currentGaze: number[]; targetGaze: number[]; morph: number }) => towards(e.currentGaze, e.targetGaze, e.morph)
+
+export function onSphere(x: number, radians: number): SpherePoint {
+  const base = Math.asin(clamp((x - SPHERE_C) / SPHERE_R, -1, 1))
+  const depth = Math.cos(base + radians)
+  return { x: SPHERE_C + SPHERE_R * Math.sin(base + radians), perspective: Math.max(depth, 0.02) / Math.max(Math.cos(base), 0.02), shown: depth > 0.02 }
+}
+
+export function blinkScale(e: { blinkStart: number | null }, now: number) {
+  if (e.blinkStart === null) return 1
+  const t = (now - e.blinkStart) / 320
+  if (t >= 1) {
+    e.blinkStart = null
+    return 1
+  }
+  return Math.max(t < 0.42 ? 1 - t / 0.42 : (t - 0.42) / 0.58, 0.04)
+}

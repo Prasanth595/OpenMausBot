@@ -6,6 +6,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { MausAvatar, type MausAvatarHandle, type MausAvatarProps } from "./Avatar";
 import { EFFECTS, EXPRESSIONS, POOLS } from "./CursorAvatar";
 import { mascotClock } from "./mascot-clock";
+import { carvedFace, moodPose } from "./carved-face";
+import { carvedEyesFor } from "./cursor-carved-face";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -62,7 +64,6 @@ afterEach(() => {
 const render = (avatars: Array<Partial<MausAvatarProps> & { ref?: React.Ref<MausAvatarHandle> }>) =>
   act(() => root.render(avatars.map((props, key) => createElement(MausAvatar, { key, color: "green", ...props }))));
 const run = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
-const eyePaths = () => [...host.querySelectorAll("svg")].map((svg) => svg.querySelector("g[clip-path] path")!.getAttribute("d"));
 const toPath = (ring: Array<[number, number]>) => "M" + ring.map((p) => p[0].toFixed(2) + " " + p[1].toFixed(2)).join("L") + "Z";
 
 describe("CursorAvatar on the shared clock", () => {
@@ -77,9 +78,12 @@ describe("CursorAvatar on the shared clock", () => {
   });
 
   it("paints a still mascot with its state's face and then asks for nothing", () => {
-    render([{ state: "sleeping", animated: false, size: 24 }]);
+    render([{ state: "sleeping", animated: false, size: 24 }, { state: "sleeping", animated: false, size: 24, color: "chrome" }]);
     run(100);
-    expect(eyePaths()[0]).toBe(toPath(EXPRESSIONS[POOLS.sleeping[0]][0]));
+    const [carved, chrome] = host.querySelectorAll("svg");
+    const sleepy = carvedFace(carvedEyesFor("cursor"), moodPose("sleeping")).eyes[0];
+    expect(carved.querySelector("g[clip-path] rect")!.getAttribute("height")).toBe(String(sleepy.height));
+    expect(chrome.querySelector("g[clip-path] path")!.getAttribute("d")).toBe(toPath(EXPRESSIONS[POOLS.sleeping[0]][0]));
     frameRequests = 0;
     run(2000);
     expect(frameRequests).toBe(0);
@@ -97,9 +101,12 @@ describe("CursorAvatar on the shared clock", () => {
     expect(mascotClock().pending()).toBe(0);
   });
 
-  it("lets a small idle mascot settle to no frames, and wakes it for a blink", () => {
+  it.each([
+    { face: "traced", color: "chrome", state: "idle" },
+    { face: "carved", color: "green", state: "powering-down" },
+  ] as const)("lets a small $face mascot that holds its gaze settle to no frames, and wakes it for a blink", ({ color, state }) => {
     const ref = createRef<MausAvatarHandle>();
-    render([{ state: "idle", size: 24, ref }]);
+    render([{ state, color, size: 24, ref }]);
     run(3000);
     expect(mascotClock().pending()).toBe(0);
     frameRequests = 0;
@@ -147,6 +154,21 @@ describe("CursorAvatar on the shared clock", () => {
     run(2000);
     expect(frameRequests).toBe(0);
     expect(mascotClock().pending()).toBe(0);
+  });
+
+  it("lets a glancing carved mascot rest between glances", () => {
+    render([{ state: "idle", size: 24 }]);
+    run(200);
+    const eye = () => host.querySelector("g[clip-path] rect")!.getAttribute("x");
+    const seen = new Set<string | null>();
+    let rested = 0;
+    for (let i = 0; i < 100; i++) {
+      run(100);
+      seen.add(eye());
+      if (mascotClock().pending() === 0) rested++;
+    }
+    expect(seen.size).toBeGreaterThan(1);
+    expect(rested).toBeGreaterThan(50);
   });
 
   it("calms an animating mascot when reduced motion is switched on", () => {

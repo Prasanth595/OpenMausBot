@@ -2,7 +2,8 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import { CarvedAvatar, REST_POSE, carvedFills, carvedGeometry } from "./CarvedAvatar";
+import { CarvedAvatar, carvedFills, carvedGeometry } from "./CarvedAvatar";
+import { REST_POSE } from "./carved-face";
 import { MausAvatar } from "./Avatar";
 import { HALLOWEEN_BODIES, HALLOWEEN_BODY_IDS } from "../../shared/halloween-bodies";
 import { MAUS_COLORS } from "@/lib/mascot";

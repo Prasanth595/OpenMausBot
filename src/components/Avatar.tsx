@@ -11,11 +11,13 @@ import {
 import { cn } from "@/lib/cn";
 import { CHROME_EYES, CHROME_GRADIENT, MAUS_COLORS, type MausColor, type MausMotion, type MausState } from "@/lib/mascot";
 import { CursorAvatar, type CursorAvatarHandle } from "./CursorAvatar";
+import { carvedEyesFor } from "./cursor-carved-face";
 import { avatarCropRadius, botAvatarProfile, clampAvatarFocus, clampAvatarZoom, type BotAvatarCrop } from "../../shared/bot-avatar";
 import { MASCOT_BODIES, botMascotBody } from "../../shared/mascot-bodies";
 import { isHalloweenBody, type BotBodyId } from "../../shared/bot-body";
 import { useHalloweenDressed, wornBody } from "@/lib/halloween-dress";
 import { CarvedAvatar } from "./CarvedAvatar";
+import { CARVED_INK } from "./carved-face";
 import { steelBodyImage } from "@/lib/steel-body";
 
 export const EYE_SCALE = 1.12;
@@ -187,11 +189,13 @@ function GradientAvatarComponent(
         ref={inner}
         state={motionState ?? state}
         expression={expression}
+        face={chrome ? "traced" : "carved"}
+        carvedEyes={carvedEyesFor(silhouette.id)}
         size={size}
         silhouette={silhouette}
         gradient={gradient ?? gradientFor(color)}
         picture={chrome ? steelBodyImage(silhouette.id, size, globalThis.devicePixelRatio ?? 1) : null}
-        eyeColor={chrome ? CHROME_EYES : undefined}
+        eyeColor={chrome ? CHROME_EYES : CARVED_INK}
         title={label ?? null}
         lookAround={lookAround ?? (forward ? 0 : 1)}
         gaze={{ x: (gaze?.x ?? 0) + pointer.x, y: (gaze?.y ?? 0) + pointer.y }}
