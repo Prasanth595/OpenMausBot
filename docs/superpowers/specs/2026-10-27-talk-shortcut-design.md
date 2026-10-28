@@ -73,7 +73,10 @@ frameless, transparent, `focusable:false`, `skipTaskbar`, always on top at
 `listening (live words) → sending → thinking → reply (first ~400 chars, plain
 text) → done` or `needs-you` (an approval or question card) or `error`.
 
-The box hides 12 s after the reply unless the pointer is over it. Clicking it
+The box takes the light or dark of the app's skin as last painted (Settings →
+Appearance → Theme), macOS's appearance only until a page has painted one. It
+stays on the display it opened on. The box hides 12 s after the reply unless the
+pointer is over it. Clicking it
 opens `openmausbot://thread/<threadId>?bot=<botId>` and shows the main window.
 Places that treat every window as the main one (`activate`, single-instance,
 `activateExistingWindow`, window-all-closed, the capabilities broadcast) skip
@@ -82,7 +85,10 @@ the panel.
 ### Sending (Electron main)
 
 Asks always go to the MausBot on this Mac's own server, even when the window is
-showing a Cloud home or Team Cloud (my call for v1).
+showing a Team Cloud (my call for v1). Once this Mac's bots moved to My Cloud
+(home is My Cloud, or this Mac's copy is frozen) the shortcut is unavailable and
+its key free, until home is this Mac again; a frozen server's 409 `moved` says
+"MausBot lives on My Cloud now — talk to it there".
 
 `GET /api/bots?messages=0` → MausBot (`defaultBot` without `person`, else the
 Chief of Staff). `POST /api/bots/:id/messages {text, sendId}` with the desktop
@@ -91,7 +97,11 @@ owner header (`localServerRequest`). Follow the reply on `GET
 final bot message wins, `turn.completed` ends it, a request card switches to
 "needs you". No reply in 120 s shows "Still working · Open chat". An empty
 transcript closes the box silently. If the local server is not running, the box
-says "Open MausBot to talk".
+says "Open MausBot to talk"; while it is still starting, "MausBot is still
+starting. Try again in a moment."; with no MausBot, "Set up MausBot first, then
+try again." Speech problems use the composer's words: only a refused permission
+asks for access, a microphone or recognizer failure says "Talking couldn't
+start. Try again."
 
 ### Settings
 
@@ -99,7 +109,8 @@ says "Open MausBot to talk".
 `talkKey: "ctrl-opt-space" | "ctrl-shift-space" | "opt-shift-space"` and the
 Quick asks chat id. Settings → General gets a switch: "Talk to MausBot from any
 app · hold ⌃⌥Space, speak, let go" with the key picker under it. Hidden where
-Apple speech is unavailable. Not in `REMOTE_SAFE`.
+Apple speech is unavailable, on a remote client and while home is My Cloud. Not
+in `REMOTE_SAFE`.
 
 ## Testing
 

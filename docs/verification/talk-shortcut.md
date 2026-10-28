@@ -10,23 +10,43 @@ the control surface cannot drive them, so this is not in the map in
 ## Floor: automated checks
 
 ```sh
-node --test electron/talk-*.node-test.mjs electron/desktop-prefs.node-test.mjs electron/preload.node-test.mjs electron/speech-helper-release.node-test.mjs
-pnpm exec vitest run electron/speech.test.mjs server/task-select.test.ts server/talk-server.e2e.test.ts src/lib/call-presence.test.ts src/components/TalkShortcutRow.test.ts --maxWorkers=1
+node --test electron/talk-*.node-test.mjs electron/home-window.node-test.mjs electron/desktop-prefs.node-test.mjs electron/preload.node-test.mjs electron/speech-helper-release.node-test.mjs
+pnpm exec vitest run electron/speech.test.mjs electron/skin-overlay.test.mjs server/task-select.test.ts server/talk-server.e2e.test.ts src/lib/call-presence.test.ts src/components/TalkShortcutRow.test.ts --maxWorkers=1
 pnpm typecheck && pnpm lint && pnpm i18n:check
 ```
 
-They prove key parsing and registration, the press/release state machine with
-injected clocks and speech, the box's window flags and states, the local-server
-ask (thread, owner header, send id, SSE follow, needs-you, timeout), preference
-storage, the Settings row, scoped speech stop and the call-presence signal.
+They prove key parsing and registration, the key let go while home is My Cloud
+and taken back when home is this computer again, the press/release state machine
+with injected clocks and speech, the box's window flags, states, skin theme and
+pinned display, the local-server ask (thread, owner header, send id, SSE follow,
+needs-you, timeout, a 409 `moved`, a server still starting), preference storage,
+the Settings row, scoped speech stop, the call-presence signal and the quiet
+update waiting for a talk ask.
 They do not prove the real hotkey, the microphone, that the box never takes
 focus, that it shows over full-screen apps and other Spaces, or the release of
 ⌃⌥ after speech (no unit test covers that release path).
 
-`docs/verification/evidence/talk-shortcut/` holds the box page rendered in a
-headless Chrome for every state in light and dark (`light-*.png`, `dark-*.png`).
-Regenerate them by calling `talkPanelHtml` from `electron/talk-panel.mjs` and
-`render({state, text})` for each state.
+`docs/verification/evidence/talk-shortcut/` holds the box page rendered in
+headless Chrome for every state in the app's light and dark skins
+(`light-*.png`, `dark-*.png`). Regenerate them with:
+
+```sh
+node scripts/talk-box-evidence.mjs   # Chrome path as an argument or CHROME= when not in /Applications
+```
+
+It renders at the box's own size: a 400 px wide viewport as tall as the card
+(56 to 240 px, the height `render()` returns, clamped as `talkPanelBounds`
+does) at 2x, with the 56 px mascot, reduced motion (a still listening ring) and
+a grey desktop behind the transparent page. Each skin is rendered with macOS's
+appearance emulated the other way round, so a light card on a dark macOS shows
+the box following the app's skin (`render({state, text, theme})`), not the
+media query. `reply-long` is a 400-character reply cut with an ellipsis;
+`reply-wide` is a reply of wide characters cut at ten lines, the tallest box.
+
+Rendering by hand instead: pass `theme`, or the page falls back to the media
+query, and Chrome's `--blink-settings=preferredColorScheme=0` is dark and `=1`
+light (the reverse of what it reads like); a `--window-size` wider than 400 px
+or taller than the card shows a box the app never draws.
 
 ## Setup
 
@@ -75,10 +95,20 @@ Regenerate them by calling `talkPanelHtml` from `electron/talk-panel.mjs` and
 13. **Dev loop.** `pnpm dev:server`, `pnpm dev`, `pnpm dev:desktop`: an ask
     reaches the dev server through Vite's `/api` proxy, both the POST and the
     SSE stream (the reply arrives live, not only at the end).
-14. **Light and dark.** Switch macOS appearance: the box's colours, the warning
-    and error text and the card height follow (compare with the evidence PNGs);
-    long replies stop at 400 characters with an ellipsis and the card grows to
-    at most 240 px.
-15. **My Cloud home.** With the window on My Cloud's page, the ask still goes to
-    this computer's server; clicking the box only shows the window (it cannot
-    open the Quick asks chat there). This is a known limitation.
+14. **Light and dark.** Settings → Appearance → Theme: Light, then Dark, then
+    System while switching macOS appearance. The box's colours, the warning and
+    error text and the card height follow the app's theme, not macOS's (Dark
+    with macOS light still gives a dark box; compare with the evidence PNGs).
+    Long replies stop at 400 characters with an ellipsis, and the card grows to
+    at most 240 px with its bottom edge showing (a Japanese reply is cut at ten
+    lines).
+15. **My Cloud home.** After moving this computer's bots to My Cloud (window on
+    My Cloud's page): ⌃⌥Space does nothing in MausBot and another app can take
+    it (`talk-shortcut:state` says unavailable, so no Settings row). Come home
+    to this computer again: the key works without a restart. A box still up
+    when the move froze this computer says "MausBot lives on My Cloud now —
+    talk to it there". A Quick asks chat link sent while My Cloud's page is
+    shown does reach it as `chat:open`, and My Cloud has no such chat; with the
+    key off there, no box makes one.
+16. **Server starting.** Quit, relaunch and press at once, before the window
+    loads: "MausBot is still starting. Try again in a moment."
