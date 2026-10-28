@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { copyFileSync, linkSync, mkdirSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative } from "node:path";
 
@@ -39,8 +39,8 @@ export function uploadableFiles(files: unknown, roots: readonly string[]): { fil
 }
 
 /** Chrome names an uploaded file after its file on disk and reads it only when the form is sent, so an attachment stored
- * under a random id gets a link with the person's own name that outlives the call. `everyFile`: a boxed Chrome sees only
- * `folder`, so each file gets a link there. */
+ * under a random id gets a copy with the person's own name that outlives the call. `everyFile`: stage every file in
+ * `folder`, outside the bot's writable workspace. */
 export function namedUploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, folder: string, now = Date.now(), { everyFile = false } = {}): string[] {
   sweepNamedCopies(folder, now);
   return files.map(({ file, name: given }) => {
@@ -49,9 +49,34 @@ export function namedUploadPaths(files: ReadonlyArray<{ file: string; name: stri
     const dir = join(folder, randomUUID());
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     const named = join(dir, name);
-    try { linkSync(file, named); } catch { copyFileSync(file, named); }
+    try { copyUpload(file, named); } catch (error) {
+      rmSync(dir, { recursive: true, force: true });
+      throw error;
+    }
     return named;
   });
+}
+
+function copyUpload(source: string, destination: string): void {
+  if (process.platform === "win32" && !lstatSync(source).isFile()) throw new Error(`${source} is not a file.`);
+  const input = openSync(source, constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK));
+  let output: number | undefined;
+  try {
+    const file = fstatSync(input);
+    if (!file.isFile()) throw new Error(`${source} is not a file.`);
+    output = openSync(destination, "wx", 0o600);
+    const chunk = Buffer.allocUnsafe(1024 * 1024);
+    for (let remaining = file.size; remaining > 0;) {
+      const count = readSync(input, chunk, 0, Math.min(chunk.length, remaining), null);
+      if (!count) throw new Error(`${source} changed while staging the upload.`);
+      let offset = 0;
+      while (offset < count) offset += writeSync(output, chunk, offset, count - offset);
+      remaining -= count;
+    }
+  } finally {
+    closeSync(input);
+    if (output !== undefined) closeSync(output);
+  }
 }
 
 /** Files a person picked on their own device for a page's file picker, kept under their own names for a day. */

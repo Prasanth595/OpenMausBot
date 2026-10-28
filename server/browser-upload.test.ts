@@ -70,10 +70,30 @@ describe("the name a page sees", () => {
     expect(existsSync(old!)).toBe(false);
     expect(existsSync(fresh!)).toBe(true);
   });
+
+  it.each([0, 3, 1024 * 1024 + 7])("keeps %i copied bytes independent of later writes to the source", (size) => {
+    const { base, workspace } = folders();
+    const file = join(workspace, "report.csv");
+    writeFileSync(file, Buffer.alloc(size, 0x61));
+    const [staged] = namedUploadPaths([{ file, name: "Report.csv" }], join(base, "uploads"));
+    writeFileSync(file, "changed");
+    expect(readFileSync(staged!).equals(Buffer.alloc(size, 0x61))).toBe(true);
+  });
+
+  it.skipIf(process.platform === "win32")("refuses a file replaced by a symlink after the allowlist check", () => {
+    const { base, workspace, outside, roots } = folders();
+    const file = join(workspace, "report.csv");
+    const checked = uploadableFiles([file], roots);
+    expect(checked).toEqual({ files: [file] });
+    if ("error" in checked) throw new Error(checked.error);
+    rmSync(file);
+    symlinkSync(join(outside, "secret.txt"), file);
+    expect(() => namedUploadPaths(checked.files.map((file) => ({ file, name: null })), join(base, "uploads"), Date.now(), { everyFile: true })).toThrow();
+  });
 });
 
 describe("the files a boxed browser is given", () => {
-  it("links every file into the one folder the box shows Chrome, under the person's name or its own", () => {
+  it("copies every file into the one folder the box shows Chrome, under the person's name or its own", () => {
     const root = mkdtempSync(join(tmpdir(), "omb-boxed-upload-"));
     const source = join(root, "work", "report.txt"), stored = join(root, "attachments", "a1b2.pdf");
     mkdirSync(dirname(source), { recursive: true });
