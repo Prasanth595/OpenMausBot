@@ -157,8 +157,6 @@ export interface CloudAccountBridge {
   cancelPlan?(survey: CloudCancelSurvey | null): Promise<CloudRenewalResult>;
   keepPlan?(): Promise<CloudRenewalResult>;
   onState(callback: (state: CloudAccountState) => void): () => void;
-  /** "Let my bots use this Mac" (docs/cloud-pro.md). */
-  lending?: import("./computer-sharing.mjs").CloudLendingBridge;
   files?: import("./cloud-sync.mjs").CloudFilesBridge;
 }
 /** On the person's own Cloud, open in this app's window: the plan, read
