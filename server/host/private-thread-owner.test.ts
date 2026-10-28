@@ -28,10 +28,10 @@ function fixture() {
   mkdirSync(ownersDir);
   const file = join(ownersDir, "thread-starters.json");
   new ThreadStarters(file).set(origin, key(ADA.email));
-  const open = () => {
+  const open = (engineHomes?: Parameters<typeof createCloudTeamHost>[0]["engineHomes"]) => {
     const starters = new ThreadStarters(file);
     const current = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }));
-    const host = createCloudTeamHost({ team: { id: "acme", name: "Acme" }, dataDir: DATA_DIR, store: current, starters, markers: new Set() });
+    const host = createCloudTeamHost({ team: { id: "acme", name: "Acme" }, dataDir: DATA_DIR, store: current, starters, markers: new Set(), engineHomes });
     const notified: Notification[] = [];
     const sees = (email: string, threadId: string) => audienceIncludes(host.audienceOf(threadId), { person: key(email), admin: true, seesRoom: () => true });
     const team = createTeamMessages({
@@ -49,6 +49,39 @@ function fixture() {
 }
 
 describe("private message ownership", () => {
+  it.each(["homes", "items"])("isolates an untouched ownerless legacy inbox from %s before engine-home migration", (records) => {
+    const f = fixture();
+    const shared = f.store.createTask(f.botId, "Shared work", false)!.threadId;
+    expect(f.team.pass(f.botId, f.origin, "Bob", "Private launch date").status).toBe(200);
+    const target = f.store.tasks(f.botId).find((task) => task.title === "Inbox")!.threadId;
+    f.team.stop();
+    const botsFile = join(DATA_DIR, "bots.json");
+    const bots = JSON.parse(readFileSync(botsFile, "utf8")) as Array<{ tasks: Array<{ threadId: string; private?: true }> }>;
+    for (const bot of bots) for (const task of bot.tasks) if (task.threadId === target) delete task.private;
+    writeFileSync(botsFile, JSON.stringify(bots));
+    const owners = JSON.parse(readFileSync(f.file, "utf8"));
+    delete owners[target];
+    writeFileSync(f.file, JSON.stringify(owners));
+    const inboxFile = join(DATA_DIR, "person-inbox.json");
+    const inbox = JSON.parse(readFileSync(inboxFile, "utf8"));
+    if (records === "homes") inbox.items = [];
+    else inbox.homes = {};
+    writeFileSync(inboxFile, JSON.stringify(inbox));
+    let migratedAudience: string | undefined;
+    const restarted = f.open({ start: ({ audienceOf }) => { migratedAudience = audienceOf(target); } });
+    expect(migratedAudience).toBe(`member:unowned-${target}`);
+    expect(restarted.starters.get(target)).toBeUndefined();
+    expect(restarted.store.taskByThread(f.botId, target)?.private).toBe(true);
+    expect(restarted.host.audienceOf(f.main)).toBe("team");
+    expect(restarted.host.audienceOf(shared)).toBe("team");
+    expect(restarted.host.audienceOf(f.origin)).toBe(memberAudience(key(ADA.email)));
+    for (const person of [ADA, BOB, CARL]) expect(restarted.sees(person.email, target), person.email).toBe(false);
+    expect(restarted.store.messagesFor(target).map((message) => message.text)).toEqual(["Private launch date"]);
+    restarted.team.stop();
+    rmSync(inboxFile);
+    expect(f.open().host.audienceOf(target)).toBe(`member:unowned-${target}`);
+  });
+
   it.skipIf(process.platform === "win32" || process.getuid?.() === 0)("rolls back the provisional thread on EACCES, publishes nothing, and can retry", () => {
     const f = fixture();
     const before = f.store.tasks(f.botId).map((task) => task.threadId);

@@ -109,20 +109,26 @@ export interface PersonInboxDeps {
   now?: () => number;
 }
 
+export function loadPersonInboxState(dataDir: string): Pick<z.infer<typeof fileSchema>, "homes" | "items"> {
+  const file = join(dataDir, PERSON_INBOX_FILE);
+  try {
+    const parsed = fileSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
+    if (parsed.success) return parsed.data;
+    console.warn(`person inbox: ${file} is not an inbox file; starting fresh`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`person inbox: ${file} is unreadable; starting fresh`);
+  }
+  return { homes: {}, items: [] };
+}
+
 export function createPersonInbox(deps: PersonInboxDeps) {
   const { team, store } = deps;
   const now = deps.now ?? Date.now;
   const file = join(deps.dataDir, PERSON_INBOX_FILE);
-  let homes: Record<string, { botId: string; threadId: string }> = {};
-  let items: Item[] = [];
-  if (team) {
-    try {
-      const parsed = fileSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
-      if (parsed.success) ({ homes, items } = parsed.data);
-      else console.warn(`person inbox: ${file} is not an inbox file; starting fresh`);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`person inbox: ${file} is unreadable; starting fresh`);
-    }
+  let { homes, items } = team ? loadPersonInboxState(deps.dataDir) : { homes: {}, items: [] };
+  for (const at of [...Object.values(homes), ...items]) {
+    const task = store.taskByThread(at.botId, at.threadId);
+    if (task && !task.private) store.patchTask(at.botId, at.threadId, { private: true });
   }
   const save = () => {
     items = items.filter((item) => now() - item.at < KEEP_MS).slice(-MAX_ITEMS);

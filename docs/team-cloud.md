@@ -334,6 +334,7 @@ inbox is unread.
 Save the recipient's owner record before publishing into a new inbox.
 If that save fails, remove the provisional conversation and propagate the error without publishing content or a success notification.
 Inbox conversations also keep a saved `private` flag. A flagged conversation without an owner stays hidden from every person.
+At startup, classify saved inbox homes and item destinations as private before engine homes migrate. Save their private flags before processing messages.
 Do not reuse it for later deliveries. Refuse new owner records when the registry is full; never evict an existing owner.
 
 | What | Line | It answers back to |

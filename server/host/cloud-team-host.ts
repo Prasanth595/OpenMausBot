@@ -10,6 +10,7 @@ import { personKey } from "../person-key.ts";
 import { ensureWorkspace, loadMemory, workspaceDir } from "../workspace.ts";
 import type { EngineHomes } from "../engine-homes/engine-homes.ts";
 import { storeThreads, type StoreBotThreads } from "../engine-homes/migrate.ts";
+import { loadPersonInboxState } from "./person-inbox.ts";
 
 export interface CloudTeamHostDeps {
   team: CloudTeam | null;
@@ -40,9 +41,11 @@ type MemberSession = { id: string; email?: string };
 export function createCloudTeamHost(deps: CloudTeamHostDeps) {
   const team = deps.team;
   const people: PeopleAbout = createPeopleAbout(deps.dataDir);
+  const inbox = team ? loadPersonInboxState(deps.dataDir) : { homes: {}, items: [] };
+  const privateDeliveries = new Set([...Object.values(inbox.homes), ...inbox.items].map((at) => at.threadId));
   const audienceOf = (threadId: string): Audience => {
     const starter = deps.starters.get(threadId);
-    const privateThread = (!starter || deps.markers.has(starter)) && deps.store.bots?.some((bot) => bot.tasks?.some((task) => task.threadId === threadId && task.private));
+    const privateThread = (!starter || deps.markers.has(starter)) && (privateDeliveries.has(threadId) || deps.store.bots?.some((bot) => bot.tasks?.some((task) => task.threadId === threadId && task.private)));
     return threadAudienceFrom({ room: deps.store.groupByThread(threadId)?.id, starter, markers: deps.markers, privateThread: privateThread ? threadId : undefined });
   };
   if (team) deps.engineHomes?.start({ dataDir: deps.dataDir, audienceOf, threads: () => storeThreads(deps.store.bots ?? []) });
