@@ -100,7 +100,7 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
     const built = buildRecipe({ request: request.text ?? "", journal: taken, id: randomUUID(), now: now() });
     if (!built.ok) return;
     recipes.save(botId, built.recipe);
-    deps.patchMessage(threadId, reply.id, { savedSteps: { recipeId: built.recipe.id, learned: true } });
+    if (dispatch.wouldReplay(threadId, built.recipe)) deps.patchMessage(threadId, reply.id, { savedSteps: { recipeId: built.recipe.id, learned: true } });
   };
 
   return {

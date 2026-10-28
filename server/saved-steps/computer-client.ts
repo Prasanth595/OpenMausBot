@@ -47,6 +47,8 @@ function unjournalled(env: Record<string, string>): Record<string, string> {
 }
 
 export async function openComputerCaller(computer: LocalComputerSpec, signal: AbortSignal): Promise<ComputerCaller & { close(): Promise<void> }> {
+  // Security invariant: a replay drives only the turn's gated proxy, so the control gate and the person's consent still apply.
+  if (!computer.env.OMB_CONTROL_URL || !computer.env.OMB_CONTROL_TOKEN) throw new Error("this computer is not behind its control gate");
   const client = new ChatMcpClient({ command: computer.command, args: computer.args, env: unjournalled(computer.env) }, true);
   try {
     await client.tools(signal);

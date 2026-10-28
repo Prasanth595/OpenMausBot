@@ -32,8 +32,10 @@ afterEach(async () => {
   for (const dir of dirs.splice(0)) rmSync(dir, { force: true, recursive: true });
 });
 
+const GATE = { OMB_CONTROL_URL: "http://127.0.0.1:1/api/internal/computer-control", OMB_CONTROL_TOKEN: "turn-token" };
+
 async function open(spec: Parameters<typeof openComputerCaller>[0]) {
-  const caller = await openComputerCaller(spec, signal);
+  const caller = await openComputerCaller({ ...spec, env: { ...GATE, ...spec.env } }, signal);
   closers.push(() => caller.close());
   return caller;
 }
@@ -71,7 +73,20 @@ describe("openComputerCaller", () => {
   });
 
   it("fails to open when the computer exits before the handshake", async () => {
-    await expect(openComputerCaller({ command: process.execPath, args: ["-e", "process.exit(3)"], env: {} }, signal)).rejects.toThrow(/MCP server/);
+    await expect(openComputerCaller({ command: process.execPath, args: ["-e", "process.exit(3)"], env: GATE }, signal)).rejects.toThrow(/MCP server/);
+  });
+
+  it.each([
+    ["no control gate at all", {}],
+    ["a gate address but no turn token", { OMB_CONTROL_URL: GATE.OMB_CONTROL_URL }],
+    ["a turn token but no gate address", { OMB_CONTROL_TOKEN: GATE.OMB_CONTROL_TOKEN }],
+  ])("never drives a computer spec with %s", async (_, env) => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-saved-steps-caller-"));
+    dirs.push(dir);
+    const file = join(dir, "started");
+    const spawn = `require("node:fs").writeFileSync(${JSON.stringify(file)}, "")`;
+    await expect(openComputerCaller({ command: process.execPath, args: ["-e", spawn], env }, signal)).rejects.toThrow("this computer is not behind its control gate");
+    expect(() => readFileSync(file)).toThrow();
   });
 });
 

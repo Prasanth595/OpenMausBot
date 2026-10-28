@@ -8,6 +8,7 @@ import type { Message } from "../store.ts";
 import { textEditJournal } from "../testing/saved-steps-fixtures.ts";
 import type { RecordedCall } from "./journal.ts";
 import { requestKey } from "./key.ts";
+import type { ReplayRequest } from "./dispatch.ts";
 import type { Recipe, RecipeStep } from "./rules.ts";
 import { createSavedSteps, savedStepsEnabled, type SavedSteps, type SavedStepsDeps, type SettledRequest } from "./saved-steps.ts";
 
@@ -91,14 +92,15 @@ describe("createSavedSteps", () => {
     steps.recipes.save("b1", RECIPE);
     const engine = { instanceId: "claude", driverKind: "claudeAgent", adapter: { provider: "claudeAgent" } } as unknown as ProviderInstance;
     const start = vi.fn(async (_input: SendTurnInput): Promise<TurnStartResult> => ({ turnId: "e1" }));
-    const computer = { command: process.execPath, args: ["--experimental-strip-types", FAKE], env: {}, scope: "local-computer" as const };
+    const computer = { command: process.execPath, args: ["--experimental-strip-types", FAKE], env: { OMB_CONTROL_URL: "http://127.0.0.1:1/control", OMB_CONTROL_TOKEN: "t" }, scope: "local-computer" as const };
 
     const { turnId } = await steps.dispatch.sendTurn(engine, { botId: "b1", message: { id: "m1", at: 1, role: "user", kind: "text", text: REQUEST }, turnText: REQUEST, placePicked: true },
       { threadId: "t1", botId: "b1", text: REQUEST, approvalMode: "full", integrations: { localComputer: computer } }, start);
 
     expect(steps.journal.take("t1", new Set(["g1"]))).toEqual({ calls: [], complete: true, tainted: true });
     await vi.waitFor(() => expect(start).toHaveBeenCalledTimes(1), { timeout: 10_000 });
-    expect(start.mock.calls[0]![0].text).toContain("failed at step 1 of 2 (click on \"Document\" in TextEdit): TextEdit is not running.");
+    expect(start.mock.calls[0]![0].text).toContain('failed at step 1 of 2 (click).');
+    expect(start.mock.calls[0]![0].text).toContain('{"target":"\\"Document\\" in TextEdit","error":"TextEdit is not running"}');
     expect(steps.recipes.find("b1", RECIPE.key)).toBeUndefined();
     expect(events[0]).toMatchObject({ type: "turn.started", turnId });
     expect(slots.get("t1")).toBe(engine);
@@ -155,7 +157,17 @@ describe("SavedSteps.requestSettled", () => {
     vi.restoreAllMocks();
   });
 
-  it("saves a settled host run and marks the reply", () => {
+  const engine = { instanceId: "claude", driverKind: "claudeAgent", adapter: { provider: "claudeAgent" } } as unknown as ProviderInstance;
+  const sentThrough = async (input: Partial<SendTurnInput> = {}, request: Partial<ReplayRequest> = {}) => {
+    const start = vi.fn(async (_input: SendTurnInput): Promise<TurnStartResult> => ({ turnId: "turn-1" }));
+    const computer = { command: process.execPath, args: [FAKE], env: {}, scope: "local-computer" as const };
+    await steps.dispatch.sendTurn(engine, { botId: "b1", message: LINE, turnText: REQUEST, placePicked: true, ...request },
+      { threadId: "t1", botId: "b1", text: REQUEST, approvalMode: "full", integrations: { localComputer: computer }, ...input }, start);
+    expect(start).toHaveBeenCalledTimes(1);
+  };
+
+  it("saves a settled host run and marks the reply", async () => {
+    await sentThrough();
     record(textEditJournal().calls);
     steps.requestSettled(settled());
     const recipe = steps.recipes.find("b1", "open textedit and type hello world")!;
@@ -164,6 +176,18 @@ describe("SavedSteps.requestSettled", () => {
     expect(readFileSync(join(folder, "b1", "saved-steps.json"), "utf8")).not.toContain("Nothing else changed");
     expect(recipe.steps.map((step) => step.tool)).toEqual(["click", "set_value"]);
     expect(patches).toEqual([["t1", "reply-1", { savedSteps: { recipeId: recipe.id, learned: true } }]]);
+  });
+
+  it.each<[string, Partial<SendTurnInput>, Partial<ReplayRequest>]>([
+    ["the bot asks before acting", { approvalMode: "ask" }, {}],
+    ["the person did not pick this computer", {}, { placePicked: false }],
+    ["a step's tool is not selected for the bot", { toolScope: { deny: ["mcp:computer:set_value"] } }, {}],
+  ])("saves the steps without promising no AI next time when %s", async (_, input, request) => {
+    await sentThrough(input, request);
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
+    expect(saved()?.steps).toHaveLength(2);
+    expect(patches).toEqual([]);
   });
 
   it("marks a replayed reply, touches its recipe and clears the quick model label", () => {

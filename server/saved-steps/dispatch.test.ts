@@ -6,6 +6,7 @@ import { newId, type ProviderInstance, type RuntimeEvent, type RuntimeEventListe
 import { CONTROL_BUSY } from "../control-client.ts";
 import { Handoffs, unseenMessages, type HandedState, type Handoff } from "../delta-context.ts";
 import { EventBus } from "../harness/bus.ts";
+import { LimitResetClock } from "../limit-resets.ts";
 import { QuickModelFallback } from "../quick-model-fallback.ts";
 import type { Message } from "../store.ts";
 import { removeTempDir } from "../testing/cleanup.ts";
@@ -585,6 +586,76 @@ describe("SavedStepsDispatch.sendTurn", () => {
 function engines() {
   return slots.get("t1");
 }
+
+describe("SavedStepsDispatch.wouldReplay", () => {
+  const RECIPE_TOOLS = RECIPE;
+  const sendThrough = async (request: ReplayRequest | null, input: SendTurnInput) => {
+    recipes.find.mockReturnValue(undefined);
+    await dispatch.sendTurn(engine, request, input, start);
+  };
+
+  it("holds after a turn that met every replay condition", async () => {
+    await sendThrough(REQ, INPUT);
+    expect(start).toHaveBeenCalledWith(INPUT);
+    expect(dispatch.wouldReplay("t1", RECIPE_TOOLS)).toBe(true);
+    expect(dispatch.wouldReplay("t2", RECIPE_TOOLS)).toBe(false);
+  });
+
+  it.each<[string, ReplayRequest | null, SendTurnInput]>([
+    ["no request", null, INPUT],
+    ["Ask", REQ, { ...INPUT, approvalMode: "ask" }],
+    ["an Auto place", { ...REQ, placePicked: false }, INPUT],
+    ["no host computer", REQ, { ...INPUT, integrations: {} }],
+    ["a step's tool not selected", REQ, { ...INPUT, toolScope: { deny: ["mcp:computer:set_value"] } }],
+    ["two lines sent as one turn", { ...REQ, turnText: `first\n\n${REQUEST}` }, INPUT],
+  ])("fails after a turn with %s", async (_, request, input) => {
+    await sendThrough(REQ, INPUT);
+    await sendThrough(request, input);
+    expect(dispatch.wouldReplay("t1", RECIPE_TOOLS)).toBe(false);
+  });
+
+  it("fails while the setting is off", async () => {
+    dispatch = new SavedStepsDispatch({ ...deps, enabled: () => false });
+    await sendThrough(REQ, INPUT);
+    expect(dispatch.wouldReplay("t1", RECIPE_TOOLS)).toBe(false);
+  });
+});
+
+describe("SavedStepsDispatch.answering", () => {
+  it("names a replay's own events, its end included, and not the AI's after a fallback", async () => {
+    const seen: [string, boolean][] = [];
+    dispatch = new SavedStepsDispatch({ ...deps, publish: (event) => { deps.publish(event); seen.push([event.type, dispatch.answering(event)]); } });
+    await dispatch.sendTurn(engine, REQ, INPUT, start);
+    await settled();
+    expect(seen.length).toBeGreaterThan(2);
+    expect(seen.filter(([, answering]) => !answering)).toEqual([]);
+    expect(seen.at(-1)).toEqual(["turn.completed", true]);
+    expect(dispatch.answering(events.at(-1)!)).toBe(false);
+
+    failAt = "set_value";
+    seen.length = 0;
+    const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
+    await vi.waitFor(() => expect(start).toHaveBeenCalled());
+    expect(dispatch.take(ev("turn.completed", "e1"))).toBe(true);
+    expect(seen.at(-1)).toEqual(["turn.completed", false]);
+    expect(dispatch.answering({ ...ev("item.completed", turnId), threadId: "t2" })).toBe(false);
+  });
+
+  it("keeps an engine's usage-limit hold through a replay, and lets an AI turn end it", async () => {
+    const NOW = Date.UTC(2026, 9, 28, 12);
+    const clock = new LimitResetClock({ accounts: () => [], loadUsage: async () => ({ fetchedAt: new Date(NOW).toISOString(), providers: [] }), now: () => NOW });
+    clock.noteRefusal("claude", NOW + 3_600_000);
+    const note = (event: RuntimeEvent) => clock.noteRuntimeEvent(dispatch.answering(event) ? undefined : "claude", event);
+    dispatch = new SavedStepsDispatch({ ...deps, publish: (event) => { deps.publish(event); note(event); } });
+    await dispatch.sendTurn(engine, REQ, INPUT, start);
+    await settled();
+    expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true });
+    expect(clock.blockedUntil("claude")).toBe(NOW + 3_600_000);
+    note(ev("turn.started", "ai-turn"));
+    note(ev("turn.completed", "ai-turn"));
+    expect(clock.blockedUntil("claude")).toBeNull();
+  });
+});
 
 describe("SavedStepsDispatch with the engine's session record", () => {
   let order: string[];

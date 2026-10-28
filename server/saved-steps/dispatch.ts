@@ -64,6 +64,7 @@ export class SavedStepsDispatch {
   private readonly runs = new Map<string, Run>();
   private readonly answered = new Map<string, { turnId: string; recipeId: string }>();
   private readonly unmarked = new Set<string>();
+  private readonly replayable = new Map<string, { toolScope: unknown }>();
 
   constructor(deps: DispatchDeps) {
     this.deps = deps;
@@ -71,6 +72,11 @@ export class SavedStepsDispatch {
 
   sendTurn(engine: ProviderInstance, request: ReplayRequest | null, input: SendTurnInput, start: Start): Promise<TurnStartResult> {
     this.runs.delete(input.threadId);
+    this.replayable.delete(input.threadId);
+    if (request && this.replayHolds(request, input)) {
+      this.replayable.set(input.threadId, { toolScope: input.toolScope });
+      while (this.replayable.size > REMEMBERED_REPLIES) this.replayable.delete(this.replayable.keys().next().value!);
+    }
     if (request && request.turnText !== request.message.text) {
       if (!this.deps.taint(input.threadId)) this.unmarked.add(input.threadId);
       return start(input);
@@ -132,15 +138,31 @@ export class SavedStepsDispatch {
     return this.unmarked.delete(threadId);
   }
 
+  /** Whether the thread's latest turn met every condition for replaying this recipe, so "next time no AI" would hold. */
+  wouldReplay(threadId: string, recipe: Recipe): boolean {
+    const turn = this.replayable.get(threadId);
+    return turn !== undefined && toolsAllowed(recipe, turn.toolScope);
+  }
+
+  /** True for the events of a replay still answering without the AI, its turn.completed included. */
+  answering(event: RuntimeEvent): boolean {
+    const run = this.runs.get(event.threadId);
+    return run !== undefined && run.phase === "replay" && event.turnId === run.turnId;
+  }
+
   /** The recipe that answered this turn with no AI. */
   replayed(threadId: string, turnId: string): string | undefined {
     const answer = this.answered.get(threadId);
     return answer?.turnId === turnId ? answer.recipeId : undefined;
   }
 
+  private replayHolds(request: ReplayRequest, input: SendTurnInput): boolean {
+    return this.deps.enabled() && input.approvalMode === "full" && input.integrations?.localComputer?.scope === "local-computer"
+      && request.placePicked && personTextRequest(request.message) && request.turnText === request.message.text;
+  }
+
   private recipeFor(request: ReplayRequest, input: SendTurnInput): Recipe | undefined {
-    if (!this.deps.enabled() || input.approvalMode !== "full" || input.integrations?.localComputer?.scope !== "local-computer") return undefined;
-    if (!request.placePicked || !personTextRequest(request.message) || request.turnText !== request.message.text) return undefined;
+    if (!this.replayHolds(request, input)) return undefined;
     const text = request.turnText;
     const recipe = this.deps.recipes.find(request.botId, requestKey(text));
     return recipe && recipeFitsRequest(recipe, text) && toolsAllowed(recipe, input.toolScope) ? recipe : undefined;
@@ -219,22 +241,25 @@ export class SavedStepsDispatch {
   }
 
   private end(run: Run, outcome: Exclude<RunOutcome, Failed>): void {
-    this.forgetRun(run);
-    if (run.phase === "replay") this.deps.contextChanged(run.botId, run.threadId);
-    if (outcome.kind === "done") {
-      this.answered.delete(run.threadId);
-      this.answered.set(run.threadId, { turnId: run.turnId, recipeId: run.recipe.id });
-      while (this.answered.size > REMEMBERED_REPLIES) this.answered.delete(this.answered.keys().next().value!);
-      this.reply(run, replayedReply(run.recipe));
-      this.emit(run, { type: "turn.completed", ok: true, stopReason: "end_turn" });
-    } else if (outcome.kind === "declined") {
-      this.reply(run, declinedReply(outcome));
-      this.emit(run, { type: "turn.completed", ok: true, stopReason: "end_turn", denials: [`mcp__computer__${outcome.tool}`] });
-    } else if (outcome.kind === "stopped") {
-      this.emit(run, { type: "turn.completed", ok: false, stopReason: "interrupted" });
-    } else {
-      this.emit(run, { type: "runtime.error", message: outcome.message });
-      this.emit(run, { type: "turn.completed", ok: false, stopReason: outcome.message });
+    try {
+      if (run.phase === "replay") this.deps.contextChanged(run.botId, run.threadId);
+      if (outcome.kind === "done") {
+        this.answered.delete(run.threadId);
+        this.answered.set(run.threadId, { turnId: run.turnId, recipeId: run.recipe.id });
+        while (this.answered.size > REMEMBERED_REPLIES) this.answered.delete(this.answered.keys().next().value!);
+        this.reply(run, replayedReply(run.recipe));
+        this.emit(run, { type: "turn.completed", ok: true, stopReason: "end_turn" });
+      } else if (outcome.kind === "declined") {
+        this.reply(run, declinedReply(outcome));
+        this.emit(run, { type: "turn.completed", ok: true, stopReason: "end_turn", denials: [`mcp__computer__${outcome.tool}`] });
+      } else if (outcome.kind === "stopped") {
+        this.emit(run, { type: "turn.completed", ok: false, stopReason: "interrupted" });
+      } else {
+        this.emit(run, { type: "runtime.error", message: outcome.message });
+        this.emit(run, { type: "turn.completed", ok: false, stopReason: outcome.message });
+      }
+    } finally {
+      this.forgetRun(run);
     }
   }
 
