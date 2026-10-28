@@ -245,12 +245,11 @@ describe("renaming a new bot before its card is answered", () => {
   const replying = (choices: readonly string[]): Reply => async () => JSON.stringify(choices);
   const later = () => {
     let answer!: (text: string) => void;
-    let fail!: (error: Error) => void;
-    const reply = new Promise<string>((resolve, reject) => { answer = resolve; fail = reject; });
-    return { reply: () => reply, answer, fail };
+    const reply = new Promise<string>((resolve) => { answer = resolve; });
+    return { reply: () => reply, answer };
   };
 
-  function setup(options: { name?: string; replies?: Record<string, Reply>; writer?: () => boolean; withinBudget?: () => boolean; canSetUp?: () => boolean } = {}) {
+  function setup(options: { name?: string; replies?: Record<string, Reply>; withinBudget?: () => boolean; canSetUp?: () => boolean } = {}) {
     const store = new Store(() => ({ instanceId: "claude", model: "claude-sonnet-5" }), undefined, undefined, "en");
     const bot = store.createBot({ name: options.name ?? "Pepper" });
     const replies: Record<string, Reply> = { Recruiter: replying(RECRUITER), Gardener: replying(GARDENER), "Party Planner": replying(PLANNER), ...options.replies };
@@ -265,7 +264,7 @@ describe("renaming a new bot before its card is answered", () => {
     store.patchMessage = (threadId, id, patch) => { patches.push(patch); return patchMessage(threadId, id, patch); };
     const suggestions = createSetupSuggestions({
       store, enabled: () => true, canSetUp: () => options.canSetUp?.() ?? true, withinBudget: () => options.withinBudget?.() ?? true,
-      writer: () => (options.writer?.() === false ? null : writer), apps: () => null,
+      writer: () => writer, apps: () => null,
       facts: (of) => suggestionBasis(of, { bots: store.bots, shared: false, languageCode: "en", canBrowse: true }),
     });
     suggestions.personalise(bot.id);
