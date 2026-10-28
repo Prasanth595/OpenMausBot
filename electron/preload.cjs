@@ -51,9 +51,15 @@ function leaveRailRoom() {
   if (!railRoom.isConnected) (document.head ?? document.documentElement).append(railRoom);
 }
 ipcRenderer.on("rail:beside", (_event, width) => { railBeside = Math.max(0, Math.min(200, Number(width) || 0)); leaveRailRoom(); });
+// The rail's own page keeps its size whatever the zoom of this app's page: Chromium gives every page of a host the same
+// zoom, the rail's included, so the rail takes it back out and stays as wide as its strip.
+function railKeepsItsSize() {
+  if (!isLocalPage || location.pathname !== "/rail" || typeof document === "undefined" || !document.documentElement) return;
+  const zoom = Number(webFrame?.getZoomFactor?.()) || 1;
+  document.documentElement.style.zoom = zoom === 1 ? "" : String(Math.round((1 / zoom) * 10000) / 10000);
+}
 if (typeof window !== "undefined") {
-  window.addEventListener("resize", leaveRailRoom);
-  window.addEventListener("DOMContentLoaded", leaveRailRoom);
+  for (const type of ["resize", "DOMContentLoaded"]) window.addEventListener(type, () => { leaveRailRoom(); railKeepsItsSize(); });
 }
 const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudAdd", "cloudLending", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
@@ -133,6 +139,9 @@ const bridge = {
     look: () => ipcRenderer.invoke("workspaces:look"),
     color: (swatch) => isLocalPage || navigator.userActivation?.isActive === true
       ? ipcRenderer.invoke("workspaces:color", swatch === null ? null : String(swatch)) : Promise.reject(new Error("Choose a color.")),
+    // The colour of a place the window's rail lists, from a click on the rail's own page (main refuses any other page).
+    recolor: (id, swatch) => isLocalPage || navigator.userActivation?.isActive === true
+      ? ipcRenderer.invoke("workspaces:recolor", String(id), swatch === null ? null : String(swatch)) : Promise.reject(new Error("Choose a color.")),
     onChanged: (cb) => {
       const handler = () => cb();
       ipcRenderer.on("workspaces:changed", handler);

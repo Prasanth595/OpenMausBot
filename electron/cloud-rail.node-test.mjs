@@ -27,14 +27,14 @@ const session = (over = {}) => ({ status: "connected", account: { id: "acct-1" }
 test("the rail: My Cloud, the person's Clouds and teams' Clouds in the session's order, then servers saved by hand; names, colours and states, never an address", () => {
   const places = railPlaces({ saved: saved(), home: HOME, mine: HOME, state: session() });
   assert.deepEqual(places, [
-    { id: "home", name: "Studio", color: "purple", kind: "cloud", opens: true, active: true },
-    { id: "a", name: "Client A", color: "teal", kind: "cloud", opens: true },
-    { id: "acme", name: "Acme", color: "yellow", kind: "team", opens: true },
-    { id: "vps", name: "Office", color: null, kind: "server", opens: true },
-  ]);
+    { id: "home", name: "Studio", color: "purple", kind: "cloud", opens: true, paint: { swatch: "violet" }, active: true },
+    { id: "a", name: "Client A", color: "teal", kind: "cloud", opens: true, paint: { swatch: "green" } },
+    { id: "acme", name: "Acme", color: "yellow", kind: "team", opens: true, paint: { swatch: "amber", locked: "member" } },
+    { id: "vps", name: "Office", color: null, kind: "server", opens: true, paint: { swatch: null } },
+  ], "each colour changed from the rail, but a team's by its admins alone");
   for (const origin of [HOME, CLIENT_A, TEAM, VPS, "/Users/person/lab"]) assert.equal(JSON.stringify(places).includes(origin), false, origin);
   const before = railPlaces({ saved: saved("local"), home: null, mine: HOME, state: session() });
-  assert.deepEqual(before[0], { id: "local", name: "This computer", color: null, kind: "computer", opens: true, active: true }, "before the move, this computer is a place too");
+  assert.deepEqual(before[0], { id: "local", name: "This computer", color: null, kind: "computer", opens: true, active: true }, "before the move, this computer is a place too, in today's look");
   assert.equal(before.length, 5);
 });
 
@@ -55,7 +55,7 @@ test("a Cloud being set up shows how far it is, one at checkout waits, one the A
   const clouds = parseCloudList([PRIMARY, entry({ status: "setting_up", setup: { progress: 0.4 } }), entry({ id: "c-b", name: "Client B", color: "violet", status: "checkout", origin: null }),
     entry({ id: "c-c", name: "Client C", status: "setting_up", origin: null, setup: { step: "storage" } }), entry({ id: "c-team", name: "Acme", teamId: "team-acme", role: "member", origin: TEAM, status: "payment_problem" })]);
   const places = railPlaces({ saved: saved(), home: HOME, mine: HOME, state: session({ clouds }) });
-  assert.deepEqual(places.find(place => place.id === "a"), { id: "a", name: "Client A", color: "teal", kind: "cloud", opens: true, progress: 0.4 });
+  assert.deepEqual(places.find(place => place.id === "a"), { id: "a", name: "Client A", color: "teal", kind: "cloud", opens: true, paint: { swatch: "green" }, progress: 0.4 });
   assert.deepEqual(places.slice(-2), [
     { id: "pending:c-b", name: "Client B", color: "purple", kind: "cloud", opens: false, progress: 0, waiting: true },
     { id: "pending:c-c", name: "Client C", color: "teal", kind: "cloud", opens: false, progress: 0.4 },
@@ -77,11 +77,11 @@ test("a server of the person's own that signed in with their account: one saved 
     entry({ id: "s-render", name: "Render VPS", color: "rose", tier: null, runsOn: "server", managed: false, status: "offline", origin: RENDER, lastSeenAt: 1_761_000_100_000 })]);
   const state = session({ clouds });
   const places = railPlaces({ saved: saved(), home: HOME, mine: HOME, state });
-  assert.deepEqual(places.find(place => place.id === "vps"), { id: "vps", name: "Office", color: null, kind: "server", opens: true, server: true },
+  assert.deepEqual(places.find(place => place.id === "vps"), { id: "vps", name: "Office", color: null, kind: "server", opens: true, paint: { swatch: null }, server: true },
     "saved by hand at its address: the same circle, marked as theirs, online, opening as it always did");
   assert.deepEqual(places.slice(-2), [
-    { id: "signed-in:s-mini", name: "Mac mini", color: null, kind: "server", opens: false, ownNetwork: true, server: true, offline: true, lastSeenAt: 1_761_000_000_000 },
-    { id: "signed-in:s-render", name: "Render VPS", color: "red", kind: "server", opens: false, pairs: true, server: true, offline: true, lastSeenAt: 1_761_000_100_000 },
+    { id: "signed-in:s-mini", name: "Mac mini", color: null, kind: "server", opens: false, paint: { swatch: null }, ownNetwork: true, server: true, offline: true, lastSeenAt: 1_761_000_000_000 },
+    { id: "signed-in:s-render", name: "Render VPS", color: "red", kind: "server", opens: false, paint: { swatch: "rose" }, pairs: true, server: true, offline: true, lastSeenAt: 1_761_000_100_000 },
   ]);
   assert.equal(places.length, 6, "one circle per server");
   for (const origin of [VPS, RENDER]) assert.equal(JSON.stringify(places).includes(origin), false, origin);
@@ -210,7 +210,7 @@ function preload(origin, { activation = false } = {}) {
 
 test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle, ＋ and checkout open only from the person's click", async () => {
   const page = preload(HOME);
-  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "look", "color", "onChanged"]);
+  assert.deepEqual(Object.keys(page.bridge.workspaces), ["state", "menu", "line", "places", "open", "add", "look", "color", "recolor", "onChanged"]);
   assert.deepEqual(Object.keys(page.bridge.cloudAdd), ["state", "start", "reopen", "copyLink", "open", "interest", "sheet"]);
   await page.bridge.workspaces.places();
   await page.bridge.cloudAdd.state();
@@ -221,6 +221,7 @@ test("a Cloud's page gets the rail and the add sheet's narrow bridges; a circle,
   await assert.rejects(page.bridge.cloudAdd.copyLink(), /Copy link/);
   await assert.rejects(page.bridge.cloudAdd.open(), /Open/);
   await assert.rejects(page.bridge.workspaces.color("rose"), /Choose a color/, "a page changes its place's colour only from the person's click");
+  await assert.rejects(page.bridge.workspaces.recolor("vps", "rose"), /Choose a color/);
   await page.bridge.workspaces.look();
   assert.deepEqual(page.invoked.at(-1), ["workspaces:look"]);
   const clicked = preload(HOME, { activation: true });

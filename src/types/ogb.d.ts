@@ -178,6 +178,9 @@ const __APP_VERSION__: string;
         look?: () => Promise<import("../../electron/place-look.mjs").PlaceLook | null>;
         /** That place's colour, from the person's click: one of the six swatches, or null for none. */
         color?: (swatch: import("../../electron/cloud-list.mjs").CloudSwatch | null) => Promise<{ outcome: import("../../electron/place-look.mjs").PlaceColorOutcome; look: import("../../electron/place-look.mjs").PlaceLook | null }>;
+        /** The colour of a place the window's rail lists, by its circle's id, from the person's click on the rail's own
+         * page (refused on any other page). */
+        recolor?: (id: string, swatch: import("../../electron/cloud-list.mjs").CloudSwatch | null) => Promise<{ outcome: import("../../electron/place-look.mjs").PlaceColorOutcome; look: import("../../electron/place-look.mjs").PlaceLook | null }>;
         /** Main's word that the places or the sign-in changed: read them again. */
         onChanged?: (callback: () => void) => () => void;
       };

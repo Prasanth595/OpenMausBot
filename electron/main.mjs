@@ -2690,9 +2690,11 @@ const rail = installCloudRail({ ipcMain, clipboard, openCloud: openOwnCloud, acc
     run: choice => (choice === "link" ? addServerFromClipboard() : choice === "address" ? openWorkspaceSettings() : homeWindow.cloudOrigin() ? undefined : openCloudAdd("app_menu")) } });
 const announceAddedCloud = createAddedCloudNotice({ Notification, focused: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isFocused()), sheetOpen: rail.sheetOpen,
   open: id => { if (!desktopTray?.show()) activateExistingWindow(BrowserWindow.getAllWindows()); void openOwnCloud(id); }, shown: () => cloudAccount?.addDone() });
-// The page's own place's colour (place-look.mjs): the Admin's for a Cloud, this app's for a server connected by hand.
+// A place's colour (place-look.mjs): the Admin's for a Cloud, this app's for a server connected by hand; changed on the
+// place's own page or from the window's rail, whatever that server runs.
 installPlaceLook({ ipcMain, guard: workspaceOnly, place: () => activeEnvironment(environmentsState), session: () => ({ clouds: desktopRemoteAccess ? null : cloudAccount?.state().clouds ?? null, homeOrigin: myCloud() }),
-  setColor: (id, swatch) => ensureCloudAccount().setCloudColor(id, swatch), save: (id, color) => persistEnvironments(withPlaceColor(environmentsState, id, color)) });
+  setColor: (id, swatch) => ensureCloudAccount().setCloudColor(id, swatch), save: (id, color) => persistEnvironments(withPlaceColor(environmentsState, id, color)),
+  rail: { owns: event => chromeRail.owns(event), places: railList, saved: id => environmentsState.environments.find(entry => entry.id === id && entry.kind !== "local") ?? null } });
 ipcMain.handle("sharing:state", localWorkspaceOnly("sharing:state", async (_event, id) => {
   await requireSharedComputers();
   return sharingController().state(savedWorkspace(id).id);
