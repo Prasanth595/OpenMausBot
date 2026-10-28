@@ -88,7 +88,11 @@ function eventName(req: IncomingMessage): string | undefined {
   )?.trim() || undefined;
 }
 
-export function createWebhookIngressHandler(manager: WebhookManager, claimRequest?: () => () => void) {
+/** Another receiver on this public server, such as a chat channel. True when it answered the request. `claim` takes the
+ * same request claim the webhooks below take, and throws while the server refuses work. */
+export type IngressExtra = (req: IncomingMessage, res: ServerResponse, url: URL, claim: () => () => void) => Promise<boolean>;
+
+export function createWebhookIngressHandler(manager: WebhookManager, claimRequest?: () => () => void, extra?: IngressExtra) {
   return async (req: IncomingMessage, res: ServerResponse) => {
     let url: URL;
     try {
@@ -99,6 +103,7 @@ export function createWebhookIngressHandler(manager: WebhookManager, claimReques
     if (req.method === "GET" && url.pathname === "/health") {
       return json(res, 200, { app: "openmausbot-webhooks", ready: true });
     }
+    if (extra && await extra(req, res, url, () => claimRequest?.() ?? (() => undefined))) return;
     const match = url.pathname.match(/^\/hooks\/(wh_[A-Za-z0-9_-]+)(?:\/([^/]+))?$/);
     if (!match) return json(res, 404, { error: "Unknown webhook endpoint" });
     if (req.method !== "POST") return json(res, 405, { error: "Webhooks accept POST requests" });
@@ -166,11 +171,12 @@ export function advertisedWebhookBase(raw: string): string {
 
 export async function listenWebhookIngress(
   manager: WebhookManager,
-  options: { host?: string; port: number; publicBaseUrl?: string; claimRequest?: () => () => void },
+  options: { host?: string; port: number; publicBaseUrl?: string; claimRequest?: () => () => void; extra?: (base: () => string) => IngressExtra },
 ): Promise<WebhookIngress> {
   const host = options.host ?? "127.0.0.1";
   const advertised = options.publicBaseUrl === undefined ? undefined : advertisedWebhookBase(options.publicBaseUrl);
-  const handle = createWebhookIngressHandler(manager, options.claimRequest);
+  let base = advertised ?? "";
+  const handle = createWebhookIngressHandler(manager, options.claimRequest, options.extra?.(() => base));
   const server = createServer((req, res) => {
     handle(req, res).catch((error: unknown) => {
       console.error("webhooks: receiver failed", error);
@@ -191,11 +197,12 @@ export async function listenWebhookIngress(
     server.close();
     throw new Error("Webhook receiver did not get a TCP address");
   }
+  base = advertised ?? `http://${host}:${address.data.port}`;
   return {
     server,
     host,
     port: address.data.port,
-    baseUrl: advertised ?? `http://${host}:${address.data.port}`,
+    baseUrl: base,
   };
 }
 

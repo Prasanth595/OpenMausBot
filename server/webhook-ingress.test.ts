@@ -313,3 +313,42 @@ describe("advertised base URL", () => {
     expect(advertisedWebhookBase("http://10.0.0.5:8800///")).toBe("http://10.0.0.5:8800");
   });
 });
+
+describe("an extra receiver on the webhook server", () => {
+  it("can take the same request claim, and the claim is refused while the server refuses work", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "omb-ingress-extra-"));
+    const manager = new WebhookManager({ file: join(dir, "webhooks.json"), botState: () => "ready", enqueue: () => ({ id: "run" }) });
+    let refuse = false;
+    let claims = 0;
+    let releases = 0;
+    const receiver = await listenWebhookIngress(manager, {
+      port: 0,
+      claimRequest: () => {
+        if (refuse) throw Object.assign(new Error("frozen"), { status: 503 });
+        claims += 1;
+        return () => { releases += 1; };
+      },
+      extra: () => async (_req, res, url, claim) => {
+        if (url.pathname !== "/extra") return false;
+        try {
+          const release = claim();
+          res.writeHead(200).end("ok");
+          release();
+        } catch {
+          res.writeHead(503).end();
+        }
+        return true;
+      },
+    });
+    try {
+      expect((await fetch(`${receiver.baseUrl}/extra`, { method: "POST" })).status).toBe(200);
+      expect([claims, releases]).toEqual([1, 1]);
+      refuse = true;
+      expect((await fetch(`${receiver.baseUrl}/extra`, { method: "POST" })).status).toBe(503);
+      expect((await fetch(`${receiver.baseUrl}/hooks/wh_missing`, { method: "POST" })).status).not.toBe(200);
+    } finally {
+      await new Promise((resolve) => receiver.server.close(resolve));
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
