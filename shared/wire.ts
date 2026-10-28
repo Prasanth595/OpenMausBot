@@ -147,8 +147,7 @@ export interface WireTask {
   private?: true;
   /** On a team's server: this person's inbox, the conversation with their Chief where everything for them arrives. */
   inbox?: true;
-  /** On a person's inbox: the asks waiting on them there (questions, approvals, work handed on), each open where it was
-   * asked; absent when none. */
+  /** On a person's inbox: how many asks (questions, approvals, work handed on) still wait where they were asked; absent: none. */
   openAsks?: number;
   /** Set by close_thread; absent while the thread is open. */
   closedBy?: TaskClosedBy;
