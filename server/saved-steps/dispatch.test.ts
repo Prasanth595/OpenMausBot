@@ -274,6 +274,21 @@ describe("SavedStepsDispatch.sendTurn", () => {
     expect(handOn).not.toHaveBeenCalled();
   });
 
+  it("still ends the turn with its reply when the conversation cannot be marked", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    contextChanged.mockImplementation(() => { throw new Error("bots.json could not be written"); });
+    const { turnId } = await dispatch.sendTurn(engine, REQ, INPUT, start);
+    await vi.waitFor(() => expect(turnCompleted()).toHaveLength(1));
+    expect(events.slice(-2)).toMatchObject([
+      { type: "item.completed", itemType: "assistant_text", turnId, text: expect.stringContaining("Done — repeated 2 saved steps") },
+      { type: "turn.completed", turnId, ok: true },
+    ]);
+    expect(dispatch.replayed("t1", turnId)).toBe(RECIPE.id);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("bots.json could not be written"));
+    expect(events.some((event) => event.type === "runtime.error")).toBe(false);
+    warn.mockRestore();
+  });
+
   it("hands the turn's context on to the AI that takes over, under the replay's turn id", async () => {
     failAt = "set_value";
     start.mockImplementationOnce(async () => {

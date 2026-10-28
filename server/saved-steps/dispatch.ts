@@ -242,7 +242,7 @@ export class SavedStepsDispatch {
 
   private end(run: Run, outcome: Exclude<RunOutcome, Failed>): void {
     try {
-      if (run.phase === "replay") this.deps.contextChanged(run.botId, run.threadId);
+      if (run.phase === "replay") this.markContextChanged(run);
       if (outcome.kind === "done") {
         this.answered.delete(run.threadId);
         this.answered.set(run.threadId, { turnId: run.turnId, recipeId: run.recipe.id });
@@ -260,6 +260,14 @@ export class SavedStepsDispatch {
       }
     } finally {
       this.forgetRun(run);
+    }
+  }
+
+  private markContextChanged(run: Run): void {
+    try {
+      this.deps.contextChanged(run.botId, run.threadId);
+    } catch (error) {
+      console.warn(`saved steps on ${run.threadId}: the conversation was not marked for the engine to read again: ${errorText(error)}`);
     }
   }
 
