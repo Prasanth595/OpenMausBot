@@ -74,6 +74,50 @@ describe("scheduled memory upkeep", () => {
     expect(loop.status(BOT.id).lastTidy).toBeUndefined();
   });
 
+  it("starts a fresh dream after restart while the old response is pending and keeps it single-flight", async () => {
+    let releaseOld!: (answer: string) => void;
+    let releaseNew!: (answer: string) => void;
+    const oldResponse = new Promise<string>((resolve) => { releaseOld = resolve; });
+    const newResponse = new Promise<string>((resolve) => { releaseNew = resolve; });
+    const generateText = vi.fn().mockReturnValueOnce(oldResponse).mockReturnValue(newResponse);
+    loop = createMemoryUpkeep({
+      bots: () => [BOT], bot: () => BOT, engine: () => ({ generateText }), busy: () => false,
+      addToAboutMe: () => 0, sourceLabel: () => "chat", quietMs: () => 60_000, tidyHour: () => 3,
+      dreamer: () => BOT.id,
+      conversations: () => ["a", "b"].map((threadId) => ({ threadId, lines: [{ by: "person", text: "Keep project updates brief." }] })),
+    });
+    try {
+      loop.start();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(generateText).toHaveBeenCalledTimes(1);
+      expect(generateText.mock.calls[0]![0]).toContain(DREAM_MARKER);
+      loop.stop();
+      loop.start();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(generateText).toHaveBeenCalledTimes(2);
+      expect(generateText.mock.calls[1]![0]).toContain(DREAM_MARKER);
+      const current = loop.dream(BOT.id);
+      releaseOld('{"learned":[{"text":"Prefers detailed project updates","from":[1,2],"confidence":0.9}]}');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(loop.status(BOT.id).lastDream).toBeUndefined();
+      expect(memory()).not.toContain("Prefers detailed project updates");
+      expect(loop.dream(BOT.id)).toBe(current);
+      expect(generateText).toHaveBeenCalledTimes(2);
+      releaseNew('{"learned":[{"text":"Prefers brief project updates","from":[1,2],"confidence":0.9}]}');
+      await current;
+      await loop.idle();
+      expect(loop.status(BOT.id).lastDream).toMatchObject({
+        at: new Date(2026, 8, 25, 10, 2).getTime(),
+        learned: [{ text: "Prefers brief project updates", where: "MEMORY.md" }],
+      });
+      expect(memory()).toContain("Prefers brief project updates");
+      expect(memory()).not.toContain("Prefers detailed project updates");
+    } finally {
+      releaseOld("{}");
+      releaseNew("{}");
+    }
+  });
+
   describe.each(["freeze", "restart"] as const)("%s during a scheduled model call", (action) => {
     it.each(["organize", "notebook", "topic", "dream"] as const)("discards the active %s continuation and the rest of its tick", async (step) => {
       const other = { id: "next-bot", name: "Pixel" };

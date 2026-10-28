@@ -272,7 +272,7 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   const log = (line: string) => deps.log?.(line);
   const inflight = new Set<Promise<unknown>>();
   const tidying = new Map<string, Promise<TidyReport>>();
-  const dreaming = new Map<string, Promise<DreamReport>>();
+  const dreaming = new Map<string, { generation: number; promise: Promise<DreamReport> }>();
   let timer: ReturnType<typeof setInterval> | null = null;
   let first: ReturnType<typeof setTimeout> | null = null;
   let generation = 0;
@@ -761,10 +761,13 @@ export function createMemoryUpkeep(deps: UpkeepDeps): MemoryUpkeep {
   }
 
   function dream(botId: string): Promise<DreamReport> {
+    const started = generation;
     const running = dreaming.get(botId);
-    if (running) return running;
-    const promise = track(runDream(botId)).finally(() => dreaming.delete(botId));
-    dreaming.set(botId, promise);
+    if (running?.generation === started) return running.promise;
+    const promise = track(runDream(botId)).finally(() => {
+      if (dreaming.get(botId)?.promise === promise) dreaming.delete(botId);
+    });
+    dreaming.set(botId, { generation: started, promise });
     return promise;
   }
 
