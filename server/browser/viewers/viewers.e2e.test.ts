@@ -184,8 +184,12 @@ suite("viewers of the new browser on real Chrome", () => {
     const { viewer } = await watch(target, { size: { width: 400, height: 750 } });
     await until(() => pageSize(target), same([1280, 2400, 2]));
     const picture = await real.call(target, "agent_browser_screenshot");
-    expect(real.text(picture)).toContain("794x1488 pixels: the 1280x2400 CSS-pixel viewport drawn at 0.62");
-    expect(pngSize(Buffer.from(picture.content.find((part) => part.type === "image")!.data!, "base64"))).toEqual({ width: 794, height: 1488 });
+    // The viewport is 1280 CSS pixels wide less the scrollbar a platform with classic scrollbars draws.
+    const note = /(\d+)x1488 pixels: the (\d+)x2400 CSS-pixel viewport drawn at 0\.62, so divide x and y read off it by 0\.62/u.exec(real.text(picture));
+    expect(note, real.text(picture)).not.toBeNull();
+    const [width, region] = [Number(note![1]), Number(note![2])];
+    expect(width).toBe(Math.round(region * 0.62));
+    expect(pngSize(Buffer.from(picture.content.find((part) => part.type === "image")!.data!, "base64"))).toEqual({ width, height: 1488 });
     // The Low button's middle, read off the picture at 434,1240, divided by the scale its answer gave.
     expect((await real.call(target, "agent_browser_click", { x: 434 / 0.62, y: 1240 / 0.62 })).isError).toBeUndefined();
     expect(await real.peek<string>(target, "document.title")).toBe("at 700,2000 on low of 1280x2400");
@@ -195,12 +199,15 @@ suite("viewers of the new browser on real Chrome", () => {
     const ref = /textbox "Field" \[ref=(e\d+)\]/u.exec(real.text(await real.call(target, "agent_browser_snapshot")))![1]!;
     expect((await real.call(target, "agent_browser_type", { ref, text: "typed low" })).isError).toBeUndefined();
     expect(await real.peek<string>(target, "document.getElementById('field').value")).toBe("typed low");
-    expect(real.text(await real.call(target, "agent_browser_scroll", { dy: 600 }))).toContain("The page is at 0,600 of 4000 pixels high.");
-    expect((await real.call(target, "agent_browser_click", { x: 700, y: 1400 })).isError).toBeUndefined();
-    expect(await real.peek<string>(target, "document.title")).toBe("at 700,1400 on low of 1280x2400");
+    expect(real.text(await real.call(target, "agent_browser_scroll", { dy: 600 }))).toContain("Scrolled by 0,600.");
+    // A platform may scroll smoothly, and by more or less than the wheel's pixels: aim where the page came to rest.
+    let top = -1;
+    await until(async () => { const before = top; top = await real.peek<number>(target, "Math.round(scrollY)"); return top > 0 && top === before; }, Boolean);
+    expect((await real.call(target, "agent_browser_click", { x: 700, y: 2000 - top })).isError).toBeUndefined();
+    expect(await real.peek<string>(target, "document.title")).toBe(`at 700,${2000 - top} on low of 1280x2400`);
     await viewer.close();
     await until(() => pageSize(target), same([1280, 800, 2]));
-    expect(real.text(await real.call(target, "agent_browser_screenshot"))).toContain("1280x800 pixels, one per CSS pixel of the viewport");
+    expect(real.text(await real.call(target, "agent_browser_screenshot"))).toMatch(/\d+x800 pixels, one per CSS pixel of the viewport/u);
     expect(real.text(await real.call(target, "agent_browser_click", { x: 700, y: 2000 }))).toContain("which is 1280x800 CSS pixels now");
   }, hostTimeout(90_000));
 
