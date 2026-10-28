@@ -3,7 +3,7 @@
 // with owner "bot") in bubblewrap by the plan (plan.ts). Nothing here changes a spawn when the box is off: the command,
 // its arguments and its environment go through untouched, so every host that is not a Cloud home behaves as before.
 import { existsSync, mkdirSync, openSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join } from "node:path";
 
 import { engineInstallRoots } from "../engine-roots.ts";
 import { SERVER_ROOT, resolveProxy } from "../proxy-paths.ts";
@@ -256,10 +256,8 @@ export class BotBox {
     if (!this.runner || !this.detection.tools) return null;
     const setup = { ...this.runner.setup, engineRoots: [] };
     const seccomp = this.seccompFile && !setup.mutate?.has("no-seccomp") ? this.seccompFile : null;
-    const plan = planBox({ ...setup, seccompFd: seccomp ? seccompFd : undefined }, { command: "chrome", args: [], env: {}, net: "shared", ro });
-    const home = resolve(setup.home), dataDir = resolve(setup.dataDir);
-    const mounts = plan.mounts.filter((mount) => !(mount.kind === "bind" && mount.target === home) && !(mount.kind === "tmpfs" && mount.target === dataDir));
-    return { bwrap: this.detection.tools.bwrap, options: bwrapArgs({ ...plan, mounts }), seccomp };
+    const plan = planBox({ ...setup, seccompFd: seccomp ? seccompFd : undefined }, { command: "chrome", args: [], env: {}, net: "shared", home: false, ro });
+    return { bwrap: this.detection.tools.bwrap, options: bwrapArgs(plan), seccomp };
   }
 
   /** More read-write folders for one conversation's boxes (a memory layer); nothing without a runner. */

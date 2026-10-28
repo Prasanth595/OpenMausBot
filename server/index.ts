@@ -224,7 +224,7 @@ import {
   listMcpServers,
   parseStoredMcpServer,
 } from "./mcp-registry.ts";
-import { attachCustomMcp, prepareCustomMcp } from "./mcp-result-budget.ts";
+import { prepareCustomMcp } from "./mcp-result-budget.ts";
 import { MCP_OAUTH_CALLBACK_PATH, McpOAuthManager, mcpOAuthRedirectUri } from "./mcp-oauth.ts";
 import {
   GROUP_GOAL_WAIT_MAX_MS,

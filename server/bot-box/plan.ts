@@ -65,8 +65,8 @@ export interface BoxRequest {
   net?: BoxNet;
   /** The bot whose own folder (workspaces/<bot>) is put back; derived from a task-workspace cwd when absent. */
   botId?: string;
-  /** A Team Cloud audience's engine home, bound read-write in place of the server's HOME, none of which the box then has. */
-  home?: string;
+  /** A Team Cloud audience's engine home instead of the server's HOME; false gives a browser neither home. */
+  home?: string | false;
   /** Files bound read-write over their names in `home`: the team's engine sign-ins. */
   shared?: ReadonlyArray<{ source: string; target: string }>;
 }
@@ -146,7 +146,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   // HOME first; the data folder is replaced by an empty one right after, so the lines below put back only what is named.
   // An engine home lives in the data folder, so it goes back after that.
   const ownHome = request.home ? resolve(request.home) : null;
-  if (!ownHome) rw(home);
+  if (!ownHome && request.home !== false) rw(home);
   if (!mutate.has("bind-data")) {
     mounts.push({ kind: "tmpfs", target: dataDir });
   } else {
