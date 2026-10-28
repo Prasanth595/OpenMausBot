@@ -45,18 +45,22 @@ export function uploadableFiles(files: unknown, roots: readonly string[]): { fil
  * `folder`, outside the bot's writable workspace. */
 export function namedUploadPaths(files: ReadonlyArray<{ file: string; name: string | null }>, folder: string, now = Date.now(), { everyFile = false } = {}): string[] {
   sweepNamedCopies(folder, now);
-  return files.map(({ file, name: given }) => {
-    const name = given && basename(given) === given ? given : everyFile ? basename(file) : null;
-    if (!name || (name === basename(file) && !everyFile)) return file;
-    const dir = join(folder, randomUUID());
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const named = join(dir, name);
-    try { copyUpload(file, named); } catch (error) {
-      rmSync(dir, { recursive: true, force: true });
-      throw error;
-    }
-    return named;
-  });
+  const created: string[] = [];
+  try {
+    return files.map(({ file, name: given }) => {
+      const name = given && basename(given) === given ? given : everyFile ? basename(file) : null;
+      if (!name || (name === basename(file) && !everyFile)) return file;
+      const dir = join(folder, randomUUID());
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      created.push(dir);
+      const named = join(dir, name);
+      copyUpload(file, named);
+      return named;
+    });
+  } catch (error) {
+    for (const dir of created) rmSync(dir, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function copyUpload(source: string, destination: string): void {

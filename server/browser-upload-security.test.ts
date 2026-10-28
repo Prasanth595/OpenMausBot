@@ -57,3 +57,14 @@ it("rejects a Windows open that follows a symlink swapped in after lstat", () =>
   hooks.redirect = { source, target: secret };
   expect(() => namedUploadPaths([{ file: source, name: "Report.txt" }], join(base, "uploads"))).toThrow(/changed/);
 });
+
+it("removes every directory from a batch when its second file fails", () => {
+  const base = fs.realpathSync(fs.mkdtempSync(join(tmpdir(), "omb-upload-cleanup-")));
+  dirs.push(base);
+  const first = join(base, "first.txt"), folder = join(base, "uploads");
+  fs.writeFileSync(first, "first");
+  expect(() => namedUploadPaths([
+    { file: first, name: "First.txt" }, { file: join(base, "missing.txt"), name: "Missing.txt" },
+  ], folder)).toThrow();
+  expect(fs.readdirSync(folder)).toEqual([]);
+});
