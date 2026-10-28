@@ -151,6 +151,29 @@ describe("search-hit navigation replies", () => {
   });
 
   it.each([
+    { type: "toggleActivity", open: true },
+    { type: "toggleInspector", open: true },
+    { type: "toggleAppSettings", open: true },
+    { type: "togglePlugins", open: true },
+    { type: "toggleNewBot", open: true },
+    { type: "toggleShortcuts", open: true },
+    { type: "toggleNotifications", open: true },
+    { type: "toggleWelcome", open: true },
+    { type: "toggleTour", open: true },
+    { type: "openCloudAdd", source: "app_settings" },
+    { type: "closeCloudAdd" },
+    { type: "cloudHowTo", open: true },
+    { type: "createGroup", memberIds: ["scout"], name: "New room" },
+  ] satisfies Action[])("cancels a pending search jump after explicit $type navigation", async (action) => {
+    const landing = landOnSearchHit({ ...hit, onActivePath: false }, seen, dispatch, true, navigationRevision);
+    await vi.waitFor(() => expect(held.some((request) => request.path === "/api/bots/scout/active-branch")).toBe(true));
+    flushSync(() => dispatch(action));
+    await answer("/api/bots/scout/active-branch", { activeLeafId: "first" }, "first");
+    await landing;
+    expect(seen.focusMessage).toBeNull();
+  });
+
+  it.each([
     { type: "hydrate", bots: [bot], groups: [room], computerControl: {} },
     { type: "botPatched", bot: { ...bot, title: "Updated" } },
     { type: "groupPatched", group: { id: "room", name: "Updated room" } },

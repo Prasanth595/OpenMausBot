@@ -2343,7 +2343,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const wrapped: React.Dispatch<Action> = (action) => {
-      advanceNavigation(action, selectionRevision, presenceRevision);
+      advanceNavigation(action, stateRef.current, selectionRevision, presenceRevision);
       // Pin before any await or optimistic state change.
       action = pinBotThreadAction(action, stateRef.current.bots);
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
