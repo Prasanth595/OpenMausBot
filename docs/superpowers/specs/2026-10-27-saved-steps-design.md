@@ -64,21 +64,38 @@ if **all** hold:
 
 - direct message from the person; text only (no images, files, reply, app or
   data context); no steering during the request; host computer;
+- each turn sent exactly the person's one line: several queued lines sent as
+  one turn never save;
 - every computer call happened in one turn of the request. The journal is keyed
   by the request, so a `select_computer` hand-off (whose first turn made no
   computer calls) still saves (builder's call);
-- no denials, no tool error, no refusal anywhere in the journal;
+- no denials, no tool error, no refusal anywhere in the journal, and no
+  question the person answered during the request (a replay would reuse their
+  answer without asking);
+- every other tool the request used is read-only (`Read`, `Glob`, `Grep`, `LS`,
+  `ToolSearch`, `TodoWrite`, `WebSearch`, `WebFetch`, `select_computer`): a
+  replay redoes only the computer steps, so a request that also ran a command,
+  wrote a file or used a connector would repeat a reply claiming work it did
+  not do;
+- no other computer (Local VM, VPS, Cloud Boat) in the request;
+- the journal still holds the whole request: it keeps 64 threads, least
+  recently used first out, and a thread evicted mid-request never saves;
+- the request did not begin with a replay that fell back (the screen was
+  already partly changed);
 - request text has no moment words (this, that, it, here, there, these, those,
   them);
 - 1 to 40 action steps, each replayable:
   - element actions (`click`, `double_click`, `right_click`, `type_text`,
-    `set_value`, `press_key`, `scroll`) addressed by `element_token` or
-    `element_index` that maps to an element with a non-empty label in the
-    preceding `get_window_state` result of that window;
+    `set_value`, `scroll`) addressed by `element_token`, or by `element_index`
+    with a `window_id` (mapped to the latest `get_window_state` of that
+    window), that names an element with a non-empty label whose role, label
+    and path are unique in that snapshot;
   - `type_text`/`set_value` text appears word for word (case-insensitive) in
-    the request;
+    the request, equals its own trim and holds no control characters (a
+    newline would press Return);
   - `launch_app` (its `urls`, if any, appear in the request), `bring_to_front`,
-    `hotkey`, `press_key` without an element;
+    `hotkey` and `press_key` with the `pid` of the app they went to;
+  - key and element actions with a `scope` other than `window` refuse;
   - anything with `x`/`y`, `drag`, `move_cursor`, `zoom` or a `browser_*` tool
     makes the whole request not saveable.
 
@@ -86,7 +103,10 @@ Observation calls (`get_window_state`, `list_apps`, `list_windows`, …) are not
 replayed; they are how the run found its way. The recipe stores each action
 with its target described by identity, not ids: app `{bundle_id, name}`, window
 `{title}`, element `{role, label, path}` where `path` is the role:label chain
-of its ancestors from the same snapshot.
+of its ancestors below the window node, from the same snapshot.
+
+ACP engines name their tools freely (titles and plan rows, not driver tool
+names), so their requests never save in v1.
 
 Store: `DATA_DIR/bots/<botId>/saved-steps.json`, mode 0600, outside the
 bot-writable workspace, written atomically. At most 200 recipes per bot; one
@@ -108,29 +128,45 @@ access. Full access is the default most people run (it approves on its own), so
 the approval step below still emits `request.opened` per action for the
 decision log and the safety floor, but never shows a card.
 
+**Place: picked by the person only.** Before a bot's first action on the
+person's own computer in a request, the person is asked once (Allow once or
+Deny), at every approval level, unless they picked this computer as the place:
+the bot's Works on, or the conversation's place chip. A place Auto chose or
+pinned does not count. A replay runs only where the person picked it, so it
+never meets that question.
+
 Modelled on `QuickModelFallback`, wrapped where the engine starts
 (`server/index.ts` `quickFallback.sendTurn`). By then the user message, turn
 generation, gated computer, approval mode and Stop handling are all in place.
 It replays only when: the setting is on, the bot has a recipe for the key, the
-turn is a direct text-only person turn, and the host computer is mounted.
+turn is a direct text-only person turn that sends exactly the person's one
+line, the approval mode is Full access, the host computer is mounted, and the
+person picked it as the place.
 
 For each step, in order:
 
 1. Resolve the target fresh: `list_apps` → pid by `bundle_id` (else name);
-   `list_windows(pid)` → window by exact title, else the only window that pid
-   has; `get_window_state(pid, window_id, include_screenshot:false)` → the
-   unique element with the same role, label and path. No unique match is a
-   failure.
+   `list_windows(pid)` → the one window with exactly the saved title (a
+   renamed window is a failure: with Full access approving on its own, any
+   other window could be a different document);
+   `get_window_state(pid, window_id, include_screenshot:false)` → the unique
+   element with the same role, label and path. The answer must be for the
+   window asked and say `elements_complete: true` (a cut tree could hide a
+   second match). No unique match is a failure.
 2. Ask exactly as an engine does: emit `request.opened` with
    `tool: "mcp__computer__<name>"`, `approvalScope: "local-computer"`,
-   `allowSession: false`, through the normal handler. Full access approves on
-   its own; otherwise the person sees the usual card. A denial stops the replay
-   and the reply says what was declined (no AI fallback).
+   `allowSession: false`, through the normal handler, naming the target and
+   any text typed or keys pressed. Full access approves on its own, and the
+   decision log records it. A denial stops the replay and the reply says what
+   was declined (no AI fallback).
 3. Call the tool through an in-process MCP client on the turn's own
    `integrations.localComputer` (the gated proxy, so "person took control" and
-   busy checks still apply).
-4. `isError`, a JSON-RPC error, a refusal, a control-gate refusal or a 30 s
-   timeout is a failure.
+   busy checks still apply), with journalling off.
+4. `isError`, a JSON-RPC error, a refusal or a 60 s timeout is a failure. The
+   timeout outlasts the control gate's 45 s hold, so a person who takes the
+   computer mid-replay gets the gate's own answer. A control-gate refusal
+   (the person has the computer, another turn has it) is not the steps'
+   fault: the recipe is kept and the AI takes over with the note.
 
 The normal approval handler answers the engine adapter, and Stop interrupts the
 engine in `runningTurnEngines`. The replay therefore registers itself there as
@@ -148,9 +184,12 @@ On failure the recipe is deleted, the held events are dropped, and the real
 engine's `sendTurn` runs with the same turn id and this note appended to the
 request: "A saved run of this request did steps 1–k of N and failed at step
 k+1 (<tool> on <label>): <error>. The screen may already be partly changed;
-look before acting." A successful AI run saves a fresh recipe.
+look before acting." That request never saves, since its AI run started from a
+screen the replay had already changed; the next plain AI run of those words
+saves a fresh recipe.
 
-Stop during replay cancels it like any turn.
+Stop during replay ends the turn interrupted, like any turn. The recipe is
+kept and the AI does not start.
 
 ### 4. Person-facing
 
@@ -176,16 +215,20 @@ new input route, no second binary, one permission identity. Update that doc's
   images are stripped; a slow or failing POST still forwards within 1 s.
 - Replay: fake MCP client + fake approval handler: success path emits the right
   events; a denial stops without fallback; a failed step falls back with the
-  note and deletes the recipe; Full access approves without a card; Ask shows
-  one card per step.
+  note and deletes the recipe; Full access approves without a card; non-Full
+  turns never replay.
 - Fixture per `docs/verification/README.md` with the fake engine scripting
   computer tool calls, then the same request again: second turn has no engine
-  call.
+  call ([recipe](../../verification/saved-steps.md)).
 
 ## Decisions
 
 - Omkar, 2026-10-27: replays run for Full access bots only; other modes always
   use the AI.
+- 2026-10-28, after main began asking before a bot first uses the person's own
+  computer: replays only where the person picked this computer as the place;
+  windows match by exact title only; a replayed step waits 60 s; a
+  control-gate refusal keeps the recipe.
 - My calls: journal switched on only by the host mount; journal keyed by
   request so a `select_computer` hand-off still saves; the replay registers as
   the turn's engine for answers and Stop; fallback events remapped onto the
