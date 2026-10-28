@@ -1,0 +1,82 @@
+# The rail of places (PR #3725) end to end, in the real desktop app under Xvfb.
+#
+# A test harness on its own branch (e2e/cloud-rail): never merged and never a PR. It builds the app's page and server
+# and the npm package a self-hoster installs, starts two servers with `openmausbot serve --no-pair`, and drives the
+# installed-layout app with Playwright (scripts/e2e/cloud-rail.e2e.mjs). No secrets: the servers and the app reach no
+# production service, nothing signs in to MausBot Cloud and nothing is bought.
+name: E2E rail of places
+
+on:
+  push:
+    branches: [e2e/cloud-rail]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-cloud-rail-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rail:
+    name: rail of places (Ubuntu 24.04, Xvfb)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      OMB_E2E_OUT: ${{ github.workspace }}/e2e-out
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: System packages for Electron under Xvfb
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          xvfb xauth dbus dbus-x11 time
+          libgtk-3-0t64 libnss3 libgbm1 libasound2t64 libxss1 libxtst6 libatk-bridge2.0-0t64 libdrm2
+          libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2t64 libpango-1.0-0 libcairo2 fonts-liberation
+      - run: pnpm install --frozen-lockfile
+      - name: Build the page, the server and the self-hosted package
+        run: |
+          mkdir -p "$OMB_E2E_OUT"
+          /usr/bin/time -f "vite build: %e s, peak %M KB" -a -o "$OMB_E2E_OUT/resources.txt" pnpm exec vite build
+          /usr/bin/time -f "build:server: %e s, peak %M KB" -a -o "$OMB_E2E_OUT/resources.txt" pnpm build:server
+          /usr/bin/time -f "npm package: %e s, peak %M KB" -a -o "$OMB_E2E_OUT/resources.txt" node scripts/build-npm-package.mjs
+          cat "$OMB_E2E_OUT/resources.txt"
+      - name: The rail of places, end to end
+        run: |
+          ( while true; do free -m | awk '/^Mem:/ { print $3 }' >> "$OMB_E2E_OUT/memory-used-mb.txt"; sleep 2; done ) &
+          sampler=$!
+          status=0
+          /usr/bin/time -f "e2e: %e s, peak single process %M KB" -a -o "$OMB_E2E_OUT/resources.txt" \
+            dbus-run-session -- xvfb-run -a --server-args="-screen 0 1600x1000x24" node scripts/e2e/cloud-rail.e2e.mjs || status=$?
+          kill "$sampler" || true
+          echo "peak memory in use on the runner: $(sort -n "$OMB_E2E_OUT/memory-used-mb.txt" | tail -1) MB (of $(free -m | awk '/^Mem:/ { print $2 }') MB, $(nproc) CPUs)" | tee -a "$OMB_E2E_OUT/resources.txt"
+          exit "$status"
+      - name: Summary
+        if: always()
+        run: |
+          node -e '
+            const fs = require("fs");
+            const file = process.env.OMB_E2E_OUT + "/report.json";
+            if (!fs.existsSync(file)) { console.log("no report.json"); process.exit(0); }
+            const report = JSON.parse(fs.readFileSync(file, "utf8"));
+            const rows = report.scenarios.map((s) => `| ${s.id} | ${s.status} | ${s.title.replace(/\|/g, "/")} | ${s.checks.filter((c) => !c.ok).map((c) => c.name).join("; ").replace(/\|/g, "/")} |`);
+            const findings = report.findings.map((f) => `- **${f.id}**: ${f.text}`);
+            const text = ["## Rail of places, end to end", "", `commit ${report.commit}, Electron ${report.electron}, Playwright ${report.playwright}, ${report.mode}`, "",
+              "| scenario | status | what | failed checks |", "|---|---|---|---|", ...rows, "", "### Findings", ...findings, report.error ? `\n**Harness error:** ${report.error}` : ""].join("\n");
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text + "\n");
+            console.log(text);
+          '
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: e2e-cloud-rail
+          path: ${{ env.OMB_E2E_OUT }}
+          if-no-files-found: warn
+          retention-days: 14
