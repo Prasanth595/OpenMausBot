@@ -460,7 +460,7 @@ beforeAll(async () => {
   writeFileSync(
     join(home, ".openmausbot", "config.json"),
     JSON.stringify({
-      // generated titles are opt-in; this suite owns the one-shot's reply file (FAKE_CLAUDE_TEXT_FILE below); one test turns the setup card's answers on
+      // generated titles are opt-in; this suite owns the one-shot's reply file (FAKE_CLAUDE_TEXT_FILE below); the setup card's tests turn its answers on
       features: { llmThreadTitles: true, browser: false, smartSetupChoices: false },
       instances: {
         ghost: { driver: "not-a-real-driver", displayName: "Ghost" },
@@ -1604,6 +1604,8 @@ describe("harness HTTP API", () => {
     expect(theirs.status).toBe(202);
     expect(theirs.body.message).toMatchObject({ role: "user", sender: { name: "Safari on Mac" } });
 
+    // A message steers into a turn its engine is running; one sent while that turn is still being set up waits for it.
+    await expect.poll(() => claudePrompts().some((line) => line.includes("from the paired person")), { timeout: 10_000 }).toBe(true);
     const steered = await person.call("POST", `/api/bots/${bot.id}/messages`, { text: "and one more" });
     expect(steered.status).toBe(202);
     expect(steered.body.message).toMatchObject({ steered: true, sender: { name: "Safari on Mac" } });
@@ -7814,6 +7816,45 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("writes a new bot's setup answers again when it is renamed before anyone answers, and without the name for a picked one", async () => {
+    const hiring = ["Screen my new candidates", "Draft a job post", "Schedule my interviews", "Find candidates on job sites", "Remind me to follow up"];
+    const everyday = ["Find cheap flights", "Sort my inbox", "Check my calendar", "Draft a cover letter", "Remind me to pay bills"];
+    const greeting = async (threadId: string) => (await api("GET", `/api/threads/${threadId}/messages?limit=50`)).body.messages[0];
+    const settled = async (threadId: string) => {
+      await expect.poll(async () => { const line = await greeting(threadId); return line.setupChoicesPending ?? line.setupChoicesUpdating ?? null; }, { timeout: 10_000 }).toBeNull();
+      return greeting(threadId);
+    };
+    const answer = (choices: string[]) => { writeFileSync(setupAnswersFile, `${JSON.stringify(choices)}\n`); rmSync(setupAnswersDump, { force: true }); };
+    let id = "";
+    expect((await api("PUT", "/api/config", { features: { smartSetupChoices: true } })).status).toBe(200);
+    try {
+      rmSync(setupAnswersFile, { force: true });
+      const created = await api("POST", "/api/bots", { name: "Pepper", modelSelection: { instanceId: "claude", model: "claude-sonnet-5" }, requireAvailableModel: true });
+      expect(created.status).toBe(201);
+      id = created.body.bot.id;
+      const { threadId } = created.body.bot;
+      const fixed = created.body.bot.messages[0].setupChoices;
+      expect((await settled(threadId)).setupChoices).toEqual(fixed);
+
+      answer(hiring);
+      expect((await api("PATCH", `/api/bots/${id}`, { name: "Recruiter" })).status).toBe(200);
+      expect((await greeting(threadId)).setupChoicesUpdating).toEqual(expect.any(Number));
+      expect((await settled(threadId)).setupChoices).toEqual(hiring);
+      expect((await readJsonFileWhenReady<{ prompt: string }>(setupAnswersDump)).prompt).toContain("Bot name: Recruiter");
+
+      answer(everyday);
+      expect((await api("PATCH", `/api/bots/${id}`, { name: "Pesto" })).status).toBe(200);
+      const unnamed = await settled(threadId);
+      const rewritten = existsSync(setupAnswersDump) ? await readJsonFileWhenReady<{ prompt: string }>(setupAnswersDump) : null;
+      expect(unnamed.setupChoices).toEqual(rewritten ? everyday : fixed);
+      expect(rewritten?.prompt ?? "").not.toContain("Bot name:");
+    } finally {
+      rmSync(setupAnswersFile, { force: true });
+      if (id) await api("DELETE", `/api/bots/${id}`);
+      await api("PUT", "/api/config", { features: { smartSetupChoices: false } });
+    }
+  });
+
   it("validates approval decisions and reports a request that is no longer open", async () => {
     const { body } = await api("GET", "/api/bots");
     const bot = body.bots[0];
@@ -8505,7 +8546,7 @@ describe("harness HTTP API", () => {
     try {
       const created = await api("POST", "/api/mcp/servers", { name: "docs", url: fake.url, headers: { Authorization: secret } });
       expect(created.status).toBe(201);
-      expect(created.body.servers).toEqual([{ name: "docs", type: "http", url: fake.url, headerKeys: ["Authorization"], enabled: false, apps: true }]);
+      expect(created.body.servers).toEqual([{ name: "docs", type: "http", url: fake.url, headerKeys: ["Authorization"], enabled: false, apps: true, scope: "team" }]);
       expect(JSON.stringify(created.body)).not.toContain(secret);
 
       const tested = await api("POST", "/api/mcp/servers/docs/test");
@@ -8552,7 +8593,7 @@ describe("harness HTTP API", () => {
       const first = await api("POST", "/api/mcp/servers/hf/test");
       expect(first.body).toEqual({ ok: false, auth: "required", error: "This server needs you to sign in." });
       expect((await api("GET", "/api/mcp/servers")).body.servers).toEqual([
-        { name: "hf", type: "http", url: fake.url, headerKeys: [], enabled: false, apps: true, auth: "needs-sign-in" },
+        { name: "hf", type: "http", url: fake.url, headerKeys: [], enabled: false, apps: true, auth: "needs-sign-in", scope: "team" },
       ]);
 
       const started = await api("POST", "/api/mcp/servers/hf/sign-in");
@@ -8617,7 +8658,7 @@ describe("harness HTTP API", () => {
       const created = await api("POST", "/api/mcp/servers", { name: "corp", url, oauth: { clientId: "corp-app", clientSecret: secret, scopes: ["mcp", "offline_access"] } });
       expect(created.status).toBe(201);
       expect(created.body.servers).toEqual([{
-        name: "corp", type: "http", url, headerKeys: [], enabled: false, apps: true,
+        name: "corp", type: "http", url, headerKeys: [], enabled: false, apps: true, scope: "team",
         oauth: { clientId: "corp-app", scopes: ["mcp", "offline_access"], clientSecretConfigured: true, redirectUri: expect.stringMatching(/^http:\/\/127\.0\.0\.1:\d+\/mcp-oauth\/callback$/) },
       }]);
 
