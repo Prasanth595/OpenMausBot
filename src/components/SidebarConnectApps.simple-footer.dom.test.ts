@@ -100,7 +100,7 @@ describe("the Apps entry a dismissal leaves in the shipping Simple footer", () =
     const entry = compact()!;
     expect(entry).not.toBeNull();
     expect(host.querySelector('[data-sidebar-footer="simple"]')!.contains(entry)).toBe(true);
-    expect(entry.getAttribute("aria-label")).toBe("Connect apps");
+    expect(entry.getAttribute("aria-label")).toBe("Apps");
     expect(entry.getAttribute("data-tour")).toBe("nav-apps");
     expect(entry.getAttribute("data-sidebar-nav")).toBe("apps");
     expect(entry.className).toContain("size-9");
@@ -156,7 +156,7 @@ describe("the Apps entry a dismissal leaves in the shipping Simple rail", () => 
     expect(entry).not.toBeNull();
     const foot = host.querySelector("[data-sidebar-rail-footer]")!;
     expect(foot.contains(entry)).toBe(true);
-    expect(entry.getAttribute("aria-label")).toBe("Connect apps");
+    expect(entry.getAttribute("aria-label")).toBe("Apps");
     expect(entry.className).toContain("size-9");
     expect(entry.className).toContain("rounded-full");
     // One row, in the pill's slot: the button is the rail footer's first child, not an extra row below the account.

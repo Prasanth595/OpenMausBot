@@ -135,7 +135,7 @@ function SidebarConnectAppsCompact({ circle, open, onOpen, buttonRef }: {
   onOpen: () => void;
   buttonRef: Ref<HTMLButtonElement>;
 }) {
-  const label = t("sidebar.connectApps");
+  const label = t("apps.title");
   return (
     <span className={circle ? "flex shrink-0 flex-col items-center gap-1" : "flex min-w-0 flex-1 items-center gap-1"}>
       <button
@@ -171,7 +171,12 @@ export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
   }, [dismissed]);
   const openPanel = () => dispatch({ type: "togglePlugins", open: true });
   if (dismissed) return <SidebarConnectAppsCompact circle={circle} open={state.pluginsOpen} onOpen={openPanel} buttonRef={compactRef} />;
-  if (result?.nothingToConnect) return null;
+  // Every app is connected, so the prompt has nothing to ask. Simple mode's rail still needs its only Apps entry.
+  if (result?.nothingToConnect) {
+    return circle
+      ? <SidebarConnectAppsCompact circle open={state.pluginsOpen} onOpen={openPanel} buttonRef={compactRef} />
+      : null;
+  }
   return <SidebarConnectAppsButton
     circle={circle}
     faces={result?.faces ?? appFaces([], new Map())}

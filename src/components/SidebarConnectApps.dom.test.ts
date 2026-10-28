@@ -19,9 +19,10 @@ const fixture = vi.hoisted(() => ({
     { slug: "x", connected: true },
   ] as Array<{ slug: string; connected: boolean }>,
   pluginsOpen: false,
+  dispatch: vi.fn(),
 }));
 
-vi.mock("@/state/store", () => ({ useStore: () => ({ state: { pluginsOpen: fixture.pluginsOpen }, dispatch: vi.fn() }) }));
+vi.mock("@/state/store", () => ({ useStore: () => ({ state: { pluginsOpen: fixture.pluginsOpen }, dispatch: fixture.dispatch }) }));
 vi.mock("./PluginsPanel", () => ({ preloadConnectedApps: () => Promise.resolve(fixture.inventory) }));
 vi.mock("./bot-settings/useBotApps", () => ({ loadAppCatalogue: () => Promise.resolve(fixture.catalogue) }));
 vi.mock("@/lib/native-app-connections", () => ({ loadNativeAppConnections: () => Promise.resolve(fixture.native) }));
@@ -44,6 +45,7 @@ beforeEach(() => {
     { slug: "x", connected: true },
   ];
   fixture.pluginsOpen = false;
+  fixture.dispatch.mockClear();
   Object.defineProperty(window, "localStorage", { configurable: true, value: memoryStorage() });
   restoreConnectAppsPill();
   window.localStorage.clear();
@@ -117,6 +119,24 @@ describe("the Connect apps pill against the catalogue", () => {
     flushSync(() => root.render(createElement(SidebarConnectApps)));
     await settle();
     expect(pill()).toBeNull();
+    // Advanced keeps nothing: the Apps panel has its own entry in the full sidebar.
+    expect(compact()).toBeNull();
+  });
+
+  it("keeps an Apps entry on the Simple rail when every app is already connected", async () => {
+    fixture.inventory = { services: { gmail: { connected: true }, slack: { connected: true } }, authoritative: true };
+    fixture.catalogue = { cards: new Map(), slugs: ["gmail", "slack"], complete: true };
+    flushSync(() => root.render(createElement(SidebarConnectApps, { circle: true })));
+    // Mounting must not pull focus: nothing here asks the person to act.
+    expect(document.activeElement).not.toBe(compact());
+    await settle();
+    expect(pill()).toBeNull();
+    const entry = compact();
+    expect(entry).not.toBeNull();
+    expect(entry!.getAttribute("aria-label")).toBe("Apps");
+    expect(document.activeElement).not.toBe(entry);
+    flushSync(() => entry!.click());
+    expect(fixture.dispatch).toHaveBeenCalledWith({ type: "togglePlugins", open: true });
   });
 
   it("stays when a native app outside the catalogue is not connected", async () => {
@@ -217,7 +237,8 @@ describe("dismissing the Connect apps pill", () => {
     expect(dismiss?.getAttribute("aria-label")).toBe("Hide Connect apps");
     flushSync(() => dismiss!.click());
     expect(pill()).toBeNull();
-    expect(compact()?.getAttribute("aria-label")).toBe("Connect apps");
+    expect(compact()?.getAttribute("aria-label")).toBe("Apps");
+    expect(compact()?.getAttribute("title")).toBe("Apps");
   });
 
   it("keeps the pill settled on a fresh mount while the panel is already open", () => {

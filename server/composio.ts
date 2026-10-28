@@ -948,7 +948,11 @@ export type CatalogStopReason =
   | "cursor-repeated"
   | "http-error"
   | "bad-page"
-  | "limit";
+  | "limit"
+  /** The marketplace was configured but every page came back without a usable toolkit. */
+  | "empty"
+  /** The marketplace was configured but the request itself never answered. */
+  | "unavailable";
 
 export interface CatalogPagination {
   items: number;
@@ -964,6 +968,7 @@ export interface CatalogPagination {
 export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard[]; source: "api" | "curated"; pagination?: CatalogPagination }> {
   const backendKey = projectApiKey(cfg);
   const broker = backendKey ? null : brokerAccess();
+  const configured = Boolean(backendKey || broker);
   const identity = backendKey
     ? backendFingerprint("project-catalog", toolkitBase(), backendKey)
     : broker
@@ -972,7 +977,9 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
   if (identity && toolkitCache?.identity === identity && Date.now() - toolkitCache.at < 10 * 60_000) {
     return { cards: toolkitCache.cards, source: "api", pagination: toolkitCache.pagination };
   }
-  if (backendKey || broker) {
+  /** Why a configured marketplace fell back to the curated list; unused when nothing is configured. */
+  let fallbackReason: CatalogStopReason = "unavailable";
+  if (configured) {
     try {
       const items: any[] = [];
       const seenCursors = new Set<string>();
@@ -1050,31 +1057,44 @@ export async function listToolkits(cfg: AppConfig): Promise<{ cards: ToolkitCard
         const uniqueCards = cards.filter(
           (card, index) => card.slug && cards.findIndex((candidate) => candidate.slug === card.slug) === index,
         );
-        const shortOfReportedTotal = reportedTotalItems !== undefined && uniqueCards.length < reportedTotalItems;
-        const pagingStoppedEarly = lastReportedPage !== undefined
-          && reportedTotalPages !== undefined
-          && lastReportedPage < reportedTotalPages;
-        const stalled = shortOfReportedTotal || pagingStoppedEarly;
-        const complete = (stop === "end" || stop === "total-reached") && !stalled;
-        const pagination: CatalogPagination = { items: uniqueCards.length, stalled, complete };
-        if (reportedTotalItems !== undefined) pagination.totalItems = reportedTotalItems;
-        if (pagination.stalled) pagination.reason = stop;
-        if (pagination.stalled) {
-          console.warn(
-            `[composio] marketplace catalog paging stopped early (${stop}) after ${uniqueCards.length} toolkits`
-              + (reportedTotalItems !== undefined ? ` of ~${reportedTotalItems}` : "")
-              + "; serving a partial marketplace",
-          );
+        if (!uniqueCards.length) {
+          // Every item was unusable, so the walk reading nothing is the same as no answer at all.
+          fallbackReason = "empty";
+        } else {
+          const shortOfReportedTotal = reportedTotalItems !== undefined && uniqueCards.length < reportedTotalItems;
+          const pagingStoppedEarly = lastReportedPage !== undefined
+            && reportedTotalPages !== undefined
+            && lastReportedPage < reportedTotalPages;
+          const stalled = shortOfReportedTotal || pagingStoppedEarly;
+          const complete = (stop === "end" || stop === "total-reached") && !stalled;
+          const pagination: CatalogPagination = { items: uniqueCards.length, stalled, complete };
+          if (reportedTotalItems !== undefined) pagination.totalItems = reportedTotalItems;
+          if (pagination.stalled) pagination.reason = stop;
+          if (pagination.stalled) {
+            console.warn(
+              `[composio] marketplace catalog paging stopped early (${stop}) after ${uniqueCards.length} toolkits`
+                + (reportedTotalItems !== undefined ? ` of ~${reportedTotalItems}` : "")
+                + "; serving a partial marketplace",
+            );
+          }
+          toolkitCache = { at: Date.now(), cards: uniqueCards, identity: identity!, pagination };
+          return { cards: uniqueCards, source: "api", pagination };
         }
-        toolkitCache = { at: Date.now(), cards: uniqueCards, identity: identity!, pagination };
-        return { cards: uniqueCards, source: "api", pagination };
+      } else {
+        fallbackReason = stop === "end" || stop === "total-reached" || stop === "limit" ? "empty" : stop;
       }
-    } catch {}
+    } catch {
+      fallbackReason = "unavailable";
+    }
   }
   return {
     cards: CURATED,
     source: "curated",
-    pagination: { items: CURATED.length, stalled: false, complete: true },
+    // With no configured marketplace the curated list is the whole catalogue. With one, it is only a stand-in for a
+    // marketplace nobody read: coverage stays unknown so the sidebar keeps its Connect apps pill.
+    pagination: configured
+      ? { items: CURATED.length, stalled: true, complete: false, reason: fallbackReason }
+      : { items: CURATED.length, stalled: false, complete: true },
   };
 }
 
