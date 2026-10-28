@@ -67,6 +67,32 @@ test("where Apple speech is unavailable nothing registers and nothing changes", 
   assert.deepEqual([...shortcuts.registered.keys()], []);
 });
 
+test("refresh lets the key go once it is no longer available and takes it again when it is, keeping the saved choice", () => {
+  const shortcuts = fakeShortcuts(); const prefs = memoryPrefs(); let available = true; let registrations = 0;
+  const counting = { ...shortcuts, register: (accelerator, fn) => { registrations += 1; return shortcuts.register(accelerator, fn); } };
+  const talk = createTalkShortcut({ globalShortcut: counting, prefs, available: () => available, onPress: () => {} });
+  talk.set({ key: "ctrl-shift-space" });
+  talk.refresh();
+  assert.equal(registrations, 2, "nothing changed, so the key is not taken again");
+  available = false;
+  talk.refresh();
+  assert.deepEqual([...shortcuts.registered.keys()], []);
+  assert.equal(talk.state().available, false);
+  talk.refresh();
+  assert.equal(registrations, 2);
+  available = true;
+  talk.refresh();
+  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Shift+Space"]);
+  assert.deepEqual(talk.state(), { available: true, enabled: true, key: "ctrl-shift-space", keys: KEYS, taken: false });
+
+  const off = memoryPrefs(); off.setTalkShortcut(false); let offAvailable = false;
+  const quiet = fakeShortcuts();
+  const later = createTalkShortcut({ globalShortcut: quiet, prefs: off, available: () => offAvailable, onPress: () => {} });
+  offAvailable = true;
+  later.refresh();
+  assert.deepEqual([...quiet.registered.keys()], [], "turned off stays off");
+});
+
 test("a shortcut not set up says it is unavailable, in the same shape as a real one", () => {
   assert.deepEqual(TALK_SHORTCUT_UNAVAILABLE, { available: false, enabled: false, key: "ctrl-opt-space", keys: KEYS, taken: false });
   const real = createTalkShortcut({ globalShortcut: fakeShortcuts(), prefs: memoryPrefs(), available: () => false, onPress: () => {} }).state();

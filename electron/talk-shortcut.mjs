@@ -5,7 +5,7 @@ const KEY_LIST = Object.entries(TALK_KEYS).map(([id, { label }]) => ({ id, label
 export const TALK_SHORTCUT_UNAVAILABLE = Object.freeze({ available: false, enabled: false, key: DEFAULT_TALK_KEY, keys: KEY_LIST, taken: false });
 
 export function createTalkShortcut({ globalShortcut, prefs, available, onPress }) {
-  let registered = null, taken = false;
+  let registered = null, taken = false, offered = false;
   const release = () => {
     if (registered) globalShortcut.unregister(registered);
     registered = null;
@@ -13,7 +13,8 @@ export function createTalkShortcut({ globalShortcut, prefs, available, onPress }
   };
   const apply = () => {
     release();
-    if (!available() || !prefs.talkShortcut()) return;
+    offered = available();
+    if (!offered || !prefs.talkShortcut()) return;
     const { accelerator } = TALK_KEYS[prefs.talkKey()];
     if (globalShortcut.register(accelerator, onPress)) registered = accelerator;
     else taken = true;
@@ -28,6 +29,9 @@ export function createTalkShortcut({ globalShortcut, prefs, available, onPress }
       if (change?.key !== undefined) prefs.setTalkKey(change.key);
       apply();
       return state();
+    },
+    refresh() {
+      if (available() !== offered) apply();
     },
     releaseModifiers: () => [...TALK_KEYS[prefs.talkKey()].release],
     close: release,

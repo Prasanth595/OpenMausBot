@@ -64,7 +64,7 @@ function world({ journal = done(), marker = null, state = connected(), power = n
     /** The team's Cloud, answering at TEAM; `gone`: the Admin's team pairing says this person is no longer in it. */
     team: { down: false, signedIn: true, version: "0.1.130", health: 200, gone: false, ...team },
     went: [], calls: [], fetched: [], pairs: 0, teamPairs: [], wakes: 0, waking: [], splash: [], published: [], local: [], reloads: 0, signIns: [],
-    remembered, remembers: [], left: [], dropped: [], redeemed: [],
+    remembered, remembers: [], left: [], dropped: [], redeemed: [], rehomes: [], rehomeThrows: false,
     url, timers: [], intervals: [],
   };
   const timers = {
@@ -125,6 +125,7 @@ function world({ journal = done(), marker = null, state = connected(), power = n
     splash: () => (splash ? { status: (text) => w.splash.push(text) } : null),
     lastInput: () => w.typed,
     publish: (view) => w.published.push(view),
+    rehomed: (home) => { w.rehomes.push(home); if (w.rehomeThrows) throw new Error("listener broke"); },
     now: w.now,
     timers,
   });
@@ -378,6 +379,22 @@ test("My Cloud ending brings the window back to this computer's page", async () 
   await w.home.changed();
   assert.deepEqual(w.local, [true]);
   assert.equal(w.home.cloudOrigin(), null);
+});
+
+test("a change of home is told once as it happens: My Cloud after the move, this computer when My Cloud ends", async () => {
+  const w = world();
+  w.rehomeThrows = true;
+  await w.home.show();
+  await w.home.show();
+  assert.deepEqual(w.rehomes, [{ kind: "cloud", origin: CLOUD }], "a listener that throws never stops the window");
+  assert.equal(w.home.cloudOrigin(), CLOUD);
+  w.state = connected({ hold: { until: 9 } });
+  await w.home.changed();
+  assert.deepEqual(w.rehomes, [{ kind: "cloud", origin: CLOUD }, { kind: "computer" }]);
+  const never = world({ journal: null, state: { status: "signed-out" } });
+  await never.home.show();
+  await never.home.refresh();
+  assert.deepEqual(never.rehomes, [], "no move: home stays this computer");
 });
 
 test("only the main window's main frame counts, at My Cloud's origin for its page and this computer's for the screen", async () => {
