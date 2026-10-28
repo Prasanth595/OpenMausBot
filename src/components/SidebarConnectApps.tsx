@@ -2,6 +2,7 @@ import { Puzzle } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { cn } from "@/lib/cn";
+import { everyAppConnected } from "@/lib/connector-status";
 import { t } from "@/lib/i18n";
 import { useStore } from "@/state/store";
 
@@ -25,22 +26,29 @@ export function appFaces(connected: readonly string[], cards: ReadonlyMap<string
   return [...own, ...POPULAR_APPS.filter((app) => !own.some((card) => card.slug === app.slug))].slice(0, APP_FACES);
 }
 
-function useAppFaces(): AppFace[] {
+function useAppFaces(): { faces: AppFace[]; nothingToConnect: boolean } {
   const { state } = useStore();
-  const [faces, setFaces] = useState<AppFace[]>(() => appFaces([], new Map()));
+  const [result, setResult] = useState<{ faces: AppFace[]; nothingToConnect: boolean }>(
+    () => ({ faces: appFaces([], new Map()), nothingToConnect: false }),
+  );
   useEffect(() => {
     if (state.pluginsOpen) return;
     let alive = true;
-    void preloadConnectedApps()
+    void preloadConnectedApps(true)
       .then(async (inventory) => {
         const connected = Object.entries(inventory.services).filter(([, status]) => status.connected).map(([slug]) => slug).sort();
         const cards = connected.length > 0 ? await loadAppCards() : new Map<string, AppFace>();
-        if (alive) setFaces(appFaces(connected, cards));
+        if (alive) {
+          setResult({
+            faces: appFaces(connected, cards),
+            nothingToConnect: everyAppConnected(inventory.services, inventory.authoritative),
+          });
+        }
       })
       .catch(() => {});
     return () => { alive = false; };
   }, [state.pluginsOpen]);
-  return faces;
+  return result;
 }
 
 function AppFaceIcon({ face, className }: { face: AppFace; className?: string }) {
@@ -62,8 +70,9 @@ const FAN = ["motion-safe:group-hover/apps:-translate-x-[3px] motion-safe:group-
 /** `circle` is the collapsed rail's round button. */
 export function SidebarConnectApps({ circle = false }: { circle?: boolean }) {
   const { state, dispatch } = useStore();
-  const faces = useAppFaces();
+  const { faces, nothingToConnect } = useAppFaces();
   const label = t("sidebar.connectApps");
+  if (nothingToConnect) return null;
   return (
     <button
       type="button"

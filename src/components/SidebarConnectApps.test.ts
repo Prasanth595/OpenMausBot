@@ -7,8 +7,27 @@ import { initialState } from "@/state/store";
 vi.mock("@/state/store", async (original) => ({ ...await original<typeof import("@/state/store")>(), useStore: () => ({ state: initialState, dispatch: vi.fn() }) }));
 
 import { APP_FACES, POPULAR_APPS, SidebarConnectApps, appFaces } from "./SidebarConnectApps";
+import { everyAppConnected } from "@/lib/connector-status";
 
 const card = (slug: string) => ({ slug, label: slug, logo: `https://logos.example/${slug}.png`, domain: null });
+
+describe("when there is nothing left to connect", () => {
+  it("says so only for a complete inventory where every app is connected and settled", () => {
+    expect(everyAppConnected({}, true)).toBe(false);
+    expect(everyAppConnected({ gmail: { connected: true } }, false)).toBe(false);
+    expect(everyAppConnected({ gmail: { connected: true }, slack: { connected: false } }, true)).toBe(false);
+    expect(everyAppConnected({ gmail: { connected: true }, slack: { connected: true, pending: true } }, true)).toBe(false);
+    expect(everyAppConnected({
+      gmail: { connected: true, accounts: [{ id: "a", status: "ACTIVE" }] },
+      slack: { connected: true },
+      notion: { connected: true, accounts: [{ id: "b", status: "EXPIRED" }] },
+    }, true)).toBe(false);
+    expect(everyAppConnected({
+      gmail: { connected: true, accounts: [{ id: "a", status: "ACTIVE" }] },
+      slack: { connected: true },
+    }, true)).toBe(true);
+  });
+});
 
 describe("the Connect apps faces", () => {
   it("shows popular apps until something is connected", () => {

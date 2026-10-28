@@ -761,7 +761,8 @@ export function ModelPicker({
     <button
       {...triggerProps}
       className={cn(
-        "group flex shrink-0 items-center rounded-full text-[13px] leading-[18px] text-ink-secondary transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:cursor-not-allowed disabled:text-ink-tertiary disabled:hover:bg-transparent",
+        "group flex items-center rounded-full text-[13px] leading-[18px] text-ink-secondary transition-colors duration-150 hover:bg-ink/[0.06] hover:text-ink aria-expanded:bg-ink/[0.08] aria-expanded:text-ink disabled:cursor-not-allowed disabled:text-ink-tertiary disabled:hover:bg-transparent",
+        contained ? "min-w-0 max-w-[58%]" : "shrink-0",
         size === "sm" ? "h-7 pl-2 pr-1.5" : "h-8 pl-2.5 pr-2",
       )}
     >
@@ -771,7 +772,7 @@ export function ModelPicker({
           : <span className="size-3.5 rounded-full bg-ink/[0.08]" aria-hidden="true" />}
         {attention && <span data-model-attention className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-warning ring-[1.5px] ring-app" />}
       </span>
-      <span className="max-w-[160px] truncate">{modelName(active, selection.model)}</span>
+      <span className="min-w-0 max-w-[160px] truncate">{modelName(active, selection.model)}</span>
       <ChevronDown size={12} strokeWidth={2} aria-hidden="true" className="ml-1 shrink-0 text-ink-tertiary group-hover:text-ink-secondary" />
     </button>
   );

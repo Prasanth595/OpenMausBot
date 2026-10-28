@@ -25,6 +25,13 @@ export function hasActiveConnection(state: ConnectorStatus | undefined): boolean
   return accounts.length ? accounts.some((account) => ACTIVE.test(account.status)) : state?.connected === true;
 }
 
+/** True only when the inventory is complete and every app on it is connected and settled. */
+export function everyAppConnected(services: Record<string, ConnectorStatus>, authoritative: boolean): boolean {
+  if (!authoritative) return false;
+  const states = Object.values(services);
+  return states.length > 0 && states.every((state) => hasActiveConnection(state) && state.pending !== true);
+}
+
 export function needsReconnect(account: ConnectorAccount): boolean {
   return !ACTIVE.test(account.status) && !UNFINISHED.test(account.status);
 }
