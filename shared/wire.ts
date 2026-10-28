@@ -12,7 +12,7 @@ import type { ReplyStyle } from "./reply-style.ts";
 import type { CredentialTargetId } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
-import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardData } from "./wait-request.ts";
+import type { WebhookRequestCardData } from "./webhook-request.ts"; import type { WaitCardData, WaitLine } from "./wait-request.ts";
 import type { AppEventAttempt, AppTrigger, AppTriggerRequestCardData, AppTriggerService } from "./app-triggers.ts";
 import type { ProfileRequestCardData } from "./profile-request.ts";
 import type { PlaceRow } from "./place-view.ts";
@@ -527,8 +527,7 @@ export interface WireMessage extends HelperIntroField {
    * its words. On a room line this also carries `from`, so the room renders
    * the webhook's bot as the speaker. */
   webhookPost?: boolean;
-  /** The line a wait (wait_until) posted when it ended. */
-  wait?: { id: string; status: "fired" | "expired" | "stopped" };
+  wait?: WaitLine;
   /** user messages sent INTO a running turn (capabilities.queueing). */
   steered?: boolean;
   /** user messages a peer bot handed to this thread's RUNNING turn: peer
@@ -704,7 +703,6 @@ export interface OptionCardData {
   routineRequest?: RoutineRequestCardData;
   /** A webhook trigger a bot made or changed from chat. */
   webhookRequest?: WebhookRequestCardData;
-  /** A wait with a follow-up a bot set up from chat (wait_until); its Cancel stops it. */
   waitRequest?: WaitCardData;
   /** An app-event automation a bot made or changed from chat. */
   appTriggerRequest?: AppTriggerRequestCardData;
