@@ -1,7 +1,7 @@
 // The descriptor and turn token travel in environment variables, never argv or logs.
 import { runMcpBridge } from "./mcp-bridge.ts";
 import { augmentedPath } from "./env-path.ts";
-import { localComputerResultLine } from "./local-computer-guidance.ts";
+import { localComputerCallQuery, localComputerResultLine } from "./local-computer-guidance.ts";
 import { journalUrl } from "./saved-steps/journal-tap.ts";
 
 const {
@@ -34,7 +34,7 @@ runMcpBridge({
   args,
   env: { ...childEnv, PATH: augmentedPath() },
   label: "Local Cua Driver",
-  gate: { url: url!, token: token! },
+  gate: { url: url!, token: token!, describe: localComputerCallQuery },
   ...(journal === "1" ? { journal: { url: journalUrl(url!), token: token! } } : {}),
   rewriteResponse: localComputerResultLine,
 });
