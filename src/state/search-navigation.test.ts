@@ -88,11 +88,84 @@ describe("search-hit navigation replies", () => {
     const roomHit = { ...hit, botId: undefined, groupId: "room", threadId: "room-two" };
     await landOnSearchHit(roomHit, seen, dispatch, true, navigationRevision);
     await landOnSearchHit({ ...roomHit, threadId: "room-one" }, seen, dispatch, true, navigationRevision);
-    await answer("/api/groups/room/tasks/room-one", { group: room });
     await answer("/api/groups/room/tasks/room-two", { group: { ...room, threadId: "room-two", messages: [line("stale")] } });
     expect(shownRoom().threadId).toBe("room-one");
     expect(shownRoom().messages.map((message) => message.id)).toEqual(["first"]);
     expect(seen.focusMessage).toMatchObject({ threadId: "room-one", messageId: "first" });
+    expect(held.some((request) => request.path === "/api/groups/room/tasks/room-one")).toBe(false);
+  });
+
+  it("keeps the loaded room page and hit index when the hit is already there", async () => {
+    const history = Array.from({ length: 1000 }, (_, index) => line(`r${index}`));
+    flushSync(() => dispatch({ type: "groupPatched", group: { ...room, messages: history.slice(800), hasMore: true } }));
+    await landOnSearchHit({ ...hit, botId: undefined, groupId: "room", threadId: "room-one", messageId: "r950" }, seen, dispatch, true, navigationRevision);
+    const path = "/api/groups/room/tasks/room-one";
+    if (held.some((request) => request.path === path)) await answer(path, { group: { ...room, messages: history, hasMore: false } });
+    await settle();
+    expect(shownRoom().messages).toHaveLength(200);
+    expect(shownRoom().messages.findIndex((message) => message.id === "r950")).toBe(150);
+    expect(shownRoom().hasMore).toBe(true);
+    expect(seen.focusMessage).toMatchObject({ threadId: "room-one", messageId: "r950" });
+  });
+
+  it("focuses a bot-to-bot room hit without trying to switch its canonical task", async () => {
+    flushSync(() => dispatch({ type: "groupPatched", group: { ...room, dm: true } }));
+    await landOnSearchHit({ ...hit, botId: undefined, groupId: "room", threadId: "room-one" }, seen, dispatch, true, navigationRevision);
+    const request = held.find((candidate) => candidate.path.startsWith("/api/groups/room/tasks/"));
+    request?.resolve(new Response(JSON.stringify({ error: "bot-to-bot channels keep one canonical conversation" }), { status: 400 }));
+    await settle();
+    expect(seen.error).toBeNull();
+    expect(request).toBeUndefined();
+    expect(seen.focusMessage).toMatchObject({ threadId: "room-one", messageId: "first" });
+  });
+
+  it.each([false, true])("keeps a manual branch choice after a delayed search reply (manual reply settled: %s)", async (settled) => {
+    const landing = landOnSearchHit({ ...hit, onActivePath: false }, seen, dispatch, true, navigationRevision);
+    await vi.waitFor(() => expect(held.some((request) => request.path === "/api/bots/scout/active-branch")).toBe(true));
+    flushSync(() => dispatch({ type: "switchBranch", botId: "scout", messageId: "second" }));
+    if (settled) await answer("/api/bots/scout/active-branch", { activeLeafId: "second" }, "second");
+    await answer("/api/bots/scout/active-branch", { activeLeafId: "first" }, "first");
+    await landing;
+    expect(shownBot().activeLeafId).toBe("second");
+    expect(seen.focusMessage).toBeNull();
+    if (!settled) await answer("/api/bots/scout/active-branch", { activeLeafId: "second" }, "second");
+    expect(shownBot().activeLeafId).toBe("second");
+  });
+
+  it.each([
+    { type: "toggleComputer", botId: "scribe", open: true },
+    { type: "toggleSettings", botId: "scribe", open: true },
+    { type: "openDataResult", botId: "scribe", cardId: "result" },
+    { type: "openSignIn", botId: "scribe", messageId: "sign-in", url: "https://fixture.test", site: "Fixture", place: "browser" },
+  ] satisfies Action[])("keeps newer $type navigation while a search jump with threads hidden is pending", async (action) => {
+    flushSync(() => dispatch({ type: "botPatched", bot: { ...bot, id: "scribe", name: "Scribe", threadId: "scribe-one" } }));
+    const landing = landOnSearchHit({ ...hit, threadId: "two", onActivePath: false }, seen, dispatch, false, navigationRevision);
+    await vi.waitFor(() => expect(held.some((request) => request.path === "/api/bots/scout/active-branch")).toBe(true));
+    flushSync(() => dispatch(action));
+    expect(seen.selectedId).toBe("scribe");
+    await answer("/api/bots/scout/active-branch", { activeLeafId: "first" }, "first");
+    await landing;
+    expect(seen.selectedId).toBe("scribe");
+    expect(seen.focusMessage).toBeNull();
+    expect(held.some((request) => request.path.startsWith("/api/bots/scout/tasks/"))).toBe(false);
+  });
+
+  it.each([
+    { type: "hydrate", bots: [bot], groups: [room], computerControl: {} },
+    { type: "botPatched", bot: { ...bot, title: "Updated" } },
+    { type: "groupPatched", group: { id: "room", name: "Updated room" } },
+    { type: "messageAdded", threadId: "one", message: line("incoming") },
+    { type: "threadActive", threadId: "one", activeLeafId: "incoming" },
+    { type: "connected", value: true },
+  ] satisfies Action[])("continues a pending search jump after a background $type update", async (action) => {
+    const landing = landOnSearchHit({ ...hit, onActivePath: false }, seen, dispatch, true, navigationRevision);
+    await vi.waitFor(() => expect(held.some((request) => request.path === "/api/bots/scout/active-branch")).toBe(true));
+    flushSync(() => dispatch(action));
+    await answer("/api/bots/scout/active-branch", { activeLeafId: "first" }, "first");
+    await landing;
+    await settle();
+    expect(shownBot().activeLeafId).toBe("first");
+    expect(seen.focusMessage).toMatchObject({ threadId: "one", messageId: "first" });
   });
 
   it("keeps the newer hit's active leaf when an earlier branch reply arrives last", async () => {

@@ -117,3 +117,13 @@ export function openThread(
   dispatch({ type: "notice", notice: { kind: "thread-gone", botName: bot?.name ?? null } });
   return false;
 }
+
+export function advanceNavigation(
+  action: Action,
+  selection: { current: number },
+  presence: { current: number },
+): void {
+  const selects = ["select", "newTask", "switchTask", "switchBranch", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles"].includes(action.type);
+  if (selects) selection.current++;
+  if (selects || ["toggleComputer", "toggleSettings", "openDataResult", "openSignIn"].includes(action.type)) presence.current++;
+}

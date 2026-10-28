@@ -46,7 +46,7 @@ export async function landOnSearchHit(
   const choice = ++latestChoice;
   const switchAlone = bot && bot.threadId !== hit.threadId && !threadsShown ? bot : undefined;
   if (!switchAlone) dispatch({ type: "select", id: ownerId });
-  if (group) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: hit.threadId, whole: true });
+  if (group && !group.dm) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: hit.threadId, whole: true });
   const revision = navigationRevision.current;
   const current = () => choice === latestChoice && navigationRevision.current === revision;
   if (bot && bot.threadId !== hit.threadId && !switchAlone) {

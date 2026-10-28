@@ -19,10 +19,11 @@ import { DATA_ROUTES, type DataSheet, type DataTable } from "../../shared/data-s
 import type { NotificationLogEntry } from "../../shared/notification";
 import { isNotificationFeedAction, reduceNotificationFeed, type NotificationFeedAction } from "./notification-feed";
 import { bumpThreadUpdatedAt, mergeTaskStamps, rewindThreadUpdatedAt } from "./thread-stamps";
-import { botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
+import { advanceNavigation, botOpensTo, openBot, openNotificationTarget, visibleNotificationThread } from "./thread-navigation";
 import { patchGroupTask } from "./thread-edits";
 import { keepSendsInFlight, optimisticMessageId, optimisticUserMessage, parentOnConfirmedSends } from "./optimistic-send";
 import { patchedGroups, roomAnswers, snapshotPatch } from "./room-frames";
+import { switchRoomTask } from "./room-task-navigation";
 import { savedStateAction, type SavedOwner, type SavedSnapshot } from "./saved-state";
 export { awayFromMainThread, botOpensTo, openBot, openBotThread, openNotificationTarget, openThread, visibleNotificationThread, type ThreadTarget } from "./thread-navigation";
 import type { TurnDigest } from "../../shared/digest";
@@ -2194,7 +2195,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     tasks: bot.tasks?.map((task) => ({ ...task, ...taskPatchFields(taskWrites.get(task.threadId)?.patch ?? {}) })),
   });
   const [state, rawDispatch] = useReducer(reducer, initialState, restoreBotSettingsSection);
-  const stateRef = useRef(state), selectionRevision = useRef(0);
+  const stateRef = useRef(state), selectionRevision = useRef(0), presenceRevision = useRef(0);
   stateRef.current = state;
   const showThreads = useShowThreads();
   const showThreadsRef = useRef(showThreads);
@@ -2342,7 +2343,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     };
 
     const wrapped: React.Dispatch<Action> = (action) => {
-      if (["select", "newTask", "switchTask", "newGroupTask", "switchGroupTask", "showChat", "showRoutines", "showTeamMap", "showFiles"].includes(action.type)) selectionRevision.current++;
+      advanceNavigation(action, selectionRevision, presenceRevision);
       // Pin before any await or optimistic state change.
       action = pinBotThreadAction(action, stateRef.current.bots);
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };
@@ -2969,9 +2970,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             .catch(showError);
           break;
         case "switchGroupTask":
-          api<{ group?: Partial<Group> & { id: string } }>(`/api/groups/${action.groupId}/tasks/${action.threadId}${action.whole ? "" : `?messages=${MESSAGE_PAGE_SIZE}`}`, { method: "POST" })
-            .then(roomAnswer(action.groupId, true))
-            .catch(showError);
+          void switchRoomTask(action, stateRef.current.groups, roomAnswer(action.groupId, true)).catch(showError);
           break;
         case "renameGroupTask":
           api(`/api/groups/${action.groupId}/tasks/${action.threadId}`, {
@@ -3431,7 +3430,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     [botPatchQueue],
   );
   const value = useMemo(
-    () => ({ state, dispatch, navigationRevision: selectionRevision, flushBotPatches, refreshInstances, refreshModels }),
+    () => ({ state, dispatch, navigationRevision: presenceRevision, flushBotPatches, refreshInstances, refreshModels }),
     [state, dispatch, flushBotPatches, refreshInstances, refreshModels],
   );
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
