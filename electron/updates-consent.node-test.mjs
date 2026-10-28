@@ -221,6 +221,37 @@ test("signed out, the same email opts in again: a failed submission keeps the ac
   });
 });
 
+test("signed out, an overlapping same-email opt-in keeps the active receipt when the final submission fails", async t => {
+  for (const email of [" Person@Example.TEST ", undefined]) await t.test(email ?? "saved email", async t => {
+    const f = await world(t);
+    await f.consent.choose({ status: "opted_in", email: "person@example.test" });
+    const repeated = Promise.withResolvers(), final = Promise.withResolvers();
+    t.after(() => { repeated.resolve(); final.resolve(); });
+    f.gate = repeated.promise;
+    const sending = f.consent.choose({ status: "opted_in", email: "person@example.test" });
+    await until(() => f.requests.length === 2);
+    f.now++;
+    const changing = f.consent.choose({ status: "opted_in", email });
+    await until(() => f.saved.updatesConsent.at === f.now);
+    f.gate = final.promise;
+    repeated.resolve();
+    await until(() => f.requests.length === 3);
+    f.failOptIns = 1;
+    f.gate = null;
+    final.resolve();
+    await Promise.all([sending, changing]);
+    assert.equal(f.emails.get("person@example.test"), "opted_in");
+    assert.deepEqual(f.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now,
+      email: "person@example.test", receipt: RECEIPT, pending: true });
+    assert.deepEqual(f.requests.map(request => request.body.status), ["opted_in", "opted_in", "opted_in"]);
+    f.launch();
+    await f.consent.sync();
+    assert.equal(f.saved.updatesConsent.pending, undefined);
+    await f.consent.choose({ status: "withdrawn" });
+    assert.equal(f.emails.get("person@example.test"), "withdrawn");
+  });
+});
+
 test("signed out, opting back in to the same email retries a pending withdrawal before subscribing", async t => {
   const f = await world(t);
   await f.consent.choose({ status: "opted_in", email: "person@example.test" });

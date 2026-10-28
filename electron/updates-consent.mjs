@@ -68,7 +68,7 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
       if (sameAnswer()) return save({ ...local, receipt, pending: false });
       const latest = prefs.updatesConsent();
       if (!latest) return;
-      if (!latest.account && latest.status !== "opted_in" && latest.email === local.email && !latest.receipt) save({ ...latest, receipt });
+      if (!latest.account && latest.email === local.email && (latest.status === "opted_in" || !latest.receipt)) save({ ...latest, receipt });
       else save(withReplacedReceipts(latest, [receipt]));
     } else if (local.status !== "opted_in" && local.receipt) {
       await client().withdrawUpdatesConsent({ status: local.status, receipt: local.receipt });
