@@ -79,10 +79,13 @@ describe("a bot's threads in the chat header", () => {
     expect(host.querySelector('[role="tablist"]')!.getAttribute("aria-label")).toBe("Conversations");
   });
 
-  it("keeps the archived thread that is open in the strip, so the tab for what is on screen is there", () => {
+  it("hides the strip when the open thread is archived or a routine run, so no tab is selected by a missing id", () => {
     render(bot({ threadId: "old" }));
-    expect(tabs().map((element) => element.dataset.threadTab)).toContain("old");
-    expect(tab("old").getAttribute("aria-selected")).toBe("true");
+    expect(host.querySelector("[data-chathead-tabs]")).toBeNull();
+    expect(tabs()).toHaveLength(0);
+    render(bot({ threadId: "run" }));
+    expect(host.querySelector("[data-chathead-tabs]")).toBeNull();
+    expect(tabs()).toHaveLength(0);
   });
 
   it("draws nothing for a bot with one conversation", () => {

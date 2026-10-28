@@ -835,8 +835,10 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
   const advanced = useAdvancedMode();
   const phone = useMediaQuery(PHONE_LAYOUT);
   const phoneMenu = phone && !remoteClient;
-  // The transcript only becomes a tabpanel when the strip is actually rendered, so it never points at an absent tab.
+  const [threadTabWidth, setThreadTabWidth] = useState(0);
   const threadTabsVisible = showThreads && !phone && threadTabsShown(profile);
+  // A strip hidden by the header's container query has zero width; only a measured, visible strip may label the panel.
+  const threadPanelVisible = threadTabsVisible && threadTabWidth > 0;
   const simpleHead = !advanced && !remoteClient;
   const canWrite = useCanWriteIn(bot.threadId);
 
@@ -1102,7 +1104,7 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
               {t("chat.backToMainThread")}
             </button>
           )}
-          {threadTabsVisible && <ThreadTabs bot={profile} dispatch={dispatch} />}
+          {threadTabsVisible && <ThreadTabs bot={profile} dispatch={dispatch} onMeasuredWidthChange={setThreadTabWidth} />}
         </div>
         <div
           data-chathead-controls
@@ -1172,9 +1174,9 @@ export function ChatView({ bot: profile }: { bot: Bot }) {
 
       <div
         ref={scrollRef}
-        role={threadTabsVisible ? "tabpanel" : undefined}
-        id={threadTabsVisible ? CHAT_THREAD_PANEL_ID : undefined}
-        aria-labelledby={threadTabsVisible ? threadTabId(bot.threadId) : undefined}
+        role={threadPanelVisible ? "tabpanel" : undefined}
+        id={threadPanelVisible ? CHAT_THREAD_PANEL_ID : undefined}
+        aria-labelledby={threadPanelVisible ? threadTabId(bot.threadId) : undefined}
         className="glass-scroller h-full overflow-x-hidden overflow-y-auto overscroll-y-contain px-5 [overflow-anchor:none]"
         // Simple mode's composer sits on plain canvas, so a row scrolled into view stops clear of it.
         style={advanced ? undefined : { scrollPaddingBottom: composerDock.pad }}

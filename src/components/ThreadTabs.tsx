@@ -28,9 +28,13 @@ const displayTitle = (task: TabTask) => localizedTaskTitle(task.title || t("task
 export const CHAT_THREAD_PANEL_ID = "chat-thread-panel";
 export const threadTabId = (threadId: string) => `thread-tab-${threadId}`;
 
-/** True only when the strip renders: a second listed thread, with the same filter the tab list uses. */
+/** True only when the strip renders: the open thread qualifies for a tab, and at least two tasks do. A routine run or
+ *  archived open thread is filtered out of the strip, so a panel must not be labelled by a tab that cannot exist. */
 export function threadTabsShown(bot: Bot): boolean {
-  return (bot.tasks ?? []).filter((task) => !task.routineRunId && (!isArchived(task) || task.threadId === bot.threadId)).length >= 2;
+  const tasks = bot.tasks ?? [];
+  const active = tasks.find((task) => task.threadId === bot.threadId);
+  if (!active || active.routineRunId || isArchived(active)) return false;
+  return tasks.filter((task) => !task.routineRunId && !isArchived(task)).length >= 2;
 }
 
 /** What a tab says besides its name: a spinner for a running turn or a dot for an unread reply, in words for a reader. */
@@ -228,7 +232,12 @@ function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, 
  * A bot's threads as tabs beside its name in the chat header, opposite the model picker. The bot panel's Conversations
  * card is the same list with a preview; this one is the quick switch for a bot with several threads.
  */
-export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Action> }) {
+export function ThreadTabs({ bot, dispatch, onMeasuredWidthChange }: {
+  bot: Bot;
+  dispatch: Dispatch<Action>;
+  /** Reports the tablist's current client width, including 0 while a container query hides it. */
+  onMeasuredWidthChange?: (width: number) => void;
+}) {
   const { state } = useStore();
   const generatedTitles = llmThreadTitlesEnabled(state.config);
   const actions = useMemo(() => threadRowActions(bot.id, dispatch, generatedTitles), [bot.id, dispatch, generatedTitles]);
@@ -269,6 +278,7 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
   const measure = useCallback(() => {
     const list = listRef.current;
     if (!list) return;
+    onMeasuredWidthChange?.(list.clientWidth);
     const rtl = typeof getComputedStyle === "function" && getComputedStyle(list).direction === "rtl";
     const max = Math.max(0, list.scrollWidth - list.clientWidth);
     const left = list.scrollLeft;
@@ -277,7 +287,7 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
     const next = { overflow: max > 1, start: offset > 1, end: offset < max - 1, rtl };
     setEdges((previous) => previous.overflow === next.overflow && previous.start === next.start
       && previous.end === next.end && previous.rtl === next.rtl ? previous : next);
-  }, []);
+  }, [onMeasuredWidthChange]);
 
   // Every hook has to run before the early return, or a strip that gains its second thread breaks hook order.
   const register = useCallback((threadId: string, element: HTMLButtonElement | null) => {

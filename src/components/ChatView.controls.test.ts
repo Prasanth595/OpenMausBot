@@ -742,14 +742,7 @@ describe("thread tabs in the chat header", () => {
     expect(selected).toContain('aria-controls="chat-thread-panel"');
     expect(launch).toContain('id="thread-tab-launch"');
     expect(launch).toContain('aria-controls="chat-thread-panel"');
-    const panel = markup.match(/<div[^>]*role="tabpanel"[^>]*>/)?.[0] ?? "";
-    expect(panel).toContain('id="chat-thread-panel"');
-    expect(panel).toContain('aria-labelledby="thread-tab-selected"');
-    const panelStart = markup.indexOf(panel);
-    expect(panelStart).toBeGreaterThan(-1);
-    expect(markup.indexOf('role="log"')).toBeGreaterThan(panelStart);
-    // The tab menu belongs to the header, never inside the transcript panel it controls.
-    expect(markup.slice(panelStart)).not.toContain('aria-label="Actions for');
+    // The tabpanel relationship needs a measured strip, so it is asserted in ChatView.thread-panel.dom.test.ts.
     const controls = markup.slice(markup.indexOf("data-chathead-controls"));
     expect(controls).toContain("data-test-model-control");
     expect(controls).not.toContain("data-chathead-tabs");
