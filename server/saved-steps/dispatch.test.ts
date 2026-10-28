@@ -22,7 +22,7 @@ const TARGET: Pick<RecipeStep, "app" | "window" | "element"> = {
   element: { role: "AXTextArea", label: "Document", path: ["AXScrollArea:"] },
 };
 const RECIPE: Recipe = {
-  id: "r1", key: requestKey(REQUEST), request: REQUEST, reply: "Typed hello world into TextEdit.", createdAt: 1_000, lastUsedAt: 1_000,
+  id: "r1", key: requestKey(REQUEST), request: REQUEST, createdAt: 1_000, lastUsedAt: 1_000,
   steps: [{ tool: "click", args: {}, ...TARGET }, { tool: "set_value", args: { value: "hello world" }, ...TARGET }],
 };
 const LABEL = '"Document" in TextEdit';
@@ -215,7 +215,7 @@ describe("SavedStepsDispatch.sendTurn", () => {
     });
     expect(events.filter((e) => e.type === "request.opened")[1]).toMatchObject({ tool: "mcp__computer__set_value", summary: `set_value "hello world" on ${LABEL}` });
     expect(events.find((e) => e.type === "request.resolved")).toMatchObject({ behavior: "allow", source: "user", approvalScope: "local-computer" });
-    expect(events.at(-2)).toMatchObject({ itemType: "assistant_text", text: RECIPE.reply });
+    expect(events.at(-2)).toMatchObject({ itemType: "assistant_text", text: "Done — repeated 2 saved steps: clicked “Document”, set “Document” to “hello world”." });
     expect(events.at(-1)).toMatchObject({ type: "turn.completed", ok: true, stopReason: "end_turn", provider: "claudeAgent", providerInstanceId: "claude" });
     expect(dispatch.replayed("t1", turnId)).toBe(RECIPE.id);
     expect(dispatch.replayed("t1", "another-turn")).toBeUndefined();

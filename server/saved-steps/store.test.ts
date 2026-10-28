@@ -9,7 +9,6 @@ const recipe = (id: string, key: string, lastUsedAt = 1_000): Recipe => ({
   id,
   key,
   request: key,
-  reply: "Done.",
   steps: [{ tool: "launch_app", args: { name: "Notes" }, app: { name: "Notes" } }],
   createdAt: 1_000,
   lastUsedAt,

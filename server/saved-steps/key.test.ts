@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { exactRequest, firstSentence, hasMomentWords, inRequest, requestKey } from "./key.ts";
+import { exactRequest, hasMomentWords, inRequest, requestKey } from "./key.ts";
 
 describe("requestKey", () => {
   it("drops case, punctuation and filler words", () => {
@@ -52,10 +52,4 @@ it("matches typed text word for word, ignoring case", () => {
   expect(inRequest("a.b", "type a.b now")).toBe(true);
   expect(inRequest("hello world", "type hello, world")).toBe(false);
   expect(inRequest("  ", "anything")).toBe(false);
-});
-
-it("keeps the first sentence of a reply", () => {
-  expect(firstSentence("Typed hello world into TextEdit. Nothing else changed.")).toBe("Typed hello world into TextEdit.");
-  expect(firstSentence("   ")).toBeNull();
-  expect(firstSentence("x ".repeat(400))!.length).toBeLessThanOrEqual(281);
 });

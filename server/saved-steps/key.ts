@@ -3,7 +3,6 @@ const MOMENT_WORDS = new Set([
   "this", "that", "it", "here", "there", "these", "those", "them",
   "latest", "newest", "oldest", "last", "first", "top", "next", "previous", "recent", "today", "tonight", "tomorrow", "yesterday", "current", "unread",
 ]);
-const MAX_SENTENCE = 280;
 
 const wordPattern = (phrase: string, flags: string) =>
   new RegExp(`(?<![\\p{L}\\p{N}])${phrase}(?![\\p{L}\\p{N}])`, flags);
@@ -37,15 +36,4 @@ export function inRequest(fragment: string, request: string): boolean {
   const trimmed = fragment.trim();
   if (!trimmed) return false;
   return wordPattern(trimmed.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "iu").test(request);
-}
-
-export function firstSentence(text: string): string | null {
-  const trimmed = text.trim();
-  if (!/[\p{L}\p{N}]/u.test(trimmed)) return null;
-  const match = /^[\s\S]*?[.!?](?=\s|$)/.exec(trimmed);
-  const sentence = match ? match[0] : trimmed;
-  if (sentence.length <= MAX_SENTENCE) return sentence;
-  const cut = sentence.slice(0, MAX_SENTENCE);
-  const space = cut.lastIndexOf(" ");
-  return `${(space > 0 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }

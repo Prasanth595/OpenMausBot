@@ -1,7 +1,7 @@
 import type { Message } from "../store.ts";
 import { elementPath, type SlimStructured, type WireElement } from "./driver-wire.ts";
 import type { RecordedCall, RequestJournal } from "./journal.ts";
-import { exactRequest, firstSentence, hasMomentWords, inRequest, requestKey } from "./key.ts";
+import { exactRequest, hasMomentWords, inRequest, requestKey } from "./key.ts";
 import { matchElement } from "./resolve.ts";
 
 export type ActionTool = "click" | "double_click" | "right_click" | "type_text" | "set_value" | "press_key" | "scroll" | "launch_app" | "bring_to_front" | "hotkey";
@@ -14,11 +14,11 @@ export const OBSERVATION_TOOLS: ReadonlySet<string> = new Set([
 export interface AppIdentity { bundleId?: string; name?: string }
 export interface ElementIdentity { role: string; label: string; path: string[] }
 export interface RecipeStep { tool: ActionTool; args: Record<string, unknown>; app?: AppIdentity; window?: { title: string }; element?: ElementIdentity }
-export interface Recipe { id: string; key: string; request: string; reply: string; steps: RecipeStep[]; createdAt: number; lastUsedAt: number }
+export interface Recipe { id: string; key: string; request: string; steps: RecipeStep[]; createdAt: number; lastUsedAt: number }
 
 export type Refusal =
   | "moment-words" | "several-turns" | "incomplete-journal" | "denied" | "tool-error" | "unknown-tool" | "pixel-or-drag" | "extra-arguments"
-  | "unknown-target" | "stale-element" | "unlabelled-element" | "ambiguous-element" | "typed-text-not-in-request" | "url-not-in-request" | "no-steps" | "too-many-steps" | "no-reply"
+  | "unknown-target" | "stale-element" | "unlabelled-element" | "ambiguous-element" | "typed-text-not-in-request" | "url-not-in-request" | "no-steps" | "too-many-steps"
   | "typing-appends" | "toggle-element";
 
 const MAX_STEPS = 40;
@@ -118,15 +118,13 @@ const fillMissing = (known: AppIdentity | undefined, next: AppIdentity): AppIden
 
 const numberArg = (args: Record<string, unknown>, key: string): number | undefined => (typeof args[key] === "number" ? args[key] : undefined);
 
-export function buildRecipe(input: { request: string; reply: string; journal: RequestJournal; id: string; now: number }): { ok: true; recipe: Recipe } | { ok: false; reason: Refusal } {
+export function buildRecipe(input: { request: string; journal: RequestJournal; id: string; now: number }): { ok: true; recipe: Recipe } | { ok: false; reason: Refusal } {
   const { request, journal } = input;
   const refuse = (reason: Refusal) => ({ ok: false as const, reason });
   if (hasMomentWords(request)) return refuse("moment-words");
   if (!journal.complete) return refuse("incomplete-journal");
   if (journal.tainted) return refuse("denied");
   if (new Set(journal.calls.map((call) => call.generation)).size > 1) return refuse("several-turns");
-  const reply = firstSentence(input.reply);
-  if (reply === null) return refuse("no-reply");
 
   const appsByPid = new Map<number, AppIdentity>();
   const windowsById = new Map<number, string>();
@@ -252,7 +250,7 @@ export function buildRecipe(input: { request: string; reply: string; journal: Re
   if (steps.length > MAX_STEPS) return refuse("too-many-steps");
   const outside = wordsOutsideRequest(steps, request);
   if (outside) return refuse(outside);
-  return { ok: true, recipe: { id: input.id, key: requestKey(request), request: exactRequest(request), reply, steps, createdAt: input.now, lastUsedAt: input.now } };
+  return { ok: true, recipe: { id: input.id, key: requestKey(request), request: exactRequest(request), steps, createdAt: input.now, lastUsedAt: input.now } };
 }
 
 function stripEmpty(app: AppIdentity): AppIdentity {

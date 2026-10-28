@@ -30,7 +30,6 @@ const recipeSchema = z.object({
   id: z.string().min(1),
   key: z.string().min(1),
   request: z.string(),
-  reply: z.string(),
   steps: z.array(step.refine((entry) => argsFitTool(entry.tool, entry.args) && windowScoped(entry.tool, entry.args) && targetsFitTool(entry))).min(1).max(40),
   createdAt: z.number().finite(),
   lastUsedAt: z.number().finite(),

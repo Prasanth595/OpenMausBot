@@ -4,7 +4,7 @@ import { retriedTurnEvent, type RetriedTurn } from "../quick-model-fallback.ts";
 import type { Message } from "../store.ts";
 import type { LocalComputerSpec } from "./computer-client.ts";
 import { requestKey } from "./key.ts";
-import { declinedReply, fallbackNote, runSteps, type ReplayOutcome, type ReplayTurn } from "./replay.ts";
+import { declinedReply, fallbackNote, replayedReply, runSteps, type ReplayOutcome, type ReplayTurn } from "./replay.ts";
 import type { ComputerCaller } from "./resolve.ts";
 import { personTextRequest, recipeFitsRequest, stepLabel, type Recipe } from "./rules.ts";
 import type { RecipeStore } from "./store.ts";
@@ -214,7 +214,7 @@ export class SavedStepsDispatch {
       this.answered.delete(run.threadId);
       this.answered.set(run.threadId, { turnId: run.turnId, recipeId: run.recipe.id });
       while (this.answered.size > REMEMBERED_REPLIES) this.answered.delete(this.answered.keys().next().value!);
-      this.reply(run, run.recipe.reply);
+      this.reply(run, replayedReply(run.recipe));
       this.emit(run, { type: "turn.completed", ok: true, stopReason: "end_turn" });
     } else if (outcome.kind === "declined") {
       this.reply(run, declinedReply(outcome));

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RuntimeEvent } from "../contracts.ts";
 import { completeWindowState, windowState } from "../testing/saved-steps-fixtures.ts";
-import { declinedReply, fallbackNote, runSteps, type ReplayTurn, type StepApproval } from "./replay.ts";
+import { declinedReply, fallbackNote, replayedReply, runSteps, type ReplayTurn, type StepApproval } from "./replay.ts";
 import type { CallOutcome, ComputerCaller } from "./resolve.ts";
 import type { Recipe, RecipeStep } from "./rules.ts";
 
@@ -11,7 +11,7 @@ const TARGET: Pick<RecipeStep, "app" | "window" | "element"> = {
   element: { role: "AXTextArea", label: "Document", path: ["AXScrollArea:"] },
 };
 const RECIPE: Recipe = {
-  id: "r1", key: "open textedit and type hello world", request: "Open TextEdit and type hello world", reply: "Typed hello world into TextEdit.",
+  id: "r1", key: "open textedit and type hello world", request: "Open TextEdit and type hello world",
   createdAt: 1_000, lastUsedAt: 1_000, steps: [{ tool: "click", args: {}, ...TARGET }, { tool: "set_value", args: { value: "hello world" }, ...TARGET }],
 };
 const TURN: ReplayTurn = { threadId: "t1", turnId: "turn-1", provider: "claudeAgent", providerInstanceId: "claude" };
@@ -165,6 +165,34 @@ describe("replay wording", () => {
   it("ends the note with one period whatever the error ends with", () => {
     const note = fallbackNote({ kind: "failed", done: 2, total: 3, tool: "click", label: "Save", error: "Not performed . . \n" });
     expect(note).toBe("A saved run of this request did steps 1–2 of 3 and failed at step 3 (click on Save): Not performed. The screen may already be partly changed; look before acting.");
+  });
+
+  it("says what the steps did, never what an earlier run saw", () => {
+    const mail = { bundleId: "com.apple.mail", name: "Mail" };
+    const inbox = { role: "AXRow", label: "Inbox", path: [] };
+    expect(replayedReply({ steps: [{ tool: "launch_app", args: { name: "Mail" } }, { tool: "click", args: {}, app: mail, window: { title: "Inbox" }, element: inbox }] }))
+      .toBe("Done — repeated 2 saved steps: opened Mail, clicked “Inbox”.");
+    expect(replayedReply({ steps: [{ tool: "bring_to_front", args: {}, app: mail }] })).toBe("Done — repeated 1 saved step: brought Mail to the front.");
+  });
+
+  it("names each kind of step by its saved target", () => {
+    const app = { name: "TextEdit" };
+    const element = { role: "AXTextArea", label: "Document", path: [] };
+    expect(replayedReply({ steps: [
+      { tool: "double_click", args: {}, app, window: { title: "Untitled" }, element },
+      { tool: "right_click", args: {}, app, window: { title: "Untitled" }, element },
+      { tool: "scroll", args: { direction: "down" }, app, window: { title: "Untitled" }, element },
+      { tool: "set_value", args: { value: "hello world" }, app, window: { title: "Untitled" }, element },
+      { tool: "hotkey", args: { keys: ["cmd", "s"] }, app, window: { title: "Untitled" } },
+    ] })).toBe("Done — repeated 5 saved steps: double-clicked “Document”, right-clicked “Document”, scrolled “Document”, "
+      + "set “Document” to “hello world”, pressed cmd+s in “Untitled”.");
+  });
+
+  it("lists five steps, then says how many more", () => {
+    const step = (label: string) => ({ tool: "click" as const, args: {}, app: { name: "Notes" }, window: { title: "Notes" }, element: { role: "AXButton", label, path: [] } });
+    expect(replayedReply({ steps: ["a", "b", "c", "d", "e", "f", "g"].map(step) }))
+      .toBe("Done — repeated 7 saved steps: clicked “a”, clicked “b”, clicked “c”, clicked “d”, clicked “e”, and 2 more.");
+    expect(replayedReply({ steps: [step("x".repeat(80))] })).toBe(`Done — repeated 1 saved step: clicked “${"x".repeat(59)}…”.`);
   });
 
   it("says what was declined", () => expect(declinedReply({ kind: "declined", tool: "set_value", label: '"Document" in TextEdit' }))

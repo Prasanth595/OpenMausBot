@@ -11,6 +11,8 @@ export type ReplayOutcome =
   | { kind: "stopped" };
 
 const STOPPED: ReplayOutcome = { kind: "stopped" };
+const LISTED_STEPS = 5;
+const LABEL_CHARS = 60;
 const engineToolName = (tool: string) => `mcp__computer__${tool}`;
 const stepSummary = (tool: string, label: string) => `${tool} on ${label}`;
 const text = (value: unknown) => (typeof value === "string" ? value : undefined);
@@ -59,6 +61,33 @@ export async function runSteps(
     if (!result.ok) return failed(result);
   }
   return { kind: "done" };
+}
+
+const quoted = (label: string) => `“${label.length > LABEL_CHARS ? `${label.slice(0, LABEL_CHARS - 1).trimEnd()}…` : label}”`;
+
+function stepDone(step: RecipeStep): string {
+  const { tool, args, element, window } = step;
+  const target = element ? quoted(element.label) : stepLabel(step);
+  const app = step.app?.name ?? step.app?.bundleId ?? "the app";
+  switch (tool) {
+    case "launch_app": return `opened ${stepLabel(step)}`;
+    case "bring_to_front": return `brought ${app} to the front`;
+    case "click": return `clicked ${target}`;
+    case "double_click": return `double-clicked ${target}`;
+    case "right_click": return `right-clicked ${target}`;
+    case "scroll": return `scrolled ${target}`;
+    case "set_value": return `set ${target} to ${quoted(text(args.value) ?? "")}`;
+    case "press_key":
+    case "hotkey": return `pressed ${typedOrPressed(step) ?? tool}${element ? ` on ${target}` : window ? ` in ${quoted(window.title)}` : ""}`;
+    default: return `${tool} on ${target}`;
+  }
+}
+
+export function replayedReply(recipe: Pick<Recipe, "steps">): string {
+  const { steps } = recipe;
+  const listed = steps.slice(0, LISTED_STEPS).map(stepDone);
+  const more = steps.length - listed.length;
+  return `Done — repeated ${steps.length} saved step${steps.length === 1 ? "" : "s"}: ${listed.join(", ")}${more > 0 ? `, and ${more} more` : ""}.`;
 }
 
 export function fallbackNote(outcome: Extract<ReplayOutcome, { kind: "failed" }>): string {

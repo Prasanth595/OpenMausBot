@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,7 +19,7 @@ const TARGET: Pick<RecipeStep, "app" | "window" | "element"> = {
   element: { role: "AXTextArea", label: "Document", path: ["AXScrollArea:"] },
 };
 const RECIPE: Recipe = {
-  id: "r1", key: requestKey(REQUEST), request: REQUEST, reply: "Typed hello world into TextEdit.", createdAt: Date.now(), lastUsedAt: Date.now(),
+  id: "r1", key: requestKey(REQUEST), request: REQUEST, createdAt: Date.now(), lastUsedAt: Date.now(),
   steps: [{ tool: "click", args: {}, ...TARGET }, { tool: "set_value", args: { value: "hello world" }, ...TARGET }],
 };
 
@@ -150,7 +150,9 @@ describe("SavedSteps.requestSettled", () => {
     record(textEditJournal().calls);
     steps.requestSettled(settled());
     const recipe = steps.recipes.find("b1", "open textedit and type hello world")!;
-    expect(recipe).toMatchObject({ request: REQUEST, reply: "Typed hello world into TextEdit.", createdAt: NOW, lastUsedAt: NOW });
+    expect(recipe).toMatchObject({ request: REQUEST, createdAt: NOW, lastUsedAt: NOW });
+    expect(recipe).not.toHaveProperty("reply");
+    expect(readFileSync(join(folder, "b1", "saved-steps.json"), "utf8")).not.toContain("Nothing else changed");
     expect(recipe.steps.map((step) => step.tool)).toEqual(["click", "set_value"]);
     expect(patches).toEqual([["t1", "reply-1", { savedSteps: { recipeId: recipe.id, learned: true } }]]);
   });
@@ -159,7 +161,7 @@ describe("SavedSteps.requestSettled", () => {
     steps.recipes.save("b1", { ...RECIPE, createdAt: NOW - 5_000, lastUsedAt: NOW - 5_000 });
     const replayed = vi.spyOn(steps.dispatch, "replayed").mockImplementation((threadId, turnId) => (threadId === "t1" && turnId === "turn-r" ? "r1" : undefined));
     steps.journal.taint({ threadId: "t1", generation: "g1" });
-    const reply: Message = { ...REPLY, id: "reply-r", turnId: "turn-r", text: RECIPE.reply };
+    const reply: Message = { ...REPLY, id: "reply-r", turnId: "turn-r", text: "Done — repeated 2 saved steps." };
 
     steps.requestSettled(settled({ request: { ...LINE, quickModel: "Haiku 4.5" }, reply, after: [reply] }));
 

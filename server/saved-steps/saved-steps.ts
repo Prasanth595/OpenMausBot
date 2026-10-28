@@ -84,7 +84,7 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
       return;
     }
     if (!deps.enabled() || automated || !taken?.calls.length || !personTextRequest(request) || after.some((line) => line.role === "user") || !otherToolsHarmless(after)) return;
-    const built = buildRecipe({ request: request.text ?? "", reply: reply.text ?? "", journal: taken, id: randomUUID(), now: now() });
+    const built = buildRecipe({ request: request.text ?? "", journal: taken, id: randomUUID(), now: now() });
     if (!built.ok) return;
     recipes.save(botId, built.recipe);
     deps.patchMessage(threadId, reply.id, { savedSteps: { recipeId: built.recipe.id, learned: true } });

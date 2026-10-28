@@ -6,8 +6,7 @@ import type { RecordedCall, RequestJournal } from "./journal.ts";
 import { buildRecipe, personTextRequest, recipeFitsRequest, stepLabel, type Recipe } from "./rules.ts";
 
 const REQUEST = "Open TextEdit and type hello world";
-const build = (journal = textEditJournal(), request = REQUEST, reply = "Typed hello world into TextEdit. Done.") =>
-  buildRecipe({ request, reply, journal, id: "r1", now: 1_000 });
+const build = (journal = textEditJournal(), request = REQUEST) => buildRecipe({ request, journal, id: "r1", now: 1_000 });
 
 const ok: SlimResult = { isError: false };
 const action = (tool: string, args: Record<string, unknown>, result: SlimResult = ok): RecordedCall => ({ tool, arguments: args, result, generation: "g1" });
@@ -33,7 +32,7 @@ describe("buildRecipe", () => {
     const out = build(); if (!out.ok) throw new Error(out.reason);
     const target = { app: { bundleId: "com.apple.TextEdit", name: "TextEdit" }, window: { title: "Untitled" },
       element: { role: "AXTextArea", label: "Document", path: ["AXScrollArea:"] } };
-    expect(out.recipe).toEqual({ id: "r1", key: "open textedit and type hello world", request: REQUEST, reply: "Typed hello world into TextEdit.",
+    expect(out.recipe).toEqual({ id: "r1", key: "open textedit and type hello world", request: REQUEST,
       createdAt: 1_000, lastUsedAt: 1_000, steps: [{ tool: "click", args: {}, ...target }, { tool: "set_value", args: { value: "hello world" }, ...target }] });
     expect(JSON.stringify(out.recipe)).not.toMatch(/s1-e2|4242|"window_id"/);
   });
@@ -62,7 +61,6 @@ describe("buildRecipe", () => {
     ["no-steps", () => build(observationsOnly())],
     ["no-steps", () => build(textEditJournal({ calls: [] }))],
     ["too-many-steps", () => build(clicks(41))],
-    ["no-reply", () => build(textEditJournal(), REQUEST, "  ")],
   ])("refuses: %s", (reason, run) => expect(run()).toEqual({ ok: false, reason }));
 
   it("saves exactly 40 steps", () => expect(build(clicks(40)).ok).toBe(true));

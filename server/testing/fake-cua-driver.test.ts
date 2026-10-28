@@ -139,7 +139,7 @@ describe("the fake cua-driver", () => {
 
   it("is a window the saved-steps resolver accepts as it would the real driver", async () => {
     const { call } = start();
-    const built = buildRecipe({ request: "Open TextEdit and type hello world", reply: "Typed hello world.", journal: textEditJournal(), id: "r1", now: 1 });
+    const built = buildRecipe({ request: "Open TextEdit and type hello world", journal: textEditJournal(), id: "r1", now: 1 });
     if (!built.ok) throw new Error(built.reason);
     const caller: ComputerCaller = { call: async (tool, args) => callOutcome(await call(tool, args)) };
     const signal = new AbortController().signal;
