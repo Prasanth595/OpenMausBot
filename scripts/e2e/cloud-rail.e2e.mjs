@@ -262,7 +262,7 @@ function appEnv(brokerPort) {
 }
 
 let launches = 0;
-async function launchApp(binary, brokerPort) {
+async function launchApp(binary, brokerPort, firstOrigin = null) {
   launches += 1;
   const electronApp = await electron.launch({
     executablePath: binary,
@@ -277,9 +277,13 @@ async function launchApp(binary, brokerPort) {
   await answerNativeDialogs(electronApp);
   const page = await mainPage(electronApp);
   page.setDefaultTimeout(30_000);
-  await waitForApp(page, "this app's own page");
-  const localOrigin = new URL(page.url()).origin;
+  await waitForApp(page, firstOrigin ? `${firstOrigin}'s page` : "this app's own page");
   const windowId = await (await electronApp.browserWindow(page)).evaluate((w) => w.id);
+  // This app's own page, as main tells it to the window's preload (the window may open on a server's page).
+  const localOrigin = await electronApp.evaluate(({ BrowserWindow }, id) => {
+    const args = BrowserWindow.fromId(id)?.webContents.getLastWebPreferences()?.additionalArguments ?? [];
+    return args.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
+  }, windowId) ?? new URL(page.url()).origin;
   await electronApp.evaluate(({ BrowserWindow }, id) => { const w = BrowserWindow.fromId(id); w.setBounds({ x: 40, y: 30, width: 1440, height: 900 }); w.show(); w.focus(); }, windowId);
   await page.waitForTimeout(800);
   const paths = await electronApp.evaluate(({ app }) => ({ userData: app.getPath("userData"), home: app.getPath("home"), isPackaged: app.isPackaged, name: app.getName(), version: app.getVersion() }));
@@ -521,6 +525,44 @@ async function dismissOverlays() {
       await overlay.waitFor({ state: "hidden", timeout: 1_500 }).catch(() => {});
     }
   }
+}
+
+/** The narrow layout as the person reaches it: the window at its minimum, then View → Zoom In until the page is below the
+ * rail's breakpoint; the sidebar is a drawer there, opened with Open bot list. Measures the switcher in the drawer, then
+ * puts the window back. `before()` reads what to check before the drawer opens. */
+async function narrowLayout(entry, name, before) {
+  const { page } = current;
+  const sized = await setWindow({ size: [700, 900] });
+  await page.waitForTimeout(800);
+  const asked = await page.evaluate(() => window.innerWidth);
+  entry.notes.push(`asked for a 700 px window: ${sized.bounds.width} px, page ${asked} CSS px (minimum ${sized.minimum.join("×")})`);
+  if (asked >= RAIL_BREAKPOINT) finding("narrow-unreachable", `The window cannot be narrower than its minimum width (${sized.minimum[0]} px), which is wider than the ${RAIL_BREAKPOINT} px below which the rail hides: at 100% zoom the rail never hides. Only zooming in (View → Zoom In) reaches the narrow layout.`, { askedFor: 700, window: sized.bounds.width, page: asked, minimum: sized.minimum });
+  let width = asked;
+  for (let i = 0; i < 6 && width >= RAIL_BREAKPOINT; i++) {
+    await chooseMenuItem({ role: "zoomin" }).catch(async (error) => {
+      entry.notes.push(`View → Zoom In not found (${String(error.message).slice(0, 120)}); zooming the page directly`);
+      await setWindow({ zoomLevel: (await setWindow({})).zoomLevel + 0.5 });
+    });
+    await page.waitForTimeout(500);
+    width = await page.evaluate(() => window.innerWidth);
+  }
+  entry.notes.push(`after View → Zoom In: the page is ${width} CSS px wide`);
+  const seen = await before();
+  await shot(entry, name);
+  const opener = page.getByRole("button", { name: "Open bot list" });
+  if (await opener.getAttribute("aria-expanded").catch(() => null) !== "true") await opener.click();
+  await page.waitForTimeout(700);
+  const switcher = await page.evaluate(() => [...document.querySelectorAll("[data-sidebar-top-switcher] [data-tour='server-switcher']")].map((element) => {
+    const box = element.getBoundingClientRect();
+    return { text: element.textContent?.trim().slice(0, 60) ?? "", left: Math.round(box.left), right: Math.round(box.right), viewport: window.innerWidth,
+      beside: Boolean(element.closest("[data-switcher-beside-rail]")) };
+  }).filter((item) => item.right > 0 && item.left < item.viewport));
+  await shot(entry, `${name}-drawer`);
+  await page.keyboard.press("Escape");
+  await chooseMenuItem({ role: "resetzoom" }).catch(() => setWindow({ zoomLevel: 0 }));
+  await setWindow({ bounds: { x: 40, y: 30, width: 1440, height: 900 }, zoomLevel: 0 });
+  await page.waitForTimeout(800);
+  return { width, before: seen, switcher };
 }
 
 /** The place's colour in its own Settings: the profile menu's Settings, then Appearance (Advanced) or More looks (Simple). */
@@ -840,37 +882,10 @@ async function main() {
     const { page } = current;
     await backToThisComputer();
     await page.locator("[data-places-rail]").waitFor({ state: "visible", timeout: 15_000 });
-    const sized = await setWindow({ size: [700, 900] });
-    await page.waitForTimeout(800);
-    const asked = await page.evaluate(() => window.innerWidth);
-    entry.notes.push(`asked for a 700 px window: ${sized.bounds.width} px, page ${asked} CSS px (minimum ${sized.minimum.join("×")})`);
-    if (asked >= RAIL_BREAKPOINT) finding("narrow-unreachable", `The window cannot be narrower than its minimum width (${sized.minimum[0]} px), which is wider than the ${RAIL_BREAKPOINT} px below which the rail hides: at 100% zoom the rail never hides. Only zooming in (View → Zoom In) reaches the narrow layout.`, { askedFor: 700, window: sized.bounds.width, page: asked, minimum: sized.minimum });
-    let width = asked;
-    for (let i = 0; i < 6 && width >= RAIL_BREAKPOINT; i++) {
-      await chooseMenuItem({ role: "zoomin" }).catch(async (error) => {
-        entry.notes.push(`View → Zoom In not found (${String(error.message).slice(0, 120)}); zooming the page directly`);
-        await setWindow({ zoomLevel: (await setWindow({})).zoomLevel + 0.5 });
-      });
-      await page.waitForTimeout(500);
-      width = await page.evaluate(() => window.innerWidth);
-    }
-    entry.notes.push(`after View → Zoom In: the page is ${width} CSS px wide`);
-    const rail = await railOnScreen();
-    check(entry, `below ${RAIL_BREAKPOINT} CSS px the rail hides`, width < RAIL_BREAKPOINT && rail.present && !rail.visible, { width, present: rail.present, visible: rail.visible });
-    await shot(entry, "narrow");
-    // The sidebar is a drawer at this width: open it, as the person would, and find the switcher there.
-    await page.getByRole("button", { name: "Open bot list" }).click();
-    await page.waitForTimeout(600);
-    const drawer = await page.evaluate(() => [...document.querySelectorAll("[data-switcher-beside-rail] [data-tour='server-switcher'], [data-switcher-beside-rail] button")].map((element) => {
-      const box = element.getBoundingClientRect();
-      return { text: element.textContent?.trim().slice(0, 60) ?? "", label: element.getAttribute("aria-label"), onScreen: box.width > 0 && box.right > 0 && box.left < window.innerWidth && box.bottom > 0 && box.top < window.innerHeight };
-    }));
-    check(entry, "the switcher stays: in the sidebar drawer, in the rail's place, naming This computer", drawer.some((item) => item.onScreen && `${item.text} ${item.label}`.includes("This computer")), drawer);
-    await shot(entry, "narrow-drawer");
-    await page.keyboard.press("Escape");
-    await chooseMenuItem({ role: "resetzoom" }).catch(() => setWindow({ zoomLevel: 0 }));
-    await setWindow({ bounds: { x: 40, y: 30, width: 1440, height: 900 }, zoomLevel: 0 });
-    await page.waitForTimeout(800);
+    const narrow = await narrowLayout(entry, "narrow", () => railOnScreen());
+    check(entry, `below ${RAIL_BREAKPOINT} CSS px the rail hides`, narrow.width < RAIL_BREAKPOINT && narrow.before.present && !narrow.before.visible, { width: narrow.width, present: narrow.before.present, visible: narrow.before.visible });
+    check(entry, "the switcher stays: in the sidebar drawer, in the rail's place, naming This computer", narrow.switcher.some((item) => item.beside && item.text.includes("This computer")), narrow.switcher);
+    report.narrowSwitcher = { withRail: narrow.switcher };
     check(entry, "wide again: the rail is back", (await railOnScreen()).visible);
   });
 
@@ -885,11 +900,27 @@ async function main() {
     check(entry, "the same three circles", rail.circles.map((circle) => circle.id).join() === ["local", ids.a, ids.b].join(), rail.circles.map(({ id, label }) => ({ id, label })));
     const menu = await serverMenu();
     check(entry, "the Server menu still lists both servers", [A, B].every((server) => radios(menu).some((label) => label.startsWith(`${server.label} — `))), radios(menu));
+    const tinted = report.scenarios.find((item) => item.id === "tint")?.status === "pass";
+    if (tinted) {
+      const circleA = rail.circles.find((circle) => circle.id === ids.a), circleB = rail.circles.find((circle) => circle.id === ids.b);
+      check(entry, `${A.label}'s colour is still on its circle`, Boolean(circleA?.fill) && circleA.fill !== circleB?.fill, { a: circleA?.fill, b: circleB?.fill });
+    }
     await shot(entry, "after-restart");
     await openCircle(B, ids.b);
     await expectShowing(entry, B);
     await shot(entry, "after-restart-on-b");
+    // Quit while a server is on screen: the app comes back on that server.
     await backToThisComputer();
+    await openCircle(A, ids.a);
+    await collectMainRecords();
+    await current.electronApp.close();
+    current = await launchApp(binary, brokerPort, A.origin);
+    check(entry, `quit on ${A.label}, reopened on ${A.label}`, new URL(current.page.url()).origin === A.origin, current.page.url());
+    await expectShowing(entry, A);
+    if (tinted) check(entry, `${A.label}'s tint is there from the start`, Boolean((await sidebarTint())?.value?.includes("purple")), await sidebarTint());
+    await shot(entry, "reopened-on-a");
+    await backToThisComputer();
+    check(entry, "back on this computer, the rail is there", (await railOnScreen()).visible);
   });
 
   async function forget(server) {
@@ -919,8 +950,22 @@ async function main() {
     await shot(entry, "forgot-b");
   });
 
-  await scenario("forget-a", `Forget ${A.label}: only this computer, no rail`, async (entry) => {
-    await forget(A);
+  await scenario("forget-a", `Forget ${A.label} from the Server menu, on its own page: only this computer, no rail`, async (entry) => {
+    const { page, localOrigin } = current;
+    await backToThisComputer();
+    // No rail with one server: the Server menu opens it, and its Forget “…” item forgets the place on screen.
+    await chooseMenuItem({ label: A.label });
+    await page.waitForURL((url) => url.origin === A.origin, { timeout: 60_000 });
+    await waitForApp(page, `${A.label}'s page`);
+    const session = (await pageIdentity()).session?.id ?? null;
+    await chooseMenuItem({ label: `Forget “${A.label}”` });
+    await page.waitForURL((url) => url.origin === localOrigin, { timeout: 60_000 });
+    await waitForApp(page, "this computer's page");
+    check(entry, "the window went back to this computer", new URL(page.url()).origin === localOrigin, page.url());
+    if (A.sessions) {
+      const after = await A.sessions();
+      check(entry, `${A.label} signed this desktop out (its session is gone there)`, Boolean(session) && !after.some((item) => item.id === session), { session, after: after.map((item) => item.id) });
+    }
     const rail = await railOnScreen();
     const menu = await serverMenu();
     check(entry, "no rail", !rail.present, rail);
@@ -928,6 +973,13 @@ async function main() {
     const back = await switcherPlace();
     check(entry, "the switcher is there, on This computer, as on a fresh app", back.place === "This computer", back);
     await shot(entry, "forgot-a");
+    // The same narrow layout without a rail, to tell what the rail changes there from what was there before.
+    const narrow = await narrowLayout(entry, "narrow-without-rail", async () => null);
+    report.narrowSwitcher = { ...report.narrowSwitcher, withoutRail: narrow.switcher };
+    const clipped = (items) => (items ?? []).some((item) => item.right > item.viewport);
+    if (clipped(report.narrowSwitcher.withRail) || clipped(narrow.switcher)) {
+      finding("narrow-pill-clipped", `In the narrow layout the sidebar's switcher pill runs past the window's right edge (${clipped(report.narrowSwitcher.withRail) ? "with" : "without"} the rail${clipped(report.narrowSwitcher.withRail) && clipped(narrow.switcher) ? " and without it, so not the rail's doing" : ""}).`, report.narrowSwitcher);
+    }
   });
 }
 
