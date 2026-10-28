@@ -1,7 +1,8 @@
 import type { DesktopPrefs } from "./desktop-prefs.mjs";
 
 export declare const QUICK_ASKS_TITLE: "Quick asks";
-export type TalkServerErrorCode = "server-down" | "no-mausbot" | "refused" | "lost";
+/** `starting`: this computer's server is not up yet; `moved`: its bots moved to My Cloud, so it takes no asks. */
+export type TalkServerErrorCode = "server-down" | "starting" | "no-mausbot" | "refused" | "moved" | "lost";
 export declare class TalkServerError extends Error {
   constructor(code: TalkServerErrorCode);
   readonly code: TalkServerErrorCode;
@@ -29,10 +30,12 @@ export declare function createTalkServer(options: {
   prefs: Pick<DesktopPrefs, "quickAsksChat" | "setQuickAsksChat">;
   /** Which server the saved Quick asks chat belongs to. */
   serverKey: () => string;
+  /** This computer's server is on its way up, so a request that can't reach it says "starting". */
+  starting?: () => boolean;
 }): {
-  /** Rejects with TalkServerError "server-down", "no-mausbot" or "refused". One call runs at a time; a call while one
-   * runs gets the same promise. */
+  /** Rejects with TalkServerError "server-down", "starting", "no-mausbot", "refused" or "moved". One call runs at a
+   * time; a call while one runs gets the same promise. */
   prepare(): Promise<TalkChat>;
-  /** Rejects with TalkServerError "server-down", "refused" or "lost", or with `signal.reason`. */
+  /** Rejects with TalkServerError "server-down", "starting", "refused", "moved" or "lost", or with `signal.reason`. */
   ask(input: { chat: TalkChat; text: string; sendId: string; signal: AbortSignal; onUpdate: (update: TalkUpdate) => void }): Promise<"done" | "needs-you" | "failed">;
 };

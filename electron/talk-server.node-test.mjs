@@ -14,7 +14,9 @@ const completed = (threadId, ok, turnId) => ({ kind: "runtime", event: { type: "
 const HELLO = { kind: "hello", cursor: "s:1", resumed: false };
 const CHAT = { botId: "m", threadId: "t1" };
 
-function fakeServer({ bots, saved = null, sendStatus = 202 }) {
+const MOVED = { error: "This bot lives on My Cloud now.", code: "moved" };
+
+function fakeServer({ bots, saved = null, sendStatus = 202, sendBody = { ok: true }, made = null, starting }) {
   const encoder = new TextEncoder();
   const server = { calls: [], saves: [], events: null, listing: { down: false, status: 200 } };
   const request = async (route, init = {}) => {
@@ -24,17 +26,17 @@ function fakeServer({ bots, saved = null, sendStatus = 202 }) {
       if (server.listing.down) throw new TypeError("fetch failed");
       return Response.json({ bots }, { status: server.listing.status });
     }
-    if (method === "POST" && /^\/api\/bots\/[\w-]+\/tasks$/.test(route)) return Response.json({ task: { threadId: "t-new", title: "Quick asks" } }, { status: 201 });
+    if (method === "POST" && /^\/api\/bots\/[\w-]+\/tasks$/.test(route)) return made ? Response.json(made.body, { status: made.status }) : Response.json({ task: { threadId: "t-new", title: "Quick asks" } }, { status: 201 });
     if (method === "GET" && route === "/api/events?screens=off") {
       let stream;
       const body = new ReadableStream({ start: controller => { stream = controller; }, cancel: () => { server.events.cancelled = true; } });
       server.events = { cancelled: false, push: frame => stream.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`)), end: () => stream.close() };
       return new Response(body, { headers: { "content-type": "text/event-stream" } });
     }
-    if (method === "POST" && /^\/api\/bots\/[\w-]+\/messages$/.test(route)) return Response.json({ ok: true }, { status: sendStatus });
+    if (method === "POST" && /^\/api\/bots\/[\w-]+\/messages$/.test(route)) return Response.json(sendBody, { status: sendStatus });
     return new Response(null, { status: 404 });
   };
-  server.talk = createTalkServer({ request, serverKey: () => "server-a", prefs: { quickAsksChat: () => saved, setQuickAsksChat: (key, chat) => server.saves.push([key, chat]) } });
+  server.talk = createTalkServer({ request, serverKey: () => "server-a", starting, prefs: { quickAsksChat: () => saved, setQuickAsksChat: (key, chat) => server.saves.push([key, chat]) } });
   return server;
 }
 
@@ -84,6 +86,30 @@ test("prepare says why it cannot ask", async () => {
   server.listing.status = 200;
   assert.deepEqual(await server.talk.prepare(), { botId: "m", threadId: "t-new" });
   await assert.rejects(fakeServer({ bots: [] }).talk.prepare(), { code: "no-mausbot" });
+  await assert.rejects(fakeServer({ bots: [{ id: "m", defaultBot: {}, tasks: [] }], made: { status: 500, body: {} } }).talk.prepare(), { code: "refused" });
+});
+
+test("a server still on its way up says starting, not down", async () => {
+  let starting = true;
+  const server = fakeServer({ bots: [{ id: "m", defaultBot: {}, tasks: [] }], starting: () => starting });
+  server.listing.down = true;
+  await assert.rejects(server.talk.prepare(), { code: "starting" });
+  starting = false;
+  await assert.rejects(server.talk.prepare(), { code: "server-down" });
+});
+
+test("a computer whose bots moved to My Cloud says so, on making the chat and on sending", async () => {
+  const frozen = fakeServer({ bots: [{ id: "m", defaultBot: {}, tasks: [] }], made: { status: 409, body: MOVED } });
+  await assert.rejects(frozen.talk.prepare(), { name: "TalkServerError", code: "moved" });
+  assert.deepEqual(frozen.saves, []);
+  await assert.rejects(fakeServer({ bots: [{ id: "m", defaultBot: {}, tasks: [] }], made: { status: 409, body: { code: "thread_busy" } } }).talk.prepare(), { code: "refused" });
+
+  const sending = fakeServer({ bots: [], sendStatus: 409, sendBody: MOVED });
+  const refusing = asking(sending);
+  await flush();
+  sending.events.push(HELLO);
+  await assert.rejects(refusing, { name: "TalkServerError", code: "moved" });
+  assert.equal(sending.events.cancelled, true);
 });
 
 test("the reply tracker follows only this ask", () => {

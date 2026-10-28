@@ -95,13 +95,21 @@ export function createReplyTracker({ threadId, sendId }) {
 
 const JSON_HEADERS = { "content-type": "application/json" };
 
-export function createTalkServer({ request, prefs, serverKey }) {
+/** A server whose bots moved to My Cloud refuses every change with 409 `{ code: "moved" }`. */
+async function refusal(response) {
+  const body = response.status === 409 ? await response.json().catch(() => null) : null;
+  if (!body) void response.body?.cancel().catch(() => {});
+  return new TalkServerError(body?.code === "moved" ? "moved" : "refused");
+}
+
+export function createTalkServer({ request, prefs, serverKey, starting = () => false }) {
   let preparing = null;
+  const down = () => new TalkServerError(starting() ? "starting" : "server-down");
 
   const quickAsksChat = async () => {
     const listing = await request("/api/bots?messages=0").catch(() => null);
     const bots = listing?.ok ? (await listing.json().catch(() => null))?.bots : null;
-    if (!Array.isArray(bots)) throw new TalkServerError("server-down");
+    if (!Array.isArray(bots)) throw down();
     const bot = findMausBot(bots);
     if (!bot) throw new TalkServerError("no-mausbot");
     const server = serverKey();
@@ -109,8 +117,9 @@ export function createTalkServer({ request, prefs, serverKey }) {
     if (saved?.botId === bot.id && bot.tasks?.some(task => task.threadId === saved.threadId)) return saved;
     const made = await request(`/api/bots/${encodeURIComponent(bot.id)}/tasks`, {
       method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ title: QUICK_ASKS_TITLE, select: false }),
-    }).catch(() => { throw new TalkServerError("server-down"); });
-    const threadId = made.ok ? (await made.json().catch(() => null))?.task?.threadId : null;
+    }).catch(() => { throw down(); });
+    if (!made.ok) throw await refusal(made);
+    const threadId = (await made.json().catch(() => null))?.task?.threadId;
     if (typeof threadId !== "string") throw new TalkServerError("refused");
     const chat = { botId: bot.id, threadId };
     prefs.setQuickAsksChat(server, chat);
@@ -135,11 +144,11 @@ export function createTalkServer({ request, prefs, serverKey }) {
     const send = () => request(`/api/bots/${encodeURIComponent(chat.botId)}/messages`, {
       method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ text, threadId: chat.threadId, sendId }),
     }).then(
-      response => {
-        void response.body?.cancel().catch(() => {});
-        if (!response.ok) settle(reject, new TalkServerError("refused"));
+      async response => {
+        if (response.ok) void response.body?.cancel().catch(() => {});
+        else settle(reject, await refusal(response));
       },
-      () => settle(reject, new TalkServerError("server-down")),
+      () => settle(reject, down()),
     );
     const onFrame = frame => {
       if (settled) return;
@@ -155,7 +164,7 @@ export function createTalkServer({ request, prefs, serverKey }) {
       if (update.kind === "done") settle(resolve, !update.ok && !update.text ? "failed" : "done");
       else if (update.kind === "needs-you") settle(resolve, "needs-you");
     };
-    const ended = () => settle(reject, new TalkServerError(sent ? "lost" : "server-down"));
+    const ended = () => settle(reject, sent ? new TalkServerError("lost") : down());
     request("/api/events?screens=off", { signal: reading.signal })
       .then(response => {
         if (response.ok && response.body) return readFrames(response.body, onFrame, reading.signal);

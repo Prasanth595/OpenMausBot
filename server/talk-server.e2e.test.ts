@@ -32,3 +32,20 @@ it("asks MausBot in its own Quick asks chat, as the desktop app does, and follow
   expect(after.tasks.find((t: any) => t.threadId === chat.threadId).title).toBe(QUICK_ASKS_TITLE);
   expect(await talk.prepare()).toEqual(chat);
 }, 90_000);
+
+it("a computer whose bots moved to My Cloud refuses asks with moved, both a new chat and a send to the saved one", async () => {
+  let saved: TalkChat | null = null;
+  const prefs = { quickAsksChat: () => saved, setQuickAsksChat: (_s: string, chat: TalkChat) => { saved = chat; } };
+  const chat = await createTalkServer({ request, serverKey: () => "fixture", prefs }).prepare();
+  expect((await request("/api/move/freeze", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(200);
+  try {
+    const fresh = createTalkServer({ request, serverKey: () => "fixture", prefs: { quickAsksChat: () => null, setQuickAsksChat: () => {} } });
+    await expect(fresh.prepare()).rejects.toMatchObject({ name: "TalkServerError", code: "moved" });
+    const talk = createTalkServer({ request, serverKey: () => "fixture", prefs });
+    expect(await talk.prepare()).toEqual(chat);
+    await expect(talk.ask({ chat, text: "Still there?", sendId: randomUUID(), signal: AbortSignal.timeout(30_000), onUpdate: () => {} }))
+      .rejects.toMatchObject({ name: "TalkServerError", code: "moved" });
+  } finally {
+    await request("/api/move/freeze", { method: "DELETE" });
+  }
+}, 90_000);
