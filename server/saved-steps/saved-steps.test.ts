@@ -242,6 +242,14 @@ describe("SavedSteps.requestSettled", () => {
     expect(facade({ platform: "linux" }).journals(person)).toBe(false);
   });
 
+  it("says saved steps can run only on a Mac, setting or not, so clients hide the switch elsewhere", () => {
+    expect(facade({ platform: "darwin" }).here()).toBe(true);
+    enabled = false;
+    expect(facade({ platform: "darwin" }).here()).toBe(true);
+    expect(facade({ platform: "linux" }).here()).toBe(false);
+    expect(facade({ platform: "win32" }).here()).toBe(false);
+  });
+
   it("never records a turn a peer handed on, though it carries the person's origin", () => {
     const handed = { origin: { kind: "user", request: "Open TextEdit and type hello world" } };
     expect(steps.journals(handed)).toBe(false);

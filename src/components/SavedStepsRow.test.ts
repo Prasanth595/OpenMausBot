@@ -25,7 +25,8 @@ function render() {
   return { html, toggle: nodes(tree).find((node) => node.props.role === "switch" || node.props["aria-label"] === "Repeat computer tasks without AI"), tree };
 }
 
-beforeEach(() => { fixture.values = []; fixture.config = {}; fixture.api.mockReset(); fixture.dispatch.mockReset(); });
+const HERE = { savedStepsHere: true };
+beforeEach(() => { fixture.values = []; fixture.config = { features: HERE }; fixture.api.mockReset(); fixture.dispatch.mockReset(); });
 
 describe("the saved-steps setting", () => {
   it("is on when the config does not mention it, and titled in plain words", () => {
@@ -34,13 +35,20 @@ describe("the saved-steps setting", () => {
     expect(view.html).toContain('aria-checked="true"');
   });
 
+  it("draws nothing where the server cannot run saved steps (Windows, a Cloud home) or does not say", () => {
+    fixture.config = { features: { savedStepsHere: false } };
+    expect(render().html).toBe("");
+    fixture.config = {};
+    expect(render().html).toBe("");
+  });
+
   it("shows off when the config turns it off", () => {
-    fixture.config = { features: { savedSteps: false } };
+    fixture.config = { features: { ...HERE, savedSteps: false } };
     expect(render().html).toContain('aria-checked="false"');
   });
 
   it("the switch saves the opposite value", async () => {
-    const config = { features: { savedSteps: false } };
+    const config = { features: { ...HERE, savedSteps: false } };
     fixture.api.mockResolvedValue(config);
     (render().toggle!.props.onClick as () => void)();
     expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ features: { savedSteps: false } }) });

@@ -50,6 +50,8 @@ export interface SavedSteps {
   dispatch: SavedStepsDispatch;
   gateChecked(capability: JournalCapability): void;
   journals(owner: RequestOwner | undefined): boolean;
+  /** Saved steps can run on this server (macOS only in v1), whatever the setting says; clients show the switch only then. */
+  here(): boolean;
   routes: RouteHandler;
   journalRoutes(internal: { capability: JournalCapability; readBody(): Promise<unknown> }): RouteHandler;
   requestSettled(settled: SettledRequest): void;
@@ -115,6 +117,7 @@ export function createSavedSteps(deps: SavedStepsDeps): SavedSteps {
       else if (capability.kind === "computer") journal.taint({ threadId: capability.threadId, generation: capability.generation });
     },
     journals: (owner) => owner?.personLine === true && personRequest(owner) && enabled(),
+    here: () => platform === "darwin",
     journalRoutes: (internal) => createComputerJournalRoutes({ ...internal, enabled, record: (scope, entry) => journal.record(scope, entry) }),
     requestSettled(settled) {
       const taken = journal.take(settled.threadId, settled.generations);

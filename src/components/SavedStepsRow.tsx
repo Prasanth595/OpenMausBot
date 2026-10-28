@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { savedStepsEnabled } from "@/lib/feature-flags";
+import { savedStepsEnabled, savedStepsHere } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
 import { api, useStore, type ConfigStatus } from "@/state/store";
 import { SettingRow, Switch } from "./SettingsPrimitives";
@@ -11,6 +11,7 @@ export function SavedStepsRow() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  if (!savedStepsHere(state.config)) return null;
   const toggle = async () => {
     if (saving) return;
     setSaving(true);

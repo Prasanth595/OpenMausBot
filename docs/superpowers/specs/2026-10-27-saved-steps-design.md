@@ -267,7 +267,9 @@ kept and the AI does not start.
 - Bot reply chips (desktop renderer): "Saved these steps · next time no AI ·
   Forget" after learning; "Repeated saved steps · no AI · Forget" after a
   replay. Forget calls `DELETE /api/bots/:botId/saved-steps/:recipeId`.
-- Settings → General: "Repeat computer tasks without AI" (default on). Off
+- Settings → General: "Repeat computer tasks without AI" (default on), shown only
+  where the server can run saved steps (`features.savedStepsHere`: a Mac, never
+  Windows or a Cloud home). Off
   stops both saving and replaying.
 
 ### 5. Policy check
