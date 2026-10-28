@@ -4756,7 +4756,7 @@ function settleTrackedRequest(threadId: string, incoming: ReadonlySet<string> = 
   if (messages.some(requestNeedsInput) || terminal?.requestMessageId !== source.id || !terminal.turnSucceeded ||
       terminal.turnId !== owner.turnId || messages.findLast(message => message.turnId)?.turnId !== terminal.turnId ||
       messages.findLast(message => message.turnSucceeded !== undefined)?.turnSucceeded !== true) return;
-  store.patchMessage(threadId, source.id, { requestPending: false }); savedSteps.requestSettled({ botId: bot.id, threadId, request: source, reply: terminal, after: messages, generations: owner.generations, automated: owner.automation !== undefined });
+  store.patchMessage(threadId, source.id, { requestPending: false }); savedSteps.requestSettled({ botId: bot.id, threadId, request: source, reply: terminal, after: messages, generations: owner.generations, automated: owner.automation !== undefined || owner.origin?.kind !== "user" });
 }
 
 function messageWindow(threadId: string, messageId: string, limit: number) {

@@ -37,11 +37,14 @@ function bump(counts: Map<string, number>, key: string): void {
   counts.set(key, (counts.get(key) ?? 0) + 1);
 }
 
+interface Tombstone { generations: Set<string>; all: boolean }
+
+const LOST_GENERATIONS = 64;
 const emptyThread = (): ThreadJournal => ({ calls: [], checks: new Map(), recorded: new Map(), tainted: new Set(), overflow: new Set() });
 
 export class ComputerJournal {
   private readonly threads = new Map<string, ThreadJournal>();
-  private readonly evicted = new Map<string, Set<string>>();
+  private readonly evicted = new Map<string, Tombstone>();
   private readonly callsPerThread: number;
   private readonly maxThreads: number;
   private readonly maxEvicted: number;
@@ -54,7 +57,11 @@ export class ComputerJournal {
 
   private thread(threadId: string): ThreadJournal {
     let found = this.threads.get(threadId);
-    if (found) return found;
+    if (found) {
+      this.threads.delete(threadId);
+      this.threads.set(threadId, found);
+      return found;
+    }
     found = emptyThread();
     this.threads.set(threadId, found);
     while (this.threads.size > this.maxThreads) {
@@ -66,10 +73,14 @@ export class ComputerJournal {
   }
 
   private evict(threadId: string, journal: ThreadJournal): void {
-    const lost = this.evicted.get(threadId) ?? new Set<string>();
-    for (const generation of [...journal.checks.keys(), ...journal.recorded.keys(), ...journal.tainted]) lost.add(generation);
+    const tombstone = this.evicted.get(threadId) ?? { generations: new Set<string>(), all: false };
+    if (!tombstone.all) for (const generation of [...journal.checks.keys(), ...journal.recorded.keys(), ...journal.tainted]) tombstone.generations.add(generation);
+    if (tombstone.generations.size > LOST_GENERATIONS) {
+      tombstone.all = true;
+      tombstone.generations.clear();
+    }
     this.evicted.delete(threadId);
-    this.evicted.set(threadId, lost);
+    this.evicted.set(threadId, tombstone);
     while (this.evicted.size > this.maxEvicted) this.evicted.delete(this.evicted.keys().next().value as string);
   }
 
@@ -90,7 +101,8 @@ export class ComputerJournal {
 
   take(threadId: string, generations: ReadonlySet<string>): RequestJournal | null {
     const thread = this.threads.get(threadId) ?? emptyThread();
-    const lost = this.evicted.get(threadId) ?? new Set<string>();
+    const tombstone = this.evicted.get(threadId);
+    const lost = tombstone?.all ? new Set(generations) : tombstone?.generations ?? new Set<string>();
     this.threads.delete(threadId);
     this.evicted.delete(threadId);
     const seen = new Set<string>();

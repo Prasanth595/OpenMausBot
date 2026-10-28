@@ -72,6 +72,13 @@ export function personTextRequest(message: Message): boolean {
     || message.via || message.relayed || message.setupRequest || message.steered || message.aside);
 }
 
+const READ_ONLY_TOOLS: ReadonlySet<string> = new Set(["Read", "Glob", "Grep", "LS", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch"]);
+const COMPUTER_TOOL_PREFIX = "mcp__computer__";
+
+export function otherToolsReadOnly(lines: readonly Message[]): boolean {
+  return lines.every(({ tool }) => tool?.itemId === undefined || tool.name.startsWith(COMPUTER_TOOL_PREFIX) || READ_ONLY_TOOLS.has(tool.name));
+}
+
 export function stepLabel(step: RecipeStep): string {
   const appName = step.app?.name ?? step.app?.bundleId;
   if (step.element) return `"${step.element.label}" in ${appName ?? "the app"}`;

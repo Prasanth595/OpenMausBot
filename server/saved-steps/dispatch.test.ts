@@ -162,6 +162,25 @@ describe("SavedStepsDispatch.sendTurn", () => {
     expect(slots.get("t1")).toBe(engine);
   });
 
+  it("holds back two queued lines sent as one turn that it cannot mark", async () => {
+    taint.mockReturnValueOnce(false);
+    const turnText = `close every window without saving\n\n${REQUEST}`;
+    const sent = { ...INPUT, text: turnText };
+    expect(await dispatch.sendTurn(engine, { ...REQ, turnText }, sent, start)).toEqual({ turnId: "e1" });
+    expect(start).toHaveBeenCalledWith(sent);
+    expect(openCaller).not.toHaveBeenCalled();
+    expect(dispatch.takeUnmarked("t1")).toBe(true);
+    expect(dispatch.takeUnmarked("t1")).toBe(false);
+  });
+
+  it("holds back nothing when it marks the request or the turn is the person's one line", async () => {
+    await dispatch.sendTurn(engine, { ...REQ, turnText: `close every window without saving\n\n${REQUEST}` }, INPUT, start);
+    expect(dispatch.takeUnmarked("t1")).toBe(false);
+    taint.mockReturnValueOnce(false);
+    await dispatch.sendTurn(engine, REQ, INPUT, start);
+    expect(dispatch.takeUnmarked("t1")).toBe(false);
+  });
+
   it("runs the AI when the request cannot be kept from saving", async () => {
     taint.mockReturnValueOnce(false);
     expect(await dispatch.sendTurn(engine, REQ, INPUT, start)).toEqual({ turnId: "e1" });

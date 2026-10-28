@@ -55,6 +55,7 @@ export class SavedStepsDispatch {
   private readonly deps: DispatchDeps;
   private readonly runs = new Map<string, Run>();
   private readonly answered = new Map<string, { turnId: string; recipeId: string }>();
+  private readonly unmarked = new Set<string>();
 
   constructor(deps: DispatchDeps) {
     this.deps = deps;
@@ -62,7 +63,10 @@ export class SavedStepsDispatch {
 
   sendTurn(engine: ProviderInstance, request: ReplayRequest | null, input: SendTurnInput, start: Start): Promise<TurnStartResult> {
     this.runs.delete(input.threadId);
-    if (request && request.turnText !== request.message.text) this.deps.taint(input.threadId);
+    if (request && request.turnText !== request.message.text) {
+      if (!this.deps.taint(input.threadId)) this.unmarked.add(input.threadId);
+      return start(input);
+    }
     const computer = input.integrations?.localComputer;
     const recipe = request && computer ? this.recipeFor(request, input) : undefined;
     if (!request || !computer || !recipe || !this.deps.taint(input.threadId)) return start(input);
@@ -112,6 +116,11 @@ export class SavedStepsDispatch {
     if (kept.type === "turn.completed") this.forgetRun(run);
     this.deps.publish(kept);
     return true;
+  }
+
+  /** True when a turn of the thread's ending request sent more than its line and could not be marked; it must not save. Taking it forgets it. */
+  takeUnmarked(threadId: string): boolean {
+    return this.unmarked.delete(threadId);
   }
 
   /** The recipe that answered this turn with no AI. */

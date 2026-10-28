@@ -215,6 +215,14 @@ describe("SavedSteps.requestSettled", () => {
     expect(patches).toEqual([]);
   });
 
+  it("an answered question during the request stops it saving", () => {
+    record(textEditJournal().calls);
+    steps.observe({ type: "request.resolved", threadId: "t1", turnId: "x", requestId: "q1", behavior: "answer", source: "user" } as RuntimeEvent);
+    steps.requestSettled(settled());
+    expect(saved()).toBeUndefined();
+    expect(patches).toEqual([]);
+  });
+
   it("an allowed approval and a turn with no denials leave it saveable", () => {
     steps.observe({ type: "request.resolved", threadId: "t1", turnId: "x", requestId: "q1", behavior: "allow", source: "user" } as RuntimeEvent);
     record(textEditJournal().calls);
@@ -236,6 +244,50 @@ describe("SavedSteps.requestSettled", () => {
     steps.requestSettled(settled());
     expect(saved()).toBeUndefined();
     expect(patches).toEqual([]);
+  });
+
+  const toolLine = (name: string, at: number): Message => ({ id: `tool-${at}`, at, role: "bot", kind: "activity", tool: { name, ok: true, itemId: `item-${at}` } });
+  const COMPUTER_LINES = [toolLine("mcp__computer__get_window_state", 10), toolLine("mcp__computer__click", 11), toolLine("mcp__computer__type_text", 12)];
+
+  it.each(["Read", "Glob", "Grep", "LS", "ToolSearch", "TodoWrite", "WebSearch", "WebFetch"])("saves a computer run that also used %s", (tool) => {
+    record(textEditJournal().calls);
+    steps.requestSettled(settled({ after: [toolLine(tool, 9), ...COMPUTER_LINES, REPLY] }));
+    expect(saved()?.steps).toHaveLength(2);
+  });
+
+  it("saves a computer-only run beside rows that are not tool calls", () => {
+    record(textEditJournal().calls);
+    const notice: Message = { id: "notice", at: 9, role: "bot", kind: "activity", tool: { name: "Bash", ok: true } };
+    steps.requestSettled(settled({ after: [notice, ...COMPUTER_LINES, REPLY] }));
+    expect(saved()?.steps).toHaveLength(2);
+  });
+
+  it.each(["Bash", "Write", "Edit", "NotebookEdit", "mcp__gmail__send_email", "mcp__browser__navigate", "mcp__agents__select_computer", "Task", "click"])(
+    "saves nothing when the run also used %s",
+    (tool) => {
+      record(textEditJournal().calls);
+      steps.requestSettled(settled({ after: [...COMPUTER_LINES, toolLine(tool, 13), REPLY] }));
+      expect(saved()).toBeUndefined();
+      expect(patches).toEqual([]);
+    },
+  );
+
+  it("never saves two queued lines sent as one turn, even when the turn cannot be marked", async () => {
+    steps = facade({ generation: () => undefined });
+    const turnText = `close every window without saving\n\n${REQUEST}`;
+    const engine = { instanceId: "claude", driverKind: "claudeAgent", adapter: { provider: "claudeAgent" } } as unknown as ProviderInstance;
+    const start = vi.fn(async (_input: SendTurnInput): Promise<TurnStartResult> => ({ turnId: "turn-1" }));
+    const input: SendTurnInput = { threadId: "t1", botId: "b1", text: turnText, approvalMode: "full" };
+    await steps.dispatch.sendTurn(engine, { botId: "b1", message: LINE, turnText, placePicked: true }, input, start);
+    expect(start).toHaveBeenCalledWith(input);
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
+    expect(saved()).toBeUndefined();
+    expect(patches).toEqual([]);
+
+    record(textEditJournal().calls);
+    steps.requestSettled(settled());
+    expect(saved()?.steps).toHaveLength(2);
   });
 
   it("frees the journal even when it saves nothing", () => {

@@ -114,6 +114,29 @@ describe("computer journal", () => {
     expect(j.take("t1", new Set(["g0"]))).toBeNull();
   });
 
+  it("evicts the thread used least recently", () => {
+    const j = new ComputerJournal({ threads: 2 });
+    j.gateChecked(scope); j.record(scope, CLICK);
+    j.record({ ...scope, threadId: "t2" }, CLICK);
+    j.gateChecked(scope); j.record(scope, TYPE);
+    j.record({ ...scope, threadId: "t3" }, CLICK);
+    expect(j.take("t1", new Set(["g1"]))).toMatchObject({ complete: true, tainted: false, calls: [{ tool: "click" }, { tool: "type_text" }] });
+    expect(j.take("t2", new Set(["g1"]))).toMatchObject({ calls: [], tainted: true });
+  });
+
+  it("remembers up to 64 lost generations of a thread, then treats every generation it is asked about as lost", () => {
+    const evictWith = (count: number) => {
+      const j = new ComputerJournal({ threads: 1 });
+      for (let i = 0; i < count; i++) j.taint({ threadId: "t1", generation: `old-${i}` });
+      j.record({ ...scope, threadId: "t2" }, CLICK);
+      const g9 = { ...scope, generation: "g9" };
+      j.gateChecked(g9); j.record(g9, CLICK);
+      return j.take("t1", new Set(["g9"]));
+    };
+    expect(evictWith(64)).toMatchObject({ complete: true, tainted: false });
+    expect(evictWith(65)).toMatchObject({ complete: false, tainted: true });
+  });
+
   it("remembers a bounded number of evicted threads", () => {
     const j = new ComputerJournal({ threads: 1, evictedThreads: 1 });
     for (const threadId of ["t1", "t2", "t3"]) j.record({ ...scope, threadId }, CLICK);
