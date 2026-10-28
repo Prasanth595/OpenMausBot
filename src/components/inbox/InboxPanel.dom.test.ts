@@ -101,6 +101,8 @@ describe("the inbox's card in the chat", () => {
     expect(document.querySelectorAll("[data-inbox-card]")).toHaveLength(1);
     expect(document.querySelector('[data-inbox-card="open"]')!.getAttribute("aria-label")).toBe("2 need you · 2 for your info");
     expect([...document.querySelectorAll("[data-inbox-card] [data-inbox-row]")].map((row) => (row as HTMLElement).dataset.inboxRow)).toEqual([approvalRow.id, questionRow.id]);
+    expect([...document.querySelectorAll('[data-inbox-card] [data-inbox-action="allow"]')].filter((button) => !button.closest("[data-inbox-row]")),
+      "the line the card sits under answers on its own card").toEqual([]);
     await click('[data-inbox-card] [data-inbox-choice="Pricing"]');
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "decideRequest", threadId: "inbox", requestId: "req-question", behavior: "answer", message: "Pricing" }));
     await click('[data-inbox-card] header button');

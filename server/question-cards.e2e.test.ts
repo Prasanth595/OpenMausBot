@@ -21,7 +21,7 @@ process.env.FAKE_CLAUDE_ROOM_PLAN = dir + "/room-plan.json";`;
 const TOKEN = `ops_fake-team-${randomBytes(8).toString("hex")}`;
 
 type Card = { requestId?: string; requestType?: string; options?: string[]; subtitle?: string; answered?: string; answeredText?: string; stopped?: boolean };
-type Row = { id: string; role: string; kind: string; text?: string; card?: Card; replyToId?: string; tool?: { name: string };
+type Row = { id: string; role: string; kind: string; at: number; text?: string; card?: Card; replyToId?: string; tool?: { name: string };
   inbox?: { kind: string; from: { name: string }; origin?: { threadId: string } } };
 type Task = { threadId: string; title: string; inbox?: true; openedBy?: { botId: string } };
 type Bot = { id: string; name: string; threadId: string; busy?: boolean; activity?: string; tasks?: Task[] };
@@ -48,13 +48,8 @@ const told = (botId: string, key: string) => JSON.stringify(turns(botId).find((t
 const messages = async (threadId: string) => ((await team.as(philipp, "GET", `/api/threads/${threadId}/messages?limit=200`)).body.messages ?? []) as Row[];
 const bots = async () => (await team.as(philipp, "GET", "/api/bots")).body.bots as Bot[];
 const idle = async () => (await bots()).every((bot) => !bot.busy && bot.activity !== "working");
-const asks = (jobKey: string) => async () => {
-  const work = (await bots()).find((bot) => bot.id === biber.id)!.tasks!.find((task) => task.openedBy?.botId === luchs.id && task.title.includes(jobKey))
-    ?? (await bots()).find((bot) => bot.id === biber.id)!.tasks!.filter((task) => task.openedBy?.botId === luchs.id).at(-1)!;
-  return work.threadId;
-};
 const questionsIn = async (threadId: string, text: string) => (await messages(threadId)).filter((row) => JSON.stringify([row.text, row.card?.subtitle, row.tool?.name]).includes(text));
-const notified = (threadId: string) => frames.filter((frame) => frame.kind === "notify" && frame.notification?.threadId === threadId);
+const questionsNotified = (threadId: string) => frames.filter((frame) => frame.kind === "notify" && frame.notification?.threadId === threadId && frame.notification.kind === "question");
 
 async function until(done: () => Promise<boolean> | boolean, timeoutMs = 60_000): Promise<void> {
   const end = Date.now() + timeoutMs;
@@ -90,14 +85,19 @@ async function say(bot: Bot, threadId: string, text: string) {
   expect(sent.status, JSON.stringify(sent.body)).toBe(202);
   return sent.body as { message?: Row };
 }
-/** The question card Biber's turn asks with in its work thread, once it is there. */
-async function cardIn(threadId: () => Promise<string>, match: (card: Card) => boolean): Promise<{ work: string; row: Row }> {
+/** The question card a job's turn asks with, once it is there: an open one since `since`, in the work Luchs handed Biber. */
+async function cardIn(since: number, match: (card: Card) => boolean): Promise<{ work: string; row: Row }> {
   let found: { work: string; row: Row } | undefined;
+  const handed = async () => ((await bots()).find((bot) => bot.id === biber.id)!.tasks ?? []).filter((task) => task.openedBy?.botId === luchs.id);
   await until(async () => {
-    const work = await threadId().catch(() => "");
-    const row = work ? (await messages(work)).find((one) => one.card && match(one.card) && !one.card.answered) : undefined;
-    if (work && row) found = { work, row };
+    for (const { threadId: work } of await handed()) {
+      const row = (await messages(work)).find((one) => one.card && match(one.card) && !one.card.answered && one.at >= since);
+      if (row) found = { work, row };
+    }
     return Boolean(found);
+  }).catch(async (error: Error) => {
+    const seen = await Promise.all((await handed()).map(async (task) => ({ task: task.title, rows: (await messages(task.threadId)).slice(-4).map((row) => [row.role, row.kind, row.text?.slice(0, 80), row.card?.answered]) })));
+    throw new Error(`${error.message}: ${JSON.stringify({ seen, luchs: turns(luchs.id).map((turn) => turn.planKey), biber: turns(biber.id).map((turn) => turn.planKey) })}`);
   });
   return found!;
 }
@@ -139,10 +139,10 @@ const askWithCard = (job: string) => ({ key: `${job}-B`, match: [`${job}-BRIEF`]
 it("asks Philipp a decision with set answers as a card in Biber's chat and a copy in his inbox, and a tap there answers Biber, who carries on", async () => {
   script(luchs.id, ...handOn("QC1"));
   script(biber.id, askWithCard("QC1"));
+  const sinceQC1 = Date.now();
   await say(luchs, inbox, "QC1-JOB: Lass Biber den Fix für die Sondervariante umsetzen.");
-  const { work, row } = await cardIn(asks("QC1"), (card) => card.subtitle === QUESTION);
+  const { work, row } = await cardIn(sinceQC1, (card) => card.subtitle === QUESTION);
   expect(row.card).toMatchObject({ requestType: "question", options: CHOICES });
-  expect(told(biber.id, "QC1-B"), "the envelope offers the card tool for set answers").toContain("ask it with ask_user, not show_widget");
 
   await until(async () => (await messages(inbox)).some((line) => line.card?.requestId === row.card!.requestId));
   expect((await bots()).find((bot) => bot.id === luchs.id)!.tasks!.find((task) => task.inbox)?.threadId, "Philipp's chat with Luchs is his inbox").toBe(inbox);
@@ -150,28 +150,30 @@ it("asks Philipp a decision with set answers as a card in Biber's chat and a cop
   expect(copy).toMatchObject({ kind: "options", card: { options: CHOICES, requestType: "question" }, inbox: { kind: "ask", from: { name: "Biber" }, origin: { threadId: work } } });
   const listed = (await team.as(philipp, "GET", "/api/inbox")).body as { rows: Array<{ id: string; tab: string; card?: Card }> };
   expect(listed.rows.find((line) => line.id === copy.id)).toMatchObject({ tab: "needs-you", card: { options: CHOICES } });
-  await until(() => notified(inbox).length === 1);
-  expect(notified(inbox)[0]!.notification).toMatchObject({ kind: "question", botId: luchs.id, title: "Biber has a question" });
+  await until(() => questionsNotified(inbox).length === 1);
+  expect(questionsNotified(inbox)[0]!.notification).toMatchObject({ botId: luchs.id, title: "Biber has a question" });
   expect(frames.filter((frame) => frame.kind === "notify" && frame.notification?.botId === biber.id), "one notification, from the inbox").toEqual([]);
+  expect((await messages(inbox)).some((line) => line.tool?.name.startsWith("Waiting on your answer")), "no chip beside the copy").toBe(false);
 
   const answered = await team.as(philipp, "POST", `/api/threads/${inbox}/respond`, { requestId: row.card!.requestId, behavior: "answer", message: CHOICES[0] });
   expect(answered.status, JSON.stringify(answered.body)).toBe(200);
   await until(async () => (await messages(work)).some((line) => line.role === "bot" && line.text === `QC1-B: Umgesetzt mit: ${CHOICES[0]}`));
+  expect(told(biber.id, "QC1-B"), "the envelope offered the card tool for set answers").toContain("ask it with ask_user, not show_widget");
   await until(async () => (await messages(inbox)).some((line) => line.text === "QC1-L-DONE: Biber ist fertig."));
   expect((await messages(work)).find((line) => line.id === row.id)!.card).toMatchObject({ answered: "answer", answeredText: CHOICES[0] });
   expect((await messages(inbox)).find((line) => line.id === copy.id)!.card, "the copy follows").toMatchObject({ answered: "answer" });
   expect(told(luchs.id, "QC1-L-DONE")).toContain(`QC1-B: Umgesetzt mit: ${CHOICES[0]}`);
   expect(turns(luchs.id).map((turn) => turn.planKey), "Luchs is woken once, with the result").toEqual(["QC1-L", "QC1-L-DONE"]);
   expect(await questionsIn(inbox, QUESTION), "the question reaches Philipp once: the card's copy").toHaveLength(1);
-  expect((await messages(inbox)).some((line) => line.tool?.name.startsWith("Waiting on your answer")), "no chip beside the copy").toBe(false);
   await until(idle);
 }, hostTimeout(150_000));
 
 it("takes Philipp's own words in Biber's chat as the answer to the card Biber waits on", async () => {
   script(luchs.id, ...handOn("QC2"));
   script(biber.id, askWithCard("QC2"));
+  const sinceQC2 = Date.now();
   await say(luchs, inbox, "QC2-JOB: Lass Biber den Fix für die Sondervariante umsetzen.");
-  const { work, row } = await cardIn(asks("QC2"), (card) => card.subtitle === QUESTION);
+  const { work, row } = await cardIn(sinceQC2, (card) => card.subtitle === QUESTION);
   const sent = await say(biber, work, "Nur den Abschlusstext, bitte");
   expect(sent.message, "his line is kept, under the card it answers").toMatchObject({ role: "user", text: "Nur den Abschlusstext, bitte", replyToId: row.id });
   await until(async () => (await messages(work)).some((line) => line.role === "bot" && line.text === "QC2-B: Umgesetzt mit: Nur den Abschlusstext, bitte"));
@@ -186,8 +188,9 @@ it("turns Biber's NEEDS INPUT question into the same card with a reply field, in
   script(biber.id,
     { key: "QC3-B2", match: ["QC3-BRIEF", "The person answered"], reply: "QC3-B2: Erledigt, der neue Abschlusstext steht." },
     { key: "QC3-B", match: ["QC3-BRIEF"], reply: `Geprüft: der Abschlusstext nutzt noch die alte Vorlage.\nNEEDS INPUT: ${OPEN}` });
+  const sinceQC3 = Date.now();
   await say(luchs, inbox, "QC3-JOB: Lass Biber den Abschlusstext der Sondervariante prüfen.");
-  const { work, row } = await cardIn(asks("QC3"), (card) => card.subtitle === OPEN);
+  const { work, row } = await cardIn(sinceQC3, (card) => card.subtitle === OPEN);
   expect(row.card).toMatchObject({ requestType: "question", options: [], requestId: expect.stringMatching(/^needs-input-/) });
   expect((await messages(work)).find((line) => line.role === "bot" && line.text?.startsWith("Geprüft"))!.text, "the line keeps its words, the card asks")
     .toBe("Geprüft: der Abschlusstext nutzt noch die alte Vorlage.");
@@ -212,8 +215,9 @@ it("turns Biber's NEEDS INPUT question into the same card with a reply field, in
 it("closes the open question as stopped when Philipp stops Biber's work, in its chat and in his inbox", async () => {
   script(luchs.id, ...handOn("QC4"), { key: "QC4-L-ASKED", match: ["stopped on a question for", "[OpenMausBot question from @Biber", "QC4-JOB"], reply: "QC4-L-ASKED" });
   script(biber.id, { key: "QC4-B", match: ["QC4-BRIEF"], reply: `Geprüft.\nNEEDS INPUT: ${OPEN}` });
+  const sinceQC4 = Date.now();
   await say(luchs, inbox, "QC4-JOB: Lass Biber den Einladungstext prüfen.");
-  const { work, row } = await cardIn(asks("QC4"), (card) => card.subtitle === OPEN);
+  const { work, row } = await cardIn(sinceQC4, (card) => card.subtitle === OPEN);
   await until(async () => (await messages(inbox)).some((line) => line.card?.requestId === row.card!.requestId));
   const stopped = await team.as(philipp, "POST", `/api/bots/${biber.id}/interrupt`, { threadId: work });
   expect(stopped.status, JSON.stringify(stopped.body)).toBe(200);

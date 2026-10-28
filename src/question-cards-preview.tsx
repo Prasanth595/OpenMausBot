@@ -1,6 +1,6 @@
 // Dev-only gallery of the question and approval cards on a Team Cloud, served at /question-cards-preview.html; not in
 // the packaged app. It mounts the real chat and inbox components over a fixed store, with no server behind it.
-// ?state=question|approval|open|answered&surface=chat|inbox|panel&skin=midnight|daylight&mode=simple|advanced&lang=de
+// ?state=question|approval|open|answered|others&surface=chat|inbox|panel&skin=midnight|daylight&mode=simple|advanced&lang=de
 import { StrictMode, useMemo, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import type { InboxRow, InboxView } from "../shared/inbox";
@@ -47,7 +47,17 @@ const cardFor = (state: string): NonNullable<Message["card"]> | null =>
 const message = (id: string, minutes: number, fields: Partial<Message>): Message =>
   ({ id, at: AT + minutes * 60_000, role: "bot", kind: "text", text: "", ...fields }) as Message;
 
+/** The other cards that share the question card's shell: a key, a sign-in, a connection and a first-run choice. */
+const others = (): Message[] => [
+  message("secret", 1, { kind: "secret", text: "Securely provide the OpenAI API key.", secret: { target: "openaiImageApiKey", label: "OpenAI API key",
+    description: "Generate a key at platform.openai.com. Biber can use it but never read it back.", placeholder: "sk-…", requestKey: "request-key-1" } }),
+  message("signin", 2, { kind: "signin", signIn: { url: "https://example.com/login", site: "example.com", place: "browser", reason: "The report is behind a login." } }),
+  message("connector", 3, { kind: "connector", connector: { slug: "github", label: "GitHub", description: "Read pull requests", status: "required", resumeKey: "resume1" } }),
+  message("quiz", 4, { kind: "options", card: { title: "Wie soll ich dich nennen?", subtitle: "", options: ["Philipp", "Phil", "Herr Huber"] } }),
+] as Message[];
+
 function biberMessages(state: string): Message[] {
+  if (state === "others") return others();
   const rows: Message[] = [
     message("brief", 0, { role: "bot", from: { botId: "luchs", name: "Luchs", color: "orange" }, roomRequest: { id: "job-1", phase: "request" },
       text: "@Biber Setz bitte den Fix für die Sondervariante natural-greenery um: als Branch fix/natural-greenery-custom-case, mit PR nach develop." }),
