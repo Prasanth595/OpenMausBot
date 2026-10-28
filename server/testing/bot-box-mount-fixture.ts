@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { closeSync, mkdirSync, openSync, symlinkSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { BotBox } from "../bot-box/box.ts";
@@ -67,18 +67,23 @@ if (scenario === "browser" || scenario === "browser-read-only") {
     }
   }
   console.log(JSON.stringify(results));
-} else if (["symlink-rw", "symlink-env", "symlink-home-rw", "symlink-home-env"].includes(scenario)) {
-  const boxHome = scenario.startsWith("symlink-home-") ? "/srv/linked-home" : "/srv";
-  const alias = scenario.startsWith("symlink-home-") ? join(boxHome, "openmausbot") : "/srv/omb";
-  symlinkSync(scenario.startsWith("symlink-home-") ? "/var/lib" : realData, scenario.startsWith("symlink-home-") ? boxHome : alias);
-  const folder = join(alias, "engine-home"), canonical = join(realData, "engine-home");
-  mkdirSync(folder);
-  writeFileSync(join(folder, "settings"), "writable fixture\n");
-  const plan = planBox({ ...setup, dataDir: alias, home: boxHome }, {
-    ...request, ...(scenario.endsWith("-env") ? { env: { CODEX_HOME: folder } } : { rw: [folder] }),
+} else if (["hostile-env-data", "hostile-env-bot", "hostile-rw-data", "hostile-rw-bot"].includes(scenario)) {
+  const otherBot = join(realData, "workspaces", "bot-b"), alias = join(home, ".codex");
+  const cwd = join(realData, "task-workspaces", "bot-a", "thread-1");
+  for (const folder of [otherBot, cwd, join(realData, "workspaces", "bot-a")]) mkdirSync(folder, { recursive: true });
+  writeFileSync(join(otherBot, "private.txt"), "other bot fixture");
+  symlinkSync(scenario.endsWith("-data") ? realData : otherBot, alias);
+  const plan = planBox(setup, { ...request, cwd,
+    ...(scenario.startsWith("hostile-env-") ? { env: { HOME: home, CODEX_HOME: alias } } : { rw: [alias] }),
   });
-  console.log(JSON.stringify(probe(bwrapArgs(plan),
-    `for folder in ${folder} ${canonical}; do if test -r "$folder/settings"; then cat "$folder/settings"; else echo missing; fi; if (echo changed > "$folder/probe") 2>/dev/null; then echo writable; else echo unwritable; fi; done; for file in ${alias}/messages.db ${realData}/messages.db; do if test -r "$file"; then echo exposed; else echo hidden; fi; done`)));
+  const database = join(realData, "messages.db"), otherFile = join(otherBot, "private.txt");
+  const aliasedFile = join(alias, scenario.endsWith("-data") ? "messages.db" : "private.txt");
+  const paths = [database, otherFile, aliasedFile].join(" ");
+  const files = probe(bwrapArgs(plan),
+    `for file in ${paths}; do if test -r "$file"; then echo exposed; else echo hidden; fi; done; for file in ${paths}; do (echo changed >> "$file") 2>/dev/null || :; done; for folder in ${alias} ${realData} ${otherBot}; do (echo changed > "$folder/alias-write-probe") 2>/dev/null || :; done`);
+  console.log(JSON.stringify({ files, hostFiles: [database, otherFile].map((file) => readFileSync(file, "utf8")),
+    created: [realData, otherBot].map((folder) => existsSync(join(folder, "alias-write-probe"))),
+  }));
 } else if (scenario === "symlink-private-env") {
   writeFileSync("/tmp/private.txt", "private fixture");
   symlinkSync("/tmp", "/srv/scratch");

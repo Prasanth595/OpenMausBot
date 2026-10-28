@@ -51,8 +51,12 @@ describe.skipIf(detection.box !== "bwrap")("synthetic filesystem layouts inside 
     expect(layout(scenario)).toEqual([files, files, files, files]);
   });
 
-  it.each(["symlink-rw", "symlink-env", "symlink-home-rw", "symlink-home-env"])("restores writable paths through data aliases (%s)", (scenario) => {
-    expect(layout(scenario)).toEqual(["writable fixture", "writable", "writable fixture", "writable", "hidden", "hidden"]);
+  it.each(["hostile-env-data", "hostile-env-bot", "hostile-rw-data", "hostile-rw-bot"])("keeps writable aliases from exposing masked data (%s)", (scenario) => {
+    expect(layout(scenario)).toEqual({
+      files: ["hidden", "hidden", "hidden"],
+      hostFiles: ["private fixture", "other bot fixture"],
+      created: [false, false],
+    });
   });
 
   it("keeps private temporary files hidden when an environment path aliases /tmp", () => {
