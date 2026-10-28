@@ -153,10 +153,9 @@ Bots have tools:
 
 These are deliberate product decisions. Do not report them.
 
-- **Full access is the default approval level** (`DEFAULT_APPROVAL_MODE` in
-  `shared/approval-mode.ts`). At Full access each engine runs in its own most
-  permissive mode. Where an engine has no such mode, the harness answers the
-  permission requests it leaves.
+- **Ask is the default approval level** (`DEFAULT_APPROVAL_MODE` in
+  `shared/approval-mode.ts`). Elevated modes require an explicit grant and
+  remain subject to provider and outbound safety gates.
 - **OpenMausBot adds no approval prompts of its own.** Approvals belong to
   each engine's native permission system, at the level the person picked.
   When a bot changes its own routines, skills, webhooks, profile or model,
