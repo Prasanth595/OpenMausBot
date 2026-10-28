@@ -152,19 +152,27 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     mounts.push({ kind: "bind", source: path, target: path });
     if (!writable.includes(path)) writable.push(path);
   };
-  // HOME first; the data folder is replaced by an empty one right after, so the lines below put back only what is named.
-  // An engine home lives in the data folder, so it goes back after that.
   const ownHome = request.home ? resolve(request.home) : null;
-  if (!ownHome && request.home !== false) rw(home);
+  const allowedHome = request.home === false ? null : ownHome ?? home;
+  const realHome = allowedHome ? physicalPath(allowedHome) : null;
+  if (realHome === dataDir) throw new Error("The bot box requires HOME to differ from the data directory.");
+  const homeInsideData = realHome !== null && under(realHome, dataDir);
+  if (allowedHome && !homeInsideData) rw(allowedHome);
   if (!mutate.has("bind-data")) {
-    mounts.push({ kind: "tmpfs", target: dataDir });
+    const dataViews = new Set([dataDir]);
+    for (const mount of mounts) {
+      if (mount.kind !== "bind" && mount.kind !== "ro") continue;
+      const source = physicalPath(mount.source);
+      if (under(dataDir, source)) dataViews.add(join(mount.target, relative(source, dataDir)));
+    }
+    for (const target of dataViews) mounts.push({ kind: "tmpfs", target });
   } else {
     rw(dataDir);
   }
-  if (ownHome) rw(ownHome);
+  if (allowedHome && homeInsideData) rw(allowedHome);
   const covered = (path: string) => mountAccess(mounts, path) === "rw";
 
-  const cwd = request.cwd ? resolve(request.cwd) : null;
+  const cwd = request.cwd ? physicalPath(request.cwd) : null;
   const ids = cwd ? taskWorkspaceIds(cwd, dataDir) : null;
   const botId = request.botId ?? ids?.botId ?? null;
   if (cwd && !covered(cwd)) rw(cwd);

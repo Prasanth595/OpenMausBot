@@ -38,10 +38,20 @@ describe.skipIf(detection.box !== "bwrap")("synthetic filesystem layouts inside 
 
   it("hides data through its symlink and real path while preserving the turn's workspace", () => {
     expect(layout("symlink")).toEqual({ botId: "bot-a", files: ["hidden", "hidden", "task fixture", "memory fixture"] });
+    expect(layout("symlink-home")).toEqual({ botId: "bot-a", files: ["hidden", "hidden", "task fixture", "memory fixture"] });
   });
 
   it("restores explicitly read-only paths below a data mask for engines and browsers", () => {
     expect(layout("read-only")).toEqual(["skill fixture", "read-only", "hidden"]);
     expect(layout("browser-read-only")).toEqual(["hidden", "hidden", "upload fixture"]);
+  });
+
+  it("restores HOME below the data directory and refuses HOME equal to all data", () => {
+    expect(layout("home")).toEqual([
+      { files: ["settings fixture", "writable", "hidden"] },
+      { error: expect.stringMatching(/HOME.*data directory/) },
+      { error: expect.stringMatching(/HOME.*data directory/) },
+      ["hidden"],
+    ]);
   });
 });
