@@ -13,6 +13,7 @@ export const TALK_TEXT = Object.freeze({
   cloudWaking: "My Cloud is still waking. Try again in a moment.",
   wakeFailed: "My Cloud didn't wake up. Try again in a moment.",
   cloudSignIn: "Sign in to My Cloud again, then try again.",
+  notSent: "That didn't reach MausBot. Try again in a moment.",
   permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
   dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again.",
   unavailable: "Talking couldn't start. Try again.",
@@ -129,12 +130,20 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     else settle(ask, "error", TALK_TEXT.failed, TALK_TIMING.replyHideMs);
   }
 
+  /** Nothing was sent: the words are dropped and the box says so. */
+  function notSent(ask) {
+    ask.controller.abort();
+    settle(ask, "error", TALK_TEXT.notSent, TALK_TIMING.noticeHideMs);
+  }
+
   function send(ask, prepared) {
     show(ask, ask.waking ? "waking" : "sending", ask.words);
-    ask.answerTimer = setTimeout(() => { if (live(ask)) stillWorking(ask); }, TALK_TIMING.stillWorkingMs);
+    ask.answerTimer = setTimeout(() => { if (live(ask)) notSent(ask); }, TALK_TIMING.stillWorkingMs);
     prepared.then(chat => {
       if (!live(ask)) return;
       if (ask.state === "waking") show(ask, "sending", ask.words);
+      clearTimeout(ask.answerTimer);
+      ask.answerTimer = setTimeout(() => { if (live(ask)) stillWorking(ask); }, TALK_TIMING.stillWorkingMs);
       server.ask({
         chat,
         text: ask.words,

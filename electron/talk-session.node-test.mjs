@@ -57,6 +57,7 @@ test("the box's words and timings are fixed", () => {
     cloudWaking: "My Cloud is still waking. Try again in a moment.",
     wakeFailed: "My Cloud didn't wake up. Try again in a moment.",
     cloudSignIn: "Sign in to My Cloud again, then try again.",
+    notSent: "That didn't reach MausBot. Try again in a moment.",
     permission: "Talking needs Microphone + Speech Recognition access — System Settings → Privacy & Security.",
     dictationOff: "Turn on Dictation in System Settings → Keyboard, then try again.",
     unavailable: "Talking couldn't start. Try again.",
@@ -372,6 +373,37 @@ test("no answer in 120 s shows Still working · Open chat", async () => {
   assert.equal(signal.aborted, true);
   mock.timers.tick(11_999); assert.equal(h.closed, 0);
   mock.timers.tick(1); assert.equal(h.closed, 1);
+});
+
+test("the reply's 120 s start once the words are sent, never while My Cloud wakes", async () => {
+  const wake = waking();
+  const { inputs, ask } = holdAsk([{ kind: "thinking" }]);
+  const h = harness({ prepare: wake.prepare, ask });
+  h.session.press(); wake.wake(); say(h, "book a table"); release(h); await flush();
+  mock.timers.tick(100_000);
+  assert.equal(h.views.at(-1).state, "waking");
+  wake.done(CHAT); await flush();
+  assert.equal(inputs.length, 1);
+  mock.timers.tick(119_999);
+  assert.equal(h.views.at(-1).state, "thinking");
+  mock.timers.tick(1);
+  assert.deepEqual(h.views.at(-1), { state: "still-working", text: "" });
+  assert.equal(inputs[0].signal.aborted, true);
+});
+
+test("words that never got sent in 120 s say so, never Still working, and are not sent later", async () => {
+  const wake = waking();
+  const h = harness({ prepare: wake.prepare });
+  h.session.press(); wake.wake(); say(h, "book a table"); release(h); await flush();
+  mock.timers.tick(119_999);
+  assert.equal(h.views.at(-1).state, "waking");
+  mock.timers.tick(1);
+  assert.deepEqual(h.views.at(-1), { state: "error", text: TALK_TEXT.notSent });
+  assert.equal(h.session.busy(), false);
+  wake.done(CHAT); await flush();
+  assert.equal(h.asks.length, 0);
+  assert.deepEqual(h.views.at(-1), { state: "error", text: TALK_TEXT.notSent });
+  mock.timers.tick(TALK_TIMING.noticeHideMs); assert.equal(h.closed, 1);
 });
 
 test("a lost stream shows Still working; a refused send shows the failure", async () => {
