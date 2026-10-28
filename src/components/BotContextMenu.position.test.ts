@@ -113,7 +113,7 @@ describe("bot actions menu viewport placement", () => {
   it("keeps Advanced's flat list of bot actions, drawn on the shared menu sheet", () => {
     fixture.advanced = true;
     const html = render();
-    for (const key of ["task.newShort", "folder.new", "task.deleteAll", "sidebar.bot.pin", "sidebar.bot.makeChief", "sidebar.bot.moveToSection", "sidebar.bot.markUnread", "sidebar.bot.editProfile", "sidebar.bot.duplicate", "sidebar.copyConversationId", "sidebar.bot.archive", "common.delete"]) {
+    for (const key of ["task.newShort", "folder.new", "task.deleteAll", "sidebar.bot.pin", "sidebar.bot.makeChief", "sidebar.bot.moveToSection", "sidebar.bot.markUnread", "sidebar.bot.editProfile", "sidebar.bot.duplicate", "sidebar.copyConversationId", "sidebar.bot.archive", "common.delete"] as const) {
       expect(html, key).toContain(t(key));
     }
     expect(html).not.toContain(t("sidebar.bot.more"));
