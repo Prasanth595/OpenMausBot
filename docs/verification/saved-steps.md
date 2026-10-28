@@ -170,10 +170,12 @@ each round, `prompts.jsonl`, `cua-calls.jsonl`, the Auto round's
 
 ### Last exercised
 
-2026-10-28 on macOS against `feat/learned-replay`, twice, with the machine's
-one-minute load average near 5 and then near 40: all eight rounds as stated
-each time, 40 driver calls and 5 engine prompts per run. A script asserted each round's statements
-above except round 5's rebuilt prompt, which was read from `prompts.jsonl`.
+2026-10-29 on macOS against `feat/learned-replay` at `f25286f8d` (after
+merging `origin/main`), once, with the machine's one-minute load average near
+10: all eight rounds as stated, 40 driver calls and 5 engine prompts. A script
+asserted each round's statements above (34 checks) except round 5's rebuilt
+prompt, which was read from `prompts.jsonl`. The same recipe passed on
+2026-10-28 before the merge, at loads near 5 and 40.
 
 ## Limits
 
