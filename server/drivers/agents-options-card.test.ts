@@ -49,7 +49,7 @@ describe("Watcher options-card tool", () => {
     expect(tool.description).toContain("2-6 choices");
     expect(options).toMatchObject({ type: "array", items: { type: "string" } });
     expect(fullInputSchema("create_options_card")).toMatchObject({ properties: { options: { type: "array", minItems: 2, maxItems: 6, uniqueItems: true } } });
-    expect(tool.inputSchema.required).toEqual(["title", "subtitle", "options"]);
+    expect((tool.inputSchema as { required?: string[] }).required).toEqual(["title", "subtitle", "options"]);
   });
 
   it("refuses direct calls from another bot before a server round trip", async () => {
