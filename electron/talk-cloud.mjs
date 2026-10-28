@@ -40,13 +40,14 @@ export function createCloudTalkServer({ origin, fetch: fetchImpl, reconnect, pow
     if (response.status === 401) {
       drop(response);
       if (!(await reconnect(at).catch(() => false))) throw new TalkServerError("cloud-signin");
+      if (origin() !== at) throw new TalkServerError("cloud-down");
       response = await call(at, route, init);
       if (response.status === 401) { drop(response); throw new TalkServerError("cloud-signin"); }
     }
     if (asleepAnswer(response)) {
       drop(response);
       power.hold();
-      throw new TalkServerError("cloud-waking");
+      throw Object.assign(new TalkServerError("cloud-waking"), { asleepRead: (init.method ?? "GET") === "GET" });
     }
     return response;
   }
@@ -94,8 +95,9 @@ export function createCloudTalkServer({ origin, fetch: fetchImpl, reconnect, pow
         try {
           return await server.prepare();
         } catch (error) {
-          // My Cloud said it is going to sleep (the gate now holds): woken, it is asked once more. Nothing was made.
-          if (error?.code !== "cloud-waking" || !power.asleep()) throw error;
+          // Only My Cloud's own asleep answer to a read is tried again: nothing happened there. A failed create may have
+          // made the chat, so it is never repeated.
+          if (error?.asleepRead !== true) throw error;
         }
         await wake();
         return server.prepare();

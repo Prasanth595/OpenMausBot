@@ -43,7 +43,7 @@ function world({ asleep = false, routes = {}, signIn = true, wake = async () => 
   };
   w.talk = createCloudTalkServer({
     origin: () => w.origin, fetch: w.fetch, power: w.gate, account: () => account,
-    reconnect: async at => { w.reconnects.push(at); return signIn; },
+    reconnect: async at => { w.reconnects.push(at); w.onReconnect?.(); return signIn; },
     prefs: { quickAsksChat: () => null, setQuickAsksChat: (key, chat) => w.saves.push([key, chat]) },
     ...(timing ? { timing } : {}),
   });
@@ -127,7 +127,7 @@ test("two presses during one wake share it, and each is told", async () => {
   assert.equal(w.calls.filter(call => call.key === "POST /api/bots/m/tasks").length, 1);
 });
 
-test("My Cloud answering that it is going to sleep holds the gate, wakes it and tries once more", async () => {
+test("an asleep answer to a read holds the gate, wakes My Cloud and reads once more, never in a loop", async () => {
   const w = world({ routes: { "GET /api/bots?messages=0": [asleepAnswer(), Response.json(BOTS)] } });
   assert.deepEqual(await w.talk.prepare(w.waked), { botId: "m", threadId: "t-new" });
   assert.equal(w.said, 1);
@@ -137,6 +137,36 @@ test("My Cloud answering that it is going to sleep holds the gate, wakes it and 
   const twice = world({ routes: { "GET /api/bots?messages=0": asleepAnswer() } });
   await assert.rejects(twice.talk.prepare(), { code: "cloud-waking" });
   assert.equal(twice.calls.filter(call => call.key === "GET /api/bots?messages=0").length, 2, "tries once more, never in a loop");
+});
+
+test("a failure while the gate says asleep is not an asleep answer: nothing is tried again", async () => {
+  const timedOut = () => Promise.reject(new DOMException("The operation timed out.", "TimeoutError"));
+  const making = world({ routes: { "POST /api/bots/m/tasks": () => { making.gate.hold(); return timedOut(); } } });
+  await assert.rejects(making.talk.prepare(making.waked), { name: "TalkServerError", code: "cloud-waking" });
+  assert.deepEqual(making.keys(), ["GET /api/bots?messages=0", "POST /api/bots/m/tasks"], "a create that may have happened is never made twice");
+  assert.deepEqual([making.wakes, making.said], [0, 0]);
+
+  const reading = world({ routes: { "GET /api/bots?messages=0": () => { reading.gate.hold(); return Promise.reject(new TypeError("fetch failed")); } } });
+  await assert.rejects(reading.talk.prepare(), { code: "cloud-waking" });
+  assert.deepEqual(reading.keys(), ["GET /api/bots?messages=0"]);
+});
+
+test("an asleep answer to the chat's creation is not repeated", async () => {
+  const w = world({ routes: { "POST /api/bots/m/tasks": asleepAnswer() } });
+  await assert.rejects(w.talk.prepare(), { code: "cloud-waking" });
+  assert.equal(w.calls.filter(call => call.key === "POST /api/bots/m/tasks").length, 1);
+  assert.equal(w.wakes, 0);
+});
+
+test("home moving elsewhere while the window signs in again asks nothing more", async () => {
+  const w = world({ routes: { "GET /api/bots?messages=0": new Response(null, { status: 401 }) } });
+  w.onReconnect = () => { w.origin = "https://other.example.test"; };
+  await assert.rejects(w.talk.prepare(), { name: "TalkServerError", code: "cloud-down" });
+  assert.deepEqual(w.keys(), ["GET /api/bots?messages=0"]);
+  const gone = world({ routes: { "GET /api/bots?messages=0": new Response(null, { status: 401 }) } });
+  gone.onReconnect = () => { gone.origin = null; };
+  await assert.rejects(gone.talk.prepare(), { code: "cloud-down" });
+  assert.equal(gone.calls.length, 1);
 });
 
 test("a wake that fails or takes too long says so, and nothing is asked", async () => {
