@@ -1,4 +1,4 @@
-import { WAIT_KINDS } from "../waits.ts";
+import { WAIT_HOURS, WAIT_KINDS } from "../../shared/waits.ts";
 import type { ToolCallContext, ToolCallResult } from "./agents-call.ts";
 import type { Json } from "./agents-client.ts";
 
@@ -17,7 +17,7 @@ export const WAIT_TOOL_DEFINITIONS = [
   {
     name: "wait_until",
     description:
-      "Tell the person when something happens, with no AI running while you wait: plain code checks a web page for some words (every minute), a file or folder (there, gone or changed), a program (running or stopped), or another bot finishing its work. When it happens a message lands in this chat with a notification; with follow_up, you also carry out follow_up here. Use it instead of staying busy or a short-interval routine. If it is already true nothing is set up and the result says so: tell the person at once. Files and programs are those of the computer OpenMausBot runs on, only when you work on it. A wait stops after hours (default 24, at most 168).",
+      `Tell the person when something happens, with no AI running while you wait: plain code checks a web page for some words (every minute), a file or folder (there, gone or changed), a program (running or stopped), or another bot finishing its work. When it happens a message lands in this chat with a notification; with follow_up, you also carry out follow_up here. Use it instead of staying busy or a short-interval routine. If it is already true nothing is set up and the result says so: tell the person at once. Files and programs are those of the computer OpenMausBot runs on, only when you work on it. A wait stops after hours (default ${WAIT_HOURS.default}, at most ${WAIT_HOURS.max}).`,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -38,7 +38,7 @@ export const WAIT_TOOL_DEFINITIONS = [
           maxLength: 2000,
           description: "Only when the person asked for something to happen then: that request, written for a run that will not see this conversation.",
         },
-        hours: { type: "integer", minimum: 1, maximum: 168 },
+        hours: { type: "integer", minimum: 1, maximum: WAIT_HOURS.max },
       },
       required: ["label", "kind"],
     },

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ToolCallContext } from "./agents-call.ts";
 import { callWaitTool, WAIT_TOOL_DEFINITIONS, WAIT_TOOL_NAMES } from "./agents-wait-tools.ts";
-import { WAIT_KINDS } from "../waits.ts";
+import { WAIT_KINDS } from "../../shared/waits.ts";
 
 type Reply = { ok: boolean; status: number; body: Record<string, unknown> };
 

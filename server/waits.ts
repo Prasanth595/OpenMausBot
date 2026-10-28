@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 
+import { WAIT_HOURS, type WaitKind } from "../shared/waits.ts";
 import { writeFileAtomic } from "./atomic.ts";
 import { DATA_DIR } from "./config.ts";
 import {
@@ -19,10 +20,7 @@ import {
   type ProcessEntry,
 } from "./wait-probes.ts";
 
-export const WAIT_KINDS = ["url_contains", "url_missing", "file_exists", "file_missing", "file_changed", "process_running", "process_gone", "bot_idle"] as const;
-export type WaitKind = (typeof WAIT_KINDS)[number];
 export const WAIT_LIMITS = { perBot: 10, total: 50 } as const;
-export const WAIT_HOURS = { default: 24, max: 168 } as const;
 export const WAIT_TICK_MS = 5_000, URL_CHECK_MS = 60_000, URL_BACKOFF_MAX_MS = 15 * 60_000;
 
 export type NewWaitCondition =

@@ -2,10 +2,11 @@ import type { ServerResponse } from "node:http";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
 
+import { WAIT_HOURS, WAIT_KINDS, type WaitKind } from "../../shared/waits.ts";
 import type { Surface } from "../../shared/wire.ts";
 import type { json as sendJson } from "../harness/http.ts";
 import { expandHome } from "../wait-probes.ts";
-import { WAIT_HOURS, WAIT_KINDS, waitList, type NewWaitCondition, type WaitKind, type WaitManager } from "../waits.ts";
+import { waitList, type NewWaitCondition, type WaitManager } from "../waits.ts";
 import { PASS } from "./table.ts";
 
 const WAITS = "/api/internal/waits";
