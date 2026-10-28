@@ -141,6 +141,11 @@ describe("SavedStepsDispatch.sendTurn", () => {
     ["new words", reworded("open textedit and type hello, world"), INPUT],
     ["the same key in other words, for steps that type", reworded("Please open TextEdit and type hello world."), INPUT],
     ["the same key in other case, for steps that type", reworded("open textedit and type HELLO WORLD"), INPUT],
+    ["a step's tool is not selected for the bot", REQ, { ...INPUT, toolScope: { deny: ["mcp:computer:set_value"] } }],
+    ["a lookup the replay needs is not selected for the bot", REQ, { ...INPUT, toolScope: { deny: ["mcp:computer:list_windows"] } }],
+    ["only some of the steps' tools are selected", REQ, { ...INPUT, toolScope: { allow: ["mcp:computer:click", "mcp:computer:list_apps"] } }],
+    ["the computer is not selected", REQ, { ...INPUT, toolScope: { deny: ["mcp:computer:*"] } }],
+    ["the bot's tool selection cannot be read", REQ, { ...INPUT, toolScope: { allow: "mcp:computer:*" } as never }],
   ])("passes through: %s", async (_, request, input) => {
     expect(await dispatch.sendTurn(engine, request as never, input as SendTurnInput, start)).toEqual({ turnId: "e1" });
     expect(start).toHaveBeenCalledWith(input);
@@ -220,6 +225,16 @@ describe("SavedStepsDispatch.sendTurn", () => {
     expect(dispatch.replayed("t1", turnId)).toBe(RECIPE.id);
     expect(dispatch.replayed("t1", "another-turn")).toBeUndefined();
     expect(recipes.forget).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["every computer tool selected", { allow: ["mcp:computer:*"] }],
+    ["another tool turned off", { deny: ["mcp:computer:drag", "native:Bash"] }],
+  ])("replays with %s", async (_, toolScope) => {
+    await dispatch.sendTurn(engine, REQ, { ...INPUT, toolScope }, start);
+    await settled();
+    expect(start).not.toHaveBeenCalled();
+    expect(acted).toEqual(["click", "set_value"]);
   });
 
   it("drives the turn's own gated computer and closes it", async () => {

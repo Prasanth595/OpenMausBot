@@ -1,3 +1,4 @@
+import { allowsTool } from "../../shared/tool-scope.ts";
 import { newId, type ProviderAdapter, type ProviderInstance, type RuntimeEvent, type SendTurnInput, type TurnStartResult } from "../contracts.ts";
 import { createChatToolApproval } from "../drivers/chat-tool-approval.ts";
 import { retriedTurnEvent, type RetriedTurn } from "../quick-model-fallback.ts";
@@ -48,6 +49,8 @@ interface Run extends RetriedTurn {
 }
 
 const STOPPED = { kind: "stopped" } as const satisfies ReplayOutcome;
+const LOOKUPS = ["list_apps", "list_windows", "get_window_state"] as const;
+const COMPUTER_SERVER = "computer";
 const REMEMBERED_REPLIES = 256;
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -134,7 +137,7 @@ export class SavedStepsDispatch {
     if (!request.placePicked || !personTextRequest(request.message) || request.turnText !== request.message.text) return undefined;
     const text = request.turnText;
     const recipe = this.deps.recipes.find(request.botId, requestKey(text));
-    return recipe && recipeFitsRequest(recipe, text) ? recipe : undefined;
+    return recipe && recipeFitsRequest(recipe, text) && toolsAllowed(recipe, input.toolScope) ? recipe : undefined;
   }
 
   private standIn(run: Run, approval: Approval, asked: ReadonlySet<string>): ProviderInstance {
@@ -250,6 +253,10 @@ export class SavedStepsDispatch {
   private emit(run: Run, event: DistributiveOmit<RuntimeEvent, "eventId" | "createdAt" | "threadId" | "provider">): void {
     this.deps.publish({ eventId: newId(), createdAt: new Date().toISOString(), ...this.turn(run), ...event } as RuntimeEvent);
   }
+}
+
+function toolsAllowed(recipe: Recipe, toolScope: unknown): boolean {
+  return [...LOOKUPS, ...recipe.steps.map((step) => step.tool)].every((name) => allowsTool(toolScope, { kind: "mcp", server: COMPUTER_SERVER, name }));
 }
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
