@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -6,10 +6,12 @@ import type { Notification } from "../../shared/notification.ts";
 import * as atomic from "../atomic.ts";
 import { audienceIncludes, memberAudience } from "../audience.ts";
 import { DATA_DIR } from "../config.ts";
+import { createMemoryUpkeep } from "../memory-upkeep.ts";
 import type { RequestAuth } from "../request-auth.ts";
 import { personKey } from "../person-key.ts";
 import { Store, type BotRecord } from "../store.ts";
 import { ThreadStarters } from "../thread-starters.ts";
+import { workspaceDir } from "../workspace.ts";
 import { createCloudTeamHost } from "./cloud-team-host.ts";
 import { createTeamMessages } from "./team-messages.ts";
 
@@ -71,6 +73,45 @@ function legacyFixture(records: "homes" | "items" | "both" = "both") {
 }
 
 describe("private message ownership", () => {
+  it.each([false, true])("finishes private memory capture and learns About you only for an owner (owned: %s)", async (owned) => {
+    const f = fixture();
+    const task = f.store.createTask(f.botId, "Private preferences", false)!;
+    f.store.patchTask(f.botId, task.threadId, { private: true });
+    if (owned) f.starters.set(task.threadId, key(ADA.email));
+    expect(f.host.audienceOf(task.threadId)).toBe(owned ? memberAudience(key(ADA.email)) : `member:unowned-${task.threadId}`);
+    const layer = f.host.layer(f.botId, task.threadId);
+    f.host.people.write(key(ADA.email), "Existing preference");
+    const write = vi.spyOn(f.host.people, "write");
+    const plan = vi.fn((current: string) => ({ next: `${current}\nThe person is vegetarian`, count: 1 }));
+    const upkeep = createMemoryUpkeep({
+      bots: () => f.store.bots,
+      bot: (id) => f.store.bot(f.host.baseBotId(id)) ?? undefined,
+      engine: () => ({ generateText: async () => JSON.stringify([
+        { text: "The person is vegetarian", kind: "preference", evidence: "I'm vegetarian", aboutUser: true, confidence: 0.9 },
+      ]) }),
+      busy: () => false,
+      addToAboutMe: (from) => f.host.learnAbout(from.botId, plan),
+      sourceLabel: () => 'chat "Private preferences"',
+      quietMs: () => 60_000,
+      tidyHour: () => 3,
+    });
+    stopped.push(() => upkeep.stop());
+    await expect(upkeep.capture({ botId: layer, threadId: task.threadId, turns: [
+      { person: "I'm vegetarian", bot: "I will remember your dietary preference.", owner: f.host.ownTurn(task.threadId) },
+    ] })).resolves.toMatchObject({ added: 1, topics: 0, aboutMe: owned ? 1 : 0 });
+    expect(upkeep.status(layer).lastCapture?.aboutMe).toBe(owned ? 1 : 0);
+    expect(readFileSync(join(workspaceDir(layer), "MEMORY.md"), "utf8")).toContain("The person is vegetarian");
+    expect(existsSync(join(DATA_DIR, "people", `unowned-${task.threadId}`))).toBe(false);
+    if (owned) {
+      expect(plan).toHaveBeenCalledWith("Existing preference");
+      expect(write).toHaveBeenCalledWith(key(ADA.email), "Existing preference\nThe person is vegetarian");
+    } else {
+      expect(plan).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+    }
+    expect(f.host.people.read(key(ADA.email))).toBe(owned ? "Existing preference\nThe person is vegetarian" : "Existing preference");
+  });
+
   it.each(["homes", "items", "both"] as const)("backfills many legacy destinations from %s with one registry save and needs no save after restart", (records) => {
     const f = legacyFixture(records);
     const save = vi.spyOn(atomic, "writeFileAtomicIfChanged");

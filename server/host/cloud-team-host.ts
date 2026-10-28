@@ -110,7 +110,7 @@ export function createCloudTeamHost(deps: CloudTeamHostDeps) {
     /** Captured facts about the person, into that person's own "About you"; nothing for the team's or a room's layer. */
     learnAbout(layerOrBotId: string, plan: (current: string) => { next: string; count: number } | null): number {
       const person = team ? audienceMember(layerAudience(layerOrBotId)) : null;
-      if (!person) return 0;
+      if (!person || person.startsWith("unowned-")) return 0;
       const planned = plan(people.read(person));
       if (!planned) return 0;
       people.write(person, planned.next);
