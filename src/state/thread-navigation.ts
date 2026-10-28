@@ -128,7 +128,7 @@ export function advanceNavigation(
   if (selects) selection.current++;
   if (selects || [
     "toggleSettings", "toggleComputer", "toggleActivity", "toggleInspector", "toggleAppSettings", "togglePlugins",
-    "toggleNewBot", "toggleShortcuts", "toggleNotifications", "toggleWelcome", "toggleTour", "openCloudAdd", "closeCloudAdd", "cloudHowTo",
+    "toggleShortcuts", "toggleNotifications", "toggleWelcome", "toggleTour", "openCloudAdd", "closeCloudAdd", "cloudHowTo",
   ].includes(action.type)) presence.current++;
 }
 

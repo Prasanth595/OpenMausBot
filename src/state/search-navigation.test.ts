@@ -155,7 +155,7 @@ describe("search-hit navigation replies", () => {
     { type: "toggleInspector", open: true },
     { type: "toggleAppSettings", open: true },
     { type: "togglePlugins", open: true },
-    { type: "toggleNewBot", open: true },
+    { type: "newBot" },
     { type: "toggleShortcuts", open: true },
     { type: "toggleNotifications", open: true },
     { type: "toggleWelcome", open: true },
