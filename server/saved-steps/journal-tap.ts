@@ -13,7 +13,7 @@ export function postJournal(url: string, token: string, fetchImpl: typeof fetch 
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify(entry),
       signal,
-    });
+    }).then((response) => response.body?.cancel());
 }
 
 function parse(line: string): Record<string, unknown> | null {

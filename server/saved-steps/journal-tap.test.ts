@@ -68,6 +68,16 @@ describe("journal tap", () => {
   it("derives the journal URL from the control URL", () =>
     expect(journalUrl("http://127.0.0.1:4100/api/internal/computer-control?botId=b1")).toBe("http://127.0.0.1:4100/api/internal/computer/journal"));
 
+  it("lets go of the answer's body once the journal has taken the entry", async () => {
+    const cancelled = vi.fn();
+    const body = new ReadableStream({ pull: () => {}, cancel: cancelled });
+    const fetchImpl = vi.fn(async () => new Response(body));
+    await postJournal("http://127.0.0.1:1/j", "tok", fetchImpl as unknown as typeof fetch)({ tool: "click", arguments: {}, result: { isError: false } }, new AbortController().signal);
+    expect(cancelled).toHaveBeenCalledTimes(1);
+    await postJournal("http://127.0.0.1:1/j", "tok", (async () => new Response(null)) as unknown as typeof fetch)(
+      { tool: "click", arguments: {}, result: { isError: false } }, new AbortController().signal);
+  });
+
   it("posts JSON with the bearer token and the caller's signal", async () => {
     const fetchImpl = vi.fn(async () => new Response("{}"));
     const controller = new AbortController();

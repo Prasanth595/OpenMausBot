@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { json, readBody } from "../harness/http.ts";
-import type { RequestAuth } from "../request-auth.ts";
+import { requiredScope, type RequestAuth } from "../request-auth.ts";
 import { createSavedStepsRoutes } from "./saved-steps.ts";
 import { dispatchRoutes } from "./table.ts";
 
@@ -61,6 +61,11 @@ describe("DELETE /api/bots/:botId/saved-steps/:recipeId", () => {
     expect((await del("/api/bots/b1/saved-steps/a.b"))[0]).toBe(400);
     expect((await del(`/api/bots/b1/saved-steps/${"x".repeat(65)}`))[0]).toBe(400);
     expect(forgets).toEqual([]);
+  });
+
+  it("is an owner and admin action, never a client's", () => {
+    expect(requiredScope("DELETE", "/api/bots/b1/saved-steps/r1")).toBe("admin");
+    expect(requiredScope("DELETE", "/api/bots/b1/saved-steps/r1", { sharedComputers: true })).toBe("admin");
   });
 
   it("passes other methods and paths", async () => {
