@@ -53,12 +53,15 @@ const answer = async (path: string, body: unknown, messageId?: string) => {
 const shownBot = () => seen.bots.find((candidate) => candidate.id === "scout")!;
 const shownRoom = () => seen.groups.find((candidate) => candidate.id === "room")!;
 const findPath = "/api/search?q=first&limit=100&threadId=one";
-const startFind = async () => {
+const typeFind = (query: string) => {
   flushSync(() => root.render(createElement(StoreProvider, null,
     createElement(Probe), createElement(ChatFindBar, { threadId: "one", onClose: () => {} }))));
   const input = host.querySelector("input")!;
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "first");
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, query);
   flushSync(() => input.dispatchEvent(new Event("input", { bubbles: true })));
+};
+const startFind = async () => {
+  typeFind("first");
   await vi.waitFor(() => expect(held.some((request) => request.path === findPath)).toBe(true));
 };
 
@@ -78,10 +81,29 @@ afterEach(() => {
   flushSync(() => root.unmount());
   host.remove();
   Object.assign(initialState, original);
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
 describe("search-hit navigation replies", () => {
+  it("keeps a manual bot switch made during the Find debounce", async () => {
+    vi.useFakeTimers();
+    typeFind("first");
+    expect(held.some((request) => request.path === findPath)).toBe(false);
+    flushSync(() => dispatch({ type: "switchTask", botId: "scout", threadId: "two" }));
+    flushSync(() => vi.advanceTimersByTime(180));
+    vi.useRealTimers();
+    await answer(findPath, { hits: [hit] });
+
+    const switchingAfterFind = shownBot().switchingTo;
+    await answer("/api/bots/scout/tasks/two?messages=200", { bot: { ...bot, threadId: "two", messages: [line("manual-choice")], activeLeafId: "manual-choice" } });
+    expect(shownBot().threadId).toBe("two");
+    expect(shownBot().messages.map((message) => message.id)).toEqual(["manual-choice"]);
+    expect(shownBot().activeLeafId).toBe("manual-choice");
+    expect(switchingAfterFind).toBe("two");
+    expect(seen.focusMessage).toBeNull();
+  });
+
   it.each([false, true])("keeps a manual bot switch made during Find before its automatic landing (switch settled: %s)", async (settled) => {
     await startFind();
     flushSync(() => dispatch({ type: "switchTask", botId: "scout", threadId: "two" }));
@@ -130,6 +152,27 @@ describe("search-hit navigation replies", () => {
     await startFind();
     await answer(findPath, { hits: [{ ...hit, messageId: "second" }] });
     expect(shownBot().threadId).toBe("one");
+    expect(seen.focusMessage).toMatchObject({ threadId: "one", messageId: "second" });
+  });
+
+  it("keeps the newer Find result when an earlier query answers last", async () => {
+    await startFind();
+    typeFind("second");
+    await answer("/api/search?q=second&limit=100&threadId=one", { hits: [{ ...hit, messageId: "second" }] });
+    await answer(findPath, { hits: [hit] });
+    expect(shownBot().threadId).toBe("one");
+    expect(seen.focusMessage).toMatchObject({ threadId: "one", messageId: "second" });
+  });
+
+  it("automatically lands a new Find query typed after a manual switch", async () => {
+    await startFind();
+    flushSync(() => dispatch({ type: "switchTask", botId: "scout", threadId: "two" }));
+    typeFind("second");
+    await answer("/api/search?q=second&limit=100&threadId=one", { hits: [{ ...hit, messageId: "second" }] });
+    await answer("/api/bots/scout/tasks/two?messages=200", { bot: { ...bot, threadId: "two", messages: [line("manual-choice")] } });
+    expect(shownBot().threadId).toBe("one");
+    expect(shownBot().messages.map((message) => message.id)).toEqual(["first", "second"]);
+    expect(shownBot().switchingTo).toBeUndefined();
     expect(seen.focusMessage).toMatchObject({ threadId: "one", messageId: "second" });
   });
 

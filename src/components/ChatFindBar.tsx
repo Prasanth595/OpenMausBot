@@ -26,6 +26,7 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
   useEffect(() => {
     const trimmed = query.trim();
     const request = ++requestRef.current;
+    const revision = navigationRevision.current;
     if (!trimmed) {
       setHits([]);
       setIndex(0);
@@ -34,7 +35,6 @@ export function ChatFindBar({ threadId, onClose }: { threadId: string; onClose: 
     }
     setLoading(true);
     const timer = window.setTimeout(() => {
-      const revision = navigationRevision.current;
       void api(`/api/search?q=${encodeURIComponent(trimmed)}&limit=100&threadId=${encodeURIComponent(threadId)}`)
         .then((body) => {
           if (request !== requestRef.current) return;
