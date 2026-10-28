@@ -81,9 +81,9 @@ describe("approval modes", () => {
     expect(approvalModeFor({ autoApprove: true })).toBe("auto");
   });
 
-  it("starts a bot or conversation nobody has set a level on at Full access", () => {
-    expect(DEFAULT_APPROVAL_MODE).toBe("full");
-    expect(approvalModeFor({})).toBe("full");
+  it("starts a bot or conversation nobody has set a level on at Ask", () => {
+    expect(DEFAULT_APPROVAL_MODE).toBe("ask");
+    expect(approvalModeFor({})).toBe("ask");
     // Every bot made over HTTP stores the legacy bit off beside no level.
     expect(approvalModeFor({ autoApprove: false })).toBe("full");
     expect(approvalModeFor({ approvalMode: "ask", autoApprove: false })).toBe("ask");
