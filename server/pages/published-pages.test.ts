@@ -343,7 +343,7 @@ describe("unpublishing a page", () => {
   it.each(["path", "page id"])("unpublishes by %s while a missing page is replaced", async (by) => {
     const f = setup();
     signIn();
-    const source = realpathSync(writeSite(join(f.work, "site")));
+    const source = await bundle.pageSource(writeSite(join(f.work, "site")), [f.work]);
     await f.publish({ path: "site" });
     const [oldId] = [...f.service.pages.keys()];
     f.service.pages.delete(oldId!);
@@ -373,7 +373,7 @@ describe("unpublishing a page", () => {
   it("unpublishes by path after the first publish in flight creates its record", async () => {
     const f = setup();
     signIn();
-    const source = realpathSync(writeSite(join(f.work, "site")));
+    const source = await bundle.pageSource(writeSite(join(f.work, "site")), [f.work]);
     const arrived = deferred(), answered = deferred();
     const fetch = f.service.fetch;
     f.service.fetch = async (input, init) => {
