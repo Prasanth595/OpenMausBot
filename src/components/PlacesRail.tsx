@@ -9,7 +9,7 @@ import { cloudColor, cloudColorFill } from "@/lib/cloud-look";
 import { activeLocale, t } from "@/lib/i18n";
 import { localizedRelativeTime } from "@/lib/memory";
 import { useAdvancedMode } from "@/lib/interface-mode";
-import { placeInitials, railShown, usePlaces, type RailPlace } from "@/lib/places";
+import { placeInitials, usePlaces, type RailPlace } from "@/lib/places";
 import { useDesktopCapabilities } from "./DesktopCapabilities";
 import { MENU_ROW, MENU_SHEET } from "./menu-recipe";
 import { PlaceAddSheet } from "./PlaceAddSheet";
@@ -113,7 +113,9 @@ function MorePlaces({ places, canPair, onOpen, onClose }: { places: RailPlace[];
   </div>;
 }
 
-export function PlacesRail() {
+/** `chrome`: the window's own rail (ChromeRail), drawn whatever the window's width, whose sheets ask main for the whole
+ * window while open. Without it, a rail drawn on a page from a list main gave that page: wide windows only. */
+export function PlacesRail({ chrome = false }: { chrome?: boolean }) {
   const state = usePlaces();
   const calm = !useAdvancedMode();
   const { capabilities } = useDesktopCapabilities();
@@ -127,7 +129,9 @@ export function PlacesRail() {
     window.addEventListener("mousedown", away);
     return () => window.removeEventListener("mousedown", away);
   }, [more]);
-  if (!railShown(state)) return null;
+  const covering = more || adding || connecting !== null;
+  useEffect(() => { if (chrome) void window.ogb?.rail?.expand(covering)?.catch(() => {}); }, [chrome, covering]);
+  if (!state.places.length) return null;
   const bridge = window.ogb?.workspaces;
   const open = (place: RailPlace) => {
     if (!place.opens) { if (place.pairs) setConnecting(place.name); return; }
@@ -142,11 +146,17 @@ export function PlacesRail() {
   const shown = shownPlaces(state.places);
   const canPair = state.add.link || state.add.address, canAdd = state.add.cloud || canPair;
   return <nav aria-label={t("rail.label")} data-places-rail style={drag}
-    className={cn("relative hidden w-16 shrink-0 flex-col items-center bg-panel md:flex", calm ? "border-r border-ink/[0.04]" : "border-r border-hairline/50")}>
+    className={cn("relative w-16 shrink-0 flex-col items-center bg-panel", chrome ? "flex h-full" : "hidden md:flex", calm ? "border-r border-ink/[0.04]" : "border-r border-hairline/50")}>
     {/* The macOS traffic lights sit over the rail's top; nothing here takes a click before they end. */}
     <div aria-hidden="true" className={macInset ? "h-[52px] shrink-0" : "h-3 shrink-0"} />
     <ul className="flex min-h-0 flex-col items-center gap-2.5 overflow-y-auto px-1 py-1" style={noDrag}>
-      {shown.map((place) => <li key={place.id} className="flex"><PlaceCircle place={place} calm={calm} canPair={canPair} onOpen={open} /></li>)}
+      {shown.map((place) => <li key={place.id} className="flex flex-col items-center">
+        <PlaceCircle place={place} calm={calm} canPair={canPair} onOpen={open} />
+        {/* The place on screen, named: a server's own page may name it nowhere. */}
+        {place.active && <span aria-hidden="true" data-rail-caption className="mt-1 line-clamp-2 w-[60px] break-words text-center text-[11px] leading-tight text-ink-secondary">
+          {place.kind === "computer" ? t("rail.thisComputer") : place.name}
+        </span>}
+      </li>)}
     </ul>
     <div className="relative mt-2.5 flex flex-col items-center gap-2.5 pb-3" style={noDrag} ref={moreRef}>
       {state.places.length > RAIL_SHOWN && <button type="button" aria-label={t("rail.more", { count: state.places.length })} title={t("rail.more", { count: state.places.length })}

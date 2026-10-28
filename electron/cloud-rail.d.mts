@@ -30,7 +30,8 @@ export interface RailPlace {
 }
 /** ＋'s choices here: buying a Cloud, pasting a server's pairing link, typing its address on this computer's Settings. */
 export interface RailAddChoices { cloud: boolean; link: boolean; address: boolean }
-export interface RailState { places: RailPlace[]; add: RailAddChoices }
+/** `beside`: a place's page, which never reads the list, learns that the window's rail stands beside it. */
+export interface RailState { places: RailPlace[]; add: RailAddChoices; beside?: true }
 /** Buying another Cloud as a page sees it: what the sheet says, never the account, an address or the checkout page. */
 export type AddCloudView =
   | { signedIn: false }
@@ -52,6 +53,5 @@ export type AddCloudView =
     };
   };
 export declare const RAIL_MIN_PLACES: number;
-export declare function hostedCloudOrigin(origin: unknown, input: { state: unknown; mine?: string | null }): boolean;
 export declare function railPlaces(input: { saved: { environments: any[]; activeId: string }; home?: string | null; mine?: string | null; state?: unknown }): RailPlace[];
 export declare function addCloudView(state: unknown, offer: import("./cloud-home.mjs").CloudOffer | null): AddCloudView;

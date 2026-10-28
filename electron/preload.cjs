@@ -1,5 +1,5 @@
 // contextIsolation stays on: the renderer sees only window.ogb, never Node or ipcRenderer.
-const { contextBridge, ipcRenderer, webUtils } = require("electron");
+const { contextBridge, ipcRenderer, webFrame, webUtils } = require("electron");
 
 // Sandboxed preloads get Electron's restricted `require`, which cannot load sibling CommonJS files.
 const desktopRemoteClient = process.argv.includes("--openmausbot-remote-client");
@@ -38,6 +38,23 @@ ipcRenderer.on("app:open-settings", (_event, section) => {
 // The full bridge goes only to the local server's UI; a remote page gets the safe subset, and main enforces the same rule.
 const localOrigin = process.argv.find((arg) => arg.startsWith("--omb-local-origin="))?.slice("--omb-local-origin=".length) ?? null;
 const isLocalPage = !localOrigin || location.origin === localOrigin;
+
+// The window's own rail of places stands at its left edge (electron/chrome-rail.mjs): main says how wide, and every page
+// beside it, whatever server it comes from, moves over by that much, at any zoom (a zoom change resizes the page).
+let railBeside = 0, railRoom = null;
+function leaveRailRoom() {
+  if (typeof document === "undefined" || !document.documentElement) return;
+  const zoom = Number(webFrame?.getZoomFactor?.()) || 1;
+  if (!railBeside) { railRoom?.remove(); railRoom = null; return; }
+  railRoom ??= document.createElement("style");
+  railRoom.textContent = `html { box-sizing: border-box !important; padding-left: ${Math.round((railBeside / zoom) * 100) / 100}px !important; }`;
+  if (!railRoom.isConnected) (document.head ?? document.documentElement).append(railRoom);
+}
+ipcRenderer.on("rail:beside", (_event, width) => { railBeside = Math.max(0, Math.min(200, Number(width) || 0)); leaveRailRoom(); });
+if (typeof window !== "undefined") {
+  window.addEventListener("resize", leaveRailRoom);
+  window.addEventListener("DOMContentLoaded", leaveRailRoom);
+}
 const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudAdd", "cloudLending", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "onOpenAppSettings", "exportDiagnostics", "openLogsFolder", "openAtLogin"];
@@ -120,6 +137,16 @@ const bridge = {
       const handler = () => cb();
       ipcRenderer.on("workspaces:changed", handler);
       return () => ipcRenderer.removeListener("workspaces:changed", handler);
+    },
+  },
+  // The window's own rail (this app's page at /rail, beside every place's page): while a sheet of its own is open it
+  // covers the window; the skin of the page beside it comes from main.
+  rail: {
+    expand: (on) => ipcRenderer.invoke("rail:expand", on === true),
+    onSkin: (cb) => {
+      const handler = (_event, skin) => cb(String(skin));
+      ipcRenderer.on("rail:skin", handler);
+      return () => ipcRenderer.removeListener("rail:skin", handler);
     },
   },
   // Buying another Cloud from the rail's ＋, on this app's page or a hosted Cloud's: plain words in, what the sheet says

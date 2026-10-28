@@ -189,3 +189,30 @@ it("a server of the person's own on an older release than the newest has a quiet
   expect(host.querySelector('[data-rail-place="s-old"] [data-rail-update]')).toBeNull();
   expect(host.querySelector('[data-rail-place="s-old"] [data-rail-dot]')).toBeTruthy();
 });
+
+it("the window's own rail: drawn at every width, the place on screen named under its circle, and its sheets cover the window while open", async () => {
+  const expand = vi.fn(async () => {});
+  Object.assign(window, { ogb: { workspaces, cloudAdd, rail: { expand, onSkin: () => () => {} } } });
+  await mount(createElement(PlacesRail, { chrome: true }));
+  const nav = host.querySelector("[data-places-rail]")!;
+  expect(nav.className).toContain("flex h-full");
+  expect(nav.className, "never hidden on a narrow window").not.toContain("hidden");
+  expect([...host.querySelectorAll("[data-rail-caption]")].map((caption) => caption.textContent)).toEqual(["My Cloud"]);
+  expect(expand.mock.calls.at(-1)).toEqual([false]);
+  await click(host.querySelector("[data-rail-add]"));
+  expect(expand.mock.calls.at(-1), "＋'s sheet covers the window").toEqual([true]);
+  await act(async () => { window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+  await act(async () => { await Promise.resolve(); });
+  expect(expand.mock.calls.at(-1), "and gives it back once closed").toEqual([false]);
+});
+
+it("beside the window's own rail (main says so; the page never reads the list), the sidebar's switcher and Switch to… step aside at every width", async () => {
+  rail = { places: [], add: { cloud: false, link: false, address: false }, beside: true };
+  await mount(createElement("div", null, createElement(PlacesRail), createElement(DesktopWorkspaceSwitcher, { inline: true })));
+  expect(host.querySelector("[data-places-rail]"), "no rail drawn on the page itself").toBeNull();
+  expect(host.querySelector("[data-switcher-beside-rail]")?.className).toBe("hidden");
+  const { placeMenuItems } = await import("./SidebarProfileMenu");
+  const place = { bridge: workspaces, current: { local: false, name: "Office" }, cloudHome: false, onLine: "", openMenu: () => {}, switchable: true } as never;
+  expect(placeMenuItems(place, { owner: null, onCloudSettings: () => {} }).map((item) => item.key)).toEqual(["place", "switch-place"]);
+  expect(placeMenuItems(place, { owner: null, onCloudSettings: () => {}, besideRail: true }).map((item) => item.key), "one switcher: the rail").toEqual(["place"]);
+});
