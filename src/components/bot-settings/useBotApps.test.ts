@@ -9,7 +9,7 @@ vi.hoisted(() => {
 });
 afterAll(() => vi.unstubAllGlobals());
 
-const { botAppsFrom, catalogueFrom } = await import("./useBotApps");
+const { botAppsFrom } = await import("./useBotApps");
 const highlevel = (state: "connected" | "signed-out" | "needs-sign-in" | "connecting" | "unavailable") =>
   ({ state, ...(state === "connected" ? { kind: "oauth" as const, location: { id: "loc_1", name: "Example Profiles" } } : {}) });
 
@@ -75,26 +75,5 @@ describe("the connected apps as one bot sees them", () => {
 
   it("still says it does not know when the account store is unreadable, even with HighLevel connected", () => {
     expect(botAppsFrom({}, inventory({}, false), cards, highlevel("connected"))).toEqual({ phase: "unknown", apps: [], connectedSlugs: [] });
-  });
-});
-
-describe("how much of the catalogue an answer covers", () => {
-  it("accepts the curated fallback's explicit complete pagination", () => {
-    expect(catalogueFrom({ cards: [card("gmail", "Gmail")], pagination: { complete: true } })).toMatchObject({
-      slugs: ["gmail"],
-      complete: true,
-    });
-  });
-
-  it("keeps a marketplace that stopped early incomplete", () => {
-    expect(catalogueFrom({ cards: [card("gmail", "Gmail")], pagination: { complete: false } }).complete).toBe(false);
-  });
-
-  it("treats a missing pagination block as incomplete", () => {
-    expect(catalogueFrom({ cards: [card("gmail", "Gmail")] }).complete).toBe(false);
-  });
-
-  it("never calls an empty answer complete without the server's word", () => {
-    expect(catalogueFrom({}).complete).toBe(false);
   });
 });

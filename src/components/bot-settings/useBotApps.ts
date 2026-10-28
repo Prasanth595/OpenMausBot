@@ -22,33 +22,15 @@ export interface BotApps {
   connectedSlugs: string[];
 }
 
-export interface AppCatalogue {
-  cards: Map<string, ToolkitCard>;
-  slugs: string[];
-  /** false when the catalogue could not be read. An unread catalogue is not an empty one. */
-  complete: boolean;
-}
-
-/** A missing pagination block is an older or partial answer, never proof of a complete catalogue. The curated
- *  fallback is complete by construction and the server says so explicitly. */
-export function catalogueFrom(response: { cards?: ToolkitCard[]; pagination?: { complete?: boolean } }): AppCatalogue {
-  const cards = new Map((response.cards ?? []).map((card) => [card.slug, card]));
-  return { cards, slugs: [...cards.keys()], complete: response.pagination?.complete === true };
-}
-
-let catalogueRequest: Promise<AppCatalogue> | null = null;
-export function loadAppCatalogue(): Promise<AppCatalogue> {
-  catalogueRequest ??= api("/api/connectors/catalog")
-    .then(catalogueFrom)
-    .catch(() => {
-      catalogueRequest = null;
-      return { cards: new Map<string, ToolkitCard>(), slugs: [], complete: false };
-    });
-  return catalogueRequest;
-}
-
+let cardsRequest: Promise<Map<string, ToolkitCard>> | null = null;
 export function loadAppCards(): Promise<Map<string, ToolkitCard>> {
-  return loadAppCatalogue().then(({ cards }) => cards);
+  cardsRequest ??= api("/api/connectors/catalog")
+    .then((response: { cards?: ToolkitCard[] }) => new Map((response.cards ?? []).map((card) => [card.slug, card])))
+    .catch(() => {
+      cardsRequest = null;
+      return new Map<string, ToolkitCard>();
+    });
+  return cardsRequest;
 }
 
 function slugLabel(slug: string): string {

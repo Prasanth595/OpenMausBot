@@ -38,13 +38,6 @@ it("lists exactly the curated apps product analytics may name, in the same order
   expect(CURATED_SLUGS).toEqual([...CURATED_CONNECTOR_SLUGS]);
 });
 
-it("marks the curated fallback as a complete catalogue, so the sidebar can trust its coverage", async () => {
-  await expect(listToolkits({} as AppConfig)).resolves.toMatchObject({
-    source: "curated",
-    pagination: { items: CURATED_SLUGS.length, stalled: false, complete: true },
-  });
-});
-
 it("only sends Session MCP credentials over HTTPS or loopback HTTP", () => {
   const old = process.env.OMB_COMPOSIO_API;
   try {
@@ -168,7 +161,7 @@ beforeAll(async () => {
     const apiKey = String(req.headers["x-api-key"] ?? "");
     if (!["ak_test", "ak_catalog_a", "ak_catalog_b", "ak_catalog_pages", "ak_catalog_partial", "ak_catalog_stuck",
         "ak_catalog_page_stuck", "ak_catalog_exhausted", "ak_catalog_stalled_total", "ak_catalog_end_short",
-        "ak_catalog_http_no_total", "ak_catalog_failed", "ak_catalog_empty"].includes(apiKey)) {
+        "ak_catalog_http_no_total"].includes(apiKey)) {
       res.writeHead(401, { "content-type": "application/json" });
       return res.end(JSON.stringify({ error: { message: "invalid project key" } }));
     }
@@ -193,20 +186,8 @@ beforeAll(async () => {
         || apiKey === "ak_catalog_stalled_total"
         || apiKey === "ak_catalog_end_short"
         || apiKey === "ak_catalog_http_no_total"
-        || apiKey === "ak_catalog_failed"
-        || apiKey === "ak_catalog_empty"
       )
     ) {
-      if (apiKey === "ak_catalog_failed") {
-        // A configured marketplace that does not answer at all: no page, no totals.
-        res.writeHead(502, { "content-type": "application/json" });
-        return res.end(JSON.stringify({ error: "marketplace unavailable" }));
-      }
-      if (apiKey === "ak_catalog_empty") {
-        // A configured marketplace that answers with a successful but empty catalogue.
-        res.writeHead(200, { "content-type": "application/json" });
-        return res.end(JSON.stringify({ items: [] }));
-      }
       if (apiKey === "ak_catalog_stuck") {
         // A broker deployed before cursor support ignores the cursor and replays page one.
         res.writeHead(200, { "content-type": "application/json" });
@@ -572,31 +553,6 @@ describe.sequential("Composio Sessions", () => {
   it("marks a catalog that lost a page incomplete even with no totals to compare", async () => {
     const { pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_http_no_total" } });
     expect(pagination).toEqual({ items: 3, stalled: false, complete: false });
-  });
-
-  it("never calls a configured marketplace complete when its request fails", async () => {
-    // Only the curated list is served, so a complete flag here would hide the pill although the marketplace was unread.
-    const { cards, source, pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_failed" } });
-    expect(source).toBe("curated");
-    expect(cards).toHaveLength(CURATED_SLUGS.length);
-    expect(pagination).toEqual({ items: CURATED_SLUGS.length, stalled: true, complete: false, reason: "http-error" });
-  });
-
-  it("never calls a configured marketplace complete when it answers with no toolkits", async () => {
-    const { source, pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_empty" } });
-    expect(source).toBe("curated");
-    expect(pagination).toEqual({ items: CURATED_SLUGS.length, stalled: true, complete: false, reason: "empty" });
-  });
-
-  it("never calls a configured marketplace complete when the request never answers", async () => {
-    const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
-    try {
-      const { source, pagination } = await listToolkits({ composio: { apiKey: "ak_catalog_unreachable" } });
-      expect(source).toBe("curated");
-      expect(pagination).toEqual({ items: CURATED_SLUGS.length, stalled: true, complete: false, reason: "unavailable" });
-    } finally {
-      fetchSpy.mockRestore();
-    }
   });
 
   it("stops at the reported last page even when a cursor is still offered", async () => {
