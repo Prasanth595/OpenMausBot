@@ -11,7 +11,7 @@ const detection = detectBox({ env: { ...process.env, OMB_BOT_BOX: "1" } });
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-async function fixture(engine: string, location: string, fallback = false): Promise<any> {
+async function fixture(engine: string, location: string, fallback = false, tempInHome = false): Promise<any> {
   const root = mkdtempSync(join(tmpdir(), "omb-driver-paths-"));
   roots.push(root);
   for (const path of ["home", "var-lib"]) mkdirSync(join(root, path));
@@ -25,7 +25,7 @@ async function fixture(engine: string, location: string, fallback = false): Prom
     "--ro-bind", repo, repo, "--ro-bind", dirname(dirname(process.execPath)), dirname(dirname(process.execPath)),
     "--chdir", repo, "--", process.execPath, "--experimental-strip-types", fileURLToPath(new URL("../testing/boxed-turn-fixture.ts", import.meta.url)), engine, String(fallback),
   ], {
-    env: { ...process.env, HOME: home, USERPROFILE: home, OMB_DATA_DIR: data, OMB_BOT_BOX: "1" }, stdio: ["ignore", "pipe", "pipe"],
+    env: { ...process.env, HOME: home, USERPROFILE: home, TMPDIR: tempInHome ? `${home}/tmp` : "/tmp", OMB_DATA_DIR: data, OMB_BOT_BOX: "1" }, stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "", stderr = "";
   child.stdout.on("data", (chunk) => { stdout += chunk; });
@@ -51,6 +51,22 @@ describe.skipIf(detection.box !== "bwrap")("boxed driver paths in real bubblewra
       expect(result.socket).toContain(fallback ? "/omb-perm-" : "/data/perm-");
     }, 25_000,
   );
+
+  it.each(["home", "outside"])("keeps Claude's fallback socket read-only under a writable HOME temp dir (%s)", async (location) => {
+    const result = await fixture("claude", location, true, true);
+    expect(result.asks, JSON.stringify(result)).toBe(2);
+    expect(result.socket).toContain("/home/fixture/tmp/omb-perm-");
+    expect(result.probes).toMatchObject([
+      { permission: "allow", socketChmodError: "EROFS" },
+      { permission: "allow", socketChmodError: "EROFS" },
+    ]);
+  }, 25_000);
+
+  it.each(["home", "outside"])("keeps Pi's explicit MCP config read-only under a writable HOME temp dir (%s)", async (location) => {
+    const result = await fixture("pi", location, false, true);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(result.probes).toMatchObject([{ config: true, configWriteError: "EROFS", configUnchanged: true }]);
+  }, 25_000);
 
   it.each(["home", "outside"])("reads Pi's MCP config and returns its scope receipt (%s)", async (location) => {
     const result = await fixture("pi", location);

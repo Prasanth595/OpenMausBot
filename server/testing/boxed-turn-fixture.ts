@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,6 +13,7 @@ const engine = process.argv[2], fallback = process.argv[3] === "true";
 process.env.PATH = `${dirname(process.execPath)}:${process.env.PATH}`;
 const cli = fileURLToPath(new URL("./boxed-turn-cli.ts", import.meta.url));
 ensureDirs();
+mkdirSync(tmpdir(), { recursive: true });
 writeFileSync(join(DATA_DIR, "messages.db"), "private fixture");
 const otherToken = hookTokenFile("other-thread", "other-bot");
 mkdirSync(dirname(otherToken), { recursive: true });

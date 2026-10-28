@@ -66,6 +66,29 @@ describe.skipIf(detection.box !== "bwrap")("mount source pinning in real bubblew
     expect(readFileSync(join(f.dataDir, "messages.db"), "utf8")).toBe("private fixture");
   });
 
+  it.each(["file", "directory"])("keeps an explicit read-only file protected through a writable %s alias", (grant) => {
+    const f = fixture("rw"), file = join(f.source, "allowed.txt"), alias = join(f.source, "..", "alias");
+    symlinkSync(grant === "file" ? file : f.source, alias);
+    const target = grant === "file" ? alias : join(alias, "allowed.txt");
+    const runner = new BoxRunner({ bwrap: detection.tools!.bwrap, bridge: { socat: null, node: process.execPath, bridgeScript: "unused" }, setup: f.setup, denyEnv: new Set() });
+    const wrapped = runner.wrap({ ...f.request, rw: [alias], ro: [target] });
+    try {
+      expect(probe(wrapped.args.slice(0, wrapped.args.indexOf("--")), wrapped.extraFds, "if (echo changed > " + target + ") 2>/dev/null; then echo writable; else echo read-only; fi; cat " + target)).toEqual(["read-only", "allowed fixture"]);
+      expect(readFileSync(file, "utf8")).toBe("allowed fixture");
+    } finally { closeMountFds(wrapped.extraFds); }
+  });
+
+  it("keeps Pi's session writable when argv also names its explicit writable grant", () => {
+    const f = fixture("rw"), file = join(f.dataDir, "session.jsonl");
+    writeFileSync(file, "session fixture\n");
+    const runner = new BoxRunner({ bwrap: detection.tools!.bwrap, bridge: { socat: null, node: process.execPath, bridgeScript: "unused" }, setup: f.setup, denyEnv: new Set() });
+    const wrapped = runner.wrap({ ...f.request, args: ["--session", file], rw: [file] });
+    try {
+      expect(probe(wrapped.args.slice(0, wrapped.args.indexOf("--")), wrapped.extraFds, "echo appended >> " + file + "; cat " + file)).toEqual(["session fixture", "appended"]);
+      expect(readFileSync(file, "utf8")).toBe("session fixture\nappended\n");
+    } finally { closeMountFds(wrapped.extraFds); }
+  });
+
   it("pins the generated browser launcher's sources and its writable profile", async () => {
     const f = fixture("ro"), box = new BotBox();
     try {

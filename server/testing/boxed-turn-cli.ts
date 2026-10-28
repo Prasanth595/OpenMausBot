@@ -48,7 +48,11 @@ if (process.env.OMB_BOX_TEST_ENGINE === "claude") {
     if (cmd.type === "get_available_models") send({ type: "response", command: cmd.type, success: true, data: { models: [] } });
     else if (cmd.type === "get_state") send({ type: "response", command: cmd.type, success: true, data: {} });
     else if (cmd.type === "prompt") {
-      send({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: JSON.stringify({ config: Boolean(config), hidden: hidden() }) } });
+      let configWriteError: string | null = null;
+      const configBefore = readFileSync(process.env.OMB_MCP_CONFIG!, "utf8");
+      try { writeFileSync(process.env.OMB_MCP_CONFIG!, "overwritten"); } catch (error) { configWriteError = (error as NodeJS.ErrnoException).code ?? String(error); }
+      const configUnchanged = readFileSync(process.env.OMB_MCP_CONFIG!, "utf8") === configBefore;
+      send({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: JSON.stringify({ config: Boolean(config), configWriteError, configUnchanged, hidden: hidden() }) } });
       send({ type: "turn_end", message: { stopReason: "end_turn" } });
       send({ type: "agent_end", messages: [] });
       send({ type: "agent_settled" });

@@ -22,6 +22,9 @@ The environment is an allow-list (`server/bot-box/env.ts`): the engine's own set
 tokens and a few names a shell expects. Every `OMB_CLOUD_*` setting, the server's own placement (`OMB_DATA_DIR`,
 `OMB_PORT`) and the workspace credentials are refused whatever a driver passed.
 
+Explicit read-only grants override enclosing writable mounts. Paths inferred
+from command-line arguments keep an existing writable grant.
+
 Drivers also grant files passed through environment variables. Claude gets its
 thread's hook token read-only. The server rotates that token in place because
 a retained box pins the file's inode. Pi gets its MCP configuration read-only

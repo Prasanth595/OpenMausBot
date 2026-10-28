@@ -240,13 +240,19 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     const source = optionalSource(engines);
     if (source) mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source, target: engines, optional: true });
   }
-  for (const path of [...(request.ro ?? []), ...argvPaths(request.args)]) {
+  const explicitReadOnly = new Set(request.ro ?? []);
+  for (const path of [...explicitReadOnly, ...argvPaths(request.args)]) {
     const source = optionalSource(path);
     if (!source) continue;
     if (under(dataDir, source) || (under(source, dataDir) && !under(source, approvedPath(path)))) continue;
     for (const target of new Set([source, resolve(path)])) {
-      if (mountAccess(mounts, target) !== "none") continue;
+      if (mountAccess(mounts, target) !== "none") {
+        if (!explicitReadOnly.has(path)) continue;
+        const covering = mounts.findLast((mount) => mount.kind !== "symlink" && under(target, mount.target));
+        if (target !== source && covering && "source" in covering && join(covering.source, relative(covering.target, target)) !== source) continue;
+      }
       mounts.push({ kind: "ro", source, target, optional: true });
+      for (let i = writable.length - 1; i >= 0; i--) if (under(writable[i]!, target)) writable.splice(i, 1);
     }
   }
 
