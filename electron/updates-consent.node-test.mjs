@@ -15,7 +15,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(check) { for (let i = 0; i < 200; i++) { if (check()) return; await sleep(5); } assert.fail("did not reach the expected state"); }
 
 async function world(t) {
-  const f = { now: 1_800_000_000_000, approved: false, supported: true, down: false, account: null, requests: [], saved: null, timer: null, available: true, gate: null, failWithdrawals: 0, emails: new Map() };
+  const f = { now: 1_800_000_000_000, approved: false, supported: true, down: false, account: null, requests: [], saved: null, timer: null, available: true, gate: null, failWithdrawals: 0, failOptIns: 0, emails: new Map() };
   const identity = () => ({ cloudContractVersion: 1, expiresAt: f.now + 86400_000, device: { id: "device-1" }, account: { id: "account-1", email: "person@example.test" } });
   const server = createServer(async (req, res) => {
     let raw = ""; for await (const chunk of req) raw += chunk;
@@ -31,7 +31,10 @@ async function world(t) {
       if (f.down) return send(503, { error: "unavailable" });
       if (!f.supported) return send(404, { error: "Not found." });
       if (req.url === "/api/updates-consent") {
-        if (body.status === "opted_in") { f.emails.set(body.email, "opted_in"); return send(200, { receipt: receiptOf(body.email) }); }
+        if (body.status === "opted_in") {
+          if (f.failOptIns > 0) { f.failOptIns--; return send(503, { error: "unavailable" }); }
+          f.emails.set(body.email, "opted_in"); return send(200, { receipt: receiptOf(body.email) });
+        }
         if (f.failWithdrawals > 0) { f.failWithdrawals--; return send(503, { error: "unavailable" }); }
         const email = [...f.emails.keys()].find(known => receiptOf(known) === body.receipt);
         if (!email) return send(404, { error: "unknown_receipt" });
@@ -198,6 +201,38 @@ test("a new answer given while the previous one is still on its way wins on this
   assert.deepEqual(k.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: k.now, email: "new@example.test", receipt: receiptOf("new@example.test") });
 });
 
+test("signed out, the same email opts in again: a failed submission keeps the active opt-in and its receipt", async t => {
+  for (const email of [" Person@Example.TEST ", undefined]) await t.test(email ?? "saved email", async t => {
+    const f = await world(t);
+    await f.consent.choose({ status: "opted_in", email: "person@example.test" });
+    f.failOptIns = 1;
+    await f.consent.choose({ status: "opted_in", email });
+    assert.equal(f.emails.get("person@example.test"), "opted_in");
+    assert.deepEqual(f.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now,
+      email: "person@example.test", receipt: RECEIPT, pending: true });
+    f.launch();
+    await f.consent.sync();
+    assert.equal(f.saved.updatesConsent.pending, undefined);
+    assert.deepEqual(f.requests.map(request => request.body), Array(3).fill({ status: "opted_in",
+      email: "person@example.test", installId: f.saved.installId, textVersion: UPDATES_CONSENT_VERSION }));
+    await f.consent.choose({ status: "withdrawn" });
+    assert.equal(f.emails.get("person@example.test"), "withdrawn");
+  });
+});
+
+test("signed out, opting back in to the same email retries a pending withdrawal before subscribing", async t => {
+  const f = await world(t);
+  await f.consent.choose({ status: "opted_in", email: "person@example.test" });
+  f.failWithdrawals = 1;
+  await f.consent.choose({ status: "withdrawn" });
+  assert.equal(f.saved.updatesConsent.pending, true);
+  await f.consent.choose({ status: "opted_in", email: "person@example.test" });
+  assert.deepEqual(f.requests.map(request => request.body.status), ["opted_in", "withdrawn", "withdrawn", "opted_in"]);
+  assert.equal(f.emails.get("person@example.test"), "opted_in");
+  assert.equal(f.saved.updatesConsent.pending, undefined);
+  assert.equal(f.saved.updatesConsent.receipt, RECEIPT);
+});
+
 test("signed out, a new email chosen later: the earlier email is withdrawn before the new one is sent", async t => {
   const f = await world(t);
   await f.consent.choose({ status: "opted_in", email: "old@example.test" });
@@ -235,6 +270,30 @@ test("an email-only opt-in is withdrawn once the person signs in and the account
   await g.consent.sync();
   assert.deepEqual(Object.fromEntries(g.emails), { "old@example.test": "withdrawn" }, "an account's own answer replaces it too");
   assert.equal(g.saved.updatesConsent.status, "declined");
+});
+
+test("a matching account answer queues an older email receipt until its withdrawal succeeds", async t => {
+  for (const status of ["opted_in", "declined", "withdrawn"]) await t.test(status, async t => {
+    const f = await world(t);
+    await f.consent.choose({ status: "opted_in", email: "old@example.test" });
+    f.prefs.setUpdatesConsent({ ...f.saved.updatesConsent, status, account: "account-1" });
+    f.account = { status, textVersion: "2026-10-24", source: "cloud_page", decidedAt: f.now };
+    await f.signInNow();
+    f.now++;
+    f.failWithdrawals = 1;
+    await assert.rejects(f.consent.sync(), /Cloud request failed/);
+    assert.equal(f.emails.get("old@example.test"), "opted_in");
+    assert.deepEqual(f.saved.updatesConsent, { status, version: "2026-10-24", at: f.now,
+      account: "account-1", email: "old@example.test", replacedReceipts: [receiptOf("old@example.test")] });
+    f.launch();
+    await f.consent.sync();
+    assert.equal(f.emails.get("old@example.test"), "withdrawn");
+    assert.equal(f.saved.updatesConsent.replacedReceipts, undefined);
+    assert.deepEqual(f.requests.filter(request => request.method === "POST").map(request => request.body), [
+      { status: "opted_in", email: "old@example.test", installId: f.saved.installId, textVersion: UPDATES_CONSENT_VERSION },
+      { status: "withdrawn", receipt: receiptOf("old@example.test") },
+      { status: "withdrawn", receipt: receiptOf("old@example.test") }]);
+  });
 });
 
 test("signing in while an email opt-in is on its way: an answer given on the account still withdraws the email", async t => {

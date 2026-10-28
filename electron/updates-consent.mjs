@@ -103,7 +103,7 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
     }
     const remote = parseAccountConsent(await client().updatesConsent());
     if (remote) {
-      if (local?.status !== remote.status || local.account !== who.id || local.pending)
+      if (local?.status !== remote.status || local.account !== who.id || local.pending || local.receipt)
         keep({ status: remote.status, version: remote.textVersion, at: now(), account: who.id, ...(local?.email ? { email: local.email } : {}), replacedReceipts: local?.replacedReceipts });
       return;
     }
@@ -144,7 +144,8 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
     if (input.email && !typed) throw new Error("Enter a valid email address.");
     const who = signedIn(), previous = prefs.updatesConsent();
     const email = !who && status === "opted_in" ? typed ?? previous?.email ?? null : previous?.email ?? null;
-    const sameReceipt = !who && !(status === "opted_in" && email !== null);
+    const sameReceipt = !who && (status !== "opted_in" || email === null ||
+      (previous?.status === "opted_in" && email === previous.email));
     choices++;
     save(withReplacedReceipts({ status, version: UPDATES_CONSENT_VERSION, at: now(), pending: true,
       ...(who ? { account: who.id } : {}), ...(email ? { email } : {}),
