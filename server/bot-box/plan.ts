@@ -149,8 +149,12 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
 
   const writable: string[] = [];
   const rw = (path: string) => {
-    mounts.push({ kind: "bind", source: path, target: path });
-    if (!writable.includes(path)) writable.push(path);
+    const source = physicalPath(path);
+    for (const target of new Set([source, resolve(path)])) {
+      if (mountAccess(mounts, target) === "rw") continue;
+      mounts.push({ kind: "bind", source, target });
+      if (!writable.includes(target)) writable.push(target);
+    }
   };
   const ownHome = request.home ? resolve(request.home) : null;
   const allowedHome = request.home === false ? null : ownHome ?? home;
@@ -170,7 +174,7 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     rw(dataDir);
   }
   if (allowedHome && homeInsideData) rw(allowedHome);
-  const covered = (path: string) => mountAccess(mounts, path) === "rw";
+  const covered = (path: string) => mountAccess(mounts, physicalPath(path)) === "rw" && mountAccess(mounts, path) === "rw";
 
   const cwd = request.cwd ? physicalPath(request.cwd) : null;
   const ids = cwd ? taskWorkspaceIds(cwd, dataDir) : null;
@@ -186,8 +190,10 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   }
   for (const name of PATH_ENV_NAMES) {
     const value = request.env[name];
+    if (!value || !isAbsolute(value)) continue;
+    const path = resolve(value), source = physicalPath(path);
     // A temp folder stays the box's own private one; anything else the engine writes is put back.
-    if (value && isAbsolute(value) && !covered(resolve(value)) && !PRIVATE_INSIDE.some((base) => under(resolve(value), base))) rw(resolve(value));
+    if (!covered(path) && !PRIVATE_INSIDE.some((base) => under(path, base) || under(source, base))) rw(path);
   }
   for (const path of request.rw ?? []) if (!covered(resolve(path))) rw(resolve(path));
   if (ownHome) {
@@ -201,7 +207,12 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source: engines, target: engines, optional: true });
   }
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args)]) {
-    const source = physicalPath(path);
+    let source: string;
+    try { source = physicalPath(path); } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "EACCES" || code === "ENOTDIR") continue;
+      throw error;
+    }
     for (const target of new Set([source, resolve(path)])) {
       if (mountAccess(mounts, target) !== "none") continue;
       mounts.push({ kind: "ro", source, target, optional: true });

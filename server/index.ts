@@ -10054,8 +10054,11 @@ async function runClaimedGroupMemberTurn(
     if (bot.composio !== false && composio.configured(cfg) && instance.adapter.capabilities.composioMcp === true) {
       Object.assign(integrations, await teamConnections.appsIntegrations(bot, threadId, internalGeneration));
     }
+    if (instance.adapter.capabilities.customMcp === true) {
+      await prepareCustomMcp(integrations, teamConnections.turnMcp(bot, threadId, internalGeneration), cfg, { botId: bot.id, threadId });
+    }
   } catch (error) {
-    const message = `connected apps are unavailable — ${error instanceof Error ? error.message : String(error)}`;
+    const message = `turn integrations are unavailable — ${error instanceof Error ? error.message : String(error)}`;
     store.appendMessage(threadId, {
       role: "bot",
       kind: "activity",
@@ -10064,9 +10067,6 @@ async function runClaimedGroupMemberTurn(
     });
     reportDispatchError(message);
     return true;
-  }
-  if (instance.adapter.capabilities.customMcp === true) {
-    await prepareCustomMcp(integrations, teamConnections.turnMcp(bot, threadId, internalGeneration), cfg, { botId: bot.id, threadId });
   }
   // An interrupt during connected-app setup must still stop the queued room operation before it starts a process.
   if (isCancelled?.()) return false;

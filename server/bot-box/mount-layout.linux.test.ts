@@ -51,6 +51,14 @@ describe.skipIf(detection.box !== "bwrap")("synthetic filesystem layouts inside 
     expect(layout(scenario)).toEqual([files, files, files, files]);
   });
 
+  it.each(["symlink-rw", "symlink-env", "symlink-home-rw", "symlink-home-env"])("restores writable paths through data aliases (%s)", (scenario) => {
+    expect(layout(scenario)).toEqual(["writable fixture", "writable", "writable fixture", "writable", "hidden", "hidden"]);
+  });
+
+  it("keeps private temporary files hidden when an environment path aliases /tmp", () => {
+    expect(layout("symlink-private-env")).toEqual(["hidden"]);
+  });
+
   it("restores HOME below the data directory and refuses HOME equal to all data", () => {
     expect(layout("home")).toEqual([
       { files: ["settings fixture", "writable", "hidden"] },

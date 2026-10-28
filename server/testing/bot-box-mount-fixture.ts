@@ -67,6 +67,23 @@ if (scenario === "browser" || scenario === "browser-read-only") {
     }
   }
   console.log(JSON.stringify(results));
+} else if (["symlink-rw", "symlink-env", "symlink-home-rw", "symlink-home-env"].includes(scenario)) {
+  const boxHome = scenario.startsWith("symlink-home-") ? "/srv/linked-home" : "/srv";
+  const alias = scenario.startsWith("symlink-home-") ? join(boxHome, "openmausbot") : "/srv/omb";
+  symlinkSync(scenario.startsWith("symlink-home-") ? "/var/lib" : realData, scenario.startsWith("symlink-home-") ? boxHome : alias);
+  const folder = join(alias, "engine-home"), canonical = join(realData, "engine-home");
+  mkdirSync(folder);
+  writeFileSync(join(folder, "settings"), "writable fixture\n");
+  const plan = planBox({ ...setup, dataDir: alias, home: boxHome }, {
+    ...request, ...(scenario.endsWith("-env") ? { env: { CODEX_HOME: folder } } : { rw: [folder] }),
+  });
+  console.log(JSON.stringify(probe(bwrapArgs(plan),
+    `for folder in ${folder} ${canonical}; do if test -r "$folder/settings"; then cat "$folder/settings"; else echo missing; fi; if (echo changed > "$folder/probe") 2>/dev/null; then echo writable; else echo unwritable; fi; done; for file in ${alias}/messages.db ${realData}/messages.db; do if test -r "$file"; then echo exposed; else echo hidden; fi; done`)));
+} else if (scenario === "symlink-private-env") {
+  writeFileSync("/tmp/private.txt", "private fixture");
+  symlinkSync("/tmp", "/srv/scratch");
+  const plan = planBox({ ...setup, home: "/srv" }, { ...request, env: { TMPDIR: "/srv/scratch" } });
+  console.log(JSON.stringify(probe(bwrapArgs(plan), 'if test -r /tmp/private.txt; then echo exposed; else echo hidden; fi')));
 } else if (scenario === "read-only") {
   const skills = join(realData, "claude-user-skills");
   mkdirSync(skills);
