@@ -5486,5 +5486,17 @@
   "computer.problem.localNotReady": "Los bots todavía no pueden usar este equipo. Reinicia OpenMausBot y vuelve a intentarlo.",
   "computer.problem.localNeedsApp": "Solo la app de OpenMausBot en este equipo puede dejar que un bot lo use. Abre la app aquí para usarlo.",
   "computer.problem.localWindows": "Los bots no pueden usar este PC ahora mismo. Reinicia OpenMausBot y, si no se arregla, abre Ajustes → Diagnóstico.",
-  "computer.problem.localMac": "Los bots todavía no pueden usar este Mac. Comprueba que OpenMausBot está permitido en Grabación de pantalla y Accesibilidad, en Ajustes del Sistema → Privacidad y seguridad, y luego reinícialo."
+  "computer.problem.localMac": "Los bots todavía no pueden usar este Mac. Comprueba que OpenMausBot está permitido en Grabación de pantalla y Accesibilidad, en Ajustes del Sistema → Privacidad y seguridad, y luego reinícialo.",
+  "ask.header.asks": "{name} pregunta",
+  "ask.settled.chose": "Elegiste:",
+  "ask.settled.answered": "Respondiste:",
+  "ask.settled.stopped": "Se detuvo antes de que respondieras",
+  "ask.settled.expired": "Caducó antes de que alguien respondiera",
+  "ask.error": "No se pudo enviar tu respuesta. Inténtalo de nuevo.",
+  "ask.detail.more": "Mostrar todo",
+  "inbox.action.closeQuestion": "Cerrar sin responder",
+  "question.somethingElse": "Otra cosa…",
+  "question.done": "Listo",
+  "common.done": "Listo",
+  "approval.status.timedOut": "Sin respuesta a tiempo; no se ejecutó"
 }

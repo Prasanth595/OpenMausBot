@@ -2506,5 +2506,17 @@
   "placeLook.imageMoving": "Utilisez une image fixe.",
   "placeLook.imageFailed": "L'image n'a pas été enregistrée. Réessayez.",
   "placeLook.imageSaving": "Enregistrement…",
-  "cloudWelcome.files.foldersLent": "Les bots de {name} utilisent d’eux-mêmes les fichiers de cet ordinateur tant qu’il est allumé et qu’OpenMausBot est ouvert. Rien à configurer."
+  "cloudWelcome.files.foldersLent": "Les bots de {name} utilisent d’eux-mêmes les fichiers de cet ordinateur tant qu’il est allumé et qu’OpenMausBot est ouvert. Rien à configurer.",
+  "ask.header.asks": "{name} demande",
+  "ask.settled.chose": "Vous avez choisi :",
+  "ask.settled.answered": "Vous avez répondu :",
+  "ask.settled.stopped": "Arrêté avant votre réponse",
+  "ask.settled.expired": "Expiré avant toute réponse",
+  "ask.error": "Impossible d’envoyer votre réponse. Réessayez.",
+  "ask.detail.more": "Tout afficher",
+  "inbox.action.closeQuestion": "Fermer sans répondre",
+  "question.somethingElse": "Autre chose…",
+  "question.done": "Terminé",
+  "common.done": "Terminé",
+  "approval.status.timedOut": "Pas de réponse à temps ; rien n’a été exécuté"
 }

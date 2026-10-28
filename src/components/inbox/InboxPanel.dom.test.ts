@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const server = vi.hoisted(() => ({ calls: [] as Array<{ path: string; method: string; body?: unknown }>, view: null as null | { rows: Array<{ id: string; tab: string }> } }));
+vi.mock("@/lib/use-owner-or-admin", () => ({ useOwnerOrAdmin: () => true }));
 vi.mock("../../state/api", () => ({
   api: vi.fn(async (path: string, init?: RequestInit) => {
     server.calls.push({ path, method: init?.method ?? "GET", ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
@@ -134,7 +135,8 @@ describe("answer buttons in the asking bot's colour", () => {
   };
 
   it("paints Allow on the chat's card and in the panel in the colour of the bot the line is from", async () => {
-    await mount(createElement(InboxCardSlot, { threadId: "inbox", messageId: approvalRow.id }), [reporter]);
+    shown({ ...inboxView(), anchor: questionRow.id });
+    await mount(createElement(InboxCardSlot, { threadId: "inbox", messageId: questionRow.id }), [reporter]);
     own('[data-inbox-card] [data-inbox-action="allow"]');
     expect(answer('[data-inbox-card] [data-inbox-action="deny"]').className.split(" ")).not.toContain(BOT_BUTTON);
     openInbox({ reading: approvalRow.id });
@@ -148,7 +150,8 @@ describe("answer buttons in the asking bot's colour", () => {
     const send = document.querySelector<HTMLElement>('[data-inbox-reading] button[type="submit"]')!;
     expect(send.className.split(" ")).not.toContain(BOT_BUTTON);
     expect(send.className.split(" ")).toContain("bg-accent");
-    await mount(createElement(InboxCardSlot, { threadId: "inbox", messageId: approvalRow.id }));
+    shown({ ...inboxView(), anchor: questionRow.id });
+    await mount(createElement(InboxCardSlot, { threadId: "inbox", messageId: questionRow.id }));
     expect(answer('[data-inbox-card] [data-inbox-action="allow"]').className.split(" ")).not.toContain(BOT_BUTTON);
   });
 });

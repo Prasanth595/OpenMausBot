@@ -3349,5 +3349,17 @@
   "placeLook.imageMoving": "请使用静态图片。",
   "placeLook.imageFailed": "图片没有保存。请重试。",
   "placeLook.imageSaving": "正在保存…",
-  "cloudWelcome.files.foldersLent": "只要这台电脑处于唤醒状态且 OpenMausBot 已打开，{name} 上的机器人就会自动使用这台电脑上的文件，无需任何设置。"
+  "cloudWelcome.files.foldersLent": "只要这台电脑处于唤醒状态且 OpenMausBot 已打开，{name} 上的机器人就会自动使用这台电脑上的文件，无需任何设置。",
+  "ask.header.asks": "{name} 提问",
+  "ask.settled.chose": "你选择了：",
+  "ask.settled.answered": "你回答了：",
+  "ask.settled.stopped": "在你回答前已停止",
+  "ask.settled.expired": "无人回答，已过期",
+  "ask.error": "无法发送你的回答，请重试。",
+  "ask.detail.more": "显示全部",
+  "inbox.action.closeQuestion": "不回答并关闭",
+  "question.somethingElse": "其他…",
+  "question.done": "完成",
+  "common.done": "完成",
+  "approval.status.timedOut": "未及时回答，未执行"
 }

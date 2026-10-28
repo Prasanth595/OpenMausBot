@@ -2506,5 +2506,17 @@
   "placeLook.imageMoving": "स्थिर तस्वीर लगाएँ।",
   "placeLook.imageFailed": "तस्वीर सेव नहीं हुई। फिर कोशिश करें।",
   "placeLook.imageSaving": "सेव हो रही है…",
-  "cloudWelcome.files.foldersLent": "{name} पर बॉट्स इस कंप्यूटर की फ़ाइलें अपने-आप इस्तेमाल करते हैं, जब तक यह जागा हुआ है और OpenMausBot खुला है। कुछ भी सेट अप नहीं करना है।"
+  "cloudWelcome.files.foldersLent": "{name} पर बॉट्स इस कंप्यूटर की फ़ाइलें अपने-आप इस्तेमाल करते हैं, जब तक यह जागा हुआ है और OpenMausBot खुला है। कुछ भी सेट अप नहीं करना है।",
+  "ask.header.asks": "{name} पूछ रहा है",
+  "ask.settled.chose": "आपने चुना:",
+  "ask.settled.answered": "आपका जवाब:",
+  "ask.settled.stopped": "आपके जवाब देने से पहले रोक दिया गया",
+  "ask.settled.expired": "किसी के जवाब देने से पहले समय समाप्त हो गया",
+  "ask.error": "आपका जवाब नहीं भेजा जा सका। फिर से कोशिश करें।",
+  "ask.detail.more": "सब दिखाएँ",
+  "inbox.action.closeQuestion": "बिना जवाब दिए बंद करें",
+  "question.somethingElse": "कुछ और…",
+  "question.done": "हो गया",
+  "common.done": "हो गया",
+  "approval.status.timedOut": "समय पर जवाब नहीं मिला — नहीं चलाया गया"
 }
