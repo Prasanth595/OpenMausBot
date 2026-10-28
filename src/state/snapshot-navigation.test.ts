@@ -3,7 +3,7 @@ import { createElement, type Dispatch } from "react";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StoreProvider, useStore, type Action, type AppState, type Bot, type Group, type Message } from "./store";
+import { StoreProvider, useStore, visibleMessages, type Action, type AppState, type Bot, type Group, type Message } from "./store";
 
 class FixtureEventSource {
   static current: FixtureEventSource;
@@ -53,7 +53,8 @@ const resync = async () => {
   await vi.waitFor(() => expect(snapshots).toBe(2));
 };
 const applySnapshot = async (threadId = "a", taskIds = ["a", "b"]) => {
-  const incomingBot = bot(threadId, "snapshot"), incomingRoom = room(threadId, "snapshot");
+  const incomingBot = bot(threadId), incomingRoom = room(threadId, "snapshot");
+  incomingBot.messages[0]!.text = "Refreshed snapshot";
   incomingBot.tasks = incomingBot.tasks?.filter(task => taskIds.includes(task.threadId));
   incomingRoom.tasks = incomingRoom.tasks?.filter(task => taskIds.includes(task.threadId.slice(5)));
   snapshot.resolve(json({ bots: [incomingBot], groups: [incomingRoom], sections: ["resynced"] }));
@@ -121,7 +122,9 @@ describe("navigation while a reconnect snapshot is in flight", () => {
 
     const current = owner === "bot" ? shown() : state.groups[0]!;
     expect(current.threadId).toBe(owner === "bot" ? "a" : "room-a");
-    expect(current.messages.map(message => message.id)).toEqual(["snapshot", "optimistic-next"]);
+    expect((owner === "bot" ? visibleMessages(current) : current.messages).map(message => message.id)).toEqual(
+      owner === "bot" ? ["a", "optimistic-next"] : ["snapshot", "optimistic-next"],
+    );
     expect(owner === "bot" ? state.groups[0]?.threadId : shown().threadId).toBe(owner === "bot" ? "room-b" : "b");
     if (owner === "bot") expect(shown().activeLeafId).toBe("optimistic-next");
   });
@@ -189,7 +192,8 @@ describe("navigation while a reconnect snapshot is in flight", () => {
     await resync();
     await applySnapshot("b");
     expect(shown().threadId).toBe("b");
-    expect(shown().messages.map(message => message.id)).toEqual(["snapshot"]);
+    expect(shown().messages.map(message => message.id)).toEqual(["b"]);
+    expect(shown().messages[0]?.text).toBe("Refreshed snapshot");
     expect(state.groups[0]?.threadId).toBe("room-b");
   });
 
@@ -198,7 +202,8 @@ describe("navigation while a reconnect snapshot is in flight", () => {
     flushSync(() => dispatch({ type: "switchGroupTask", groupId: "room", threadId: "room-b" }));
     await vi.waitFor(() => expect(state.groups[0]?.threadId).toBe("room-b"));
     await applySnapshot();
-    expect(shown().messages.map(message => message.id)).toEqual(["snapshot"]);
+    expect(shown().messages.map(message => message.id)).toEqual(["a"]);
+    expect(shown().messages[0]?.text).toBe("Refreshed snapshot");
     expect(state.groups[0]?.messages.map(message => message.id)).toEqual(["fresh-room-b"]);
   });
 });

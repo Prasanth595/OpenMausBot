@@ -71,6 +71,49 @@ afterEach(() => {
 });
 
 describe("search-hit navigation replies", () => {
+  it("keeps a newer bot search hit when an older ordinary switch replies last", async () => {
+    flushSync(() => dispatch({ type: "switchTask", botId: "scout", threadId: "two" }));
+    await vi.waitFor(() => expect(held.some((request) => request.path === "/api/bots/scout/tasks/two?messages=200")).toBe(true));
+    const landing = landOnSearchHit({ ...hit, threadId: "three", messageId: "third" }, seen, dispatch, true, navigationRevision);
+    await answer("/api/bots/scout/tasks/three", { bot: { ...bot, threadId: "three", messages: [line("third")], activeLeafId: "third" } });
+    await landing;
+    expect(shownBot().threadId).toBe("three");
+    expect(seen.focusMessage).toMatchObject({ threadId: "three", messageId: "third" });
+
+    await answer("/api/bots/scout/tasks/two?messages=200", { bot: { ...bot, threadId: "two", messages: [line("stale")], activeLeafId: "stale" } });
+    expect(shownBot().threadId).toBe("three");
+    expect(shownBot().messages.map((message) => message.id)).toEqual(["third"]);
+    expect(shownBot().activeLeafId).toBe("third");
+    expect(shownBot().switchingTo).toBeUndefined();
+    expect(seen.focusMessage).toMatchObject({ threadId: "three", messageId: "third" });
+  });
+
+  it.each([false, true])("keeps a newer hit in the shown bot thread when an older switch replies last (threads shown: %s)", async (threadsShown) => {
+    flushSync(() => dispatch({ type: "switchTask", botId: "scout", threadId: "two" }));
+    await vi.waitFor(() => expect(held.some((request) => request.path === "/api/bots/scout/tasks/two?messages=200")).toBe(true));
+    await landOnSearchHit(hit, seen, dispatch, threadsShown, navigationRevision);
+    await settle();
+    const switchingAfterHit = shownBot().switchingTo;
+
+    await answer("/api/bots/scout/tasks/two?messages=200", { bot: { ...bot, threadId: "two", messages: [line("stale")] } });
+    expect(shownBot().threadId).toBe("one");
+    expect(shownBot().messages.map((message) => message.id)).toEqual(["first", "second"]);
+    expect(switchingAfterHit).toBeUndefined();
+    expect(shownBot().switchingTo).toBeUndefined();
+    expect(seen.focusMessage).toMatchObject({ threadId: "one", messageId: "first" });
+    expect(held.some((request) => request.path.startsWith("/api/bots/scout/tasks/one"))).toBe(false);
+  });
+
+  it("applies an ordinary bot switch when no newer navigation overtakes it", async () => {
+    await landOnSearchHit(hit, seen, dispatch, true, navigationRevision);
+    flushSync(() => dispatch({ type: "switchTask", botId: "scout", threadId: "two" }));
+    await answer("/api/bots/scout/tasks/two?messages=200", { bot: { ...bot, threadId: "two", messages: [line("second-thread")], activeLeafId: "second-thread" } });
+    expect(shownBot().threadId).toBe("two");
+    expect(shownBot().messages.map((message) => message.id)).toEqual(["second-thread"]);
+    expect(shownBot().activeLeafId).toBe("second-thread");
+    expect(shownBot().switchingTo).toBeUndefined();
+  });
+
   it.each([false, true])("does not replace a newer ordinary bot switch (newer reply settled: %s)", async (settled) => {
     const landing = landOnSearchHit({ ...hit, threadId: "two" }, seen, dispatch, true, navigationRevision);
     flushSync(() => dispatch({ type: "switchTask", botId: "scout", threadId: "three" }));

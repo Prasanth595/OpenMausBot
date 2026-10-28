@@ -767,6 +767,7 @@ export type Action =
     }
   | { type: "newTask"; botId: string; projectId?: string; cwd?: string; onCreated?: () => void; onError?: (message: string) => void }
   | { type: "switchTask"; botId: string; threadId: string; whole?: true }
+  | { type: "searchNavigationStarted"; botId: string }
   | { type: "switchTaskFailed"; botId: string; threadId: string }
   | { type: "taskSwitched"; bot: Bot }
   | { type: "renameTask"; botId: string; threadId: string; title: string }
@@ -1757,6 +1758,8 @@ export function reducer(state: AppState, action: Action): AppState {
       return updateBot({ ...state, backgroundThreadEvents, selectedId: action.botId, activeView: "chat" }, action.botId,
         (bot) => ({ ...bot, switchingTo: action.threadId }));
     }
+    case "searchNavigationStarted":
+      return updateBot(state, action.botId, (bot) => ({ ...bot, switchingTo: undefined }));
     case "switchTaskFailed":
       return updateBot(state, action.botId, (bot) => bot.switchingTo === action.threadId ? { ...bot, switchingTo: undefined } : bot);
     case "renameTask":
@@ -2299,6 +2302,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     const wrapped: React.Dispatch<Action> = (action) => {
       advanceNavigation(action, stateRef.current, selectionRevision, presenceRevision);
+      if (action.type === "searchNavigationStarted") navigation.set(action.botId, (navigation.get(action.botId) ?? 0) + 1);
       // Pin before any await or optimistic state change.
       action = pinBotThreadAction(action, stateRef.current.bots);
       if (action.type === "taskSwitched") action = { ...action, bot: withTaskWrites(action.bot) as Bot };

@@ -44,6 +44,7 @@ export async function landOnSearchHit(
   if (!ownerId || (!bot && !group)) throw new Error("That conversation is no longer available.");
 
   const choice = ++latestChoice;
+  if (bot) dispatch({ type: "searchNavigationStarted", botId: bot.id });
   const switchAlone = bot && bot.threadId !== hit.threadId && !threadsShown ? bot : undefined;
   if (!switchAlone) dispatch({ type: "select", id: ownerId });
   if (group && !group.dm) dispatch({ type: "switchGroupTask", groupId: group.id, threadId: hit.threadId, whole: true });
