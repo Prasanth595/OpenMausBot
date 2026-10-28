@@ -43,7 +43,7 @@ type Where = { bot: BotRecord; group?: GroupRecord };
 export interface TeamMessagesDeps {
   team: CloudTeam | null;
   dataDir: string;
-  store: Pick<Store, "bot" | "bots" | "botByThread" | "groupByThread" | "taskByThread" | "tasks" | "createTask" | "appendMessage" | "patchTask" | "patchGroup"
+  store: Pick<Store, "bot" | "bots" | "botByThread" | "groupByThread" | "taskByThread" | "tasks" | "createTask" | "deleteTask" | "appendMessage" | "patchTask" | "patchGroup"
     | "patchMessage" | "messagesFor" | "activePath" | "onChange">;
   people: Pick<TeamPeople, "everyone"> | null;
   /** The name a member chose on this team, by their person key; their address or nothing when they chose none. */

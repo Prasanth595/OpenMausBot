@@ -40,8 +40,11 @@ type MemberSession = { id: string; email?: string };
 export function createCloudTeamHost(deps: CloudTeamHostDeps) {
   const team = deps.team;
   const people: PeopleAbout = createPeopleAbout(deps.dataDir);
-  const audienceOf = (threadId: string): Audience =>
-    threadAudienceFrom({ room: deps.store.groupByThread(threadId)?.id, starter: deps.starters.get(threadId), markers: deps.markers });
+  const audienceOf = (threadId: string): Audience => {
+    const starter = deps.starters.get(threadId);
+    const privateThread = (!starter || deps.markers.has(starter)) && deps.store.bots?.some((bot) => bot.tasks?.some((task) => task.threadId === threadId && task.private));
+    return threadAudienceFrom({ room: deps.store.groupByThread(threadId)?.id, starter, markers: deps.markers, privateThread: privateThread ? threadId : undefined });
+  };
   if (team) deps.engineHomes?.start({ dataDir: deps.dataDir, audienceOf, threads: () => storeThreads(deps.store.bots ?? []) });
   /** The layer a turn in this conversation writes into: the bot's own folder off a team or for the team's conversations,
    * a sibling folder for a room's or a member's. The folder exists before the turn starts, so the box can bind it. */

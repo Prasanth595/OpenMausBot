@@ -85,7 +85,7 @@ export interface Delivery {
 export interface PersonInboxDeps {
   team: CloudTeam | null;
   dataDir: string;
-  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "createTask" | "patchTask" | "patchGroup" | "appendMessage" | "patchMessage" | "messagesFor" | "groupByThread" | "onChange">;
+  store: Pick<Store, "bots" | "bot" | "tasks" | "taskByThread" | "createTask" | "deleteTask" | "patchTask" | "patchGroup" | "appendMessage" | "patchMessage" | "messagesFor" | "groupByThread" | "onChange">;
   starters: { get(threadId: string): string | undefined; set(threadId: string, person: string): void };
   audienceOf(threadId: string): Audience;
   personKeyOf(email: string): string;
@@ -150,7 +150,10 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     if (!bot) return null;
     const kept = homes[person];
     const task = kept?.botId === bot.id ? store.taskByThread(bot.id, kept.threadId) : undefined;
-    if (task && !task.archivedAt) return { bot, threadId: task.threadId };
+    if (task && !task.archivedAt && deps.starters.get(task.threadId) === person) {
+      if (!task.private) store.patchTask(bot.id, task.threadId, { private: true });
+      return { bot, threadId: task.threadId };
+    }
     const own = store.tasks(bot.id).filter((one) => !one.archivedAt && !one.routineRunId && !one.openedBy && deps.starters.get(one.threadId) === person);
     const brief = own.find((one) => one.title === BRIEF_TITLE);
     const chat = brief ?? own.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))[0];
@@ -159,9 +162,16 @@ export function createPersonInbox(deps: PersonInboxDeps) {
     else if (!chat) {
       const created = store.createTask(bot.id, INBOX_TITLE, false);
       if (!created) return null;
-      deps.starters.set(created.threadId, person);
+      try {
+        store.patchTask(bot.id, created.threadId, { private: true });
+        deps.starters.set(created.threadId, person);
+      } catch (error) {
+        store.deleteTask(bot.id, created.threadId);
+        throw error;
+      }
       threadId = created.threadId;
     }
+    if (chat && !chat.private) store.patchTask(bot.id, chat.threadId, { private: true });
     homes[person] = { botId: bot.id, threadId: threadId! };
     indexHomes();
     save();

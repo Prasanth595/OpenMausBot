@@ -102,7 +102,7 @@ export function toWireTask(task: TaskRecord, botModel: ModelSelection): WireTask
 const ASK_NOW = { approvalMode: "ask" as const, autoApprove: false, alwaysAllow: [] as string[] };
 
 const TASK_PATCH_FIELDS = [
-  "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow",
+  "title", "projectId", "modelSelection", "approvalMode", "autoApprove", "alwaysAllow", "private",
   "unread", "lastReadMessageId", "rewound", "archivedAt", "pinned", "pinnedMessageId", "resumeCursors", "lastInstanceId", "cwd",
   "routineRunId", "surface", "surfaceSource", "snoozedUntil", "link", "linkAuto", "appliedCompactionId", "contextFloor", "lastContextModel", "setupRequest",
 ] as const satisfies readonly (keyof TaskRecord)[];
