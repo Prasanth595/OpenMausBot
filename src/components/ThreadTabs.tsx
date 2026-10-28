@@ -330,7 +330,7 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
     if (task.threadId === active) return;
     // A mouse click keeps the composer's usual autofocus. Keyboard activation must leave focus in the strip so the
     // next arrow/Home/End keeps moving between tabs.
-    if (fromKeyboard) refocusAfterSwitch.current = task.threadId;
+    refocusAfterSwitch.current = fromKeyboard ? task.threadId : null;
     openBotThread(dispatch, bot, task.threadId, false);
   };
   /** Keys move focus only: switching posts to the server, so it waits for Enter, Space or a click. */

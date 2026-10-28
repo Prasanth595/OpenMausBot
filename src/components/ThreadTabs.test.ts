@@ -155,6 +155,24 @@ describe("a bot's threads in the chat header", () => {
     expect(document.activeElement).toBe(tab("pricing"));
   });
 
+  it("clears a pending keyboard refocus when a mouse switch follows", async () => {
+    render(bot());
+    const pricingTab = tab("pricing");
+    pricingTab.focus();
+    // Enter/Space on a button is a click with detail 0.
+    flushSync(() => pricingTab.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 })));
+    const deckTab = tab("deck");
+    deckTab.focus();
+    flushSync(() => deckTab.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 })));
+
+    // The keyboard switch lands first and would refocus pricing on its second frame; the mouse switch must have cleared it.
+    render(bot({ threadId: "pricing" }));
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    render(bot({ threadId: "deck" }));
+    expect(tab("deck").getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(tab("deck"));
+  });
+
   it("switches when the focused tab is pressed, not merely focused", () => {
     render(bot());
     key(tab("who"), "ArrowRight");
