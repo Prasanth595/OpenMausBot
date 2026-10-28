@@ -35,4 +35,14 @@ describe("turn call signals", () => {
     signals.sweep();
     expect(signal.aborted).toBe(false);
   });
+
+  it.each([false, true])("handles a response closed before registration (writableEnded=%s)", (writableEnded) => {
+    const signals = createTurnCallSignals(() => false);
+    const res = Object.assign(response(), { closed: true, writableEnded });
+    res.emit("close");
+    const signal = signals.signal("turn", res);
+    expect(signal.aborted).toBe(!writableEnded);
+    signals.sweep();
+    expect(signal.aborted).toBe(!writableEnded);
+  });
 });

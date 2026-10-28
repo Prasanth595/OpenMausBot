@@ -1,11 +1,12 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PublishedPageCard } from "../../shared/published-page.ts";
 import { FAKE_DESKTOP_TOKEN, FAKE_HOME, FAKE_TOKEN_URL, fakePagesService } from "../testing/fake-pages.ts";
 import { applyIncludedPagesMessage, pagesHomeSignature } from "./access.ts";
 import { PageBundleError, readPageBundle } from "./bundle.ts";
+import * as bundle from "./bundle.ts";
 import { PublishedPagesStore } from "./store.ts";
 import { createPublishedPages } from "./service.ts";
 import { createPagesInternalRoutes, createPublishedPageRoutes, type AppPages } from "../routes/published-pages.ts";
@@ -28,6 +29,12 @@ function writeSite(folder: string, files: Record<string, string> = SITE) {
   return folder;
 }
 const signIn = () => applyIncludedPagesMessage({ type: "openmausbot:included-pages", access: { url: FAKE_TOKEN_URL, token: FAKE_DESKTOP_TOKEN } });
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 function setup(options: { home?: boolean; quota?: number } = {}) {
   const service = fakePagesService({ quota: options.quota });
@@ -331,6 +338,61 @@ describe("unpublishing a page", () => {
     f.service.pages.delete(page!);
     expect(await f.pages.publisher.unpublish({ pageId: page })).toMatchObject({ status: 200, text: "That page was already taken down.", card: { state: "unpublished" } });
     expect(f.pages.store.get(page!)).toBeNull();
+  });
+
+  it.each(["path", "page id"])("unpublishes by %s while a missing page is replaced", async (by) => {
+    const f = setup();
+    signIn();
+    const source = realpathSync(writeSite(join(f.work, "site")));
+    await f.publish({ path: "site" });
+    const [oldId] = [...f.service.pages.keys()];
+    f.service.pages.delete(oldId!);
+    const arrived = deferred(), answered = deferred();
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method === "PUT" && response.status === 410) { arrived.resolve(); await answered.promise; }
+      return response;
+    };
+    const update = f.publish({ path: "site" });
+    await arrived.promise;
+    const lookup = vi.spyOn(bundle, "pageSource").mockResolvedValue(source);
+    const unpublished = f.pages.publisher.unpublish(by === "path" ? { path: "site", botId: "bot-1", roots: [f.work] } : { pageId: oldId });
+    await Promise.resolve();
+    lookup.mockRestore();
+    answered.resolve();
+    expect((await update).status).toBe(200);
+    const replacement = f.cards.at(-1)!.card.pageId!;
+    expect(replacement).not.toBe(oldId);
+    expect(await unpublished).toMatchObject({ status: 200, card: { pageId: by === "path" ? replacement : oldId } });
+    expect(f.service.pages.has(replacement)).toBe(by !== "path");
+    expect(f.pages.store.get(replacement) === null).toBe(by === "path");
+    expect(f.cards.at(-1)!.card.state).toBe(by === "path" ? "unpublished" : "live");
+  });
+
+  it("unpublishes by path after the first publish in flight creates its record", async () => {
+    const f = setup();
+    signIn();
+    const source = realpathSync(writeSite(join(f.work, "site")));
+    const arrived = deferred(), answered = deferred();
+    const fetch = f.service.fetch;
+    f.service.fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      if (init?.method === "PUT") { arrived.resolve(); await answered.promise; }
+      return response;
+    };
+    const publish = f.publish({ path: "site" });
+    await arrived.promise;
+    const lookup = vi.spyOn(bundle, "pageSource").mockResolvedValue(source);
+    const unpublished = f.pages.publisher.unpublish({ path: "site", botId: "bot-1", roots: [f.work] });
+    await Promise.resolve();
+    lookup.mockRestore();
+    answered.resolve();
+    expect((await publish).status).toBe(200);
+    expect((await unpublished).status).toBe(200);
+    expect(f.service.pages.size).toBe(0);
+    expect(f.pages.store.list()).toEqual([]);
+    expect(f.cards.map((card) => card.card.state)).toEqual(["unpublished"]);
   });
 
   it.each([["the same folder", false], ["another folder by its page id", true]])("takes a page down after an update from %s already in flight, so the update's late answer leaves no record or live card", async (_case, byId) => {

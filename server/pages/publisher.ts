@@ -147,19 +147,27 @@ export function createPagePublisher(deps: {
 
     /** Takes a page down, by its id or the file or folder it came from (with the bot's folders). */
     async unpublish(input: { pageId?: string; path?: string; botId?: string; roots?: readonly string[]; call?: PagesCall }): Promise<PageOutcome> {
-      let pageId = input.pageId;
+      const pageId = input.pageId;
       if (pageId !== undefined && !PAGE_ID.test(pageId)) return { status: 400, text: "page_id must be the id of a page you published, from its link." };
+      const takeDown = (id: string) => serially(pageKey(id), () => unpublishNow(id, input.call));
       if (!pageId && input.path && input.botId && input.roots) {
+        const botId = input.botId;
+        const notFound: PageOutcome = { status: 404, text: `No page was published from ${input.path}. Pass the page_id from its link instead.` };
+        let source: string;
         try {
-          pageId = store.fromSource(input.botId, await pageSource(input.path, input.roots))?.pageId;
+          source = await pageSource(input.path, input.roots);
         } catch (error) {
           if (!(error instanceof PageBundleError)) throw error;
+          return notFound;
         }
-        if (!pageId) return { status: 404, text: `No page was published from ${input.path}. Pass the page_id from its link instead.` };
+        return serially(JSON.stringify([botId, source]), async () => {
+          const record = store.fromSource(botId, source);
+          return record ? takeDown(record.pageId) : notFound;
+        });
       }
       if (!pageId) return { status: 400, text: "Pass the page_id of the page to unpublish, or the path it was published from." };
-      const record = store.get(pageId), takeDown = () => serially(pageKey(pageId), () => unpublishNow(pageId, input.call));
-      return record ? serially(JSON.stringify([record.botId, record.source]), takeDown) : takeDown();
+      const record = store.get(pageId);
+      return record ? serially(JSON.stringify([record.botId, record.source]), () => takeDown(pageId)) : takeDown(pageId);
     },
   };
 }

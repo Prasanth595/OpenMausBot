@@ -8,10 +8,12 @@ export function createTurnCallSignals<Grant>(isActive: (grant: Grant) => boolean
     signal(grant: Grant, res: ServerResponse): AbortSignal {
       const call = new AbortController();
       calls.set(call, grant);
-      res.once("close", () => {
+      const onClose = () => {
         calls.delete(call);
         if (!res.writableEnded) call.abort();
-      });
+      };
+      if (res.closed) onClose();
+      else res.once("close", onClose);
       return call.signal;
     },
     /** Called after grants are revoked. */
