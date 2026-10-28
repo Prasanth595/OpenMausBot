@@ -34,7 +34,7 @@ function tabStatus(task: TabTask): string {
   return task.unread ? t("task.unread") : "";
 }
 
-function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, onNew, onFocus, register }: {
+function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, onNew, onFocus, register, registerRow }: {
   task: TabTask;
   ownerId: string;
   active: boolean;
@@ -42,10 +42,11 @@ function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, 
   tabbable: boolean;
   folders: Bot["projects"];
   actions: ThreadActions;
-  onOpen: (task: TabTask) => void;
+  onOpen: (task: TabTask, fromKeyboard: boolean) => void;
   onNew: () => void;
   onFocus: (threadId: string) => void;
   register: (threadId: string, element: HTMLButtonElement | null) => void;
+  registerRow: (threadId: string, element: HTMLDivElement | null) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(task.title);
@@ -143,7 +144,7 @@ function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, 
 
   return (
     <div
-      ref={rowRef}
+      ref={(element) => { rowRef.current = element; registerRow(task.threadId, element); }}
       data-thread-tab-item={task.threadId}
       className="group/tab flex min-w-0 shrink-0 items-center"
       onContextMenu={(event) => { event.preventDefault(); openMenu(); }}
@@ -173,11 +174,11 @@ function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, 
           tabIndex={tabbable ? 0 : -1}
           data-thread-tab={task.threadId}
           title={status ? `${title} · ${status}` : title}
-          onClick={() => onOpen(task)}
+          onClick={(event) => onOpen(task, event.detail === 0)}
           onFocus={() => onFocus(task.threadId)}
           onDoubleClick={startRename}
           className={cn(
-            "flex h-7 max-w-[11rem] min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[12px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60",
+            "flex h-7 max-w-[11rem] min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[12px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60",
             active ? "bg-raised font-medium text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
           )}
         >
@@ -239,15 +240,18 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
     });
   }, [bot, state.pendingQueued]);
   const elements = useRef(new Map<string, HTMLButtonElement>());
+  const rows = useRef(new Map<string, HTMLDivElement>());
+  const refocusAfterSwitch = useRef<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [edges, setEdges] = useState({ overflow: false, start: false, end: false, rtl: false });
   const active = bot.threadId;
   const showing = threads.length >= 2;
 
-  // The open tab is always reachable, even when the strip has scrolled past it.
+  // The open tab is always reachable, even when the strip has scrolled past it. Scroll the whole row: the 24px menu
+  // trigger sits after the tab button, so aligning the button's edge would leave the trigger outside the scrollport.
   useEffect(() => {
-    elements.current.get(active)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    rows.current.get(active)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [active]);
 
   /** The strip hides its scrollbar, so its edge buttons are the only visible cue that tabs continue off-screen. */
@@ -269,6 +273,10 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
     if (element) elements.current.set(threadId, element);
     else elements.current.delete(threadId);
   }, []);
+  const registerRow = useCallback((threadId: string, element: HTMLDivElement | null) => {
+    if (element) rows.current.set(threadId, element);
+    else rows.current.delete(threadId);
+  }, []);
 
   useEffect(() => {
     measure();
@@ -289,17 +297,36 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
   // A rename or a late font can change the strip's content width without resizing its box, so keep the edges honest.
   useEffect(measure);
 
+  // The switch remounts Composer keyed by threadId, whose mount effect focuses the message box in its own frame.
+  // A second frame puts focus back on the tab that was chosen, so the next arrow/Home/End still moves the strip.
+  useEffect(() => {
+    const threadId = refocusAfterSwitch.current;
+    if (!threadId) return;
+    refocusAfterSwitch.current = null;
+    let second = 0;
+    const first = requestAnimationFrame(() => {
+      second = requestAnimationFrame(() => elements.current.get(threadId)?.focus());
+    });
+    return () => {
+      cancelAnimationFrame(first);
+      cancelAnimationFrame(second);
+    };
+  }, [active]);
+
   if (!showing) return null;
 
-  const open = (task: TabTask) => {
-    if (task.threadId !== active) openBotThread(dispatch, bot, task.threadId, false);
+  const open = (task: TabTask, fromKeyboard: boolean) => {
+    if (task.threadId === active) return;
+    // A mouse click keeps the composer's usual autofocus. Keyboard activation must leave focus in the strip so the
+    // next arrow/Home/End keeps moving between tabs.
+    if (fromKeyboard) refocusAfterSwitch.current = task.threadId;
+    openBotThread(dispatch, bot, task.threadId, false);
   };
   /** Keys move focus only: switching posts to the server, so it waits for Enter, Space or a click. */
   const focusTab = (task: TabTask) => {
     setFocusId(task.threadId);
-    const element = elements.current.get(task.threadId);
-    element?.focus();
-    element?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+    elements.current.get(task.threadId)?.focus();
+    rows.current.get(task.threadId)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   };
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     // Only a tab moves the strip: the keys in a tab's rename field or its ⋯ button belong to them.
@@ -329,7 +356,7 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
   const project = bot.projects?.find((folder) => folder.id === (bot.tasks ?? []).find((task) => task.threadId === active)?.projectId);
   const startNew = () => dispatch({ type: "newTask", botId: bot.id, ...(project ? { projectId: project.id } : {}) });
 
-  const edgeClass = "flex size-6 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:pointer-events-none disabled:opacity-30";
+  const edgeClass = "flex size-6 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/60 disabled:pointer-events-none disabled:opacity-30";
 
   return (
     <div data-chathead-tabs className="flex min-w-0 items-center @max-[30rem]/chathead:hidden">
@@ -350,12 +377,13 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
         ref={listRef}
         role="tablist"
         aria-label={t("botPanel.conversations.title")}
+        style={{ scrollPaddingInlineEnd: "1.75rem" }}
         onKeyDown={onKeyDown}
         // Leaving the strip hands the tab stop back to the open thread, so a switch from elsewhere is not left behind.
         onBlur={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusId(null);
         }}
-        className="flex min-w-0 max-w-[min(22rem,40cqw)] items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        className="flex min-w-0 max-w-[min(22rem,40cqw)] items-center gap-0.5 overflow-x-auto py-1 -my-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {threads.map((task) => (
           <ThreadTab
@@ -370,6 +398,7 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
             onNew={startNew}
             onFocus={setFocusId}
             register={register}
+            registerRow={registerRow}
           />
         ))}
       </div>

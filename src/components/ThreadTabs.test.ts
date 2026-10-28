@@ -71,6 +71,7 @@ describe("a bot's threads in the chat header", () => {
     expect(tabs().map((element) => element.dataset.threadTab)).toEqual(["hiring", "launch", "who", "pricing", "deck"]);
     expect(tab("who").getAttribute("aria-selected")).toBe("true");
     expect(tab("who").tabIndex).toBe(0);
+    expect(tab("who").className).toContain("focus-visible:ring-inset");
     expect(tab("launch").getAttribute("aria-selected")).toBe("false");
     expect(tab("launch").tabIndex).toBe(-1);
     expect(host.querySelector('[role="tablist"]')!.getAttribute("aria-label")).toBe("Conversations");
@@ -234,11 +235,11 @@ describe("a bot's threads in the chat header", () => {
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "newTask", botId: "research", projectId: "p1" }]]);
   });
 
-  it("keeps a long strip scrolling rather than growing the header, and scrolls the open tab into view", () => {
+  it("keeps a long strip scrolling rather than growing the header, and scrolls the whole active row into view", () => {
     const scrolled: string[] = [];
     const original = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = function scrollIntoView(this: Element) {
-      scrolled.push(this.getAttribute("data-thread-tab") ?? "");
+      scrolled.push(this.getAttribute("data-thread-tab-item") ?? "");
     };
     try {
       render(bot());
@@ -248,9 +249,17 @@ describe("a bot's threads in the chat header", () => {
     } finally {
       Element.prototype.scrollIntoView = original;
     }
-    const list = host.querySelector('[role="tablist"]')!;
+    const list = host.querySelector<HTMLElement>('[role="tablist"]')!;
     expect(list.className).toContain("overflow-x-auto");
+    expect(list.className).toContain("py-1");
+    expect(list.className).toContain("-my-1");
     expect(list.className).toContain("[scrollbar-width:none]");
+    // The row is the scroll target because it also holds the 24px action trigger; scrolling the button would leave
+    // the trigger outside the visible scrollport.
+    expect(list.style.scrollPaddingInlineEnd).toBe("1.75rem");
+    const row = host.querySelector('[data-thread-tab-item="who"]')!;
+    expect(row.querySelector('[role="tab"]')).not.toBeNull();
+    expect(row.querySelector('button[aria-haspopup="menu"]')).not.toBeNull();
   });
 
   it("offers edge buttons only while tabs continue off-screen, and they scroll instead of switching", () => {
@@ -269,6 +278,8 @@ describe("a bot's threads in the chat header", () => {
     const back = host.querySelector<HTMLButtonElement>("[data-thread-tabs-back]")!;
     const forward = host.querySelector<HTMLButtonElement>("[data-thread-tabs-forward]")!;
     expect(back).not.toBeNull();
+    expect(back.className).toContain("focus-visible:ring-inset");
+    expect(forward.className).toContain("focus-visible:ring-inset");
     expect(forward).not.toBeNull();
     expect(back.getAttribute("aria-label")).toBe("Earlier threads");
     expect(forward.getAttribute("aria-label")).toBe("Later threads");
