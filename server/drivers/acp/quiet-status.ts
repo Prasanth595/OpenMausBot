@@ -29,6 +29,15 @@ export type LogSignal =
   | { kind: "context"; tokens: number; threshold: number }
   | { kind: "provider-error"; message: string };
 
+/** The agent's own debug log, read while a prompt is quiet: a new line proves it alive and `parse`
+ * picks what to tell the person. Null when this process keeps none. A `shared` log holds every session's
+ * and process's lines, so its lines prove nothing about this turn and only `parse` reads them. */
+export interface AcpStatusLog {
+  path(env: Record<string, string | undefined>, sessionId: string): string | null;
+  parse(line: string, sessionId: string): LogSignal | null;
+  shared?: true;
+}
+
 export type QuietState =
   | { kind: "retrying"; status: number | null; delayMs: number | null; attempt: number | null }
   | { kind: "compressing" }

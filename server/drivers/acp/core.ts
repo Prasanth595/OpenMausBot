@@ -21,7 +21,7 @@ import { sanitizeAcpToolMessage } from "./tool-log.ts";
 import { stripLeakedSystemHarnessMessages } from "../../../shared/system-message-guard.ts";
 import {
   classifyQuiet, DEFAULT_QUIET_NOTICE_MS, describeQuiet, formatQuietLimit, lastSeenPhrase, LogTail, promptIdleTimeoutMs, quietKey, sampleProcessTree,
-  type LogSignal, type ProcessSample, type QuietState,
+  type AcpStatusLog, type LogSignal, type ProcessSample, type QuietState,
 } from "./quiet-status.ts";
 import { readSessionReport } from "./session-reports.ts";
 import { offeredModels } from "./config-options.ts";
@@ -187,14 +187,7 @@ export interface AcpSupport {
   engineTools?: number;
   /** Do not retain stderr from providers that may place OAuth material there. */
   redactStderr?: boolean;
-  /** The agent's own debug log, read while a prompt is quiet: a new line proves it alive and `parse`
-   * picks what to tell the person. Null when this process keeps none. A `shared` log holds every session's
-   * and process's lines, so its lines prove nothing about this turn and only `parse` reads them. */
-  statusLog?: {
-    path(env: Record<string, string | undefined>, sessionId: string): string | null;
-    parse(line: string, sessionId: string): LogSignal | null;
-    shared?: true;
-  };
+  statusLog?: AcpStatusLog;
   /** Bound provider-native tool payloads before writing diagnostic logs. */
   sanitizeToolPayload?: boolean;
   /** Mutate the child env once the turn model is known; catalog refresh and snapshot see only `transformEnv`. */
