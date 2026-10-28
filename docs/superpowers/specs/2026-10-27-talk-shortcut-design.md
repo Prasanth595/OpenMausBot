@@ -88,7 +88,8 @@ Asks always go to the MausBot on this Mac's own server, even when the window is
 showing a Team Cloud (my call for v1). Once this Mac's bots moved to My Cloud
 (home is My Cloud, or this Mac's copy is frozen) the shortcut is unavailable and
 its key free, until home is this Mac again; a frozen server's 409 `moved` says
-"MausBot lives on My Cloud now — talk to it there".
+"MausBot lives on My Cloud now — talk to it there". (Changed for My Cloud on 2026-10-29: the key follows MausBot
+there; see [Talk shortcut on My Cloud](2026-10-29-talk-on-my-cloud-design.md).)
 
 `GET /api/bots?messages=0` → MausBot (`defaultBot` without `person`, else the
 Chief of Staff). `POST /api/bots/:id/messages {text, sendId}` with the desktop

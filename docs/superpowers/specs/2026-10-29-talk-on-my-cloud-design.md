@@ -37,8 +37,10 @@ default session), the same path Files and lending use for My Cloud's API:
 - Signing in again is `reconnectCloud` (`electron/main.mjs:1488`) → `signInCloudSession`
   (`electron/cloud-home.mjs:229`): a fresh one-time code from the Admin for the Cloud it verified, redeemed into the
   window's own cookie, and refused for any origin but My Cloud's (or another own Cloud's, which talk never names).
-- My Cloud's server keeps its rules for such a session (`server/request-auth.ts:533`, `:536`): same origin, and a
-  change only from a request that proves it (the `origin` header). Nothing there is relaxed.
+- My Cloud's server keeps its rules for such a session: a cookie counts only for a same-origin request
+  (`server/request-auth.ts:533`), and a browser sign-in's cookie changes things only from a request that proves its
+  origin (`:536`). The window's session comes from the Admin's code (owner scopes, not a browser sign-in), and every
+  talk request names My Cloud's own origin, so it passes either rule as the window's page does. Nothing is relaxed.
 
 The origin talk uses is My Cloud's only while both agree: home's origin (`homeWindow.current()`) and the Admin's
 verified one (`myCloud()`, `electron/main.mjs:2622`). Otherwise the box says it couldn't reach My Cloud and nothing is
@@ -91,8 +93,8 @@ lives on My Cloud now. Try again in a moment.": the next press goes there.
 ## The Settings row on My Cloud's page
 
 The talk bridge (`window.ogb.talkShortcut`) is still kept off every server page by default: it is in neither
-`REMOTE_SAFE` nor `HOME_PAGE` (`electron/preload.cjs:64`, `:66`). It is added for one more page only: **My Cloud's own
-page while it is home**. Two checks, both in main:
+`REMOTE_SAFE` nor `HOME_PAGE` (`electron/preload.cjs:64`, `:66`). It is added, as `MY_CLOUD_PAGE`, for one more page
+only: **My Cloud's own page while it is home**. Two checks, both in main:
 
 - `talk-shortcut:page` (sync, asked by the preload only on a page that is already the home page) and the
   `talk-shortcut:state`/`talk-shortcut:set` handlers allow a sender that is this app's page (`localOnly`), or My
@@ -123,6 +125,9 @@ no row.
   wake, check, gate released), a failed and a slow wake, an asleep answer mid-prepare → wake → one retry, two
   prepares → one wake, no verified origin.
 - `electron/talk-server.node-test.mjs`: a request's own TalkServerError passes through; the 400 `select` fallback.
+- `server/talk-cloud.e2e.test.ts`: a real server standing in for My Cloud, asked over a cookie redeemed from a
+  one-time code: the ask is answered, Quick asks is not opened, another origin is refused, an ended session is renewed
+  once and a session that can't be renewed says sign in.
 - `electron/talk-session.node-test.mjs`: "waking" after release, then sending; presses ignored and busy while waking;
   a wake failing while listening or after release; the My Cloud notices.
 - `electron/talk-main.node-test.mjs`: available on a My Cloud home, not on sign-in; a press asks My Cloud through the

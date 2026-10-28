@@ -15,8 +15,8 @@ pnpm exec vitest run electron/speech.test.mjs electron/skin-overlay.test.mjs ser
 pnpm typecheck && pnpm lint && pnpm i18n:check
 ```
 
-They prove key parsing and registration, the key let go while home is My Cloud
-and taken back when home is this computer again, the press/release state machine
+They prove key parsing and registration, the key let go while home needs a
+sign-in and taken back on My Cloud or this computer, the press/release state machine
 with injected clocks and speech, the box's window flags, states, skin theme and
 pinned display, the local-server ask (thread, owner header, send id, SSE follow,
 needs-you, timeout, a 409 `moved`, a server still starting), preference storage,
@@ -25,6 +25,34 @@ update waiting for a talk ask.
 They do not prove the real hotkey, the microphone, that the box never takes
 focus, that it shows over full-screen apps and other Spaces, or the release of
 ⌃⌥ after speech (no unit test covers that release path).
+
+### My Cloud
+
+```sh
+node --test electron/talk-cloud.node-test.mjs electron/talk-server.node-test.mjs electron/talk-session.node-test.mjs electron/talk-main.node-test.mjs electron/talk-panel.node-test.mjs
+pnpm exec vitest run server/talk-cloud.e2e.test.ts --maxWorkers=1
+```
+
+With fakes for My Cloud, the Admin and the window's session, they prove: asks go
+to My Cloud's verified origin over the window's own sign-in there (`credentials:
+include`, an `origin` header, no background header, no token of its own) and
+never to this computer's frozen server; no verified origin asks nothing; an
+ended session signs the window in again once, a failed sign-in says so; an
+asleep My Cloud is woken at the press through the Admin (`openSleepingCloud`),
+two presses share one wake, a "going to sleep" answer wakes it and tries once
+more, a wake that fails or passes 45 s says so and asks nothing; the message
+goes once after hello (a 401 repeat keeps its send id); a server that refuses
+`select` makes the chat without it; "Waking My Cloud…" shows after the words
+are let go and presses are ignored meanwhile; an ask stays with the server that
+found its chat when home changes; the box link keeps its escaped ids; the
+Settings bridge and its channels reach My Cloud's own page only while it is
+home at the verified origin, never a team's or another server's page. The e2e
+test asks a real server over a cookie redeemed from a one-time code: answered,
+Quick asks not opened, another origin refused, an ended session renewed once,
+one that can't be renewed says sign in.
+They do not prove Electron's cookie jar, a real My Cloud behind its proxy, its
+sleep, the Admin's wake or how long a real wake takes: check those by hand
+below.
 
 `docs/verification/evidence/talk-shortcut/` holds the box page rendered in
 headless Chrome for every state in the app's light and dark skins
@@ -102,13 +130,46 @@ or taller than the card shows a box the app never draws.
     Long replies stop at 400 characters with an ellipsis, and the card grows to
     at most 240 px with its bottom edge showing (a Japanese reply is cut at ten
     lines).
-15. **My Cloud home.** After moving this computer's bots to My Cloud (window on
-    My Cloud's page): ⌃⌥Space does nothing in MausBot and another app can take
-    it (`talk-shortcut:state` says unavailable, so no Settings row). Come home
-    to this computer again: the key works without a restart. A box still up
-    when the move froze this computer says "MausBot lives on My Cloud now —
-    talk to it there". A Quick asks chat link sent while My Cloud's page is
-    shown does reach it as `chat:open`, and My Cloud has no such chat; with the
-    key off there, no box makes one.
+15. **Home needs a sign-in.** With this computer's bots on My Cloud and the
+    MausBot Cloud sign-in ended (Settings → MausBot Cloud → sign out): ⌃⌥Space
+    does nothing in MausBot and another app can take it. Sign in again: the key
+    works without a restart. A box still up when the move froze this computer
+    says "MausBot lives on My Cloud now. Try again in a moment."
 16. **Server starting.** Quit, relaunch and press at once, before the window
     loads: "MausBot is still starting. Try again in a moment."
+
+### By hand: My Cloud
+
+Needs a test account whose bots were moved to a test My Cloud, on a packaged
+build of the branch beside the installed app (never Omkar's real My Cloud, never
+a data folder that was ever opened against real data). My Cloud must run this
+branch's server for the Settings row (an older one has no row, and makes the
+Quick asks chat the open one there once).
+
+17. **Ask My Cloud.** Window on My Cloud's page, Safari in front: hold ⌃⌥Space,
+    say "what can you do", let go. The reply shows in the box; My Cloud's
+    MausBot has a "Quick asks" chat with the ask, and MausBot's open chat there
+    did not change. This computer's frozen server got no request (its log shows
+    none).
+18. **Click.** Click the box: the window comes forward on My Cloud's Quick asks
+    chat. With a team's Cloud shown in the window, the click brings My Cloud
+    back first, then the chat.
+19. **Asleep.** Let My Cloud sleep (its plan sleeps when idle; the Cloud
+    settings say asleep). Hold, speak for a few seconds, let go: "Waking My
+    Cloud…" with the words, then the reply, sent once (one user message in the
+    chat). Pressing again while it wakes does nothing.
+20. **Wake fails.** With the network off after letting go, or a Cloud that
+    can't start: "My Cloud didn't wake up. Try again in a moment." within about
+    45 s, nothing in the chat. Network off while awake: "Couldn't reach My
+    Cloud. Try again in a moment."
+21. **Session ended.** Sign this app out on My Cloud's page only (its own
+    sign-out), then press: the window's session there is renewed by itself and
+    the ask goes through. With the MausBot Cloud sign-in also ended: "Sign in to
+    My Cloud again, then try again."
+22. **Settings row.** On My Cloud's page, Settings → General shows "Talk to
+    MausBot from any app"; turning it off frees the key and this app's own
+    Settings shows it off too. On a team's Cloud page and on another own
+    Cloud's page the row is absent (`window.ogb.talkShortcut` is undefined in
+    the page's devtools).
+23. **Teams stay off.** With a team's Cloud shown, a press still asks My
+    Cloud's MausBot, never the team's.

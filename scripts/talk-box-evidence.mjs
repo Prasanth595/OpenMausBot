@@ -19,6 +19,7 @@ const asked = "what's on my calendar today";
 const STATES = [
   ["listening", { state: "listening", text: "" }],
   ["listening-words", { state: "listening", text: asked }],
+  ["waking", { state: "waking", text: asked }],
   ["sending", { state: "sending", text: asked }],
   ["thinking", { state: "thinking", text: asked }],
   ["reply", { state: "reply", text: "Standup at 10, then lunch with Sam at 1. Nothing after 4." }],
@@ -27,6 +28,7 @@ const STATES = [
   ["needs-you", { state: "needs-you", text: "Approve the file write to ~/Desktop/report.md" }],
   ["still-working", { state: "still-working", text: "" }],
   ["error", { state: "error", text: TALK_TEXT.moved }],
+  ["error-cloud", { state: "error", text: TALK_TEXT.wakeFailed }],
 ];
 const BACKDROP = { light: { r: 222, g: 222, b: 222, a: 1 }, dark: { r: 40, g: 40, b: 40, a: 1 } };
 
