@@ -8114,7 +8114,7 @@ describe("harness HTTP API", () => {
 
       const rotated = await api("PUT", "/api/config", { box: { token: " box_route_rotated " } });
       expect(rotated.status).toBe(200);
-      expect(rotated.body.box).toEqual({ configured: true });
+      expect(rotated.body.box).toEqual({ configured: true, last4: "ated" });
       expect(JSON.stringify(rotated.body)).not.toContain("box_route_rotated");
 
       expect((await api("POST", "/api/computers/boxes/bx_23456789/delete", { confirmName: name })).status).toBe(202);
@@ -8151,7 +8151,7 @@ describe("harness HTTP API", () => {
       managedBoatRejectedTokens.delete("Bearer box_route_rotated");
       const rotated = await api("PUT", "/api/config", { box: { token: "box_route_rotated" } });
       expect(rotated.status).toBe(200);
-      expect(rotated.body.box).toEqual({ configured: true });
+      expect(rotated.body.box).toEqual({ configured: true, last4: "ated" });
       if (provisioned) {
         const journal = readFileSync(join(home, ".openmausbot", "box-create-requests.json"), "utf8");
         expect(journal).toContain(managedBoatCreateId);
