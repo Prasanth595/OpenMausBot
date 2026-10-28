@@ -714,8 +714,30 @@ async function main() {
     check(entry, "the install and pairing commands", commands.join(" | ") === 'npx openmausbot start | npx openmausbot pair --label "My desktop"', commands);
     check(entry, "Connect it here: paste the link, or enter the address", await steps.getByRole("button", { name: "Paste pairing link" }).isVisible() && await steps.getByRole("button", { name: "Enter its address instead" }).isVisible());
     await shot(entry, "add-own-server");
-    await page.keyboard.press("Escape");
+    // Enter its address instead: the sheet makes way for Settings → Servers, where an address is typed.
+    await steps.getByRole("button", { name: "Enter its address instead" }).click();
     await page.locator("[data-place-add-sheet]").waitFor({ state: "hidden" });
+    check(entry, "Enter its address instead opens Settings → Servers", await page.getByLabel(ADDRESS, { exact: true }).isVisible().catch(() => false));
+    await closeSettings();
+  });
+
+  await scenario("add-own-server-paste", "＋ → Add your own server → Paste pairing link connects the server on the clipboard", async (entry) => {
+    if (A.source !== "local") throw new Skip("Needs a fresh pairing link, which only a local server can mint during the run.");
+    const { electronApp, page } = current;
+    await backToThisComputer();
+    await electronApp.evaluate(({ clipboard }, text) => clipboard.writeText(text), A.pairLink());
+    await page.locator("[data-rail-add]").click();
+    await page.locator("[data-place-add-choice='server']").click();
+    await page.locator("[data-place-add='own-server']").getByRole("button", { name: "Paste pairing link" }).click();
+    await page.waitForURL((url) => url.origin === A.origin && url.pathname !== "/pair", { timeout: 60_000 });
+    await waitForApp(page, `${A.label}'s page`);
+    await expectShowing(entry, A);
+    await backToThisComputer();
+    const saved = (await savedPlaces())?.environments.filter((item) => item.origin === A.origin) ?? [];
+    check(entry, `still one saved place for ${A.label}, with its name and id`, saved.length === 1 && saved[0].id === ids.a && saved[0].name === A.label, saved);
+    const rail = await railOnScreen();
+    check(entry, "the rail is as it was: three circles", rail.circles.map((circle) => circle.id).join() === ["local", ids.a, ids.b].join(), rail.circles.map(({ id, label }) => ({ id, label })));
+    await shot(entry, "after-paste");
   });
 
   await scenario("buy-cloud-signed-out", "＋ → Buy a Cloud, signed out: the sign-in and offer; nothing bought", async (entry) => {
