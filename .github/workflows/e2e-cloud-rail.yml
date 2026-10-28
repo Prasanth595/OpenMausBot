@@ -72,7 +72,14 @@ jobs:
               "| scenario | status | what | failed checks |", "|---|---|---|---|", ...rows, "", "### Findings", ...findings, report.error ? `\n**Harness error:** ${report.error}` : ""].join("\n");
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, text + "\n");
             console.log(text);
+            for (const s of report.scenarios.filter((item) => item.status === "fail")) console.log(`\n--- ${s.id}\n${JSON.stringify({ error: s.error, failed: s.checks.filter((c) => !c.ok), notes: s.notes }, null, 2)}`);
           '
+      - name: Logs of a failed run
+        if: failure()
+        run: |
+          cd "$OMB_E2E_OUT/logs" || exit 0
+          for f in app-launch-*.log server-*.log app/*.log; do [ -f "$f" ] && { echo "::group::$f"; tail -n 120 "$f"; echo "::endgroup::"; }; done
+          true
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:

@@ -423,6 +423,15 @@ async function switcherOnScreen() {
     .map((element) => ({ label: element.getAttribute("aria-label"), title: element.getAttribute("title"), text: element.textContent?.trim().slice(0, 80) ?? "", besideRail: Boolean(element.closest("[data-switcher-beside-rail]")) })));
 }
 
+/** The switcher the rail stands in for: how many are kept beside the rail, and how many of those are drawn now. */
+async function switcherBesideRail() {
+  return current.page.evaluate(() => {
+    const kept = [...document.querySelectorAll("[data-switcher-beside-rail]")];
+    const drawn = kept.flatMap((wrapper) => [...wrapper.querySelectorAll("button, [role='img']")]).filter((element) => element.getBoundingClientRect().width > 0);
+    return { kept: kept.length, drawn: drawn.length };
+  });
+}
+
 /** Which server this page really is: its address, and the identity and sign-in the server itself answers there. */
 async function pageIdentity() {
   return current.page.evaluate(async () => {
@@ -618,8 +627,8 @@ async function main() {
     check(entry, "each circle's tooltip names its place", first?.title === A.label && second?.title === B.label, [first?.title, second?.title]);
     check(entry, "This computer, the place on screen, is marked and ringed", computer?.active && computer.ring && !first?.active && !second?.active, rail.circles.map(({ label, active, ring }) => ({ label, active, ring })));
     check(entry, "＋ comes last", rail.add);
-    const switcher = await switcherOnScreen();
-    check(entry, "beside the rail (wide window) the sidebar's switcher steps aside", switcher.every((item) => !item.besideRail), switcher);
+    const aside = await switcherBesideRail();
+    check(entry, "beside the rail (wide window) the sidebar's switcher steps aside", aside.kept > 0 && aside.drawn === 0, aside);
     if (first && second && first.letters === second.letters) finding("same-initials", `Two servers whose names start alike get the same letters (${first.letters}): only the tooltip tells them apart.`, { a: first.label, b: second.label });
     if (first && second && first.fill === second.fill) finding("no-colour", "A server connected by hand has no colour (until it gets one), so every such server is the same plain circle in the rail.", { fill: first.fill });
     await shot(entry, "rail-three-circles");
@@ -694,7 +703,8 @@ async function main() {
     check(entry, "still signed out of MausBot Cloud", account?.status === "signed-out", account?.status ?? account);
     await shot(entry, "buy-cloud-signed-out");
     await page.keyboard.press("Escape");
-    await sheet.waitFor({ state: "hidden", timeout: 10_000 }).catch(() => {});
+    await sheet.waitFor({ state: "hidden", timeout: 5_000 }).catch(() => sheet.getByRole("button", { name: "Close", exact: true }).first().click());
+    await sheet.waitFor({ state: "hidden", timeout: 10_000 });
     await collectMainRecords();
     check(entry, "no checkout, nor any other page, was opened in a browser", report.externalOpens.length === 0, report.externalOpens);
   });
@@ -750,9 +760,9 @@ async function main() {
     }
     entry.notes.push(`after View → Zoom In: the page is ${width} CSS px wide`);
     const rail = await railOnScreen();
-    const switcher = await switcherOnScreen();
+    const aside = await switcherBesideRail();
     check(entry, `below ${RAIL_BREAKPOINT} CSS px the rail hides`, width < RAIL_BREAKPOINT && rail.present && !rail.visible, { width, present: rail.present, visible: rail.visible });
-    check(entry, "the switcher stays, in the rail's place", switcher.some((item) => item.besideRail), switcher);
+    check(entry, "the switcher stays, in the rail's place", aside.drawn > 0, { ...aside, switchers: await switcherOnScreen() });
     await shot(entry, "narrow");
     await chooseMenuItem({ role: "resetzoom" }).catch(() => setWindow({ zoomLevel: 0 }));
     await setWindow({ bounds: { x: 40, y: 30, width: 1440, height: 900 }, zoomLevel: 0 });
