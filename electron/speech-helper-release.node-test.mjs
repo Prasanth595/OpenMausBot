@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const CONTROL = 0x40000, OPTION = 0x80000, SHIFT = 0x20000, COMMAND = 0x100000;
 
@@ -17,7 +18,7 @@ test("the helper finishes when any of the chosen modifiers is let go", { skip: !
     const bin = join(dir, "speech-helper");
     execFileSync(
       "xcrun",
-      ["swiftc", "-Onone", new URL("./resources/speech-helper.swift", import.meta.url).pathname, "-o", bin],
+      ["swiftc", "-Onone", fileURLToPath(new URL("./resources/speech-helper.swift", import.meta.url)), "-o", bin],
       { timeout: 180_000 },
     );
     const check = (mods, flags) =>
