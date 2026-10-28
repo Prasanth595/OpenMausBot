@@ -99,6 +99,21 @@ describe("a bot's threads in the chat header", () => {
     expect(tab("triage").textContent).toContain("Waiting");
   });
 
+  it("shows a turn waiting on the person instead of the spinner its busy flag would raise", () => {
+    const waiting = task("triage", "Triage the inbox", 2, {
+      activity: "waiting-on-you", busy: true, turnStartedAt: now - 30_000,
+    });
+    render(bot({ tasks: [task("who", "Who am I?", 1), waiting] }));
+    const strip = tab("triage");
+    expect(strip.textContent).toContain("Waiting");
+    expect(strip.textContent).not.toContain("Working");
+    expect(strip.querySelector("svg.animate-spin")).toBeNull();
+    // The marker is visible, not only announced, and the state keeps its words for a reader.
+    expect(strip.querySelector("svg.text-accent")).not.toBeNull();
+    expect(strip.querySelector(".sr-only")!.textContent).toBe("Waiting");
+    expect(strip.getAttribute("title")).toBe("Triage the inbox · Waiting");
+  });
+
   it("switches to the tab that is clicked, and leaves the open one alone", () => {
     render(bot());
     click(tab("pricing"));
@@ -108,25 +123,50 @@ describe("a bot's threads in the chat header", () => {
     expect(fixture.dispatch).not.toHaveBeenCalled();
   });
 
-  it("moves with the arrow keys, Home and End", () => {
+  it("moves focus with the arrow keys, Home and End without switching", () => {
+    render(bot());
+    // Only one tab is tabbable at a time: the open one until something else takes focus.
+    expect(tab("who").tabIndex).toBe(0);
+    expect(tab("pricing").tabIndex).toBe(-1);
+
+    const pressed = key(tab("who"), "ArrowRight");
+    expect(pressed.defaultPrevented).toBe(true);
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(tab("pricing"));
+    expect(tab("pricing").tabIndex).toBe(0);
+    expect(tab("who").tabIndex).toBe(-1);
+    // Focus moved; the open thread did not.
+    expect(tab("who").getAttribute("aria-selected")).toBe("true");
+    expect(tab("pricing").getAttribute("aria-selected")).toBe("false");
+
+    // A second press starts from the tab that has focus, not from the stale open thread.
+    key(tab("pricing"), "ArrowRight");
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(tab("deck"));
+
+    key(tab("deck"), "Home");
+    expect(document.activeElement).toBe(tab("hiring"));
+    key(tab("hiring"), "End");
+    expect(document.activeElement).toBe(tab("deck"));
+    key(tab("deck"), "ArrowLeft");
+    expect(document.activeElement).toBe(tab("pricing"));
+  });
+
+  it("switches when the focused tab is pressed, not merely focused", () => {
     render(bot());
     key(tab("who"), "ArrowRight");
+    // A native button turns Enter and Space into a click; the keydown itself must not switch.
+    key(tab("pricing"), "Enter");
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    click(tab("pricing"));
     expect(fixture.dispatch.mock.calls).toEqual([[{ type: "switchTask", botId: "research", threadId: "pricing" }]]);
-    fixture.dispatch.mockReset();
-    key(tab("who"), "ArrowLeft");
-    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "switchTask", botId: "research", threadId: "launch" }]]);
-    fixture.dispatch.mockReset();
-    key(tab("who"), "Home");
-    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "switchTask", botId: "research", threadId: "hiring" }]]);
-    fixture.dispatch.mockReset();
-    key(tab("who"), "End");
-    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "switchTask", botId: "research", threadId: "deck" }]]);
   });
 
   it("wraps round at both ends", () => {
     render(bot({ threadId: "deck" }));
     key(tab("deck"), "ArrowRight");
-    expect(fixture.dispatch.mock.calls).toEqual([[{ type: "switchTask", botId: "research", threadId: "hiring" }]]);
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(tab("hiring"));
   });
 
   it("leaves the arrow keys alone when they are pressed in a tab's menu button", () => {
@@ -210,5 +250,67 @@ describe("a bot's threads in the chat header", () => {
     }
     const list = host.querySelector('[role="tablist"]')!;
     expect(list.className).toContain("overflow-x-auto");
+    expect(list.className).toContain("[scrollbar-width:none]");
+  });
+
+  it("offers edge buttons only while tabs continue off-screen, and they scroll instead of switching", () => {
+    render(bot());
+    expect(host.querySelector("[data-thread-tabs-back]")).toBeNull();
+    expect(host.querySelector("[data-thread-tabs-forward]")).toBeNull();
+
+    const list = host.querySelector<HTMLElement>('[role="tablist"]')!;
+    Object.defineProperty(list, "scrollWidth", { configurable: true, value: 640 });
+    Object.defineProperty(list, "clientWidth", { configurable: true, value: 300 });
+    const scrollBy = vi.fn();
+    Object.defineProperty(list, "scrollBy", { configurable: true, value: scrollBy });
+    flushSync(() => list.dispatchEvent(new Event("scroll")));
+
+    const back = host.querySelector<HTMLButtonElement>("[data-thread-tabs-back]")!;
+    const forward = host.querySelector<HTMLButtonElement>("[data-thread-tabs-forward]")!;
+    expect(back).not.toBeNull();
+    expect(forward).not.toBeNull();
+    expect(back.getAttribute("aria-label")).toBe("Earlier threads");
+    expect(forward.getAttribute("aria-label")).toBe("Later threads");
+    // Nothing is hidden behind the start edge on first paint, but there is more to the right.
+    expect(back.disabled).toBe(true);
+    expect(forward.disabled).toBe(false);
+
+    click(forward);
+    expect(scrollBy).toHaveBeenCalledWith({ left: 225, behavior: "smooth" });
+    expect(fixture.dispatch).not.toHaveBeenCalled();
+
+    list.scrollLeft = 340;
+    flushSync(() => list.dispatchEvent(new Event("scroll")));
+    expect(host.querySelector<HTMLButtonElement>("[data-thread-tabs-forward]")!.disabled).toBe(true);
+    expect(host.querySelector<HTMLButtonElement>("[data-thread-tabs-back]")!.disabled).toBe(false);
+  });
+
+  it("reads RTL scroll offsets from the right edge, so the ends still disable", () => {
+    const original = window.getComputedStyle;
+    const style = vi.spyOn(window, "getComputedStyle").mockImplementation(((element: Element, pseudo?: string | null) =>
+      element === host.querySelector('[role="tablist"]')
+        ? ({ direction: "rtl" } as unknown as CSSStyleDeclaration)
+        : original(element, pseudo)) as typeof window.getComputedStyle);
+    try {
+      render(bot());
+      const list = host.querySelector<HTMLElement>('[role="tablist"]')!;
+      Object.defineProperty(list, "scrollWidth", { configurable: true, value: 640 });
+      Object.defineProperty(list, "clientWidth", { configurable: true, value: 300 });
+      Object.defineProperty(list, "scrollBy", { configurable: true, value: vi.fn() });
+      flushSync(() => list.dispatchEvent(new Event("scroll")));
+
+      // RTL starts at scrollLeft 0 and scrolls negative towards the later tabs.
+      expect(host.querySelector<HTMLButtonElement>("[data-thread-tabs-back]")!.disabled).toBe(true);
+      expect(host.querySelector<HTMLButtonElement>("[data-thread-tabs-forward]")!.disabled).toBe(false);
+
+      list.scrollLeft = -340;
+      flushSync(() => list.dispatchEvent(new Event("scroll")));
+      expect(host.querySelector<HTMLButtonElement>("[data-thread-tabs-forward]")!.disabled).toBe(true);
+      expect(host.querySelector<HTMLButtonElement>("[data-thread-tabs-back]")!.disabled).toBe(false);
+      // The first control sits at the right edge in RTL, so it points that way.
+      expect(host.querySelector("[data-thread-tabs-back] svg")!.getAttribute("class")).toContain("chevron-right");
+    } finally {
+      style.mockRestore();
+    }
   });
 });

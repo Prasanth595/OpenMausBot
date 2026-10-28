@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
-  Archive, ArchiveRestore, BellOff, Clock, FolderInput, Link2, Link2Off, Loader2, MoreHorizontal,
-  Pencil, Pin, PinOff, RefreshCw, SquarePen, Trash2,
+  Archive, ArchiveRestore, BellOff, ChevronLeft, ChevronRight, Clock, FolderInput, Link2, Link2Off, Loader2,
+  MoreHorizontal, Pencil, Pin, PinOff, RefreshCw, SquarePen, Trash2,
 } from "lucide-react";
 
 import { cn } from "@/lib/cn";
@@ -25,21 +25,25 @@ const displayTitle = (task: TabTask) => localizedTaskTitle(task.title || t("task
 
 /** What a tab says besides its name: a spinner for a running turn or a dot for an unread reply, in words for a reader. */
 function tabStatus(task: TabTask): string {
-  if (isWorking(task)) return t("chat.activity.working");
+  // A turn waiting on the person still reports busy, so the waiting state has to be read before the working one.
   if (task.activity === "waiting-on-you") return t("task.waiting");
+  if (isWorking(task)) return t("chat.activity.working");
   if (task.waitingForTeammates) return t("task.waitingOnTeammate");
   if (task.queued) return t("task.queued");
   return task.unread ? t("task.unread") : "";
 }
 
-function ThreadTab({ task, ownerId, active, folders, actions, onOpen, onNew, register }: {
+function ThreadTab({ task, ownerId, active, tabbable, folders, actions, onOpen, onNew, onFocus, register }: {
   task: TabTask;
   ownerId: string;
   active: boolean;
+  /** The strip's roving tab stop: the focused tab, or the open one when nothing in the strip has focus. */
+  tabbable: boolean;
   folders: Bot["projects"];
   actions: ThreadActions;
   onOpen: (task: TabTask) => void;
   onNew: () => void;
+  onFocus: (threadId: string) => void;
   register: (threadId: string, element: HTMLButtonElement | null) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
@@ -50,6 +54,9 @@ function ThreadTab({ task, ownerId, active, folders, actions, onOpen, onNew, reg
   const title = displayTitle(task);
   const status = tabStatus(task);
   const working = isWorking(task);
+  const waitingOnYou = task.activity === "waiting-on-you";
+  /** A turn waiting on the person is not running, even though the bot reports itself busy. */
+  const running = working && !waitingOnYou;
   const archived = isArchived(task);
   const snoozed = isSnoozed(task);
 
@@ -162,18 +169,20 @@ function ThreadTab({ task, ownerId, active, folders, actions, onOpen, onNew, reg
           type="button"
           role="tab"
           aria-selected={active}
-          tabIndex={active ? 0 : -1}
+          tabIndex={tabbable ? 0 : -1}
           data-thread-tab={task.threadId}
           title={status ? `${title} · ${status}` : title}
           onClick={() => onOpen(task)}
+          onFocus={() => onFocus(task.threadId)}
           onDoubleClick={startRename}
           className={cn(
             "flex h-7 max-w-[11rem] min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[12px] leading-none outline-none transition-colors focus-visible:ring-2 focus-visible:ring-accent/60",
             active ? "bg-raised font-medium text-ink" : "text-ink-secondary hover:bg-raised/60 hover:text-ink",
           )}
         >
-          {isWorking(task) && <Loader2 size={12} aria-hidden="true" className="shrink-0 animate-spin text-success" />}
-          {!isWorking(task) && task.unread && <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-accent" />}
+          {running && <Loader2 size={12} aria-hidden="true" className="shrink-0 animate-spin text-success" />}
+          {waitingOnYou && <Clock size={12} aria-hidden="true" className="shrink-0 text-accent" />}
+          {!running && !waitingOnYou && task.unread && <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-accent" />}
           <span dir="auto" className="truncate">{title}</span>
           {task.pinned === true && <Pin size={10} aria-hidden="true" className="shrink-0 text-ink-tertiary" />}
           {status && <span className="sr-only">{status}</span>}
@@ -229,37 +238,83 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
     });
   }, [bot, state.pendingQueued]);
   const elements = useRef(new Map<string, HTMLButtonElement>());
+  const listRef = useRef<HTMLDivElement>(null);
   const [focusId, setFocusId] = useState<string | null>(null);
+  const [edges, setEdges] = useState({ overflow: false, start: false, end: false, rtl: false });
   const active = bot.threadId;
 
   // The open tab is always reachable, even when the strip has scrolled past it.
   useEffect(() => {
     elements.current.get(active)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
   }, [active]);
+
+  /** The strip hides its scrollbar, so its edge buttons are the only visible cue that tabs continue off-screen. */
+  const measure = useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const rtl = typeof getComputedStyle === "function" && getComputedStyle(list).direction === "rtl";
+    const max = Math.max(0, list.scrollWidth - list.clientWidth);
+    const left = list.scrollLeft;
+    // Standard RTL scrolls negative away from its start edge; engines that scroll positive start at the far end.
+    const offset = rtl ? (left <= 0 ? -left : max - left) : left;
+    const next = { overflow: max > 1, start: offset > 1, end: offset < max - 1, rtl };
+    setEdges((previous) => previous.overflow === next.overflow && previous.start === next.start
+      && previous.end === next.end && previous.rtl === next.rtl ? previous : next);
+  }, []);
+
   useEffect(() => {
-    if (!focusId) return;
-    elements.current.get(focusId)?.focus();
-    setFocusId(null);
-  }, [focusId]);
+    measure();
+    const list = listRef.current;
+    const onResize = () => measure();
+    list?.addEventListener("scroll", measure, { passive: true });
+    window.addEventListener("resize", onResize);
+    // The header hides this strip below 30rem through a container query, which fires no window resize.
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(onResize) : null;
+    if (list) observer?.observe(list);
+    return () => {
+      list?.removeEventListener("scroll", measure);
+      window.removeEventListener("resize", onResize);
+      observer?.disconnect();
+    };
+  }, [measure]);
+
+  // A rename or a late font can change the strip's content width without resizing its box, so keep the edges honest.
+  useEffect(measure);
 
   if (threads.length < 2) return null;
 
   const open = (task: TabTask) => {
     if (task.threadId !== active) openBotThread(dispatch, bot, task.threadId, false);
   };
-  const jump = (task: TabTask) => { open(task); setFocusId(task.threadId); };
+  /** Keys move focus only: switching posts to the server, so it waits for Enter, Space or a click. */
+  const focusTab = (task: TabTask) => {
+    setFocusId(task.threadId);
+    const element = elements.current.get(task.threadId);
+    element?.focus();
+    element?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  };
   const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     // Only a tab moves the strip: the keys in a tab's rename field or its ⋯ button belong to them.
     if (!(event.target instanceof HTMLElement) || event.target.getAttribute("role") !== "tab") return;
-    const index = threads.findIndex((task) => task.threadId === active);
+    const current = event.target.dataset.threadTab ?? active;
+    const index = threads.findIndex((task) => task.threadId === current);
+    if (index < 0) return;
     const count = threads.length;
     const rtl = typeof getComputedStyle === "function" && getComputedStyle(event.currentTarget).direction === "rtl";
-    const step = (delta: number) => jump(threads[(index + delta + count) % count]!);
+    const step = (delta: number) => focusTab(threads[(index + delta + count) % count]!);
     if (event.key === "ArrowRight") { event.preventDefault(); step(rtl ? -1 : 1); }
     else if (event.key === "ArrowLeft") { event.preventDefault(); step(rtl ? 1 : -1); }
-    else if (event.key === "Home") { event.preventDefault(); jump(threads[0]!); }
-    else if (event.key === "End") { event.preventDefault(); jump(threads[count - 1]!); }
+    else if (event.key === "Home") { event.preventDefault(); focusTab(threads[0]!); }
+    else if (event.key === "End") { event.preventDefault(); focusTab(threads[count - 1]!); }
   };
+  const scrollStrip = (direction: 1 | -1) => {
+    const list = listRef.current;
+    if (!list || typeof list.scrollBy !== "function") return;
+    const amount = Math.max(40, Math.round(list.clientWidth * 0.75));
+    // RTL scrolls negative from its start edge in every current engine.
+    list.scrollBy({ left: (edges.rtl ? -1 : 1) * direction * amount, behavior: "smooth" });
+  };
+  const focusable = threads.some((task) => task.threadId === focusId) ? focusId : active;
   const project = bot.projects?.find((folder) => folder.id === (bot.tasks ?? []).find((task) => task.threadId === active)?.projectId);
   const startNew = () => dispatch({ type: "newTask", botId: bot.id, ...(project ? { projectId: project.id } : {}) });
   const register = useCallback((threadId: string, element: HTMLButtonElement | null) => {
@@ -267,9 +322,25 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
     else elements.current.delete(threadId);
   }, []);
 
+  const edgeClass = "flex size-6 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:pointer-events-none disabled:opacity-30";
+
   return (
     <div data-chathead-tabs className="flex min-w-0 items-center @max-[30rem]/chathead:hidden">
+      {edges.overflow && (
+        <button
+          type="button"
+          data-thread-tabs-back
+          aria-label={t("chat.tabs.earlier")}
+          title={t("chat.tabs.earlier")}
+          disabled={!edges.start}
+          onClick={() => scrollStrip(-1)}
+          className={edgeClass}
+        >
+          {edges.rtl ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronLeft size={14} aria-hidden="true" />}
+        </button>
+      )}
       <div
+        ref={listRef}
         role="tablist"
         aria-label={t("botPanel.conversations.title")}
         onKeyDown={onKeyDown}
@@ -281,14 +352,29 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
             task={task}
             ownerId={bot.id}
             active={task.threadId === active}
+            tabbable={task.threadId === focusable}
             folders={bot.projects}
             actions={actions}
             onOpen={open}
             onNew={startNew}
+            onFocus={setFocusId}
             register={register}
           />
         ))}
       </div>
+      {edges.overflow && (
+        <button
+          type="button"
+          data-thread-tabs-forward
+          aria-label={t("chat.tabs.later")}
+          title={t("chat.tabs.later")}
+          disabled={!edges.end}
+          onClick={() => scrollStrip(1)}
+          className={edgeClass}
+        >
+          {edges.rtl ? <ChevronLeft size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+        </button>
+      )}
     </div>
   );
 }
