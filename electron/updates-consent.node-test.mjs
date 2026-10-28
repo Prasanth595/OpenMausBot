@@ -449,3 +449,78 @@ test("an account without a choice never inherits another account's answer", asyn
       assert.equal(f.saved.updatesConsent.account, "account-2");
     });
 });
+
+test("signed out, returning to an email while its repeated opt-in is in flight never withdraws the active receipt", async t => {
+  for (const failures of [1, 0]) await t.test(`final opt-in failures=${failures}`, async t => {
+    const f = await world(t);
+    await f.consent.choose({ status: "opted_in", email: "person@example.test" });
+    const repeated = Promise.withResolvers(), final = Promise.withResolvers();
+    t.after(() => { repeated.resolve(); final.resolve(); });
+    f.gate = repeated.promise;
+    const sending = f.consent.choose({ status: "opted_in", email: "person@example.test" });
+    await until(() => f.requests.length === 2);
+    const replacing = f.consent.choose({ status: "opted_in", email: "other@example.test" });
+    await until(() => f.saved.updatesConsent.email === "other@example.test");
+    const returning = f.consent.choose({ status: "opted_in", email: "person@example.test" });
+    await until(() => f.saved.updatesConsent.email === "person@example.test");
+    f.gate = final.promise;
+    repeated.resolve();
+    await until(() => f.requests.length === 3);
+    f.failOptIns = failures;
+    f.gate = null;
+    final.resolve();
+    await Promise.all([sending, replacing, returning]);
+    assert.equal(f.emails.get("person@example.test"), "opted_in");
+    assert.deepEqual(f.requests.map(request => request.body.status), ["opted_in", "opted_in", "opted_in"]);
+    assert.deepEqual(f.saved.updatesConsent, { status: "opted_in", version: UPDATES_CONSENT_VERSION, at: f.now,
+      email: "person@example.test", receipt: RECEIPT, ...(failures ? { pending: true } : {}) });
+    f.launch();
+    await f.consent.sync();
+    assert.equal(f.emails.get("person@example.test"), "opted_in");
+    assert.equal(f.saved.updatesConsent.pending, undefined);
+    assert.equal(f.requests.some(request => request.body.status === "withdrawn"), false);
+    await f.consent.choose({ status: "withdrawn" });
+    assert.equal(f.emails.get("person@example.test"), "withdrawn");
+  });
+});
+
+test("an unanswered account withdraws another account's retained email receipt without inheriting its answer", async t => {
+  for (const status of ["opted_in", "declined", "withdrawn"]) for (const pending of [false, true])
+    await t.test(`${status}, pending=${pending}`, async t => {
+      const f = await world(t);
+      await f.consent.choose({ status: "opted_in", email: "old@example.test" });
+      const ownerAnswer = { status, version: UPDATES_CONSENT_VERSION, at: f.now, account: "account-1",
+        email: "old@example.test", ...(pending ? { pending: true } : {}) };
+      f.prefs.setUpdatesConsent({ ...ownerAnswer, receipt: receiptOf("old@example.test") });
+      f.accountId = "account-2";
+      f.accessToken = `omc_${"B".repeat(43)}`;
+      await f.signInNow();
+      const held = Promise.withResolvers();
+      t.after(() => held.resolve());
+      f.gate = held.promise;
+      const syncing = f.consent.sync().catch(error => error);
+      await until(() => f.requests.length === 2);
+      assert.equal(f.requests[1].method, "GET");
+      f.failWithdrawals = 1;
+      f.gate = null;
+      held.resolve();
+      await syncing;
+      assert.equal(f.account, null);
+      assert.equal(f.emails.get("old@example.test"), "opted_in");
+      const afterFailure = structuredClone(f.saved.updatesConsent);
+      f.launch();
+      await f.consent.sync();
+      assert.equal(f.emails.get("old@example.test"), "withdrawn");
+      assert.deepEqual(afterFailure, { ...ownerAnswer, replacedReceipts: [receiptOf("old@example.test")] });
+      assert.deepEqual(f.saved.updatesConsent, ownerAnswer);
+      const state = await f.consent.state();
+      assert.equal(state.due, true);
+      assert.equal(state.status, null);
+      assert.equal(f.account, null);
+      assert.deepEqual(f.requests.filter(request => request.path === "/api/cloud/desktop/updates-consent").map(request => request.method), ["GET", "GET", "GET"]);
+      assert.deepEqual(f.requests.filter(request => request.method === "POST").map(request => request.body), [
+        { status: "opted_in", email: "old@example.test", installId: f.saved.installId, textVersion: UPDATES_CONSENT_VERSION },
+        { status: "withdrawn", receipt: receiptOf("old@example.test") },
+        { status: "withdrawn", receipt: receiptOf("old@example.test") }]);
+    });
+});

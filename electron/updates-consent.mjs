@@ -65,10 +65,10 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
     if (!local?.pending || local.account) return;
     if (local.status === "opted_in" && local.email) {
       const receipt = await client().updatesConsentByEmail({ email: local.email, installId: prefs.installId(), textVersion: local.version });
-      if (sameAnswer()) return save({ ...local, receipt, pending: false });
+      if (sameAnswer()) return save(withReplacedReceipts({ ...local, receipt, pending: false }, [], receipt));
       const latest = prefs.updatesConsent();
       if (!latest) return;
-      if (!latest.account && latest.email === local.email && (latest.status === "opted_in" || !latest.receipt)) save({ ...latest, receipt });
+      if (!latest.account && latest.email === local.email && (latest.status === "opted_in" || !latest.receipt)) save(withReplacedReceipts({ ...latest, receipt }, [], receipt));
       else save(withReplacedReceipts(latest, [receipt]));
     } else if (local.status !== "opted_in" && local.receipt) {
       await client().withdrawUpdatesConsent({ status: local.status, receipt: local.receipt });
@@ -108,7 +108,10 @@ export function createUpdatesConsent({ prefs, account, available, now = Date.now
         keep({ status: remote.status, version: remote.textVersion, at: now(), account: who.id, ...(local?.email ? { email: local.email } : {}), replacedReceipts: local?.replacedReceipts });
       return;
     }
-    if (!local || (local.account && local.account !== who.id)) return;
+    if (!local || (local.account && local.account !== who.id)) {
+      if (receipt) keep(rest);
+      return;
+    }
     await client().recordUpdatesConsent(local.status, local.version);
     keep({ ...rest, account: who.id, pending: false });
   }
