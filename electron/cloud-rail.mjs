@@ -9,10 +9,10 @@
 import environments from "./environments.cjs";
 import { cleanCloudListName, CLOUD_SWATCHES, cloudSetupProgress, olderRelease, otherOwnClouds, ownCloud, signedInServers, stepProgress, swatchColor } from "./cloud-list.mjs";
 import { machineSetup } from "./cloud-home.mjs";
+import { listedLook, placeLook, railPaint, SIGNED_IN } from "./place-look.mjs";
 
 export const RAIL_MIN_PLACES = 2;
 const PENDING = "pending:";
-const SIGNED_IN = "signed-in:";
 
 /** A server or computer of the person's own that signed in with their account, as its circle says it: online while the
  * Admin heard from it in the last few minutes, else offline since when it was last seen; and an older release than the
@@ -25,7 +25,8 @@ const machineProgress = machine => {
   return setup ? stepProgress(setup.step) : null;
 };
 
-/** One saved place as a circle: what it is, its colour and how it is doing, from the session's word for it. */
+/** One saved place as a circle: what it is, its colour (and who may change it from the rail) and how it is doing, from
+ * the session's word for it. */
 function circle(entry, { activeId, mine, state }) {
   const connected = state?.status === "connected" ? state : null;
   const listed = connected?.clouds?.find(cloud => cloud.origin === entry.origin) ?? null;
@@ -35,7 +36,8 @@ function circle(entry, { activeId, mine, state }) {
   const progress = listed ? cloudSetupProgress(listed) : machineProgress(machine);
   const problem = listed ? listed.status === "payment_problem" && listed.role === "owner" : entry.origin === mine && machine?.status === "payment-problem";
   const color = environments.ENTRY_COLORS.includes(entry.color) ? entry.color : listed ? swatchColor(listed.color) : null;
-  return { id: entry.id, name: entry.name, color, kind, opens: true, ...(entry.id === activeId ? { active: true } : {}),
+  const paint = railPaint(placeLook(entry, { clouds: connected?.clouds ?? null, homeOrigin: mine }), color);
+  return { id: entry.id, name: entry.name, color, kind, opens: true, ...(paint ? { paint } : {}), ...(entry.id === activeId ? { active: true } : {}),
     ...(progress !== null ? { progress } : {}), ...(problem ? { attention: true } : {}), ...(listed?.managed === false ? serverState(listed, connected?.latestVersion ?? null) : {}) };
 }
 
@@ -62,7 +64,7 @@ export function railPlaces({ saved, home = null, mine = null, state = null }) {
       ...(cloud.status === "checkout" ? { waiting: true } : {}) }));
   const savedOrigins = new Set(saved.environments.map(entry => entry.origin).filter(Boolean));
   const servers = signedInServers(clouds).filter(cloud => !cloud.origin || !savedOrigins.has(cloud.origin))
-    .map(cloud => ({ id: `${SIGNED_IN}${cloud.id}`, name: cloud.name, color: swatchColor(cloud.color), kind: "server", opens: false,
+    .map(cloud => ({ id: `${SIGNED_IN}${cloud.id}`, name: cloud.name, color: swatchColor(cloud.color), kind: "server", opens: false, paint: railPaint(listedLook(cloud), swatchColor(cloud.color)),
       ...(cloud.origin ? { pairs: true } : { ownNetwork: true }), ...serverState(cloud, connected?.latestVersion ?? null) }));
   const places = [...remote, ...servers, ...making];
   const all = home ? places : [{ id: environments.LOCAL_ID, name: "This computer", color: null, kind: "computer", opens: true, ...(saved.activeId === environments.LOCAL_ID ? { active: true } : {}) }, ...places];

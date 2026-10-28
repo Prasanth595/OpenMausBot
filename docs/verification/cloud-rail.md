@@ -41,6 +41,13 @@ Nothing here needs a real MausBot Cloud account, a payment or the Electron app.
   (`PATCH /api/cloud/desktop/clouds/:id`, its owner or its team's admins; a
   member sees it locked), a server connected by hand on this computer. An
   Admin without that route changes nothing and says so.
+- The window's own rail changes the colour of every place it lists, whatever
+  that place's server runs (an older server's page has no such setting): a
+  right-click on a circle, or on its row past eight, opens that place's menu
+  with the six swatches. The same rules decide where it is kept
+  (`workspaces:recolor`, the rail's own page only, an id main listed); a
+  signed-in server not connected here is changed on the Admin. This computer
+  keeps today's look and has no menu.
 - The person's own servers and computers that signed in with their account come
   in the same list (`managed: false`, on a server, with or without an address).
   They are never a Cloud of theirs to pair with or lend to: the rail shows them
@@ -60,8 +67,8 @@ The account tests answer as a loopback Admin, with and without `clouds`. The
 rail tests load the production preload and check which page gets the list,
 which ids open, and that a circle, ＋, checkout and a colour change act only
 from a click. The colour tests check who may change a place's colour and where
-it is kept, that nothing is saved when the Admin refuses, and that the tint
-follows at once.
+it is kept, from its own page and from the rail's menu, that nothing is saved
+when the Admin refuses, and that the tint follows at once.
 
 ## Rendered workflow
 
@@ -76,8 +83,9 @@ its owner, eleven for the list past eight. A headless Chrome in a throwaway
 profile photographs the rail in Advanced and Simple mode (with the place's
 tint), the list past eight, ＋'s two choices, the steps for a server of one's
 own, the plans, the name and colour of a new Cloud and its setup, the person's
-signed-in servers and the steps to connect one, and the colour in Settings for
-an admin and for a team member, each in the Daylight and Midnight skins.
+signed-in servers and the steps to connect one, and the colour in Settings and
+in a circle's own menu for an admin and for a team member, each in the
+Daylight and Midnight skins.
 `--only rail,look-settings` limits it to some views. Without `--shots` it
 prints the preview's address and waits for Ctrl-C.
 
