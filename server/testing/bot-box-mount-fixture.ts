@@ -50,6 +50,23 @@ if (scenario === "browser" || scenario === "browser-read-only") {
   const plan = planBox({ ...setup, dataDir: alias, home: boxHome }, { ...request, cwd });
   console.log(JSON.stringify({ botId: plan.botId, files: probe(bwrapArgs(plan),
     `for file in ${alias}/messages.db /var/lib/openmausbot/messages.db; do if test -r "$file"; then echo exposed; else echo hidden; fi; done; cat task.txt; cat /var/lib/openmausbot/workspaces/bot-a/memory.txt`) }));
+} else if (scenario === "symlink-read-only" || scenario === "symlink-home-read-only") {
+  const boxHome = scenario === "symlink-read-only" ? home : "/srv/linked-home";
+  const alias = scenario === "symlink-read-only" ? join(home, ".openmausbot") : join(boxHome, "openmausbot");
+  if (scenario === "symlink-read-only") symlinkSync(realData, alias);
+  else symlinkSync("/var/lib", boxHome);
+  const skills = join(realData, "claude-user-skills"), linkedSkills = join(alias, "claude-user-skills");
+  mkdirSync(skills);
+  writeFileSync(join(skills, "skill.txt"), "skill fixture\n");
+  const results: string[][] = [];
+  for (const path of [linkedSkills, skills]) {
+    for (const access of [{ args: ["--add-dir", path] }, { ro: [path] }]) {
+      const plan = planBox({ ...setup, dataDir: alias, home: boxHome }, { ...request, env: { HOME: boxHome }, ...access });
+      results.push(probe(bwrapArgs(plan),
+        `for file in ${path}/skill.txt ${skills}/skill.txt; do if test -r "$file"; then cat "$file"; else echo missing; fi; if (echo changed > "$file") 2>/dev/null; then echo writable; else echo read-only; fi; done; for file in ${alias}/messages.db ${realData}/messages.db; do if test -r "$file"; then echo exposed; else echo hidden; fi; done`));
+    }
+  }
+  console.log(JSON.stringify(results));
 } else if (scenario === "read-only") {
   const skills = join(realData, "claude-user-skills");
   mkdirSync(skills);

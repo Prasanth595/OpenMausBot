@@ -201,9 +201,11 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
     mounts.push({ kind: mutate.has("engines-rw") ? "bind" : "ro", source: engines, target: engines, optional: true });
   }
   for (const path of [...(request.ro ?? []), ...argvPaths(request.args)]) {
-    const full = resolve(path);
-    if (mountAccess(mounts, full) !== "none") continue;
-    mounts.push({ kind: "ro", source: full, target: full, optional: true });
+    const source = physicalPath(path);
+    for (const target of new Set([source, resolve(path)])) {
+      if (mountAccess(mounts, target) !== "none") continue;
+      mounts.push({ kind: "ro", source, target, optional: true });
+    }
   }
 
   const options = ["--unshare-user", "--unshare-ipc", "--unshare-uts", "--unshare-cgroup-try", "--die-with-parent", "--hostname", BOX_HOSTNAME];

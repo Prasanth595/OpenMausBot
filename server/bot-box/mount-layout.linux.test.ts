@@ -46,6 +46,11 @@ describe.skipIf(detection.box !== "bwrap")("synthetic filesystem layouts inside 
     expect(layout("browser-read-only")).toEqual(["hidden", "hidden", "upload fixture"]);
   });
 
+  it.each(["symlink-read-only", "symlink-home-read-only"])("restores read-only skills at both their alias and canonical paths (%s)", (scenario) => {
+    const files = ["skill fixture", "read-only", "skill fixture", "read-only", "hidden", "hidden"];
+    expect(layout(scenario)).toEqual([files, files, files, files]);
+  });
+
   it("restores HOME below the data directory and refuses HOME equal to all data", () => {
     expect(layout("home")).toEqual([
       { files: ["settings fixture", "writable", "hidden"] },
