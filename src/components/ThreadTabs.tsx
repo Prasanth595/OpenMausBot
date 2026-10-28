@@ -8,6 +8,7 @@ import { cn } from "@/lib/cn";
 import { copyText } from "@/lib/copy-text";
 import { llmThreadTitlesEnabled } from "@/lib/feature-flags";
 import { t } from "@/lib/i18n";
+import { reducedMotion } from "@/lib/onboarding";
 import { nextRename } from "@/lib/rename";
 import { localizedTaskTitle } from "@/lib/task-title";
 import { threadRefUrl } from "@/lib/thread-refs";
@@ -242,6 +243,7 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
   const [focusId, setFocusId] = useState<string | null>(null);
   const [edges, setEdges] = useState({ overflow: false, start: false, end: false, rtl: false });
   const active = bot.threadId;
+  const showing = threads.length >= 2;
 
   // The open tab is always reachable, even when the strip has scrolled past it.
   useEffect(() => {
@@ -262,6 +264,12 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
       && previous.end === next.end && previous.rtl === next.rtl ? previous : next);
   }, []);
 
+  // Every hook has to run before the early return, or a strip that gains its second thread breaks hook order.
+  const register = useCallback((threadId: string, element: HTMLButtonElement | null) => {
+    if (element) elements.current.set(threadId, element);
+    else elements.current.delete(threadId);
+  }, []);
+
   useEffect(() => {
     measure();
     const list = listRef.current;
@@ -276,12 +284,12 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
       window.removeEventListener("resize", onResize);
       observer?.disconnect();
     };
-  }, [measure]);
+  }, [measure, showing]);
 
   // A rename or a late font can change the strip's content width without resizing its box, so keep the edges honest.
   useEffect(measure);
 
-  if (threads.length < 2) return null;
+  if (!showing) return null;
 
   const open = (task: TabTask) => {
     if (task.threadId !== active) openBotThread(dispatch, bot, task.threadId, false);
@@ -312,15 +320,14 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
     if (!list || typeof list.scrollBy !== "function") return;
     const amount = Math.max(40, Math.round(list.clientWidth * 0.75));
     // RTL scrolls negative from its start edge in every current engine.
-    list.scrollBy({ left: (edges.rtl ? -1 : 1) * direction * amount, behavior: "smooth" });
+    list.scrollBy({
+      left: (edges.rtl ? -1 : 1) * direction * amount,
+      behavior: reducedMotion() ? "auto" : "smooth",
+    });
   };
   const focusable = threads.some((task) => task.threadId === focusId) ? focusId : active;
   const project = bot.projects?.find((folder) => folder.id === (bot.tasks ?? []).find((task) => task.threadId === active)?.projectId);
   const startNew = () => dispatch({ type: "newTask", botId: bot.id, ...(project ? { projectId: project.id } : {}) });
-  const register = useCallback((threadId: string, element: HTMLButtonElement | null) => {
-    if (element) elements.current.set(threadId, element);
-    else elements.current.delete(threadId);
-  }, []);
 
   const edgeClass = "flex size-6 shrink-0 items-center justify-center rounded-full text-ink-secondary transition-colors hover:bg-raised hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 disabled:pointer-events-none disabled:opacity-30";
 
@@ -344,6 +351,10 @@ export function ThreadTabs({ bot, dispatch }: { bot: Bot; dispatch: Dispatch<Act
         role="tablist"
         aria-label={t("botPanel.conversations.title")}
         onKeyDown={onKeyDown}
+        // Leaving the strip hands the tab stop back to the open thread, so a switch from elsewhere is not left behind.
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusId(null);
+        }}
         className="flex min-w-0 max-w-[min(22rem,40cqw)] items-center gap-0.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
         {threads.map((task) => (

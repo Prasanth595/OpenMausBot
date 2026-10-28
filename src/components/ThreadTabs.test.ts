@@ -254,6 +254,7 @@ describe("a bot's threads in the chat header", () => {
   });
 
   it("offers edge buttons only while tabs continue off-screen, and they scroll instead of switching", () => {
+    document.documentElement.dataset.reducedMotion = "false";
     render(bot());
     expect(host.querySelector("[data-thread-tabs-back]")).toBeNull();
     expect(host.querySelector("[data-thread-tabs-forward]")).toBeNull();
@@ -283,6 +284,43 @@ describe("a bot's threads in the chat header", () => {
     flushSync(() => list.dispatchEvent(new Event("scroll")));
     expect(host.querySelector<HTMLButtonElement>("[data-thread-tabs-forward]")!.disabled).toBe(true);
     expect(host.querySelector<HTMLButtonElement>("[data-thread-tabs-back]")!.disabled).toBe(false);
+  });
+
+  it("does not animate that scroll when the person has asked for less motion", () => {
+    render(bot());
+    const list = host.querySelector<HTMLElement>('[role="tablist"]')!;
+    Object.defineProperty(list, "scrollWidth", { configurable: true, value: 640 });
+    Object.defineProperty(list, "clientWidth", { configurable: true, value: 300 });
+    const scrollBy = vi.fn();
+    Object.defineProperty(list, "scrollBy", { configurable: true, value: scrollBy });
+    flushSync(() => list.dispatchEvent(new Event("scroll")));
+
+    click(host.querySelector("[data-thread-tabs-forward]"));
+    expect(scrollBy).toHaveBeenCalledWith({ left: 225, behavior: "auto" });
+  });
+
+  it("sets up its scroll handling when a second thread gives the strip something to scroll", () => {
+    render(bot({ tasks: [task("who", "Who am I?", 1)] }));
+    expect(host.querySelector('[role="tablist"]')).toBeNull();
+
+    render(bot());
+    const list = host.querySelector<HTMLElement>('[role="tablist"]')!;
+    Object.defineProperty(list, "scrollWidth", { configurable: true, value: 640 });
+    Object.defineProperty(list, "clientWidth", { configurable: true, value: 300 });
+    list.scrollLeft = 340;
+    flushSync(() => list.dispatchEvent(new Event("scroll")));
+
+    expect(host.querySelector<HTMLButtonElement>("[data-thread-tabs-back]")!.disabled).toBe(false);
+    expect(host.querySelector<HTMLButtonElement>("[data-thread-tabs-forward]")!.disabled).toBe(true);
+  });
+
+  it("gives the tab stop back to the open thread when focus leaves the strip", () => {
+    render(bot());
+    key(tab("who"), "ArrowRight");
+    expect(tab("pricing").tabIndex).toBe(0);
+    flushSync(() => tab("pricing").blur());
+    expect(tab("who").tabIndex).toBe(0);
+    expect(tab("pricing").tabIndex).toBe(-1);
   });
 
   it("reads RTL scroll offsets from the right edge, so the ends still disable", () => {
