@@ -36,6 +36,7 @@ import { needsYouVersion, useTeamPeopleLoader } from "@/state/team-people";
 import { inboxVersion, useInboxLoader, useInboxPanel } from "@/state/inbox";
 import { InboxPanel } from "@/components/inbox/InboxPanel";
 import { CloudAddDialog } from "@/components/CloudAddDialog";
+import { PlacesRail } from "@/components/PlacesRail";
 import { CloudHowTo } from "@/components/CloudHowTo";
 import { DesktopCapabilitiesProvider, useCaptionChrome, useDesktopCapabilities, WindowDragStrip } from "@/components/DesktopCapabilities";
 import { WindowCaptionButtons } from "@/components/WindowCaptionButtons";
@@ -319,6 +320,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
           className="absolute inset-0 z-30 bg-black/50 md:hidden"
         />
       )}
+      {!calendarFocus && <PlacesRail />}
       {!calendarFocus && <Sidebar
         collapseToIcons={collapseSidebar}
         open={drawerOpen}
