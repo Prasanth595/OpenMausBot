@@ -100,7 +100,8 @@ docker pull -q "$IMAGE" > "$OUT/pull.txt" 2>&1; echo "pull exit $? in $(( $(date
 docker image inspect "$IMAGE" --format 'arch={{.Architecture}} os={{.Os}} version={{index .Config.Labels "org.opencontainers.image.version"}} revision={{index .Config.Labels "org.opencontainers.image.revision"}}' >> "$OUT/pull.txt" 2>&1
 cat "$OUT/pull.txt"
 
-# A throwaway bootstrap secret for this container only, masked in the log, handed over in a 0600 env file.
+# A throwaway bootstrap secret for this container only, masked in the log, handed over in a 0600 env file. The
+# connected-apps broker points at a closed loopback port: a shipped home otherwise registers with the production one.
 umask 077
 SECRET_FILE=$(mktemp); ENV_FILE=$(mktemp)
 head -c 32 /dev/urandom | base64 | tr '+/' '-_' | tr -d '=\n' > "$SECRET_FILE"
@@ -112,6 +113,8 @@ OMB_CLOUD_ADMIN_URL=https://admin.spike.invalid
 OMB_PUBLIC_URL=https://$PUBLIC_HOST
 OMB_CLOUD_IMAGE=$IMAGE
 OMB_CLOUD_BOOTSTRAP_SECRET=$(cat "$SECRET_FILE")
+OMB_COMPOSIO_BROKER_URL=http://127.0.0.1:9
+OMB_HIGHLEVEL_RELAY_URL=off
 ENV
 # A Team Cloud also boots with its team (docs/team-cloud.md); the Admin's pairing then carries a member claim.
 if [ "$ROLE" = team ]; then printf 'OMB_CLOUD_TEAM_ID=spike-team\nOMB_CLOUD_TEAM_NAME=Spike Team\n' >> "$ENV_FILE"; export TEAM_ID=spike-team; fi
