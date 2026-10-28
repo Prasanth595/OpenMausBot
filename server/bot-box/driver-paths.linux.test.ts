@@ -44,8 +44,8 @@ describe.skipIf(detection.box !== "bwrap")("boxed driver paths in real bubblewra
       const result = await fixture("claude", location, fallback);
       expect(result.asks, JSON.stringify(result)).toBe(2);
       expect(result.probes).toMatchObject([
-        { permission: "allow", token: "hook-fixture", tokenWritable: false, hidden: true, otherTokenHidden: true },
-        { permission: "allow", token: "hook-fixture-next", tokenWritable: false, hidden: true, otherTokenHidden: true },
+        { permission: "allow", token: "hook-fixture", tokenWritable: false, socketChmodError: "EROFS", hidden: true, otherTokenHidden: true },
+        { permission: "allow", token: "hook-fixture-next", tokenWritable: false, socketChmodError: "EROFS", hidden: true, otherTokenHidden: true },
       ]);
       expect(result.probes[0].pid).toBe(result.probes[1].pid);
       expect(result.socket).toContain(fallback ? "/omb-perm-" : "/data/perm-");

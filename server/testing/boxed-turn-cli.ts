@@ -1,6 +1,6 @@
 #!/usr/bin/env -S node --experimental-strip-types
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const argv = process.argv.slice(2);
@@ -21,10 +21,11 @@ if (process.env.OMB_BOX_TEST_ENGINE === "claude") {
       });
       proxy.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "approve", arguments: { tool_name: "Bash", input: { command: "echo fixture" } } } }) + "\n");
       const answer = await reply;
-      let token: string | null = null, tokenWritable = false;
+      let token: string | null = null, tokenWritable = false, socketChmodError: string | null = null;
+      try { chmodSync(server.args.at(-1), 0o666); } catch (error) { socketChmodError = (error as NodeJS.ErrnoException).code ?? String(error); }
       try { token = readFileSync(process.env.OMB_HOOK_TOKEN_FILE!, "utf8"); } catch {}
       try { writeFileSync(process.env.OMB_HOOK_TOKEN_FILE!, "changed"); tokenWritable = true; } catch {}
-      const result = { permission: JSON.parse(answer.result.content[0].text).behavior, socket: server.args.at(-1), pid: process.pid, token, tokenWritable, hidden: hidden(), otherTokenHidden: !existsSync(process.env.OMB_BOX_TEST_OTHER_TOKEN!) };
+      const result = { permission: JSON.parse(answer.result.content[0].text).behavior, socket: server.args.at(-1), pid: process.pid, token, tokenWritable, socketChmodError, hidden: hidden(), otherTokenHidden: !existsSync(process.env.OMB_BOX_TEST_OTHER_TOKEN!) };
       send({ type: "system", subtype: "init", session_id: "fixture", tools: [] });
       send({ type: "assistant", message: { content: [{ type: "text", text: JSON.stringify(result) }] } });
       send({ type: "result", is_error: false, total_cost_usd: 0, stop_reason: "end_turn" });
