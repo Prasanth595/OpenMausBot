@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { engineInstallRoots } from "../engine-roots.ts";
-import { BOX_MUTATIONS, argvPaths, bwrapArgs, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
+import { BOX_MUTATIONS, argvPaths, describeBoxArgs, planBox, taskWorkspaceIds, visibleInBox, type BoxMutation, type BoxSetup } from "./plan.ts";
 
 const home = "/data";
 const dataDir = "/data/.openmausbot";
@@ -43,10 +43,10 @@ linuxBox("the box plan", () => {
   });
 
   it("writes the bubblewrap argv in mount order, with its own namespaces and the bridged sockets", () => {
-    const args = bwrapArgs(turn());
+    const args = describeBoxArgs(turn());
     const text = args.join(" ");
     for (const flag of ["--unshare-user", "--unshare-pid", "--unshare-net", "--unshare-ipc", "--unshare-uts", "--die-with-parent", "--hostname omb-box", "--seccomp 3", `--chdir ${cwd}`]) expect(text).toContain(flag);
-    expect(bwrapArgs(planBox({ ...setup(), seccompFd: undefined }, { command: "/usr/bin/x", args: [], env: {} })).join(" ")).not.toContain("--seccomp");
+    expect(describeBoxArgs(planBox({ ...setup(), seccompFd: undefined }, { command: "/usr/bin/x", args: [], env: {} })).join(" ")).not.toContain("--seccomp");
     expect(text).toContain("--ro-bind /usr /usr");
     expect(text).toContain("--symlink usr/bin /bin");
     expect(text).toContain("--proc /proc --dev /dev --tmpfs /tmp");
@@ -75,7 +75,7 @@ linuxBox("the box plan", () => {
     for (const other of ["tools/chrome/131/linux/chrome", "tools/agent-browser/0.37/agent-browser", "tools/token"]) {
       expect(visibleInBox(turn(), join(dataDir, other)), other).toBe("none");
     }
-    const args = bwrapArgs(turn());
+    const args = describeBoxArgs(turn());
     const engines = args.findIndex((arg, i) => arg === "--ro-bind-try" && args[i + 1] === prefix && args[i + 2] === prefix);
     expect(engines).toBeGreaterThan(args.findIndex((arg, i) => arg === "--tmpfs" && args[i + 1] === dataDir));
     const lastWritable = args.reduce((last, arg, i) => (arg === "--bind" || arg === "--bind-try") && !args[i + 2]!.startsWith("/run/omb/") ? i : last, -1);
@@ -102,8 +102,8 @@ linuxBox("the box plan", () => {
   it("a shared-network box (a browser) has no bridges and no network namespace", () => {
     const plan = planBox(setup(), { command: "/opt/chrome", args: [], env: {}, net: "shared", rw: ["/data/.openmausbot/browser/profiles/p1"] });
     expect(plan.net).toBe("shared");
-    expect(bwrapArgs(plan).join(" ")).not.toContain("--unshare-net");
-    expect(bwrapArgs(plan).join(" ")).not.toContain("/run/omb");
+    expect(describeBoxArgs(plan).join(" ")).not.toContain("--unshare-net");
+    expect(describeBoxArgs(plan).join(" ")).not.toContain("/run/omb");
     expect(visibleInBox(plan, "/data/.openmausbot/browser/profiles/p1/Default")).toBe("rw");
     expect(visibleInBox(plan, "/data/.openmausbot/messages.db")).toBe("none");
   });
@@ -139,7 +139,7 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, cwd)).toBe("rw");
     expect(visibleInBox(plan, join(dataDir, "workspaces", "bot-a", "MEMORY.md"))).toBe("rw");
     // The home goes back after the data folder is emptied, the team's sign-in over its name in the home after that.
-    const args = bwrapArgs(plan);
+    const args = describeBoxArgs(plan);
     const at = (flag: string, target: string) => args.findIndex((arg, i) => arg === flag && args[i + (flag === "--tmpfs" ? 1 : 2)] === target);
     expect(args).not.toContain(home);
     expect(at("--tmpfs", dataDir)).toBeGreaterThan(-1);
@@ -166,7 +166,7 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(plan, join(dataDir, "workspaces", "b"))).toBe("rw");
     expect(visibleInBox(plan, join(dataDir, "perm.sock"))).toBe("rw");
     expect(visibleInBox(plan, join(dataDir, "tools", "npm", "bin", "codex"))).toBe("ro");
-    expect(bwrapArgs(plan).join(" ")).toContain(`--tmpfs ${dataDir}`);
+    expect(describeBoxArgs(plan).join(" ")).toContain(`--tmpfs ${dataDir}`);
   });
 
   it("each mutation opens exactly the hole it names", () => {

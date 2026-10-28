@@ -1,7 +1,7 @@
 import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BotBox, BoxRunner, BOX_EGRESS_PORT, flyApiPrivate, procHidepid, writeSeccompFile } from "./box.ts";
 import { visibleInBox } from "./plan.ts";
@@ -9,6 +9,13 @@ import { DENIED_SYSCALLS, seccompBytes } from "./seccomp.ts";
 import { engineInstallRoots, npmEnginesPrefix } from "../engine-roots.ts";
 import { spawnCli } from "../procs.ts";
 import { waitForExit } from "../procs.ts";
+
+vi.mock("./pin.ts", async (original) => ({
+  ...await original<typeof import("./pin.ts")>(),
+  pinnedBindArgs: (mount: { kind: string; source: string; target: string; optional?: boolean }) => [
+    mount.kind === "ro" ? (mount.optional ? "--ro-bind-try" : "--ro-bind") : (mount.optional ? "--bind-try" : "--bind"), mount.source, mount.target,
+  ],
+}));
 
 const bridge = { socat: "/usr/bin/socat", bridgeScript: "/app/dist-server/bot-box/box-bridge.js", node: "/usr/local/bin/node" };
 

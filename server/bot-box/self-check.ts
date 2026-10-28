@@ -12,13 +12,14 @@ import { delimiter, join } from "node:path";
 
 import { engineInstallRoots, npmEnginesPrefix } from "../engine-roots.ts";
 import { BOX_PROBE_SCRIPT, BoxRunner, BOX_BROKER_PORT, BOX_EGRESS_PORT, defaultCodeRoots, type BoxChecks } from "./box.ts";
-import { closeSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import type { BridgeTools } from "./bridge.ts";
 import { openCredentialBroker } from "./broker.ts";
 import { openBoxEgressGate } from "./egress-gate.ts";
 import { openHarnessGate } from "./harness-gate.ts";
 import type { BoxBridge, BoxMutation } from "./plan.ts";
 import { PROBE_SPEC_ENV, type ProbeResult, type ProbeSpec } from "./box-probe.ts";
+import { closeMountFds } from "./pin.ts";
 
 export interface SelfCheckOptions {
   bwrap: string;
@@ -148,8 +149,10 @@ export async function runBoxSelfCheck(options: SelfCheckOptions): Promise<SelfCh
   wrapped.env[PROBE_SPEC_ENV] = JSON.stringify(spec);
   let stdout = "", stderr = "";
   const results = await new Promise<ProbeResult[] | string>((resolve) => {
-    const child = spawn(wrapped.command, wrapped.args, { env: wrapped.env, stdio: ["ignore", "pipe", "pipe", ...wrapped.extraFds] });
-    for (const fd of wrapped.extraFds) try { closeSync(fd); } catch {}
+    const child = (() => {
+      try { return spawn(wrapped.command, wrapped.args, { env: wrapped.env, stdio: ["ignore", "pipe", "pipe", ...wrapped.extraFds] }); }
+      finally { closeMountFds(wrapped.extraFds); }
+    })();
     const timer = setTimeout(() => { child.kill("SIGKILL"); resolve(`the probe did not answer within ${options.timeoutMs ?? 60_000} ms`); }, options.timeoutMs ?? 60_000);
     child.stdout?.on("data", (chunk) => { stdout += chunk; });
     child.stderr?.on("data", (chunk) => { stderr += chunk; });
