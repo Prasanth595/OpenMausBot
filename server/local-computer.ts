@@ -43,7 +43,7 @@ export function gatedLocalComputer(
       OMB_CUA_ARGS: JSON.stringify(connection.args),
       OMB_CONTROL_URL: control.url,
       OMB_CONTROL_TOKEN: control.token,
-      ...(journal ? { OMB_COMPUTER_JOURNAL: "1" } : {}),
+      OMB_COMPUTER_JOURNAL: journal ? "1" : "0",
     },
   };
 }
