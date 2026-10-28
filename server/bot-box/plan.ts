@@ -147,9 +147,8 @@ export function planBox(setup: BoxSetup, request: BoxRequest): BoxPlan {
   // An engine home lives in the data folder, so it goes back after that.
   const ownHome = request.home ? resolve(request.home) : null;
   if (!ownHome) rw(home);
-  const dataInsideHome = under(dataDir, home);
   if (!mutate.has("bind-data")) {
-    if (dataInsideHome) mounts.push({ kind: "tmpfs", target: dataDir });
+    mounts.push({ kind: "tmpfs", target: dataDir });
   } else {
     rw(dataDir);
   }

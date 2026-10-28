@@ -151,12 +151,19 @@ linuxBox("the box plan", () => {
     expect(visibleInBox(turn(), "/data/.claude/projects/p/s.jsonl")).toBe("rw");
   });
 
-  it("a data folder outside HOME is simply not there", () => {
-    const plan = planBox({ ...setup(), dataDir: "/srv/omb", home: "/home/maus" }, { command: "/usr/bin/x", args: [], cwd: "/srv/omb/task-workspaces/b/t", env: {} });
-    expect(visibleInBox(plan, "/srv/omb/messages.db")).toBe("none");
-    expect(visibleInBox(plan, "/srv/omb/task-workspaces/b/t")).toBe("rw");
-    expect(visibleInBox(plan, "/srv/omb/workspaces/b")).toBe("rw");
-    expect(bwrapArgs(plan).join(" ")).not.toContain("--tmpfs /srv/omb");
+  it.each(["/var/lib/openmausbot", "/opt/omb", "/etc/omb", "/usr/local/share/omb", "/app/data", "/srv/omb"])("hides %s outside HOME after enclosing mounts and restores only allowed folders", (dataDir) => {
+    const cwd = join(dataDir, "task-workspaces", "b", "t");
+    const plan = planBox({ ...setup(), dataDir, home: "/home/maus", engineRoots: engineInstallRoots(dataDir) }, {
+      command: "/usr/bin/x", args: [], cwd, env: {}, rw: [join(dataDir, "perm.sock")],
+    });
+    for (const hidden of ["messages.db", "config.json", "logins.json", "workspaces/other", "task-workspaces/b/other"]) {
+      expect(visibleInBox(plan, join(dataDir, hidden)), hidden).toBe("none");
+    }
+    expect(visibleInBox(plan, cwd)).toBe("rw");
+    expect(visibleInBox(plan, join(dataDir, "workspaces", "b"))).toBe("rw");
+    expect(visibleInBox(plan, join(dataDir, "perm.sock"))).toBe("rw");
+    expect(visibleInBox(plan, join(dataDir, "tools", "npm", "bin", "codex"))).toBe("ro");
+    expect(bwrapArgs(plan).join(" ")).toContain(`--tmpfs ${dataDir}`);
   });
 
   it("each mutation opens exactly the hole it names", () => {
