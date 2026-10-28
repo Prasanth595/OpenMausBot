@@ -2871,6 +2871,117 @@ button:disabled.bg-danger {
   color: var(--bubble-selection-ink, #ffffff);
 }
 
+/* MausBot Cloud's night: a deep night sky in the dark skins and an indigo dusk in the light ones. light-dark() picks by
+   the color-scheme of the element that paints it. One star twinkles, the z's drift and now and then a star shoots, each
+   slowly; the z's need transform-box to grow around their own centre. */
+:root {
+  --cloud-night-from: light-dark(#2c3274, #0e1230);
+  --cloud-night-mid: light-dark(#373b84, #151a45);
+  --cloud-night-to: light-dark(#7a68ae, #252c69);
+  --cloud-night-glow: light-dark(#f2a9c2, #6d5fd0);
+  --cloud-night-ink: #ffffff;
+  --cloud-night-ink-quiet: light-dark(#ffffffd6, #ffffffc4);
+  --cloud-night-star: light-dark(#ffffff, #fff7dd);
+  --cloud-night-laptop: light-dark(#eceef7, #c4c9de);
+  --cloud-night-laptop-edge: light-dark(#a9aecb, #7c84a8);
+  --cloud-night-z: light-dark(#ffffffe0, #dfe3ffcc);
+  --cloud-night-paper: light-dark(#f7eedb, #efe4c6);
+  --cloud-night-carve: light-dark(#d6c7a2, #c9bb95);
+  --cloud-night-far: light-dark(#5a4e9c, #1f2560);
+  --cloud-night-near: light-dark(#463f8c, #161b4b);
+}
+.cloud-night {
+  color-scheme: var(--code-color-scheme);
+  color: var(--cloud-night-ink);
+  background:
+    radial-gradient(55% 110% at 90% 115%, color-mix(in srgb, var(--cloud-night-glow) 20%, transparent), transparent 70%),
+    linear-gradient(100deg, var(--cloud-night-from) 0%, var(--cloud-night-mid) 55%, var(--cloud-night-to) 100%);
+  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.08);
+}
+.cloud-night-twinkle { animation: cloud-night-twinkle 9s ease-in-out infinite; }
+.cloud-night-z { transform-box: fill-box; transform-origin: center; animation: cloud-night-z 7s linear infinite; }
+.cloud-night-z:nth-child(2) { animation-delay: -2.4s; }
+.cloud-night-z:nth-child(3) { animation-delay: -4.8s; }
+.cloud-night-shoot { opacity: 0; animation: cloud-night-shoot 19s ease-in infinite; }
+.cloud-night[data-paused] * { animation-play-state: paused; }
+@keyframes cloud-night-twinkle { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+@keyframes cloud-night-z {
+  0% { opacity: 0; transform: translate(0, 0) scale(0.6); }
+  15%, 70% { opacity: 1; }
+  100% { opacity: 0; transform: translate(14px, -22px) scale(1.05); }
+}
+@keyframes cloud-night-shoot {
+  0%, 90% { opacity: 0; transform: translate(0, 0); }
+  92% { opacity: 0.9; }
+  100% { opacity: 0; transform: translate(120px, 36px); }
+}
+
+/* A Cloud's own sidebar: a faint wash of the night card's sky behind the window controls, gone before the first bot,
+   and a few small stars in the gaps between the controls (5 to 7, never under a label or a button). One twinkles,
+   briefly, once every half a minute. Both layers are pseudo-elements, so they hold no focus and take no pointer;
+   light-dark() reads the color-scheme each layer sets for itself, never the sidebar's own. */
+@property --cloud-sky-twinkle {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 32%;
+}
+[data-cloud-sky] {
+  --cloud-sky-star: light-dark(#8e9cc6, var(--cloud-night-star));
+  --cloud-sky-dot: radial-gradient(circle 1.2px, var(--cloud-sky-star), transparent);
+}
+[data-cloud-sky]::before,
+[data-cloud-sky]::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 112px;
+  pointer-events: none;
+  color-scheme: var(--code-color-scheme);
+}
+[data-cloud-sky]::before {
+  background: linear-gradient(100deg, color-mix(in srgb, var(--cloud-night-to) 70%, transparent), var(--cloud-night-to));
+  opacity: 0.08;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgb(0 0 0 / 0.5) 30%, rgb(0 0 0 / 0.12) 48%, transparent 58%);
+  mask-image: linear-gradient(to bottom, #000 0%, rgb(0 0 0 / 0.5) 30%, rgb(0 0 0 / 0.12) 48%, transparent 58%);
+}
+@container style(--code-color-scheme: dark) {
+  [data-cloud-sky]::before {
+    background: linear-gradient(100deg, color-mix(in srgb, var(--cloud-night-glow) 70%, transparent), var(--cloud-night-glow));
+    opacity: 0.13;
+  }
+}
+[data-cloud-sky]::after {
+  --star: radial-gradient(circle 1.1px, color-mix(in srgb, var(--cloud-sky-star) 38%, transparent), transparent);
+  --faint: radial-gradient(circle 0.9px, color-mix(in srgb, var(--cloud-sky-star) 26%, transparent), transparent);
+  --bright: radial-gradient(circle 1.3px, color-mix(in srgb, var(--cloud-sky-star) 45%, transparent), transparent);
+  --twinkle: radial-gradient(circle 1.3px, color-mix(in srgb, var(--cloud-sky-star) var(--cloud-sky-twinkle), transparent), transparent);
+  background-repeat: no-repeat;
+  animation: cloud-sky-twinkle 31s ease-in-out infinite;
+}
+[data-cloud-sky="simple"]::after {
+  background-image: var(--star), var(--bright), var(--faint), var(--star), var(--faint), var(--twinkle);
+  background-position: 88px 9px, 134px 14px, 10px 52px, calc(100% - 54px) 6px, calc(100% - 20px) 58px, 118px 36px;
+}
+[data-cloud-sky="advanced"]::after {
+  background-image: var(--star), var(--faint), var(--faint), var(--faint), var(--bright), var(--twinkle);
+  background-position: 96px 4px, 168px 3px, calc(100% - 64px) 3px, 10px 39px, 136px 38px, 62px 38px;
+}
+[data-cloud-sky="rail"]::before,
+[data-cloud-sky="rail"]::after { height: 88px; }
+[data-cloud-sky="rail"]::after {
+  background-image: var(--star), var(--faint), var(--faint), var(--twinkle);
+  background-position: calc(100% - 14px) 14px, 8px 58px, calc(100% - 10px) 90px, calc(100% - 12px) 40px;
+}
+[data-cloud-sky]::after { background-size: 4px 4px; }
+@keyframes cloud-sky-twinkle {
+  0%, 86%, 100% { --cloud-sky-twinkle: 32%; }
+  92% { --cloud-sky-twinkle: 72%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-cloud-sky]::after { animation: none; }
+}
+:root[data-reduced-motion="true"] [data-cloud-sky]::after { animation: none; }
+
 /* Trace waterfall: AI steps lavender, tools pale teal, errors red, each mixed into the skin's card so every skin keeps its contrast. */
 .trace-bar { border: 1px solid transparent; }
 .trace-bar-step {
