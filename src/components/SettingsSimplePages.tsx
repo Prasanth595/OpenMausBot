@@ -112,7 +112,7 @@ export function SimpleAiPage({ has, disclose, connections }: { has: Has; disclos
   );
 }
 
-export type RemoteAccessCards = Record<"client" | "domain" | "pairing" | "companion", ReactNode>;
+export type RemoteAccessCards = Record<"client" | "domain" | "pairing" | "companion" | "whatsapp", ReactNode>;
 
 export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { has: Has; remoteAccess: RemoteAccessCards; servers: ReactNode; disclose: Disclose }) {
   return (
@@ -122,6 +122,7 @@ export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { h
         <SettingsGroup label={t("settings.simple.computer.devices")} block="companion">
           {remoteAccess.pairing}
           {remoteAccess.companion}
+          {remoteAccess.whatsapp}
         </SettingsGroup>
       )}
       {has("computer") && (
