@@ -31,8 +31,12 @@ export function installTalk({ ipcMain, localOnly, localOrHome, cloudPage = () =>
   let shortcut = null, session = null, panel = null, theme = null;
   /** My Cloud's verified origin while it is home, once the shortcut is set up; else null. */
   let myCloudHome = () => null;
+  // Security: a frame's URL can name My Cloud while its own origin is opaque (a sandboxed file served there).
   const myCloudPage = event => {
-    try { return Boolean(myCloudHome()) && cloudPage(event) === true; } catch { return false; }
+    try {
+      const at = myCloudHome();
+      return Boolean(at) && event?.senderFrame?.origin === at && cloudPage(event) === true;
+    } catch { return false; }
   };
   /** This app's page, or My Cloud's own page while it is home: the talk setting only, never the microphone. */
   const localOrMyCloud = (channel, handler) => {

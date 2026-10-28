@@ -251,10 +251,12 @@ const bridge = {
   },
   talkShortcut: {
     state: () => ipcRenderer.invoke("talk-shortcut:state"),
-    set: (change) => ipcRenderer.invoke("talk-shortcut:set", {
-      ...(typeof change?.enabled === "boolean" ? { enabled: change.enabled } : {}),
-      ...(typeof change?.key === "string" ? { key: change.key } : {}),
-    }),
+    // On a server's page, only turning it off goes without the person's click.
+    set: (change) => {
+      const next = { ...(typeof change?.enabled === "boolean" ? { enabled: change.enabled } : {}), ...(typeof change?.key === "string" ? { key: change.key } : {}) };
+      return (next.enabled === false && next.key === undefined) || isLocalPage || navigator.userActivation?.isActive === true
+        ? ipcRenderer.invoke("talk-shortcut:set", next) : Promise.reject(new Error("Use the switch to change the talk shortcut."));
+    },
   },
   callActive: (active) => ipcRenderer.invoke("call:active", active === true).then(() => undefined),
   onOpenAppSettings: (cb) => {

@@ -132,16 +132,18 @@ test("the talk bridge keys stay off other servers' pages; a call can be reported
 });
 
 /** The real preload as `origin`'s page: `home` answers home:page, `talk` answers talk-shortcut:page. */
-function preloadAt(origin, { home = false, talk = false } = {}) {
-  let bridge; const synced = [];
+/** Values made in the preload's own context, compared as plain data. */
+const plain = value => JSON.parse(JSON.stringify(value));
+function preloadAt(origin, { home = false, talk = false, activation = false } = {}) {
+  let bridge; const synced = [], invoked = [];
   vm.runInNewContext(preload, {
     process: { platform: "darwin", argv: ["--omb-local-origin=http://127.0.0.1:4242"] },
-    location: { origin }, navigator: { userActivation: { isActive: false } }, TextEncoder, localStorage: { getItem: () => null }, queueMicrotask,
+    location: { origin }, navigator: { userActivation: { isActive: activation } }, TextEncoder, localStorage: { getItem: () => null }, queueMicrotask,
     require: () => ({ webUtils: {}, contextBridge: { exposeInMainWorld: (_name, value) => { bridge = value; } },
-      ipcRenderer: { on() {}, removeListener() {}, send() {}, invoke: () => Promise.resolve(),
+      ipcRenderer: { on() {}, removeListener() {}, send() {}, invoke: (...args) => { invoked.push(args); return Promise.resolve(); },
         sendSync: channel => { synced.push(channel); return channel === "home:page" ? home : channel === "talk-shortcut:page" ? talk : null; } } }),
   });
-  return { bridge, synced };
+  return { bridge, synced, invoked };
 }
 
 test("the Settings row's bridge reaches My Cloud's own page while it is home, and no other server's page", () => {
@@ -158,9 +160,28 @@ test("the Settings row's bridge reaches My Cloud's own page while it is home, an
   assert.equal(local.synced.includes("talk-shortcut:page"), false, "this app's page never needs to ask");
 });
 
+test("on My Cloud's page, turning the shortcut on or changing its key takes the person's click; turning it off does not", async () => {
+  const page = preloadAt(CLOUD, { home: true, talk: true });
+  await assert.rejects(page.bridge.talkShortcut.set({ enabled: true }), /talk shortcut/);
+  await assert.rejects(page.bridge.talkShortcut.set({ key: "ctrl-shift-space" }), /talk shortcut/);
+  await assert.rejects(page.bridge.talkShortcut.set({ enabled: false, key: "ctrl-shift-space" }), /talk shortcut/);
+  await page.bridge.talkShortcut.set({ enabled: false });
+  await page.bridge.talkShortcut.state();
+  assert.deepEqual(plain(page.invoked), [["talk-shortcut:set", { enabled: false }], ["talk-shortcut:state"]]);
+
+  const clicked = preloadAt(CLOUD, { home: true, talk: true, activation: true });
+  await clicked.bridge.talkShortcut.set({ enabled: true, key: "opt-shift-space", extra: 1 });
+  assert.deepEqual(plain(clicked.invoked), [["talk-shortcut:set", { enabled: true, key: "opt-shift-space" }]]);
+
+  const local = preloadAt("http://127.0.0.1:4242");
+  await local.bridge.talkShortcut.set({ enabled: true });
+  assert.deepEqual(plain(local.invoked), [["talk-shortcut:set", { enabled: true }]], "this app's own page needs no click");
+});
+
 test("main lets My Cloud's own page read and change the shortcut only while My Cloud is home, at the verified origin", () => {
   const h = harness();
-  const mine = { remote: true, cloudPage: true }, team = { remote: true, cloudPage: false };
+  const frame = { origin: CLOUD };
+  const mine = { remote: true, cloudPage: true, senderFrame: frame }, team = { remote: true, cloudPage: false, senderFrame: { origin: "https://team.example.test" } };
   h.home = HOME_CLOUD;
   assert.equal(h.sync("talk-shortcut:page", { ...mine }), false, "nothing before the shortcut is set up");
   assert.throws(() => h.handle("talk-shortcut:state", mine), /only available/);
@@ -185,13 +206,25 @@ test("main lets My Cloud's own page read and change the shortcut only while My C
   h.talk.close();
 });
 
+test("a page whose own origin is opaque never counts as My Cloud's, whatever its URL says", () => {
+  const h = harness();
+  h.home = HOME_CLOUD;
+  h.start();
+  for (const senderFrame of [{ origin: "null", url: `${CLOUD}/files/page.html` }, { url: `${CLOUD}/` }, undefined]) {
+    const event = { remote: true, cloudPage: true, senderFrame };
+    assert.equal(h.sync("talk-shortcut:page", { ...event }), false, JSON.stringify(senderFrame));
+    assert.throws(() => h.handle("talk-shortcut:set", event, { enabled: false }), /only available/);
+  }
+  h.talk.close();
+});
+
 test("every microphone channel answers only this computer's page; a call can be reported from My Cloud's page too", () => {
   const { guards, handlers, listeners } = harness();
-  assert.deepEqual(Object.fromEntries(guards), {
-    "speech:start": "localOnly", "speech:stop": "localOnly", "speech:finish": "localOnly",
-    "talk-shortcut:state": "localOnly", "talk-shortcut:set": "localOnly", "call:active": "localOrHome",
+  // The talk setting's own guard (this app's page, or My Cloud's while home) is proven by the tests about My Cloud's page.
+  assert.deepEqual(Object.fromEntries([...guards].filter(([channel]) => !channel.startsWith("talk-shortcut:"))), {
+    "speech:start": "localOnly", "speech:stop": "localOnly", "speech:finish": "localOnly", "call:active": "localOrHome",
   });
-  assert.deepEqual([...handlers.keys()], [...guards.keys()]);
+  assert.deepEqual([...handlers.keys()], ["speech:start", "speech:stop", "speech:finish", "talk-shortcut:state", "talk-shortcut:set", "call:active"]);
   assert.deepEqual([...listeners.keys()], ["talk-shortcut:page"]);
 });
 
