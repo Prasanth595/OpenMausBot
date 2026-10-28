@@ -485,6 +485,7 @@ async function shot(entry, name) {
 /** Back to this computer's page through the native Server menu, as the person would from a server's page. */
 async function backToThisComputer() {
   const { page, localOrigin } = current;
+  await dismissOverlays();
   if (new URL(page.url()).origin === localOrigin) return;
   await chooseMenuItem({ label: "This computer" });
   await page.waitForURL((url) => url.origin === localOrigin, { timeout: 60_000 });
@@ -503,9 +504,22 @@ const ADDRESS = "Server address or pairing link";
 
 async function closeSettings() {
   const { page } = current;
-  for (let i = 0; i < 4 && await page.locator(SETTINGS).first().isVisible().catch(() => false); i++) {
+  const dialog = page.locator(SETTINGS).first();
+  for (let i = 0; i < 4 && await dialog.isVisible().catch(() => false); i++) {
     await page.keyboard.press("Escape");
-    await page.waitForTimeout(400);
+    await dialog.waitFor({ state: "hidden", timeout: 1_500 }).catch(() => {});
+  }
+}
+
+/** Nothing a step before left open over the window: Settings, ＋'s sheet, the buying sheet. */
+async function dismissOverlays() {
+  const { page } = current;
+  for (const selector of [SETTINGS, "[data-place-add-sheet]", "[data-cloud-add-dialog]"]) {
+    const overlay = page.locator(selector).first();
+    for (let i = 0; i < 3 && await overlay.isVisible().catch(() => false); i++) {
+      await page.keyboard.press("Escape");
+      await overlay.waitFor({ state: "hidden", timeout: 1_500 }).catch(() => {});
+    }
   }
 }
 
@@ -735,7 +749,8 @@ async function main() {
     // Enter its address instead: the sheet makes way for Settings → Servers, where an address is typed.
     await steps.getByRole("button", { name: "Enter its address instead" }).click();
     await page.locator("[data-place-add-sheet]").waitFor({ state: "hidden" });
-    check(entry, "Enter its address instead opens Settings → Servers", await page.getByLabel(ADDRESS, { exact: true }).isVisible().catch(() => false));
+    const opened = await page.getByLabel(ADDRESS, { exact: true }).waitFor({ state: "visible", timeout: 15_000 }).then(() => true, () => false);
+    check(entry, "Enter its address instead opens Settings → Servers, at Connect to a server", opened);
     await closeSettings();
   });
 
