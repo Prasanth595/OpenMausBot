@@ -6,6 +6,7 @@ import { localDay } from "./cloud-trial-notice.mjs";
 import { ONBOARDING_CLOUD_HINT, onboardingHints } from "./onboarding-record.mjs";
 import { DEFAULT_TALK_KEY, isTalkKey } from "./talk-keys.mjs";
 import { createUpdatesConsent, parseUpdatesConsent, registerUpdatesConsent } from "./updates-consent.mjs";
+import { accountFullName } from "./system-name.mjs";
 
 export { DESKTOP_PORTS } from "./desktop-ports.mjs";
 /** The only notices a page may record, so no page can write anything else into the file. */
@@ -134,7 +135,7 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
  * MausBot Cloud, asked once its Cloud sign-in is restored. `localConfig()`: This computer's own workspace's config.json.
  * `languageChanged(language, sender)`: tells this desktop's other pages the language picked on one of them.
  */
-export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, now = Date.now }) {
+export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page, cloudOffered, cloudAccount, localConfig = () => null, languageChanged = () => {}, now = Date.now, systemName = accountFullName }) {
   let prefs = given ?? null;
   const store = () => prefs ??= createDesktopPrefs({ read, write, now });
   const from = (channel, pages, handler) => (event, ...args) => {
@@ -154,6 +155,8 @@ export function registerDesktopPrefs({ prefs: given, ipcMain, read, write, page,
   ipcMain.handle("desktop-notices:state", from("desktop-notices:state", ANY, state));
   ipcMain.handle("desktop-notices:seen", from("desktop-notices:seen", ANY, (_, id) => store().markSeen(id)));
   ipcMain.handle("desktop-notices:shown", from("desktop-notices:shown", ANY, (_, id) => store().shown(id)));
+  // A first run's default name for the profile: this computer's own page only, never a server's.
+  ipcMain.handle("desktop-profile:system-name", from("desktop-profile:system-name", ["local"], () => systemName()));
   // Security: a server's page learns only that this desktop turned analytics off, never that it is on.
   ipcMain.on("desktop-analytics:read", event => {
     try {
