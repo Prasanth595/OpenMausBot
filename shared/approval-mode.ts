@@ -64,9 +64,11 @@ export function isApprovalMode(value: unknown): value is ApprovalMode {
   return typeof value === "string" && (APPROVAL_MODES as readonly string[]).includes(value);
 }
 
-/** The level a bot or conversation runs at until a person picks one: Ask. Elevated modes require an explicit grant; a real question or a missing
- * credential still reaches a person. */
-export const DEFAULT_APPROVAL_MODE: ApprovalMode = "ask";
+/** The level a bot or conversation runs at until a person picks one: Full
+ * access, as in t3code (its DEFAULT_RUNTIME_MODE). Each provider maps it to
+ * its own most permissive mode; a real question or a missing credential
+ * still reaches a person. */
+export const DEFAULT_APPROVAL_MODE: ApprovalMode = "full";
 
 let defaultApprovalMode: ApprovalMode = DEFAULT_APPROVAL_MODE;
 
