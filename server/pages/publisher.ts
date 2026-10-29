@@ -45,8 +45,11 @@ export function createPagePublisher(deps: {
 }) {
   const { client, store } = deps;
 
-  // One publish at a time per bot and source, so two at once can't both find no page and each create one.
+  // One publish at a time per bot and source, so two at once can't both find no page and each create one; an update also
+  // queues on its page. An unpublish waits for both, so an update's late answer can't bring back its record. Always the
+  // source's queue before the page's.
   const queues = new Map<string, Promise<unknown>>();
+  const pageKey = (pageId: string) => `page:${pageId}`;
   const serially = <T>(key: string, work: () => Promise<T>): Promise<T> => {
     const previous = queues.get(key) ?? Promise.resolve();
     const run = previous.then(work, work);
@@ -89,14 +92,17 @@ export function createPagePublisher(deps: {
   };
 
   function publishBundle(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post" | "call">, bundle: PageBundle): Promise<PageOutcome> {
-    return serially(JSON.stringify([input.botId, bundle.source]), () => publishNow(input, bundle));
+    const onPage = () => {
+      const target = input.pageId ?? store.fromSource(input.botId, bundle.source)?.pageId;
+      return target ? serially(pageKey(target), () => publishNow(input, bundle, target)) : publishNow(input, bundle);
+    };
+    return input.pageId ? onPage() : serially(JSON.stringify([input.botId, bundle.source]), onPage);
   }
 
-  async function publishNow(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post" | "call">, bundle: PageBundle): Promise<PageOutcome> {
+  async function publishNow(input: Pick<PublishInput, "botId" | "threadId" | "title" | "pageId" | "post" | "call">, bundle: PageBundle, target?: string): Promise<PageOutcome> {
     const title = pageTitle(input.title);
     if (!title) return TITLE_REQUIRED;
-    const remembered = input.pageId ? store.get(input.pageId) : store.fromSource(input.botId, bundle.source);
-    const target = input.pageId ?? remembered?.pageId;
+    const remembered = target ? store.get(target) : null;
     let result = await client.publish({ title, files: bundle.files, ...(target ? { pageId: target } : {}) }, input.call);
     // The page this folder was published to before is gone (unpublished, or taken down): it gets a new link.
     if (!result.ok && result.reason === "gone" && !input.pageId && target) {
@@ -127,28 +133,41 @@ export function createPagePublisher(deps: {
     return { status: 200, text: lines.join("\n"), card };
   }
 
+  async function unpublishNow(pageId: string, call: PagesCall | undefined): Promise<PageOutcome> {
+    const title = store.get(pageId)?.title;
+    const result = await client.unpublish(pageId, call);
+    if (!result.ok && result.reason !== "gone") return { status: failureStatus[result.reason], text: result.message };
+    const card = markUnpublished(pageId, result.ok ? result.usage : null)
+      ?? { state: "unpublished" as const, title: title ?? pageId, pageId, ...(result.ok && result.usage ? { usage: result.usage } : {}) };
+    return { status: 200, text: result.ok ? `Unpublished${title ? ` “${title}”` : ""}. Its link no longer opens.` : "That page was already taken down.", card };
+  }
+
   return {
     ...pages,
 
     /** Takes a page down, by its id or the file or folder it came from (with the bot's folders). */
     async unpublish(input: { pageId?: string; path?: string; botId?: string; roots?: readonly string[]; call?: PagesCall }): Promise<PageOutcome> {
-      let pageId = input.pageId;
+      const pageId = input.pageId;
       if (pageId !== undefined && !PAGE_ID.test(pageId)) return { status: 400, text: "page_id must be the id of a page you published, from its link." };
+      const takeDown = (id: string) => serially(pageKey(id), () => unpublishNow(id, input.call));
       if (!pageId && input.path && input.botId && input.roots) {
+        const botId = input.botId;
+        const notFound: PageOutcome = { status: 404, text: `No page was published from ${input.path}. Pass the page_id from its link instead.` };
+        let source: string;
         try {
-          pageId = store.fromSource(input.botId, await pageSource(input.path, input.roots))?.pageId;
+          source = await pageSource(input.path, input.roots);
         } catch (error) {
           if (!(error instanceof PageBundleError)) throw error;
+          return notFound;
         }
-        if (!pageId) return { status: 404, text: `No page was published from ${input.path}. Pass the page_id from its link instead.` };
+        return serially(JSON.stringify([botId, source]), async () => {
+          const record = store.fromSource(botId, source);
+          return record ? takeDown(record.pageId) : notFound;
+        });
       }
       if (!pageId) return { status: 400, text: "Pass the page_id of the page to unpublish, or the path it was published from." };
-      const title = store.get(pageId)?.title;
-      const result = await client.unpublish(pageId, input.call);
-      if (!result.ok && result.reason !== "gone") return { status: failureStatus[result.reason], text: result.message };
-      const card = markUnpublished(pageId, result.ok ? result.usage : null)
-        ?? { state: "unpublished" as const, title: title ?? pageId, pageId, ...(result.ok && result.usage ? { usage: result.usage } : {}) };
-      return { status: 200, text: result.ok ? `Unpublished${title ? ` “${title}”` : ""}. Its link no longer opens.` : "That page was already taken down.", card };
+      const record = store.get(pageId);
+      return record ? serially(JSON.stringify([record.botId, record.source]), () => takeDown(pageId)) : takeDown(pageId);
     },
   };
 }

@@ -12,8 +12,10 @@ export type PagesFailure = {
   upgrade?: boolean;
   plan?: string;
 };
-/** A bot's tool call: `assertActive` throws once its turn has ended, and `signal` aborts once its request is gone.
- * Security: each token and each upload or delete is preceded by `assertActive`, so a stopped turn changes no page. */
+/** A bot's tool call: `assertActive` throws once its turn has ended, and `signal` aborts once its turn ends or its request
+ * is gone. Security: each token and each upload or delete is preceded by `assertActive`, and `signal` aborts the one in
+ * flight, so a stopped turn shows no card and records no page. Known risk: an upload the Worker stored before the abort
+ * stays published. */
 export interface PagesCall { assertActive?: () => void; signal?: AbortSignal }
 export type Published = { ok: true; pageId: string; url: string; usage: PageUsage; badge: boolean };
 export type Unpublished = { ok: true; pageId: string; usage: PageUsage | null };
@@ -121,6 +123,7 @@ export function createPagesClient(options: { access: () => PagesAccess | null; n
         return fail("unavailable", UNAVAILABLE);
       }
       const body = await readJson(response);
+      if (call.signal?.aborted) return fail("unavailable", UNAVAILABLE);
       if (!response.ok) return workerFailure(response.status, body, minted);
       const usage = usageOf(body.usage);
       return { ok: true, pageId: minted.pageId, url: minted.pageUrl, usage: usage ?? { pages: 0, limit: minted.limits.pages }, badge: body.badge === true };
