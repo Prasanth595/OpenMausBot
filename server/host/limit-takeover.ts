@@ -3,7 +3,7 @@
 import { recoveryCapabilityError } from "../automatic-recovery.ts";
 import type { InstanceConfigMap, ProviderAdapter, RuntimeEvent } from "../contracts.ts";
 import { readyToRun, selectDefaultModelSelection, type DefaultSelectionContext, type SelectableInstance } from "../default-model-selection.ts";
-import { limitBackupAllowed, type LimitFailover } from "../limit-failover.ts";
+import { billsEachUse, limitBackupAllowed, type LimitFailover } from "../limit-failover.ts";
 import { LimitNotices, limitNoticeText } from "../limit-notices.ts";
 import { UNNAMED_LIMIT_MS } from "../limit-resets.ts";
 import type { ModelSelection } from "../../shared/wire.ts";
@@ -67,7 +67,8 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
   };
 
   /** The AIs that may carry on while `from` is limited, best first: for one model's limit the same AI's own default
-   * model, then the backups the person chose, then the AI OpenMausBot would pick for a new bot among the rest. */
+   * model, then the backups the person chose, then the AI OpenMausBot would pick for a new bot among the rest that draw on
+   * a plan. One that bills each use spends the person's money, so it carries on only as a backup they chose. */
   function backups(botId: string, from: ModelSelection, scope: LimitScope = "engine"): ModelSelection[] {
     const engines = deps.engines();
     const current = engines.find((engine) => engine.instanceId === from.instanceId);
@@ -80,7 +81,7 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     };
     if (scope !== "engine") add({ instanceId: current.instanceId, model: current.models.default });
     for (const selection of deps.chosen(botId)) add(selection);
-    const others = engines.filter((engine) => engine.instanceId !== from.instanceId
+    const others = engines.filter((engine) => engine.instanceId !== from.instanceId && engine.access !== "api" && !billsEachUse(deps.configs()[engine.instanceId])
       && usable(engines, current, { instanceId: engine.instanceId, model: engine.models.default }));
     const pick = selectDefaultModelSelection(others, undefined, deps.context);
     if (pick.instanceId && pick.model) add(pick);
