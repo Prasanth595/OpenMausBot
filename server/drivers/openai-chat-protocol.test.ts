@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ChatToolCalls } from "./openai-chat-protocol.ts";
+import { ChatReasoningDetails, ChatProtocolError, ChatToolCalls } from "./openai-chat-protocol.ts";
 
 const completeCall = {
   id: "call_echo",
@@ -97,5 +97,30 @@ describe("streamed tool calls without an index (Gemini's OpenAI-compatible endpo
     const calls = new ChatToolCalls();
     calls.add(Array.from({ length: 32 }, (_, n) => whole(`call_${n}`, "f")), true);
     expect(() => calls.add([whole("call_32", "f")], true)).toThrow(/invalid tool-call index/);
+  });
+});
+
+describe("streamed reasoning details", () => {
+  const delta = (text: string) => [{ type: "reasoning.text", id: "trace", format: "glm", index: 0, text, signature: "s" }];
+
+  it("counts the reasoning itself, not the envelope a gateway repeats on every delta", () => {
+    // 3 000 deltas of 100 characters: ~256 KB of JSON envelope, 300 KB of reasoning. Counting the envelope
+    // died at ~28 KB of real reasoning; counting the payload leaves room for the reply to finish.
+    const details = new ChatReasoningDetails();
+    for (let index = 0; index < 3_000; index += 1) details.add(delta("r".repeat(100)));
+
+    expect(details.blocks).toHaveLength(3_000);
+  });
+
+  it("still refuses a reply whose reasoning alone is past the bound", () => {
+    const details = new ChatReasoningDetails();
+    expect(() => details.add(delta("r".repeat(400_001)))).toThrow(ChatProtocolError);
+  });
+
+  it("measures an unfamiliar block by the JSON it arrived as", () => {
+    const details = new ChatReasoningDetails();
+    details.add([{ type: "reasoning.summary", summary: "x".repeat(50) }]);
+
+    expect(details.blocks).toHaveLength(1);
   });
 });
