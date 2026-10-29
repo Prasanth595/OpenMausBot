@@ -19,6 +19,11 @@ const names = windows => windows.map(win => win?.name ?? null);
 const CLOUD = "https://home.example.test";
 const HOME_HERE = Object.freeze({ kind: "computer" }), HOME_CLOUD = Object.freeze({ kind: "cloud", origin: CLOUD });
 const talkKeys = h => [...h.registered.keys()].filter(key => key.endsWith("Space"));
+const typeKeys = h => [...h.registered.keys()].filter(key => key.endsWith("+T"));
+const SETTINGS = Object.freeze({
+  "talk-shortcut": { unavailable: TALK_SHORTCUT_UNAVAILABLE, key: "ctrl-opt-space", other: "ctrl-shift-space", accelerator: "Control+Shift+Space", keys: talkKeys },
+  "type-shortcut": { unavailable: TYPE_SHORTCUT_UNAVAILABLE, key: "ctrl-opt-t", other: "ctrl-shift-t", accelerator: "Control+Shift+T", keys: typeKeys },
+});
 
 /** `serve(route, where)`: an answer for this computer's server ("local", "dev") or My Cloud ("cloud"), else none yet. */
 function harness({ packaged = true, appleSpeech = true, remote = false, register, serve = () => undefined, myCloud = true, platform = "darwin" } = {}) {
@@ -182,45 +187,48 @@ test("on My Cloud's page, turning the shortcut on or changing its key takes the 
   assert.deepEqual(plain(local.invoked), [["talk-shortcut:set", { enabled: true }]], "this app's own page needs no click");
 });
 
-test("main lets My Cloud's own page read and change the shortcut only while My Cloud is home, at the verified origin", () => {
-  const h = harness();
-  const frame = { origin: CLOUD };
-  const mine = { remote: true, cloudPage: true, senderFrame: frame }, team = { remote: true, cloudPage: false, senderFrame: { origin: "https://team.example.test" } };
-  h.home = HOME_CLOUD;
-  assert.equal(h.sync("talk-shortcut:page", { ...mine }), false, "nothing before the shortcut is set up");
-  assert.throws(() => h.handle("talk-shortcut:state", mine), /only available/);
-  h.start();
-  assert.equal(h.sync("talk-shortcut:page", { ...mine }), true);
-  assert.equal(h.handle("talk-shortcut:state", mine).available, true);
-  assert.equal(h.handle("talk-shortcut:set", mine, { enabled: false }).enabled, false);
-  assert.equal(h.handle("talk-shortcut:state", {}).enabled, false, "the same setting as this app's page");
-  assert.equal(h.sync("talk-shortcut:page", { ...team }), false);
-  assert.throws(() => h.handle("talk-shortcut:set", team, { enabled: true }), /only available/);
-  h.mine = "https://other.example.test";
-  assert.equal(h.sync("talk-shortcut:page", { ...mine }), false, "home's origin is not the verified My Cloud");
-  assert.throws(() => h.handle("talk-shortcut:state", mine), /only available/);
-  h.mine = CLOUD;
-  h.home = HOME_HERE;
-  assert.equal(h.sync("talk-shortcut:page", { ...mine }), false, "My Cloud before the move made it home");
-  assert.throws(() => h.handle("talk-shortcut:state", mine), /only available/);
-  h.home = { kind: "signin" };
-  assert.throws(() => h.handle("talk-shortcut:state", mine), /only available/);
-  h.fail.home = "home unknown";
-  assert.equal(h.sync("talk-shortcut:page", { ...mine }), false);
-  h.talk.close();
-});
+for (const prefix of Object.keys(SETTINGS)) {
+  test(`main lets My Cloud's own page read and change ${prefix} only while My Cloud is home, at the verified origin`, () => {
+    const h = harness();
+    const frame = { origin: CLOUD };
+    const mine = { remote: true, cloudPage: true, senderFrame: frame }, team = { remote: true, cloudPage: false, senderFrame: { origin: "https://team.example.test" } };
+    h.home = HOME_CLOUD;
+    assert.equal(h.sync("talk-shortcut:page", { ...mine }), false, "nothing before the shortcut is set up");
+    assert.throws(() => h.handle(`${prefix}:state`, mine), /only available/);
+    h.start();
+    assert.equal(h.sync("talk-shortcut:page", { ...mine }), true);
+    assert.equal(h.handle(`${prefix}:state`, mine).available, true);
+    assert.equal(h.handle(`${prefix}:set`, mine, { enabled: false }).enabled, false);
+    assert.equal(h.handle(`${prefix}:state`, {}).enabled, false, "the same setting as this app's page");
+    assert.equal(h.sync("talk-shortcut:page", { ...team }), false);
+    assert.throws(() => h.handle(`${prefix}:set`, team, { enabled: true }), /only available/);
+    h.mine = "https://other.example.test";
+    assert.equal(h.sync("talk-shortcut:page", { ...mine }), false, "home's origin is not the verified My Cloud");
+    assert.throws(() => h.handle(`${prefix}:state`, mine), /only available/);
+    h.mine = CLOUD;
+    h.home = HOME_HERE;
+    assert.equal(h.sync("talk-shortcut:page", { ...mine }), false, "My Cloud before the move made it home");
+    assert.throws(() => h.handle(`${prefix}:state`, mine), /only available/);
+    h.home = { kind: "signin" };
+    assert.throws(() => h.handle(`${prefix}:state`, mine), /only available/);
+    h.fail.home = "home unknown";
+    assert.equal(h.sync("talk-shortcut:page", { ...mine }), false);
+    h.talk.close();
+  });
 
-test("a page whose own origin is opaque never counts as My Cloud's, whatever its URL says", () => {
-  const h = harness();
-  h.home = HOME_CLOUD;
-  h.start();
-  for (const senderFrame of [{ origin: "null", url: `${CLOUD}/files/page.html` }, { url: `${CLOUD}/` }, undefined]) {
-    const event = { remote: true, cloudPage: true, senderFrame };
-    assert.equal(h.sync("talk-shortcut:page", { ...event }), false, JSON.stringify(senderFrame));
-    assert.throws(() => h.handle("talk-shortcut:set", event, { enabled: false }), /only available/);
-  }
-  h.talk.close();
-});
+  test(`a page whose own origin is opaque never counts as My Cloud's for ${prefix}, whatever its URL says`, () => {
+    const h = harness();
+    h.home = HOME_CLOUD;
+    h.start();
+    for (const senderFrame of [{ origin: "null", url: `${CLOUD}/files/page.html` }, { url: `${CLOUD}/` }, undefined]) {
+      const event = { remote: true, cloudPage: true, senderFrame };
+      assert.equal(h.sync("talk-shortcut:page", { ...event }), false, JSON.stringify(senderFrame));
+      assert.throws(() => h.handle(`${prefix}:state`, event), /only available/);
+      assert.throws(() => h.handle(`${prefix}:set`, event, { enabled: false }), /only available/);
+    }
+    h.talk.close();
+  });
+}
 
 test("every microphone channel answers only this computer's page; a call can be reported from My Cloud's page too", () => {
   const { guards, handlers, listeners } = harness();
@@ -267,20 +275,22 @@ test("the shortcut is offered only with Apple speech, on a desktop that is not a
   assert.deepEqual(talkKeys(h), ["Control+Alt+Space"]);
 });
 
-test("before the shortcut is set up its setting says unavailable; afterwards a change passes on only what it understands", () => {
-  const h = harness();
-  assert.equal(h.handle("talk-shortcut:state", {}), TALK_SHORTCUT_UNAVAILABLE);
-  assert.equal(h.handle("talk-shortcut:set", {}, { enabled: false }), TALK_SHORTCUT_UNAVAILABLE);
-  h.start();
-  const shown = state => ({ enabled: state.enabled, key: state.key, taken: state.taken });
-  assert.deepEqual(shown(h.handle("talk-shortcut:set", {}, { enabled: "no", key: 7, extra: 1 })), { enabled: true, key: "ctrl-opt-space", taken: false });
-  assert.deepEqual(shown(h.handle("talk-shortcut:set", {}, { enabled: false })), { enabled: false, key: "ctrl-opt-space", taken: false });
-  assert.deepEqual(talkKeys(h), []);
-  h.handle("talk-shortcut:set", {}, { enabled: true, key: "ctrl-shift-space" });
-  assert.deepEqual(talkKeys(h), ["Control+Shift+Space"]);
-  h.talk.close();
-  assert.deepEqual([...h.registered.keys()], [], "quitting lets the key go");
-});
+for (const [prefix, setting] of Object.entries(SETTINGS)) {
+  test(`before ${prefix} is set up its setting says unavailable; afterwards a change passes on only what it understands`, () => {
+    const h = harness();
+    assert.equal(h.handle(`${prefix}:state`, {}), setting.unavailable);
+    assert.equal(h.handle(`${prefix}:set`, {}, { enabled: false }), setting.unavailable);
+    h.start();
+    const shown = state => ({ enabled: state.enabled, key: state.key, taken: state.taken });
+    assert.deepEqual(shown(h.handle(`${prefix}:set`, {}, { enabled: "no", key: 7, extra: 1 })), { enabled: true, key: setting.key, taken: false });
+    assert.deepEqual(shown(h.handle(`${prefix}:set`, {}, { enabled: false })), { enabled: false, key: setting.key, taken: false });
+    assert.deepEqual(setting.keys(h), []);
+    h.handle(`${prefix}:set`, {}, { enabled: true, key: setting.other });
+    assert.deepEqual(setting.keys(h), [setting.accelerator]);
+    h.talk.close();
+    assert.deepEqual([...h.registered.keys()], [], "quitting lets the key go");
+  });
+}
 
 test("a press listens until the key's modifiers are let go, and asks this computer's own server; in development, the dev server's proxy", () => {
   const built = harness();
@@ -384,7 +394,7 @@ test("while home needs a sign-in the shortcut is unavailable and the key free; h
   assert.deepEqual([...h.registered.keys()], []);
   h.fail.home = "home unknown";
   assert.doesNotThrow(() => h.talk.homeChanged());
-  assert.deepEqual(h.log, ["talk home change failed: home unknown"]);
+  assert.deepEqual(h.log, ["talk home change failed: home unknown", "talk home change failed: home unknown"], "each key is refreshed on its own");
   const early = harness();
   assert.doesNotThrow(() => early.talk.homeChanged(), "before start");
   h.talk.close();

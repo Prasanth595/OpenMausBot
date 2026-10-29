@@ -45,6 +45,14 @@ export function installTalk({ ipcMain, localOnly, localOrHome, cloudPage = () =>
     const local = localOnly(channel, handler);
     return (event, ...args) => (myCloudPage(event) ? handler : local)(event, ...args);
   };
+  // Security: a page's change reaches the shortcut as a boolean `enabled` and a string `key`, nothing else.
+  const shortcutSetting = (prefix, current, unavailable) => {
+    ipcMain.handle(`${prefix}:state`, localOrMyCloud(`${prefix}:state`, () => current()?.state() ?? unavailable));
+    ipcMain.handle(`${prefix}:set`, localOrMyCloud(`${prefix}:set`, (_event, change) => current()?.set({
+      enabled: typeof change?.enabled === "boolean" ? change.enabled : undefined,
+      key: typeof change?.key === "string" ? change.key : undefined,
+    }) ?? unavailable));
+  };
 
   ipcMain.handle("speech:start", localOnly("speech:start", (event, options) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -61,16 +69,8 @@ export function installTalk({ ipcMain, localOnly, localOrHome, cloudPage = () =>
   ipcMain.handle("speech:finish", localOnly("speech:finish", (event) => {
     if (appleSpeech) speech.finish(BrowserWindow.fromWebContents(event.sender));
   }));
-  ipcMain.handle("talk-shortcut:state", localOrMyCloud("talk-shortcut:state", () => shortcut?.state() ?? TALK_SHORTCUT_UNAVAILABLE));
-  ipcMain.handle("talk-shortcut:set", localOrMyCloud("talk-shortcut:set", (_event, change) => shortcut?.set({
-    enabled: typeof change?.enabled === "boolean" ? change.enabled : undefined,
-    key: typeof change?.key === "string" ? change.key : undefined,
-  }) ?? TALK_SHORTCUT_UNAVAILABLE));
-  ipcMain.handle("type-shortcut:state", localOrMyCloud("type-shortcut:state", () => typeShortcut?.state() ?? TYPE_SHORTCUT_UNAVAILABLE));
-  ipcMain.handle("type-shortcut:set", localOrMyCloud("type-shortcut:set", (_event, change) => typeShortcut?.set({
-    enabled: typeof change?.enabled === "boolean" ? change.enabled : undefined,
-    key: typeof change?.key === "string" ? change.key : undefined,
-  }) ?? TYPE_SHORTCUT_UNAVAILABLE));
+  shortcutSetting("talk-shortcut", () => shortcut, TALK_SHORTCUT_UNAVAILABLE);
+  shortcutSetting("type-shortcut", () => typeShortcut, TYPE_SHORTCUT_UNAVAILABLE);
   ipcMain.on("talk-shortcut:page", event => { event.returnValue = myCloudPage(event); });
   ipcMain.handle("call:active", localOrHome("call:active", (event, active) => {
     callPresence.set(event.sender, active === true);
@@ -121,10 +121,10 @@ export function installTalk({ ipcMain, localOnly, localOrHome, cloudPage = () =>
       }
     },
     /** Home changed (My Cloud, a sign-in it needs, or this computer again): both keys are let go or taken again to match. */
-    homeChanged: logged("home change", () => {
-      shortcut?.refresh();
-      typeShortcut?.refresh();
-    }),
+    homeChanged() {
+      logged("home change", () => shortcut?.refresh())();
+      logged("home change", () => typeShortcut?.refresh())();
+    },
     /** A page painted the app's skin (its id, resolved from the Theme setting): both boxes take its light or dark. */
     skin(id) {
       if (!skins.isKnownSkin(id)) return;
