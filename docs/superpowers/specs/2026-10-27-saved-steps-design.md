@@ -54,7 +54,12 @@ posts while it is off. A continuation of the person's request, such as a
 request id with its response and POSTs `{tool, arguments, result}` to
 `/api/internal/computer/journal` **before** forwarding the response to the
 engine (1 s timeout, then forward anyway). Awaiting keeps the journal complete
-when the turn ends right after the last step. Image content is dropped; from
+when the turn ends right after the last step. A call the bridge answers itself
+through its `relay` hook (today only on Windows: foreground typing sent one
+character at a time, a sent click reworded) is never journalled, and neither
+are the bridge's own calls on the driver for it: the answer is the bridge's, not
+the driver's, so the gate check that call passed is left without an entry and
+its request is incomplete, which never saves. Image content is dropped; from
 `structuredContent` only what replay needs is kept (`elements[]`:
 `element_index`, `element_token`, `role`, `label`, `parent_index`, `depth`;
 plus `pid`, `window_id`, `bundle_id`, `name`, `app_name`, `window_title`,

@@ -28,10 +28,13 @@ function parse(line: string): Record<string, unknown> | null {
 export function createJournalTap(options: {
   post: (entry: JournalEntry, signal: AbortSignal) => Promise<unknown>;
   timeoutMs?: number;
-}): { request(line: string): void; response(line: string): Promise<void> } {
+}): { request(line: string): void; leaveOut(id: unknown): void; response(line: string): Promise<void> } {
   const timeoutMs = options.timeoutMs ?? 1000;
   const pending = new Map<string | number, { tool: string; arguments: Record<string, unknown> }>();
   return {
+    leaveOut(id) {
+      if (typeof id === "string" || typeof id === "number") pending.delete(id);
+    },
     request(line) {
       const frame = parse(line);
       if (!frame || frame.method !== "tools/call" || (typeof frame.id !== "string" && typeof frame.id !== "number")) return;

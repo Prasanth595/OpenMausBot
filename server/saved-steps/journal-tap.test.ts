@@ -65,6 +65,16 @@ describe("journal tap", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it("posts nothing for a call it was told to leave out, and still posts the calls around it", async () => {
+    const posted: JournalEntry[] = [];
+    const tap = createJournalTap({ post: async (entry) => { posted.push(entry); } });
+    for (const id of [1, 2, 3]) tap.request(call(id));
+    tap.leaveOut(2);
+    tap.leaveOut(null);
+    for (const id of [1, 2, 3]) await tap.response(reply(id));
+    expect(posted).toHaveLength(2);
+  });
+
   it("derives the journal URL from the control URL", () =>
     expect(journalUrl("http://127.0.0.1:4100/api/internal/computer-control?botId=b1")).toBe("http://127.0.0.1:4100/api/internal/computer/journal"));
 
