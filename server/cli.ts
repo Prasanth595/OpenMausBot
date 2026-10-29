@@ -875,13 +875,16 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
           tailscaleAttempted = true;
           if (tailscaleServing) await tailscaleServeOff(tailscale).catch(() => undefined);
           const served = await tailscaleServe(tailscale, port);
-          if (startupCancelled) throw new SetupCancelled();
+          if (startupCancelled || stopping) throw new SetupCancelled();
           if ("failure" in served) throw new Error(`--tailscale: ${explainTailscaleFailure(served.failure)}`);
           tailscaleServing = true;
           publicUrl = served.origin;
           log(`tailscale: serving https://${tailscale.dnsName} → http://127.0.0.1:${port} (only your tailnet can reach it)`);
         }
-        if (startupCancelled) throw new SetupCancelled();
+        // From the second attempt on, cancelStartup is already disarmed — a
+        // signal during the port scan arrives through onSignal and sets
+        // stopping, so it has to veto the spawn here too.
+        if (startupCancelled || stopping) throw new SetupCancelled();
         if (publicUrl) env.OMB_PUBLIC_URL = publicUrl;
         child = spawn(entry.command, entry.args, { env, stdio: [ownerToken ? "pipe" : "ignore", logFd ?? "inherit", logFd ?? "inherit"] });
         if (ownerToken) {
@@ -942,14 +945,23 @@ export async function runServe(options: CliOptions, log: (line: string) => void 
       // pinned child that loses it still serves — leaving Caddy and Tailscale
       // pointed at a foreign socket. Relaunch on a fresh pair when the port
       // was taken, the same way a stolen main port is handled.
+      let webhookHeldByOther = false;
       try {
         const ingress = (await api(port, "/api/webhooks")).body?.ingress;
-        if (ingress?.available === false && attempt + 1 < SERVE_LAUNCH_ATTEMPTS && !(await loopbackPortFree(webhookPort))) {
-          log(`webhook port ${webhookPort} was claimed while the server was starting; trying a new pair`);
-          await terminateChild();
-          continue;
-        }
+        webhookHeldByOther = ingress?.available === false && !(await loopbackPortFree(webhookPort));
       } catch { /* ingress verification is best-effort; the receiver logged its own failure */ }
+      if (webhookHeldByOther) {
+        if (attempt + 1 >= SERVE_LAUNCH_ATTEMPTS) {
+          // Never declare ready with the webhook port in foreign hands: Caddy
+          // and Tailscale would forward hooks to a process that is not us.
+          console.error(`webhook port ${webhookPort} is owned by another process; the server cannot accept webhooks safely`);
+          await stop();
+          return 1;
+        }
+        log(`webhook port ${webhookPort} was claimed while the server was starting; trying a new pair`);
+        await terminateChild();
+        continue;
+      }
       ready = true;
     }
     if (!ready) {

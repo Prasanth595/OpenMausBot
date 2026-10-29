@@ -231,6 +231,58 @@ describe("CLI startup lifecycle", () => {
     expect(log).toHaveBeenCalledWith(`OpenMausBot is running on http://127.0.0.1:${base}`);
   });
 
+  it("fails startup when the negotiated webhook port is still foreign-held on the last attempt", async () => {
+    const base = await freePortBlock([0, 1, 2, 3, 4, 5]);
+    options = { ...options, port: base };
+    let healthCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      if (address.endsWith("/api/health")) {
+        return ++healthCalls === 1 ? Response.json({}, { status: 503 }) : Response.json({ app: "openmausbot", pid: childPid });
+      }
+      if (address.endsWith("/api/webhooks")) {
+        // Every attempt loses its negotiated webhook port to a third party:
+        // a proxy started now would forward hooks to a foreign process.
+        await holdPort(Number(spawnEnv(mocks.spawn.mock.calls.length - 1).OMB_WEBHOOK_PORT));
+        return Response.json({ ingress: { available: false } });
+      }
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await runServe(options, vi.fn())).toBe(1);
+    expect(mocks.spawn).toHaveBeenCalledTimes(5);
+    for (const child of children) expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(error).toHaveBeenCalledWith(expect.stringContaining(`webhook port ${base + 5} is owned by another process`));
+    error.mockRestore();
+  });
+
+  it("does not spawn a retry child when shutdown begins during relaunch negotiation", async () => {
+    const base = await freePortBlock([0, 1]);
+    options = { ...options, port: base, tailscale: true };
+    vi.stubGlobal("fetch", vi.fn(async (url: string | URL | Request) => {
+      const address = String(url);
+      if (address.endsWith("/api/health")) return Response.json({}, { status: 503 });
+      throw new Error(`Unexpected fixture request: ${address}`);
+    }));
+    mocks.spawn.mockImplementation(() => {
+      const child = childProcess();
+      if (mocks.spawn.mock.calls.length === 1) {
+        // The negotiated main port is stolen before the child binds.
+        void holdPort(base).then(() => child.emit("exit", 1, null));
+      }
+      return child;
+    });
+    mocks.tailscaleServe.mockImplementation(async () => {
+      if (mocks.tailscaleServe.mock.calls.length === 2) interrupt();
+      return { origin: "https://fixture.tail.test" };
+    });
+    expect(await runServe(options, vi.fn())).toBe(130);
+    // The retry never reached spawn: onSignal already disarmed cancelStartup,
+    // so only the stopping check can veto it.
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(mocks.tailscaleServeOff).toHaveBeenCalled();
+  });
+
   it("does not enable Tailscale or spawn a server when guided logs cannot be opened", async () => {
     mocks.denyLogOpen = true;
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({}, { status: 503 })));
