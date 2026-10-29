@@ -222,7 +222,7 @@ export function createTalkSession({ speech, server, panel, typeBox, voiceInUse, 
 
   function watchIdle(ask) {
     clearTimeout(ask.idleTimer);
-    ask.idleTimer = ask.words.trim() ? null : setTimeout(() => closeBox(ask), TYPE_TIMING.idleMs);
+    ask.idleTimer = ask.words.trim() ? null : setTimeout(() => { if (typing() === ask) closeBox(ask); }, TYPE_TIMING.idleMs);
   }
 
   const dismiss = () => { if (current) cancel(current); };
@@ -248,19 +248,23 @@ export function createTalkSession({ speech, server, panel, typeBox, voiceInUse, 
       if (repeat) return;
       const open = typing();
       if (open) {
-        if (!open.words.trim()) closeBox(open);
+        try {
+          if (open.words.trim()) typeBox.focus();
+          else closeBox(open);
+        } catch {}
         return;
       }
       if (current && UNDER_WAY.has(current.state)) return;
       dismiss();
-      const text = draft && at - draft.at < TYPE_TIMING.draftMs ? draft.words : "";
+      const kept = draft && at - draft.at < TYPE_TIMING.draftMs ? draft : null;
       draft = null;
       const ask = begin("typing");
       ask.typed = true;
-      ask.words = text;
+      ask.words = kept?.words ?? "";
       try {
-        typeBox.open({ text });
+        typeBox.open({ text: ask.words });
       } catch {
+        draft = kept;
         closeBox(ask);
         return;
       }

@@ -11,7 +11,7 @@ test.afterEach(() => mock.timers.reset());
 
 const CHAT = { botId: "m", threadId: "t1" };
 function harness({ busy = false, prepare = async () => CHAT, ask } = {}) {
-  const h = { views: [], closed: 0, typed: [], typeClosed: 0, openFails: false, blurOnClose: false, starts: [], stops: [], opened: [], asks: [], prepares: 0, sink: null };
+  const h = { views: [], closed: 0, typed: [], typeClosed: 0, focused: 0, openFails: false, blurOnClose: false, starts: [], stops: [], opened: [], asks: [], prepares: 0, sink: null };
   h.session = createTalkSession({
     speech: {
       start: (sink, options) => { h.sink = sink; h.starts.push(options); },
@@ -30,6 +30,7 @@ function harness({ busy = false, prepare = async () => CHAT, ask } = {}) {
     typeBox: {
       open: view => { h.typed.push(view); if (h.openFails) throw new Error("no box"); },
       close: () => { h.typeClosed += 1; if (h.blurOnClose) h.session.typeBlurred(); },
+      focus: () => { h.focused += 1; },
     },
     voiceInUse: () => busy,
     release: () => ["control", "option"],
@@ -105,12 +106,12 @@ test("clicking away closes the box and keeps the words for 5 minutes", () => {
   assert.deepEqual(h.typed.at(-1), { text: "" });
 });
 
-test("⌃⌥T on an open box closes it when blank and does nothing when it holds words", () => {
+test("⌃⌥T on an open box closes it when blank and gives it focus back when it holds words", () => {
   const h = harness();
   h.session.typePress(); mock.timers.tick(500); h.session.typeInput("keep"); h.session.typePress();
-  assert.equal(h.typeClosed, 0);
+  assert.deepEqual([h.typeClosed, h.focused], [0, 1]);
   mock.timers.tick(500); h.session.typeInput(" "); h.session.typePress();
-  assert.equal(h.typeClosed, 1);
+  assert.deepEqual([h.typeClosed, h.focused], [1, 1]);
 });
 
 test("a ⌃⌥T within 500 ms of the last one is a key repeat: one box stays open", () => {
@@ -128,6 +129,25 @@ test("a blank box closes itself after 60 s; words stop the clock and clearing th
   mock.timers.tick(1_000); h.session.typePress(); h.session.typeInput("a");
   mock.timers.tick(120_000); assert.equal(h.typeClosed, 1);
   h.session.typeInput(""); mock.timers.tick(60_000); assert.equal(h.typeClosed, 2);
+});
+
+test("a typed ask sent before the box reported any words is never closed by the idle minute", async () => {
+  const { ask } = holdAsk([{ kind: "thinking" }]);
+  const h = harness({ ask });
+  h.session.typePress(); h.session.typeSend("hi"); await flush();
+  mock.timers.tick(60_000);
+  assert.deepEqual([h.closed, h.typeClosed, h.views.at(-1).state, h.session.busy()], [0, 1, "thinking", true]);
+});
+
+test("a box that fails to open keeps the draft it would have shown, on the draft's own clock", () => {
+  const h = harness();
+  h.session.typePress(); h.session.typeInput("half"); h.session.typeBlurred();
+  mock.timers.tick(1_000); h.openFails = true; h.session.typePress();
+  h.openFails = false; mock.timers.tick(1_000); h.session.typePress();
+  assert.deepEqual(h.typed.map(view => view.text), ["", "half", "half"]);
+  h.session.typeBlurred(); mock.timers.tick(1_000); h.openFails = true; h.session.typePress();
+  h.openFails = false; mock.timers.tick(299_000); h.session.typePress();
+  assert.deepEqual(h.typed.at(-1), { text: "" });
 });
 
 test("one ask at a time: ⌃⌥T waits while talk listens or an ask is on its way, and ⌃⌥Space waits while the box takes words or a typed ask is on its way", async () => {

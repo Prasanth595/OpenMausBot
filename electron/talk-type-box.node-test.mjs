@@ -42,7 +42,8 @@ function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width:
     setBounds(bounds) { this.bounds = bounds; this.calls.push(["setBounds", bounds]); }
     getBounds() { return this.bounds; }
     show() { this.calls.push(["show"]); }
-    focus() { this.calls.push(["focus"]); }
+    focus() { this.calls.push(["focus"]); this.focused = true; }
+    isFocused() { return this.focused === true; }
     moveTop() { this.calls.push(["moveTop"]); }
     showInactive() { this.calls.push(["showInactive"]); }
     loadURL(url) { this.url = url; return loadFails ? Promise.reject(new Error("load failed")) : Promise.resolve(); }
@@ -125,6 +126,19 @@ test("a box that loses focus, whose renderer goes or whose window closes is dest
     for (const again of Object.values(ends)) again(made[0]);
     assert.deepEqual(events, [["blur"]], what);
   }
+});
+
+test("focus goes back to the open box once it shows, and a box that has it is left alone", async () => {
+  const { box, made } = harness();
+  box.open({ text: "words" }); box.focus();
+  assert.deepEqual(shown(made[0]), []);
+  made[0].webContents.emit("did-finish-load"); await flush();
+  box.focus();
+  assert.deepEqual(shown(made[0]), ["showInactive", "focus"]);
+  made[0].focused = false; box.focus();
+  assert.deepEqual(shown(made[0]), ["showInactive", "focus", "focus"]);
+  box.close(); made[0].focused = false; box.focus();
+  assert.equal(shown(made[0]).length, 3);
 });
 
 test("the page's messages count only from this box, and only when well formed", () => {

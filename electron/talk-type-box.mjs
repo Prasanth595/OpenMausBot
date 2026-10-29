@@ -66,6 +66,7 @@ const wellFormed = text => typeof text === "string" && text.length <= TYPE_LIMIT
 
 export function createTypeBox({ BrowserWindow, screen, nativeImage, iconPath, theme: initialTheme = null, onInput, onSend, onCancel, onBlur }) {
   let win = null;
+  let shown = null;
   let page = null;
   let theme = initialTheme;
 
@@ -125,6 +126,7 @@ export function createTypeBox({ BrowserWindow, screen, nativeImage, iconPath, th
       if (win !== target) return;
       target.setBounds(talkPanelBounds(area, height));
       target.showInactive();
+      shown = target;
       // Electron/macOS: focus() on a "panel" window makes it key without activating the app, so the app the person
       // was in stays active. Unit tests can't prove it.
       target.focus();
@@ -167,6 +169,9 @@ export function createTypeBox({ BrowserWindow, screen, nativeImage, iconPath, th
       win = create(view);
     },
     close,
+    focus() {
+      if (win && win === shown && live(win) && !win.isFocused()) win.focus();
+    },
     /** The app's skin for the next open; null follows macOS's appearance. */
     setTheme(next) {
       theme = next;
