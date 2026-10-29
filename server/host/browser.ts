@@ -62,7 +62,7 @@ export interface BrowserHostDeps {
   }): string;
   DESKTOP_MANAGED: boolean;
   CLOUD_HOME: unknown;
-  PORT: number;
+  PORT(): number;
   /** A Cloud home's way out through the person's own lent computer. */
   device?: EgressSetup["device"];
   /** Why a turn may not use the person's lent computer (cloud-lending.ts plus the memory check), or null when it may.
@@ -334,7 +334,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
       kind: "browser", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 });
     return {
       command: process.execPath, args: [SPAWNED_PROXIES.harnessMcp, "browser"], env: {
-        ...AGENTS_NODE_FLAG, [harnessMcpTokenEnv("browser")]: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT}`,
+        ...AGENTS_NODE_FLAG, [harnessMcpTokenEnv("browser")]: token, OMB_HARNESS_URL: `http://127.0.0.1:${PORT()}`,
       },
     };
   }

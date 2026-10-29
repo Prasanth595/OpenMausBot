@@ -630,8 +630,12 @@ import { withScopeHint } from "./connector-scope-hint.ts";
 import { connectorRequestItems } from "./connector-request-items.ts";
 import { personAsks as personAskAt } from "./thread-presence.ts";
 
-const PORT = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
-const WEBHOOK_PORT = Number(process.env.OMB_WEBHOOK_PORT || PORT + 1);
+const startPort = Number(process.env.OMB_PORT || process.env.OGB_PORT || 8799);
+const startWebhookPort = Number(process.env.OMB_WEBHOOK_PORT) || startPort + 1;
+let PORT = startPort;
+let WEBHOOK_PORT = startWebhookPort;
+const HOST = "127.0.0.1";
+const MAX_PORT_ATTEMPTS = 100;
 const WEBHOOK_PUBLIC_URL = process.env.OMB_WEBHOOK_PUBLIC_URL || undefined;
 const STATIC_DIR = process.env.OMB_STATIC_DIR || null;
 
@@ -710,7 +714,7 @@ if (CLOUD_HOME) {
 }
 holdIncludedServices(CLOUD_ENV);
 for (const key of CLOUD_HOME_SECRET_KEYS) delete process.env[key];
-await startBotBoxAtBoot({ dataDir: DATA_DIR, port: PORT }); // The bot box (server/bot-box): on a Cloud home every bot turn runs in it, decided before any engine starts.
+// The bot box (server/bot-box) starts after the port binds: its harness gate forwards to the bound port, still before any engine starts.
 if (CLOUD_HOME && Object.keys(CLOUD_SECRETS).length === 0) {
   console.warn("cloud home: its secrets came in this process's environment, which anything running as the same user can read in /proc; start it with cloud-home-start");
 }
@@ -733,10 +737,16 @@ const onePassword = new OnePasswordLogins({
 });
 if (logins.onePasswordToken()) void onePassword.refresh();
 const botLogins = new BotLogins(logins, onePassword);
-const SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
+// Assigned after the server binds: the session cookie is keyed on the port the
+// instance actually bound, not the configured start port. Cookies are not
+// port-scoped, so the name is the only thing separating two instances in the
+// same browser profile. Every consumer reads it per request (or is created
+// after the bind), so it sees the final cookie name.
+let SESSION_COOKIE: string;
 const HOSTED_WORKSPACE = hostedWorkspaceConfigured();
 let workspaceAccess: WorkspaceAccess | null = null;
 const DESKTOP_MANAGED = process.env.OMB_DESKTOP_PARENT === "1";
+const PORT_PINNED = process.env.OMB_PORT_PINNED === "1" || DESKTOP_MANAGED;
 const SHARED_WORKSPACE_FULL_ACCESS = sharedWorkspaceFullAccessConfigured();
 const sharedWorkspaceFullAccessEnabled = () => SHARED_WORKSPACE_FULL_ACCESS && Boolean(workspaceAccess) && entitled("admin");
 const HOSTED_FULL_ACCESS_REFUSAL = "On a shared company workspace Full access comes only from the operator's dedicated policy";
@@ -1411,7 +1421,7 @@ const mcpOAuth = new McpOAuthManager({
   },
 });
 // Connector tool grants only filter tools/list; the relay's verdict decides each call.
-const teamConnections = createTeamConnectionsHost({ team: CLOUD_TEAM, dataDir: DATA_DIR, cfg: () => cfg, adminOrigin: CLOUD_HOME?.adminOrigin ?? null, harnessUrl: `http://127.0.0.1:${PORT}`, audienceOf: teamHost.audienceOf,
+const teamConnections = createTeamConnectionsHost({ team: CLOUD_TEAM, dataDir: DATA_DIR, cfg: () => cfg, adminOrigin: CLOUD_HOME?.adminOrigin ?? null, harnessUrl: () => `http://127.0.0.1:${PORT}`, audienceOf: teamHost.audienceOf,
   requester: (threadId, generation) => { const owner = directRequestOwners.get(threadId); return provenRequestPerson(owner, generation ?? owner?.generation ?? "", (id) => linePersonKey(store.messagesFor(threadId).find((message) => message.id === id))); },
   mint: (capability) => mintInternalCapability({ ...capability, depth: 0, kind: "connectors", skillAuthoring: false, createdBots: 0, openedThreads: 0 }), mcpOAuth, isSessionLive: (id) => sessions.isLive(id),
   botMcp: (bot) => managedPolicy.filterMcp(customMcpServers(cfg, bot.mcpServers)), brokerUrl: () => (CLOUD_TEAM ? cloudConnectedAppsBrokerUrl() || null : null), composio }); teamConnections.primeApps();
@@ -2454,7 +2464,7 @@ const {
   browserRuntime, browserLive, usedBrowserSessions, browserSweep, temporaryBrowserSessions,
   currentBrowserSession, forgetTemporaryBrowser, myChromeAvailable, usesMyChrome, lentChromeSummary, browserSessionSpec, browserIntegration,
   browserReady, currentBrowserSpec, loginInput, browserSystemPrompt, closeBrowser, browserEngineSwitched, eraseDeletedBrowser, engineSummary, browserSessionsOf, signedInSitesTarget, uploadPaths, eraseAudienceBrowsers,
-} = createBrowserHost({ cfg, store: () => store, turnResources, activeInternalGenerationByThread, mintInternalCapability, DESKTOP_MANAGED, CLOUD_HOME, PORT, engineMemory, audienceOf: teamHost.browserAudience, ...(CLOUD_TEAM ? { browserBox: (fd: number, ro: readonly string[]) => botBox.browserBox(fd, ro) } : {}), lendRefusal: (turn) => cloudLendingRefusal({ botId: store.botByThread(turn.threadId)?.id ?? "", threadId: turn.threadId, generation: turn.generation }), device: () => deviceLinks.route(CLOUD_HOME_LENDER) ?? sharedComputers.internetAway(CLOUD_HOME_LENDER) ?? { unshared: true as const }, lentChrome: CLOUD_PERSONAL ? { route: () => deviceLinks.chromeRoute(CLOUD_HOME_LENDER), lender: () => sharedComputers.chromeLender(CLOUD_HOME_LENDER) } : undefined });
+} = createBrowserHost({ cfg, store: () => store, turnResources, activeInternalGenerationByThread, mintInternalCapability, DESKTOP_MANAGED, CLOUD_HOME, PORT: () => PORT, engineMemory, audienceOf: teamHost.browserAudience, ...(CLOUD_TEAM ? { browserBox: (fd: number, ro: readonly string[]) => botBox.browserBox(fd, ro) } : {}), lendRefusal: (turn) => cloudLendingRefusal({ botId: store.botByThread(turn.threadId)?.id ?? "", threadId: turn.threadId, generation: turn.generation }), device: () => deviceLinks.route(CLOUD_HOME_LENDER) ?? sharedComputers.internetAway(CLOUD_HOME_LENDER) ?? { unshared: true as const }, lentChrome: CLOUD_PERSONAL ? { route: () => deviceLinks.chromeRoute(CLOUD_HOME_LENDER), lender: () => sharedComputers.chromeLender(CLOUD_HOME_LENDER) } : undefined });
 
 const dataSheets = new DataSheetRegistry({
   broadcast: (frame) => broadcast({ ...frame }),
@@ -2898,7 +2908,7 @@ const phones = createPhones({
   dataDir: DATA_DIR, shared: Boolean(HOSTED_WORKSPACE || CLOUD_TEAM), cloudHome: Boolean(CLOUD_HOME), cloudOwnerKey: CLOUD_OWNER_KEY,
   loopbackTrust: LOOPBACK.trust, sharedMembership, store, sessions, routines: () => routines, ownerOrAdmin, cloudOwnerSession,
   cloudLendingRefusal, cloudLendingTurn, originIsUser: (turn) => turnOrigin(turn).kind === "user", request: (threadId) => directRequestOwners.get(threadId),
-  nudge: (frame) => broadcast(frame, { adminOnly: true }), harnessUrl: `http://127.0.0.1:${PORT}`,
+  nudge: (frame) => broadcast(frame, { adminOnly: true }), harnessUrl: () => `http://127.0.0.1:${PORT}`,
   mint: (botId, turn) => mintInternalCapability({ botId, ...turn, kind: "device", depth: 0, skillAuthoring: false, createdBots: 0, openedThreads: 0 }),
   active: (turn) => internalCapabilityIsActive(turn as InternalCapability),
 });
@@ -9695,17 +9705,8 @@ ROUTES.push(createLimitResetRoutes({ clock: limitClock, routines: routines!, req
 
 let webhookIngress: WebhookIngress | null = null;
 let webhookIngressError: string | null = null;
-try {
-  webhookIngress = await listenWebhookIngress(webhooks, {
-    port: WEBHOOK_PORT, publicBaseUrl: WEBHOOK_PUBLIC_URL,
-    claimRequest: () => { moveFreeze.assertTurns(); return workspaceMaintenance.request(); },
-  });
-  const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
-  console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
-} catch (error) {
-  webhookIngressError = error instanceof Error ? error.message : String(error);
-  console.error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
-}
+// The webhook receiver is bound after the main server resolves its port so a
+// busy webhook port does not drag the main port forward with it.
 
 const webhookIngressStatus = () => ({
   available: Boolean(webhookIngress),
@@ -12354,7 +12355,7 @@ const publishedPages = createPublishedPages({ dataDir: DATA_DIR, cloudHome: CLOU
 // `let` slots are read per request.
 ROUTES.push(createThreadRoutes({
   store, userName: userNameFor, sessions, groupUsageReader, lendingEnabled,
-  hostedWorkspace: HOSTED_WORKSPACE, sessionCookie: SESSION_COOKIE, loopback: LOOPBACK, defaultPage: DEFAULT_PAGE,
+  hostedWorkspace: HOSTED_WORKSPACE, sessionCookie: () => SESSION_COOKIE, loopback: LOOPBACK, defaultPage: DEFAULT_PAGE,
   workspaceAccess: () => workspaceAccess,
   desktopMutationToken: () => desktopMutationToken,
   companionMutationToken: () => companionMutationToken,
@@ -15675,12 +15676,6 @@ const pruneDecisionLog = () => {
 };
 pruneDecisionLog();
 setInterval(pruneDecisionLog, 6 * 60 * 60_000).unref();
-workspaceAccess = createWorkspaceAccess({ sessions, cookieName: SESSION_COOKIE, closeSessionStreams });
-// With the bridge's five-second deadline, this bounds stale portal access on quiet streams to fifteen seconds.
-const workspaceAccessTimer = workspaceAccess ? setInterval(() => {
-  void workspaceAccess!.revalidate().catch((error) => console.warn("workspace access revalidation failed", error));
-}, 10_000) : null;
-workspaceAccessTimer?.unref();
 console.log(describeBrand(loadBrand()));
 
 // Before any row below settles: an interrupted dispatch's words come back with a review notice, never to a model a second time.
@@ -15729,37 +15724,10 @@ if (CLOUD_HOME) registerCloudPower(cloudPower = createCloudPower({ dataDir: DATA
   liveCall: () => liveCalls.current() !== null, computer: () => cloudComputerPower.awake() || boatLifecycleBusyBots.size > 0, nextDueAt: () => { const due = [routines?.nextDueAt() ?? null, proactive.brief.nextWakeAt()].filter((at): at is number => at !== null); return due.length ? Math.min(...due) : null; },
   maintenance: () => workspaceMaintenance.active || providerFleetReloading || providerAuthSessions.active || browserEngineInstall !== null } }));
 
-server.listen(PORT, "127.0.0.1", async () => {
-  companyRuntimeReady();
-  console.log(`openmausbot server on http://127.0.0.1:${PORT}`);
-  browserSweep.start(); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
-  void afterFirstEngineRead().then(() => { if (builtInBrowserEnabled(cfg)) chromeLauncher.start(); });
-  followupsReady = true;
-  drainQueuedSends();
-  drainQueuedChannelSends();
-  void cloudComputerPower.armRunning();
-  startUpkeep({ bots: () => store.bots, retentionDays: () => threadEventLogRetentionDays(cfg), busy: threadBusy, openDirectHandoff: (threadId) => coordinator.activeDirect(threadId) });
-  if (enginesRead) {
-    await enginesRead;
-    if (companyShutdown) return;
-  }
-  // Only once every registry is initialized and the endpoint listens: earlier dispatch can hit uninitialized bindings.
-  moveFreeze.hold(() => { routines!.start(); proactive.start(); }, () => { routines!.stop(); proactive.stop(); });
-  limitClock.start();
-  moveFreeze.hold(() => memoryUpkeep.start(), () => memoryUpkeep.stop());
-});
-
 // Tunnel requests have no peer address, which request-auth treats as proxied: a session is required, never loopback trust.
 const TUNNEL_SOCKET = process.env.OMB_TUNNEL_SOCKET?.trim() || null;
 let tunnelListener: ReturnType<typeof createServer> | null = null;
-if (TUNNEL_SOCKET) {
-  if (process.platform !== "win32") rmSync(TUNNEL_SOCKET, { force: true });
-  tunnelListener = createServer(gzipTunnelReplies(handleRequest));
-  upgrades.attach(tunnelListener, handleRequest);
-  tunnelListener.listen(TUNNEL_SOCKET, () => {
-    console.log(`openmausbot tunnel listener on ${TUNNEL_SOCKET}`);
-  });
-}
+let workspaceAccessTimer: NodeJS.Timeout | null = null;
 
 /** A root the runtime holds is the runtime's to account for at the next start: a line here, with Retry, would start the job a second time. */
 function noteTurnsCutByShutdown(): void {
@@ -15784,6 +15752,8 @@ function runtimeHoldsRoot(threadId: string): boolean {
   return coordinator.active().some((n) => !n.parentId && n.threadId === threadId && !ENDED.has(n.status));
 }
 
+// Registered before the port loop: a signal during bot-box, engine or webhook
+// startup is still a graceful shutdown, never an abrupt kill.
 const gracefulShutdown = createGracefulShutdown({
   cleanup: [
     () => {
@@ -15859,4 +15829,119 @@ const gracefulShutdown = createGracefulShutdown({
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, gracefulShutdown);
+}
+
+function isEaddrinuse(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "EADDRINUSE";
+}
+
+// Bind the main server first. When the desktop parent or CLI spawns us it sets
+// OMB_PORT and then polls that exact port, so a packaged child or `serve`
+// invocation must not silently move. Source/headless runs may walk forward
+// until they find a free port.
+const mainAttempts = PORT_PINNED ? 1 : MAX_PORT_ATTEMPTS + 1;
+for (let offset = 0; offset < mainAttempts; offset++) {
+  const candidatePort = startPort + offset;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error) => {
+        server.off("error", onError);
+        reject(error);
+      };
+      server.once("error", onError);
+      PORT = candidatePort;
+      server.listen(candidatePort, HOST, () => {
+        server.off("error", onError);
+        companyRuntimeReady();
+        resolve();
+      });
+    });
+    console.log(`openmausbot server on http://${HOST}:${PORT}`);
+    break;
+  } catch (error) {
+    if (PORT_PINNED || !isEaddrinuse(error)) throw error;
+  }
+}
+
+if (!server.listening) {
+  throw new Error(`could not find an available port after ${MAX_PORT_ATTEMPTS + 1} attempts starting from ${startPort}`);
+}
+
+// On a Cloud home every bot turn runs in the bot box: start it now that the
+// harness gate's forward target is the bound port, still before any engine.
+await startBotBoxAtBoot({ dataDir: DATA_DIR, port: PORT });
+
+// The session cookie is scoped by port; compute it once the real bind port is
+// known so the UI and remote clients get a cookie matching this listener.
+SESSION_COOKIE = sessionCookieName(PORT, ENVIRONMENT_ID);
+
+// The hosted-workspace handoff cookie is keyed on the bound port too.
+workspaceAccess = createWorkspaceAccess({ sessions, cookieName: SESSION_COOKIE, closeSessionStreams });
+// With the bridge's five-second deadline, this bounds stale portal access on quiet streams to fifteen seconds.
+workspaceAccessTimer = workspaceAccess ? setInterval(() => {
+  void workspaceAccess!.revalidate().catch((error) => console.warn("workspace access revalidation failed", error));
+}, 10_000) : null;
+workspaceAccessTimer?.unref();
+
+browserSweep.start(); moveFreeze.hold(() => appTriggers.start(), () => void appTriggers.stop()); startCloudHomeConnectedApps({ cloudHome: CLOUD_HOME !== null, dataDir: DATA_DIR, cloudGrant: CLOUD_ENV.OMB_CLOUD_CONNECTED_APPS_GRANT, apply: (access) => { composio.setManagedBrokerAccess(access); broadcast({ kind: "config", ...configStatus() }); } });
+void afterFirstEngineRead().then(() => { if (builtInBrowserEnabled(cfg)) chromeLauncher.start(); });
+followupsReady = true;
+drainQueuedSends();
+drainQueuedChannelSends();
+void cloudComputerPower.armRunning();
+startUpkeep({ bots: () => store.bots, retentionDays: () => threadEventLogRetentionDays(cfg), busy: threadBusy, openDirectHandoff: (threadId) => coordinator.activeDirect(threadId) });
+if (enginesRead) {
+  await enginesRead;
+}
+if (!companyShutdown) {
+  // Only once every registry is initialized and the endpoint listens: earlier dispatch can hit uninitialized bindings.
+  moveFreeze.hold(() => { routines!.start(); proactive.start(); }, () => { routines!.stop(); proactive.stop(); });
+  limitClock.start();
+  moveFreeze.hold(() => memoryUpkeep.start(), () => memoryUpkeep.stop());
+}
+
+// Bind the webhook receiver in its own loop after the main server is locked.
+// A busy webhook port must not prevent the main server from using its
+// configured port, and the webhook must not steal the resolved main port.
+const webhookAttempts = PORT_PINNED ? 1 : MAX_PORT_ATTEMPTS + 1;
+for (let offset = 0; offset < webhookAttempts; offset++) {
+  const candidateWebhookPort = startWebhookPort + offset;
+  if (candidateWebhookPort === PORT) continue;
+  try {
+    webhookIngress = await listenWebhookIngress(webhooks, {
+      port: candidateWebhookPort,
+      publicBaseUrl: WEBHOOK_PUBLIC_URL,
+      claimRequest: () => { moveFreeze.assertTurns(); return workspaceMaintenance.request(); },
+    });
+    WEBHOOK_PORT = candidateWebhookPort;
+    webhookIngressError = null;
+    const advertised = WEBHOOK_PUBLIC_URL ? ` (advertised as ${webhookIngress.baseUrl})` : "";
+    console.log(`openmausbot webhook receiver on http://${webhookIngress.host}:${webhookIngress.port}${advertised}`);
+    break;
+  } catch (error) {
+    if (PORT_PINNED || !isEaddrinuse(error)) {
+      webhookIngressError = error instanceof Error ? error.message : String(error);
+      console.error(`openmausbot webhook receiver unavailable: ${webhookIngressError}`);
+      break;
+    }
+  }
+}
+
+utilityParentPort?.postMessage({
+  type: "openmausbot:listen",
+  port: PORT,
+  webhookPort: WEBHOOK_PORT,
+});
+
+export function getResolvedPort(): number | undefined {
+  return server.listening ? PORT : undefined;
+}
+
+if (TUNNEL_SOCKET) {
+  if (process.platform !== "win32") rmSync(TUNNEL_SOCKET, { force: true });
+  tunnelListener = createServer(gzipTunnelReplies(handleRequest));
+  upgrades.attach(tunnelListener, handleRequest);
+  tunnelListener.listen(TUNNEL_SOCKET, () => {
+    console.log(`openmausbot tunnel listener on ${TUNNEL_SOCKET}`);
+  });
 }
