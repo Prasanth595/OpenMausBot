@@ -111,6 +111,11 @@ in Advanced and Simple mode, and its circle and menu with the rail beside it.
 the window (1280x800 by default). Without `--shots` it prints the preview's
 address and waits for Ctrl-C.
 
+This computer's card, with no colour or picture yet
+(`evidence/sidebar-look-everyone/`):
+
+![This computer's Sidebar color and Sidebar picture in Settings, plain](evidence/sidebar-look-everyone/after-card-simple-daylight.png)
+
 This is not production qualification: the places and the purchase are the
 preview's fixtures, and no Admin, browser checkout or desktop window is
 involved.
