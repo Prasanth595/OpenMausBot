@@ -73,15 +73,18 @@ body.listening #mascot::after{animation:pulse 1.4s ease-out infinite}
 #label{font-weight:600}#label:empty{display:none}
 body.needs-you #label,body.still-working #label{color:var(--warning)}body.error #text{color:var(--danger)}
 #text{color:var(--ink2);overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${TEXT_LINES};overflow:hidden}#text:empty{display:none}#label:not(:empty)+#text{margin-top:2px}
+#echo{color:var(--ink);overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin-bottom:4px}#echo:empty{display:none}body.echoed #text{-webkit-line-clamp:8}
 #close{position:absolute;top:8px;right:8px;width:24px;height:24px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:transparent;color:var(--ink2);cursor:pointer}
 #close:hover{background:var(--hover);color:var(--ink)}#close svg{pointer-events:none}
 @keyframes pulse{from{transform:scale(.9);opacity:.8}to{transform:scale(1.35);opacity:0}}
 @media (prefers-reduced-motion: reduce){body{transition:none}body.listening #mascot::after{animation:none;opacity:.7}}
-</style></head><body><div id="card"><div id="mascot"><img src="data:image/png;base64,${iconBase64}" alt=""></div><div id="body"><div id="label"></div><div id="text" role="status"></div></div><button id="close" type="button" aria-label="Dismiss"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><script>
+</style></head><body><div id="card"><div id="mascot"><img src="data:image/png;base64,${iconBase64}" alt=""></div><div id="body"><div id="echo"></div><div id="label"></div><div id="text" role="status"></div></div><button id="close" type="button" aria-label="Dismiss"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><script>
 const LABELS=${labels};
-const card=document.getElementById("card"),label=document.getElementById("label"),text=document.getElementById("text");
+const card=document.getElementById("card"),echo=document.getElementById("echo"),label=document.getElementById("label"),text=document.getElementById("text");
 function render(view){
   document.body.className=["on",view.state,view.theme].filter(Boolean).join(" ");
+  document.body.classList.toggle("echoed",Boolean(view.echo));
+  echo.textContent=view.echo||"";
   label.textContent=LABELS[view.state]||"";
   text.textContent=view.text||(view.state==="listening"?"Let go to send":"");
   return Math.ceil(card.getBoundingClientRect().height);
@@ -167,7 +170,7 @@ export function createTalkPanel({ BrowserWindow, screen, nativeImage, iconPath, 
   async function paint() {
     const target = win;
     const ticket = ++latest;
-    const payload = JSON.stringify({ state: view.state, text: replyPreview(view.text), ...(theme ? { theme } : {}) });
+    const payload = JSON.stringify({ state: view.state, text: replyPreview(view.text), ...(view.echo ? { echo: view.echo } : {}), ...(theme ? { theme } : {}) });
     let height;
     try {
       height = await target.webContents.executeJavaScript(`render(${payload})`);

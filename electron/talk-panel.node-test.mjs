@@ -296,3 +296,16 @@ test("a box that fails to place itself is not an unhandled rejection", async () 
     process.off("unhandledRejection", record);
   }
 });
+
+test("a typed ask's words show above the label in two lines at most, as plain text, and the reply fits under them", async () => {
+  const { panel, made } = harness();
+  panel.render({ state: "sending", text: "", echo: "<b>what's on</b>" });
+  made[0].webContents.emit("did-finish-load"); await flush();
+  assert.equal(made[0].webContents.scripts[0], `render({"state":"sending","text":"","echo":"<b>what's on</b>"})`);
+  const html = talkPanelHtml("AAAA");
+  assert.match(html, /<div id="body"><div id="echo"><\/div><div id="label">/);
+  assert.match(html, /#echo\{[^}]*display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden/);
+  assert.match(html, /body\.echoed #text\{-webkit-line-clamp:8\}/);
+  assert.match(html, /echo\.textContent=/);
+  assert.ok(28 + 2 + 2 + 4 + (2 + 1 + 8) * 18.2 <= TALK_PANEL.maxHeight, "two echo lines, the label and eight reply lines fit");
+});

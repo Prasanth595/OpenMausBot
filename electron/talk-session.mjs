@@ -20,6 +20,10 @@ export const TALK_TEXT = Object.freeze({
   failed: "MausBot couldn't take that · Open chat",
 });
 
+export const TYPE_TIMING = Object.freeze({ idleMs: 60_000, draftMs: 300_000, repeatMs: 500 });
+
+export const TYPE_TEXT = Object.freeze({ serverDown: "Couldn't reach MausBot. Try again in a moment." });
+
 const SPEECH_PROBLEMS = new Map([
   ["speech-not-authorized", TALK_TEXT.permission],
   ["mic-failed", TALK_TEXT.unavailable],
@@ -41,23 +45,34 @@ const SERVER_NOTICES = new Map([
   ["cloud-signin", TALK_TEXT.cloudSignIn],
 ]);
 
-const UNDER_WAY = new Set(["listening", "waking", "sending", "thinking"]);
+const UNDER_WAY = new Set(["listening", "typing", "waking", "sending", "thinking"]);
+const SHOWS_WORDS = new Set(["waking", "sending", "thinking"]);
 
-export function createTalkSession({ speech, server, panel, voiceInUse, release, openChat, newSendId = randomUUID }) {
+export function createTalkSession({ speech, server, panel, typeBox, voiceInUse, release, openChat, newSendId = randomUUID, now = () => Date.now() }) {
   let current = null;
+  let draft = null;
+  let lastTypePress = -Infinity;
 
   const live = ask => current === ask && !ask.controller.signal.aborted;
+  const typing = () => (current?.state === "typing" ? current : null);
 
   function begin(state) {
-    const ask = { state, words: "", reply: "", chat: null, waking: false, sink: null, controller: new AbortController(), listenTimer: null, hideTimer: null, answerTimer: null };
+    const ask = { state, words: "", reply: "", chat: null, waking: false, typed: false, sink: null, controller: new AbortController(), listenTimer: null, hideTimer: null, answerTimer: null, idleTimer: null };
     current = ask;
     return ask;
   }
 
   function show(ask, state, text) {
     ask.state = state;
+    const view = ask.typed ? { state, text: SHOWS_WORDS.has(state) ? "" : text, echo: ask.words } : { state, text };
     try {
-      panel.render({ state, text });
+      panel.render(view);
+    } catch {}
+  }
+
+  function closeTypeBox() {
+    try {
+      typeBox.close();
     } catch {}
   }
 
@@ -67,9 +82,11 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     clearTimeout(ask.listenTimer);
     clearTimeout(ask.hideTimer);
     clearTimeout(ask.answerTimer);
+    clearTimeout(ask.idleTimer);
     ask.controller.abort();
     try {
-      panel.close();
+      if (ask.state === "typing") typeBox.close();
+      else panel.close();
     } catch {}
   }
 
@@ -110,6 +127,7 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
   function failed(ask, error) {
     const code = error instanceof TalkServerError ? error.code : null;
     if (code === "lost") stillWorking(ask);
+    else if (ask.typed && code === "server-down") settle(ask, "error", TYPE_TEXT.serverDown, TALK_TIMING.noticeHideMs);
     else if (SERVER_NOTICES.has(code)) settle(ask, "error", SERVER_NOTICES.get(code), TALK_TIMING.noticeHideMs);
     else settle(ask, "error", TALK_TEXT.failed, TALK_TIMING.replyHideMs);
   }
@@ -154,16 +172,26 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
     }, () => {});
   }
 
-  function listen() {
-    const ask = begin("listening");
-    const listening = () => current === ask && ask.state === "listening";
-    show(ask, "listening", "");
+  function prepare(ask) {
     // A sleeping My Cloud wakes while the person talks; the box says so only once the words are let go.
     const prepared = server.prepare(() => {
       if (!live(ask) || ask.chat) return;
       ask.waking = true;
       if (ask.state === "sending") show(ask, "waking", ask.words);
     });
+    prepared.then(chat => { ask.chat = chat; ask.waking = false; }, error => {
+      if (!live(ask) || !(ask.state === "listening" || ask.state === "waking" || ask.state === "sending")) return;
+      if (ask.state === "listening") speech.stop(ask.sink);
+      failed(ask, error);
+    });
+    return prepared;
+  }
+
+  function listen() {
+    const ask = begin("listening");
+    const listening = () => current === ask && ask.state === "listening";
+    show(ask, "listening", "");
+    const prepared = prepare(ask);
     ask.sink = {
       transcript(line) {
         if (!listening() || typeof line?.text !== "string") return;
@@ -181,11 +209,6 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
         else send(ask, prepared);
       },
     };
-    prepared.then(chat => { ask.chat = chat; ask.waking = false; }, error => {
-      if (!live(ask) || !(ask.state === "listening" || ask.state === "waking" || ask.state === "sending")) return;
-      if (ask.state === "listening") speech.stop(ask.sink);
-      failed(ask, error);
-    });
     try {
       speech.start(ask.sink, { finishOnRelease: release() });
     } catch {
@@ -195,6 +218,11 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
       return;
     }
     ask.listenTimer = setTimeout(() => { if (listening()) speech.finish(ask.sink); }, TALK_TIMING.maxListenMs);
+  }
+
+  function watchIdle(ask) {
+    clearTimeout(ask.idleTimer);
+    ask.idleTimer = ask.words.trim() ? null : setTimeout(() => closeBox(ask), TYPE_TIMING.idleMs);
   }
 
   const dismiss = () => { if (current) cancel(current); };
@@ -213,9 +241,59 @@ export function createTalkSession({ speech, server, panel, voiceInUse, release, 
       cancel(ask);
       openChat(chat);
     },
+    typePress() {
+      const at = now();
+      const repeat = at - lastTypePress < TYPE_TIMING.repeatMs;
+      lastTypePress = at;
+      if (repeat) return;
+      const open = typing();
+      if (open) {
+        if (!open.words.trim()) closeBox(open);
+        return;
+      }
+      if (current && UNDER_WAY.has(current.state)) return;
+      dismiss();
+      const text = draft && at - draft.at < TYPE_TIMING.draftMs ? draft.words : "";
+      draft = null;
+      const ask = begin("typing");
+      ask.typed = true;
+      ask.words = text;
+      try {
+        typeBox.open({ text });
+      } catch {
+        closeBox(ask);
+        return;
+      }
+      watchIdle(ask);
+    },
+    typeInput(text) {
+      const ask = typing();
+      if (!ask) return;
+      ask.words = text;
+      watchIdle(ask);
+    },
+    typeSend(text) {
+      const ask = typing();
+      if (!ask || !text.trim()) return;
+      ask.words = text;
+      clearTimeout(ask.idleTimer);
+      send(ask, prepare(ask));
+      closeTypeBox();
+    },
+    typeCancel() {
+      const ask = typing();
+      if (ask) closeBox(ask);
+    },
+    /** The box lost key focus: it closes, and words left in it come back with the next ⌃⌥T within 5 minutes. */
+    typeBlurred() {
+      const ask = typing();
+      if (!ask) return;
+      if (ask.words.trim()) draft = { words: ask.words, at: now() };
+      closeBox(ask);
+    },
     dismiss,
     close: dismiss,
-    /** Listening, or an ask on its way that has not been answered yet. */
+    /** Listening, taking typed words, or an ask on its way that has not been answered yet. */
     busy: () => Boolean(current && UNDER_WAY.has(current.state)),
   };
 }

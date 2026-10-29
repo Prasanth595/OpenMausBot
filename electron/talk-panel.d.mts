@@ -3,6 +3,8 @@ export type TalkViewState = "listening" | "waking" | "sending" | "thinking" | "r
 export interface TalkView {
   state: TalkViewState;
   text: string;
+  /** A typed ask's words, shown above the label. */
+  echo?: string;
 }
 export declare const TALK_LABELS: Readonly<Record<TalkViewState, string>>;
 export declare function talkPanelBounds(workArea: { x: number; y: number; width: number; height: number }, height: number): { x: number; y: number; width: number; height: number };
