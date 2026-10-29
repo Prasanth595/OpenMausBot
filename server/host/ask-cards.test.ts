@@ -231,6 +231,14 @@ describe("a typed line answers a question card", () => {
     expect(fixed.answers).toEqual([]);
   });
 
+  it("leaves a line in a chat no teammate handed on to be steered or queued, even while its question card waits", async () => {
+    const w = world({ live: ["req-1"] });
+    const asked = question(w, "chat");
+    expect(await w.cards.typed(AUTH, "chat", "Nimm die zweite", undefined, {})).toBeNull();
+    expect(await w.cards.typed(AUTH, "chat", "Nimm die zweite", asked, {})).toBeNull();
+    expect(w.answers).toEqual([]);
+  });
+
   it("passes on why an answer was refused, and writes no line", async () => {
     const w = world({ live: ["req-1"] });
     question(w, "work");
