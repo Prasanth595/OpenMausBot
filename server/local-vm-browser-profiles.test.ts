@@ -156,6 +156,21 @@ describe.skipIf(process.platform === "win32")("rescueFirefoxProfile", () => {
     expect(await rescueInstalledApps(fakeRuntime(dir, container).runtime, target(workspace))).toBe("rescued");
     expect(readFileSync(join(workspace, ".desktop-apps", "local", "share", "applications", "example.desktop"), "utf8")).toBe("[Desktop Entry]");
   });
+
+  it("refuses to replace a different durable app area", async () => {
+    const dir = scratch();
+    const container = join(dir, "container");
+    mkdirSync(join(container, "home", "cua", ".local", "share", "applications"), { recursive: true });
+    writeFileSync(join(container, "home", "cua", ".local", "share", "applications", "example.desktop"), "old desktop");
+    const workspace = join(dir, "workspace");
+    mkdirSync(join(workspace, ".desktop-apps", "local", "share", "applications"), { recursive: true });
+    const durable = join(workspace, ".desktop-apps", "local", "share", "applications", "example.desktop");
+    writeFileSync(durable, "durable desktop");
+
+    await expect(rescueInstalledApps(fakeRuntime(dir, container).runtime, target(workspace)))
+      .rejects.toThrow(/durable app area differs/);
+    expect(readFileSync(durable, "utf8")).toBe("durable desktop");
+  });
   it("copies an old desktop's Firefox profile into the workspace before the desktop is removed", async () => {
     const dir = scratch();
     const container = join(dir, "container");

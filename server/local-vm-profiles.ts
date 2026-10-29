@@ -72,7 +72,6 @@ export async function rescueInstalledApps(runtime: string, target: LocalVmTarget
   const durable = join(apps, "local");
   await mkdir(apps, { recursive: true, mode: 0o700 });
   const existing = await lstat(durable).catch(() => null);
-  if (existing && !(existing.isDirectory() && await isEmptyDirectory(durable))) return "kept";
   const staging = join(apps, `.local-rescue-${randomBytes(6).toString("hex")}`);
   try {
     const { command, args } = resolveCliSpawn(runtime, ["cp", `${target.containerName}:${APPS_IN_CONTAINER}`, staging]);
@@ -85,6 +84,14 @@ export async function rescueInstalledApps(runtime: string, target: LocalVmTarget
     }
     const copied = await lstat(staging);
     if (!copied.isDirectory()) return "none";
+    if (existing && !(existing.isDirectory() && await isEmptyDirectory(durable))) {
+      try {
+        await run("/usr/bin/diff", ["-qr", staging, durable], { timeout: 5 * 60_000, maxBuffer: 1024 * 1024 });
+      } catch {
+        throw new Error("could not preserve installed desktop apps because the durable app area differs from the old desktop");
+      }
+      return "kept";
+    }
     if (existing) await rmdir(durable);
     await rename(staging, durable);
     return "rescued";
