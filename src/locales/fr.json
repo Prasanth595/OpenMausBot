@@ -74,6 +74,8 @@
   "voice.engine": "Fournisseur de voix",
   "call.voiceSetup.subtitle": "Choisissez un fournisseur de voix, ajoutez sa clé s'il en faut une, puis choisissez une voix.",
   "toolStep.useComputer": "Utiliser l'écran",
+  "toolStep.manageAutomations": "Gérer les automatisations",
+  "toolStep.checkAutomations": "Vérifier les automatisations",
   "teamImport.sharedTeamSafety": "Les bots, images, instructions partagées, le chef de cabinet, les chats de groupe, les playbooks et les notes de départ sont ajoutés. Les compétences arrivent désactivées et les routines en pause. Les connexions arrivent sans leurs clés ; terminez-les dans Apps → MCP servers. L'historique des chats, les clés et mots de passe, les choix de modèle et les ordinateurs ne sont jamais inclus.",
   "noEngines.title": "Installez un fournisseur de modèles pour commencer",
   "noEngines.intro": "{app} n'embarque pas de modèle : vos bots s'appuient sur une CLI d'IA installée sur cet ordinateur, avec votre session existante. Configurez l'une d'elles et vos bots prennent vie.",
@@ -2507,6 +2509,9 @@
   "placeLook.imageFailed": "L'image n'a pas été enregistrée. Réessayez.",
   "placeLook.imageSaving": "Enregistrement…",
   "cloudWelcome.files.foldersLent": "Les bots de {name} utilisent d’eux-mêmes les fichiers de cet ordinateur tant qu’il est allumé et qu’OpenMausBot est ouvert. Rien à configurer.",
+  "secretCard.ref": "OpenMausBot le conserve pour un seul usage par ses propres outils. Votre bot ne le voit jamais, et il n’est jamais ajouté au chat.",
+  "secretCard.file": "Enregistré dans un fichier privé que les commandes de votre bot peuvent lire pendant 24 heures, puis supprimé. Il n’est jamais ajouté au chat.",
+  "secretCard.resumed": "Le bot a repris",
   "notifications.status.notice": "Info",
   "mcp.ownBot": "Uniquement pour {bot} : ses fichiers sont dans le dossier de {bot}.",
   "mcp.offFor": "Désactivé pour {bots}, car il ne démarre pas pour eux. Il est revérifié automatiquement."

@@ -131,6 +131,8 @@
   "toolDetail.noOutput": "這次呼叫沒有記錄任何輸出。",
   "toolDetail.previewHint": "已縮短並自動遮蔽的預覽。分享前請先檢查。",
   "toolStep.useComputer": "使用畫面",
+  "toolStep.manageAutomations": "管理自動化",
+  "toolStep.checkAutomations": "查看自動化",
   "attach.gallery": "附件",
   "attach.gallerySingle": "1 個附件",
   "attach.galleryCount": "{count} 個附件",
@@ -4362,6 +4364,9 @@
   "placeLook.imageFailed": "圖片沒有儲存。請再試一次。",
   "placeLook.imageSaving": "正在儲存…",
   "cloudWelcome.files.foldersLent": "只要這台電腦處於喚醒狀態且 OpenMausBot 已開啟，{name} 上的機器人就會自動使用這台電腦上的檔案，無需任何設定。",
+  "secretCard.ref": "OpenMausBot 會保管它，只供自己的工具使用一次。你的機器人永遠看不到它，它也不會出現在聊天中。",
+  "secretCard.file": "儲存在一個私密檔案中，你的機器人的指令可在 24 小時內讀取，之後刪除。它不會出現在聊天中。",
+  "secretCard.resumed": "機器人已繼續",
   "notifications.status.notice": "通知",
   "mcp.ownBot": "僅限 {bot}：它的檔案在 {bot} 自己的資料夾中。",
   "mcp.offFor": "已為 {bots} 關閉，因為它在他們那裡無法啟動。會自動再檢查。"

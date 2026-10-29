@@ -150,6 +150,8 @@
   "toolStep.askHelper": "Giao một nhiệm vụ cho trợ lý",
   "toolStep.think": "Suy nghĩ",
   "toolStep.checkTeam": "Kiểm tra team",
+  "toolStep.manageAutomations": "Quản lý tự động hóa",
+  "toolStep.checkAutomations": "Kiểm tra tự động hóa",
   "toolStep.useTool": "Sử dụng một công cụ",
   "attach.gallery": "Tệp đính kèm",
   "attach.gallerySingle": "1 tệp đính kèm",
@@ -4979,6 +4981,9 @@
   "placeLook.imageFailed": "Chưa lưu được hình ảnh. Hãy thử lại.",
   "placeLook.imageSaving": "Đang lưu…",
   "cloudWelcome.files.foldersLent": "Bot trên {name} tự dùng các tệp trên máy tính này khi máy đang thức và OpenMausBot đang mở. Không cần thiết lập gì.",
+  "secretCard.ref": "OpenMausBot giữ nó cho một lần dùng bởi chính công cụ của mình. Bot của bạn không bao giờ thấy nó, và nó không bao giờ được thêm vào cuộc trò chuyện.",
+  "secretCard.file": "Được lưu vào một tệp riêng tư mà các lệnh của bot có thể đọc trong 24 giờ, sau đó bị xóa. Nó không bao giờ được thêm vào cuộc trò chuyện.",
+  "secretCard.resumed": "Bot đã tiếp tục",
   "mcp.ownBot": "Chỉ dành cho {bot}: các tệp của nó nằm trong thư mục riêng của {bot}.",
   "mcp.offFor": "Đã tắt cho {bots} vì nó không khởi động được với họ. Nó sẽ tự được kiểm tra lại."
 }
