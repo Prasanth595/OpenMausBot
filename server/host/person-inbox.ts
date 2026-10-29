@@ -6,7 +6,7 @@
 // inbox. A question that a fact the person shares with the team answers, their assistant may answer (representative.ts).
 // Security: a line carries only what was addressed to the person, and links its conversation only when they may read
 // it. The state is ids, names and short excerpts, in person-inbox.json. Off a team nothing here exists.
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 
@@ -116,24 +116,50 @@ export interface PersonInboxDeps {
   now?: () => number;
 }
 
-export function loadPersonInboxState(dataDir: string): Pick<z.infer<typeof fileSchema>, "homes" | "items"> {
+const INBOX_UNREADABLE_PREFIX = `${PERSON_INBOX_FILE}.unreadable-`;
+
+function inboxAside(dataDir: string): string | undefined {
+  try {
+    return readdirSync(dataDir).find((name) => name.startsWith(INBOX_UNREADABLE_PREFIX));
+  } catch {
+    return undefined;
+  }
+}
+
+function setInboxAside(file: string, problem: string): { homes: {}; items: []; unreadable: true } {
+  const aside = `${file}.unreadable-${Date.now()}`;
+  try {
+    renameSync(file, aside);
+    console.warn(`person inbox: ${file} ${problem}; moved to ${aside}. Threads that cannot be classified without it stay private until it is repaired or removed.`);
+  } catch (error) {
+    console.warn(`person inbox: ${file} ${problem} and could not be moved aside: ${error instanceof Error ? error.message : String(error)}. Threads that cannot be classified without it stay private until it is repaired or removed.`);
+  }
+  return { homes: {}, items: [], unreadable: true };
+}
+
+export function loadPersonInboxState(dataDir: string): Pick<z.infer<typeof fileSchema>, "homes" | "items"> & { unreadable?: boolean } {
   const file = join(dataDir, PERSON_INBOX_FILE);
+  const aside = inboxAside(dataDir);
   let raw: string;
   try {
     raw = readFileSync(file, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { homes: {}, items: [] };
-    throw new Error(`person inbox: ${file} is unreadable; refusing to classify threads without it`, { cause: error });
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return aside ? { homes: {}, items: [], unreadable: true } : { homes: {}, items: [] };
+    return setInboxAside(file, "is unreadable");
   }
   let json: unknown;
   try {
     json = JSON.parse(raw);
-  } catch (error) {
-    throw new Error(`person inbox: ${file} is not valid JSON; refusing to classify threads without it`, { cause: error });
+  } catch {
+    return setInboxAside(file, "is not valid JSON");
   }
   const parsed = fileSchema.safeParse(json);
-  if (parsed.success) return parsed.data;
-  throw new Error(`person inbox: ${file} is not an inbox file; refusing to classify threads without it`);
+  if (!parsed.success) return setInboxAside(file, "is not an inbox file");
+  if (aside) {
+    console.warn(`person inbox: ${join(dataDir, aside)} still unread; threads that cannot be classified without it stay private until it is repaired or removed.`);
+    return { ...parsed.data, unreadable: true };
+  }
+  return parsed.data;
 }
 
 export function createPersonInbox(deps: PersonInboxDeps) {

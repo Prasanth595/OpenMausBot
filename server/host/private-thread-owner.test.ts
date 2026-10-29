@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -131,10 +131,23 @@ describe("private message ownership", () => {
     expect(save.mock.calls.filter(([file]) => file === f.botsFile)).toHaveLength(1);
   });
 
-  it.each(["{not json", "[]"])("refuses to start the team host over an unreadable inbox file instead of classifying without its evidence (%s)", (contents) => {
+  it.each(["{not json", "[]"])("starts over an unreadable inbox file, keeps it aside, and keeps the legacy destinations closed until it is dealt with (%s)", (contents) => {
     const f = legacyFixture();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     writeFileSync(join(DATA_DIR, "person-inbox.json"), contents);
-    expect(() => f.open()).toThrow(/person-inbox\.json/);
+    const started = f.open();
+    const aside = readdirSync(DATA_DIR).filter((name) => name.startsWith("person-inbox.json.unreadable-"));
+    expect(aside, "the bad file is moved aside, not overwritten").toHaveLength(1);
+    expect(readFileSync(join(DATA_DIR, aside[0]!), "utf8")).toBe(contents);
+    expect(warn.mock.calls.flat().join(" ")).toContain("person-inbox.json");
+    for (const at of f.destinations) expect(started.host.audienceOf(at.threadId), "unclassifiable without the evidence: closed to everyone").toBe(`member:unowned-${at.threadId}`);
+    expect(started.host.audienceOf(f.main), "a bot's main thread needs no inbox evidence").toBe("team");
+    started.team.stop();
+    const restarted = f.open();
+    for (const at of f.destinations) expect(restarted.host.audienceOf(at.threadId), "still closed while the unreadable file sits aside").toBe(`member:unowned-${at.threadId}`);
+    rmSync(join(DATA_DIR, aside[0]!));
+    restarted.team.stop();
+    expect(f.open().host.audienceOf(f.destinations[0]!.threadId), "removing the aside is the operator accepting the evidence is gone").toBe("team");
   });
 
   it("keeps every legacy destination denied in memory and logs a failed registry save", () => {

@@ -42,10 +42,19 @@ export function createCloudTeamHost(deps: CloudTeamHostDeps) {
   const team = deps.team;
   const people: PeopleAbout = createPeopleAbout(deps.dataDir);
   const inbox = team ? loadPersonInboxState(deps.dataDir) : { homes: {}, items: [] };
+  const evidenceMissing = inbox.unreadable === true;
   const privateDeliveries = new Set([...Object.values(inbox.homes), ...inbox.items].map((at) => at.threadId));
   const audienceOf = (threadId: string): Audience => {
     const starter = deps.starters.get(threadId);
-    const privateThread = (!starter || deps.markers.has(starter)) && (privateDeliveries.has(threadId) || deps.store.bots?.some((bot) => bot.tasks?.some((task) => task.threadId === threadId && task.private)));
+    let privateThread = false;
+    if (!starter || deps.markers.has(starter)) {
+      if (privateDeliveries.has(threadId)) privateThread = true;
+      else {
+        const owner = deps.store.bots?.find((bot) => bot.tasks?.some((task) => task.threadId === threadId));
+        const task = owner?.tasks?.find((one) => one.threadId === threadId);
+        privateThread = Boolean(task?.private) || (evidenceMissing && owner?.threadId !== threadId && !task?.routineRunId);
+      }
+    }
     return threadAudienceFrom({ room: deps.store.groupByThread(threadId)?.id, starter, markers: deps.markers, privateThread: privateThread ? threadId : undefined });
   };
   if (team) deps.engineHomes?.start({ dataDir: deps.dataDir, audienceOf, threads: () => storeThreads(deps.store.bots ?? []) });
