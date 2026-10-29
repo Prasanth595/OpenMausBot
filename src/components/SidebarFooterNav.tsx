@@ -174,7 +174,7 @@ export function SidebarFooterNav({
           key={panel.id}
           id={`web-panel-${panel.id}`}
           label={panel.name}
-          iconsOnly={iconsOnly}
+          iconsOnly={iconsOnly || toolbar}
           active={state.activeView === "web-panel" && state.webPanelId === panel.id}
           icon={(active) => <Globe size={iconSize} className={tone(active)} />}
           onClick={() => dispatch({ type: "showWebPanel", id: panel.id })}

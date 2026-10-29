@@ -217,7 +217,7 @@ function Shell({ viewer }: { viewer: WelcomeViewer | null }) {
 
   useEffect(() => {
     if (state.activeView === "routines" && previousViewRef.current !== "routines") {
-      calendarOriginRef.current = previousViewRef.current === "team-map" ? "team-map" : "chat";
+      calendarOriginRef.current = previousViewRef.current === "team-map" || previousViewRef.current === "web-panel" ? previousViewRef.current : "chat";
     }
     previousViewRef.current = state.activeView;
   }, [state.activeView]);

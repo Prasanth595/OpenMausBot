@@ -13,11 +13,11 @@ export function PinnedPanelsSettings() {
   const panels = useWebPanels();
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
-  const [error, setError] = useState<"name" | "url" | "">("");
+  const [error, setError] = useState<"name" | "url" | "self" | "">("");
   const full = panels.length >= MAX_WEB_PANELS;
 
   const add = () => {
-    const check = validateWebPanel({ name, url });
+    const check = validateWebPanel({ name, url }, window.location.origin);
     if (!check.ok) {
       setError(check.error);
       return;
@@ -68,10 +68,10 @@ export function PinnedPanelsSettings() {
             inputMode="url"
             value={url}
             disabled={full}
-            aria-invalid={error === "url"}
+            aria-invalid={error === "url" || error === "self"}
             onChange={(event) => { setUrl(event.target.value); setError(""); }}
             onKeyDown={(event) => { if (event.key === "Enter") add(); }}
-            className={`${field} flex-1 ${error === "url" ? "border-danger/60" : "border-hairline/40 focus:border-focus"}`}
+            className={`${field} flex-1 ${error === "url" || error === "self" ? "border-danger/60" : "border-hairline/40 focus:border-focus"}`}
           />
           <button type="button" className="ui-button" disabled={full} onClick={add}>
             {t("webPanels.settings.add")}
@@ -79,7 +79,7 @@ export function PinnedPanelsSettings() {
         </div>
         {error && (
           <p role="alert" className="text-[12px] text-danger">
-            {t(error === "name" ? "webPanels.settings.nameInvalid" : "webPanels.settings.urlInvalid", { max: MAX_WEB_PANEL_NAME })}
+            {t(error === "name" ? "webPanels.settings.nameInvalid" : error === "self" ? "webPanels.settings.urlSelf" : "webPanels.settings.urlInvalid", { max: MAX_WEB_PANEL_NAME })}
           </p>
         )}
         <p className="text-[12px] leading-relaxed text-ink-secondary">

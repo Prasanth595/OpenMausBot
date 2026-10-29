@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MAX_WEB_PANELS, newWebPanelId, parseWebPanels, validateWebPanel } from "./web-panels";
+import { isAppOrigin, MAX_WEB_PANELS, newWebPanelId, parseWebPanels, validateWebPanel } from "./web-panels";
 
 describe("pinned web panels", () => {
   it("accepts absolute http and https pages and trims the name", () => {
@@ -15,6 +15,12 @@ describe("pinned web panels", () => {
     ["ftp://example.com"], ["https://user:secret@example.com/"], ["https://user@example.com/"],
   ])("refuses %s", (url) => {
     expect(validateWebPanel({ name: "x", url })).toEqual({ ok: false, error: "url" });
+  });
+
+  it("refuses a page on the app's own origin, which the frame would run with the app's access", () => {
+    expect(validateWebPanel({ name: "Me", url: "http://127.0.0.1:5173/settings" }, "http://127.0.0.1:5173")).toEqual({ ok: false, error: "self" });
+    expect(validateWebPanel({ name: "Board", url: "http://127.0.0.1:7841/" }, "http://127.0.0.1:5173")).toMatchObject({ ok: true });
+    expect(isAppOrigin("not a url", "http://127.0.0.1:5173")).toBe(false);
   });
 
   it("needs a name of 1 to 40 characters", () => {

@@ -102,6 +102,15 @@ describe("sidebar footer places", () => {
     expect(fixture.dispatch).toHaveBeenLastCalledWith({ type: "showWebPanel", id: "panel-1" });
   });
 
+  it("shows a pinned panel as an icon with its name as the label in the toolbar layout", () => {
+    fixture.advanced = true;
+    fixture.panels = [{ id: "panel-1", name: "Fleet board", url: "http://127.0.0.1:7841/" }];
+    const { html } = render("comfortable", { toolsLayout: "toolbar" });
+    expect(html).toContain('data-sidebar-nav="web-panel-panel-1"');
+    expect(html).not.toContain(">Fleet board</span>");
+    expect(html).toContain('aria-label="Fleet board"');
+  });
+
   it("keeps the guided tour's anchors on the rows", () => {
     fixture.advanced = true;
     const { html } = render("comfortable");

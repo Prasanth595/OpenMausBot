@@ -5902,6 +5902,7 @@
   "webPanels.settings.remove": "Remove",
   "webPanels.settings.nameInvalid": "Give the panel a name of up to {max} characters.",
   "webPanels.settings.urlInvalid": "Use a full http:// or https:// address without a user name or password.",
+  "webPanels.settings.urlSelf": "That's this app's own address. Pin a different page.",
   "webPanels.settings.help": "Pages open inside the app. Bots can't see them.",
   "webPanels.settings.full": "You've pinned the maximum of {max} pages. Remove one to add another.",
   "webPanels.page.reload": "Reload",

@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import { openExternalLink } from "@/lib/app-links";
 import { t } from "@/lib/i18n";
 import { useWebPanels } from "@/lib/web-panel-preferences";
+import { isAppOrigin } from "@/lib/web-panels";
 import { useStore } from "@/state/store";
 
 const LOAD_TIMEOUT_MS = 10_000;
@@ -51,7 +52,7 @@ export function WebPanelPage() {
           {t("webPanels.page.openInBrowser")}
         </button>
       </header>
-      {status === "failed" ? (
+      {status === "failed" || isAppOrigin(panel.url, window.location.origin) ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
           <p className="text-[14px] font-medium text-ink">{t("webPanels.page.cantEmbed")}</p>
           <p className="max-w-sm text-[13px] text-ink-secondary">{t("webPanels.page.cantEmbedBody")}</p>
