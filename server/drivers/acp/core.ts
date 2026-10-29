@@ -888,7 +888,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
             if (current && !current.state.settled && session.sessionId && p.sessionId === session.sessionId) current.receiveModelVariants(p.update);
             return;
           }
-          if (current && ["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update"].includes(p.update?.sessionUpdate)) {
+          if (current && ["agent_message_chunk", "agent_thought_chunk", "tool_call", "tool_call_update", "plan"].includes(p.update?.sessionUpdate)) {
             current.state.startupActivity = true; if (current.state.promptSent) current.acknowledge();
           }
           if (!current || !current.state.promptSent) return;
@@ -1583,7 +1583,7 @@ export function createAcpDriver(support: AcpSupport): ProviderDriver<AcpConfig> 
                   && !state.stopped && !session.closing && !asks.size && !current.runningTools.size) {
                 // Quiesce first: the close must not publish a completion before the harness recovers.
                 state.settled = true;
-                session.current = null;
+                session.current = null; current.stopQuietWatch?.();
                 if (current.interruptTimer) clearTimeout(current.interruptTimer);
                 closeSession(threadId, "startup-recovery");
                 const stopped = session.host.links.size > 0 || await killCliTree(session.child).catch(() => false);

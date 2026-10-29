@@ -336,6 +336,8 @@ describe("OpenCode catalog", () => {
   it.each([
     apiError("Internal error: Invalid API key."),
     apiError("Internal error: socket hang up"),
+    // OpenCode issue 27270: a timeout may have reached the model
+    apiError("Internal error: Cannot connect to API: Connect Timeout Error"),
     Object.assign(new Error("Cannot connect to API: ECONNREFUSED"), { code: -32602 }),
     new Error("ECONNREFUSED"),
   ])("does not take another prompt error as unreached: %s", (error) => {

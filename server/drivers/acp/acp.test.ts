@@ -2611,7 +2611,10 @@ describe("ACP turns (fake CLI)", () => {
         void pending.then(() => { settled = true; }, () => { settled = true; });
         return () => settled;
       };
-      afterEach(() => { delete process.env.FAKE_ACP_RPC_FAILURE_GATE; delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT; });
+      afterEach(() => {
+        delete process.env.FAKE_ACP_RPC_FAILURE_GATE; delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_OUTPUT;
+        delete process.env.FAKE_ACP_RPC_FAILURE_AFTER_USAGE; delete process.env.FAKE_ACP_UPDATES_FILE; delete process.env.OMB_ACP_QUIET_TICK_MS;
+      });
 
       it("holds the ACK through the prompt and rejects once its child stops, without terminal events", async () => {
         process.env.FAKE_ACP_RPC_DUMP = join(scratch, "rpc.json");
@@ -2648,6 +2651,30 @@ describe("ACP turns (fake CLI)", () => {
         releaseFailure();
         expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
           .toMatchObject({ ok: false, stopReason: "rpc_error" });
+      });
+
+      it("fails normally when the same refusal follows a plan", async () => {
+        process.env.FAKE_ACP_RPC_FAILURE_AFTER_USAGE = "1";
+        process.env.FAKE_ACP_UPDATES_FILE = join(scratch, "plan-updates.json");
+        writeFileSync(process.env.FAKE_ACP_UPDATES_FILE, JSON.stringify([{ update: { sessionUpdate: "plan", entries: [{ content: "Read the brief", status: "in_progress", priority: "medium" }] } }]));
+        await refusePrompt();
+        releaseFailure();
+        const ack = await instance.adapter.sendTurn({ threadId: "unreached-after-plan", text: "go", startupRecovery: true });
+        expect(await recorder.until((event) => event.type === "turn.completed" && event.turnId === ack.turnId))
+          .toMatchObject({ ok: false, stopReason: "rpc_error" });
+      });
+
+      it("stops the prompt's quiet watch when it hands the turn to recovery", async () => {
+        process.env.OMB_ACP_QUIET_TICK_MS = "4321";
+        const started = vi.spyOn(globalThis, "setInterval");
+        const cleared = vi.spyOn(globalThis, "clearInterval");
+        await refusePrompt();
+        const pending = instance.adapter.sendTurn({ threadId: "unreached-quiet", text: "go", startupRecovery: true });
+        await vi.waitFor(() => expect(started.mock.calls.some(([, ms]) => ms === 4321)).toBe(true));
+        releaseFailure();
+        expect(await pending.catch((error) => error)).toBeInstanceOf(TurnNotStartedError);
+        const timer = started.mock.results[started.mock.calls.findIndex(([, ms]) => ms === 4321)].value;
+        expect(cleared.mock.calls.some(([handle]) => handle === timer)).toBe(true);
       });
 
       it("fails normally for another prompt error before any activity", async () => {
