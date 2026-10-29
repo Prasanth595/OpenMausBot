@@ -64,8 +64,19 @@ describe("the read tools' paths", () => {
   });
 });
 
+// The reading commands are a POSIX shell's, with POSIX paths; a read tool's own paths count on every platform.
+const posix = it.skipIf(process.platform === "win32");
+
 describe("a bot's own files", () => {
-  it("are its folder, its conversation folders and its SOUL.md, and nothing else of the data folder", () => {
+  it("count a read tool's own paths inside them, and nothing outside, on every platform", () => {
+    const { data, own } = dataFolder();
+    expect(readsOwnFiles(data, "iris", { reads: [join(own, "MEMORY.md")] })).toBe(true);
+    expect(readsOwnFiles(data, "iris", { reads: [join(data, "bots", "iris", "SOUL.md")] })).toBe(true);
+    expect(readsOwnFiles(data, "iris", { reads: [join(data, "config.json")] })).toBe(false);
+    expect(readsOwnFiles(data, "paul", { reads: [join(own, "MEMORY.md")] })).toBe(false);
+  });
+
+  posix("are its folder, its conversation folders and its SOUL.md, and nothing else of the data folder", () => {
     const { data, own, conversation, revision } = dataFolder();
     const command = (line: string, cwd = conversation) => readsOwnFiles(data, "iris", { command: { command: line, cwd } });
     expect(command(`cat ${join(data, "bots", "iris", "SOUL.md")}`)).toBe(true);
@@ -83,7 +94,7 @@ describe("a bot's own files", () => {
     expect(ownReadRoots(data, "iris")).toHaveLength(3);
   });
 
-  it("follow every link before they count", () => {
+  posix("follow every link before they count", () => {
     const { data, own, conversation } = dataFolder();
     symlinkSync(join(data, "config.json"), join(own, "config-link.json"));
     symlinkSync(join(data, "workspaces", "paul"), join(conversation, "paul"));

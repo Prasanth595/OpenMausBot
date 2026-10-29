@@ -9,7 +9,8 @@ import { expect, it } from "vitest";
 
 import { launchVerificationServer } from "../scripts/control-omb.ts";
 
-it("answers a bot's plain reads of its own files at Ask with no card, and still asks for anything else", async () => {
+// The reads asked about are a POSIX shell's commands on POSIX paths.
+it.skipIf(process.platform === "win32")("answers a bot's plain reads of its own files at Ask with no card, and still asks for anything else", async () => {
   const fixture = await launchVerificationServer({ FAKE_CLAUDE_MODE: "hang" });
   const { url, dataDir } = fixture.info;
   const sockets: Socket[] = [];
