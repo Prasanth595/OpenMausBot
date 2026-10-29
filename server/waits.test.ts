@@ -182,8 +182,10 @@ describe("WaitManager", () => {
   it("holds the line while a turn runs in the chat, then posts it once, even across a restart", async () => {
     const h = harness();
     await h.create({ kind: "file_exists", path: "/r.txt" }, { followUp: "Go." });
+    expect(h.manager.count("bot-1")).toBe(1);
     h.stamp = { size: 1, mtimeMs: 1 }; h.postOk = false; h.advance(5_000); await h.manager.tick();
     expect(h.manager.list("bot-1")).toEqual([]);
+    expect(h.manager.count("bot-1")).toBe(0);
     expect(h.manager.owners()).toEqual(["bot-1"]);
     const storedAtFollowUp: number[] = [];
     h.followUp.mockImplementation(() => { storedAtFollowUp.push(JSON.parse(readFileSync(h.file, "utf8")).waits.length); });
@@ -347,7 +349,9 @@ describe("WaitManager", () => {
     const { wait } = await h.create({ kind: "file_exists", path: "/r" }, { followUp: "Go." }) as { wait: WaitRecord };
     expect(h.manager.cancel(wait.id, "bot-2")).toBeNull();
     expect(h.manager.list("bot-1")).toHaveLength(1);
+    expect([h.manager.count("bot-1"), h.manager.count("bot-2")]).toEqual([1, 0]);
     expect(h.manager.cancel(wait.id, "bot-1")?.id).toBe(wait.id);
+    expect(h.manager.count("bot-1")).toBe(0);
     expect(h.settleCard.mock.calls.map(([, how]) => how)).toEqual(["cancelled"]);
     expect(h.manager.list("bot-1")).toEqual([]);
     expect(h.reload().owners()).toEqual([]);

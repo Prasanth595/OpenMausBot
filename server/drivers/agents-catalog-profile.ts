@@ -24,6 +24,9 @@ export interface CatalogProfile {
   computerSelection?: boolean;
   /** A room's turn: the widget and page tools and wait_until and cancel_wait, which rooms refuse, are not mounted. */
   room?: boolean;
+  /** The bot has a wait that has not ended: list_waits and cancel_wait are mounted. Without one they still answer a
+   * call (agents-catalog.ts callableTools), but are not listed. */
+  activeWaits?: boolean;
 }
 
 /** Everything is off unless the harness says "1". */
@@ -42,5 +45,6 @@ export function catalogProfileFromEnv(env: NodeJS.ProcessEnv): CatalogProfile {
     mausbot: env.OMB_MAUSBOT === "1",
     computerSelection: env.OMB_COMPUTER_SELECTION === "1",
     room: env.OMB_ROOM === "1",
+    activeWaits: env.OMB_ACTIVE_WAITS === "1",
   };
 }

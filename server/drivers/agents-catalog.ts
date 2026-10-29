@@ -5,7 +5,7 @@ import { agentToolAnnotations } from "../agent-tool-policy.ts";
 import { CHAT_CARD_TOOL_DEFINITIONS } from "./agents-chat-card-tools.ts";
 import { DEVS_TOOL_DEFINITIONS } from "./agents-devs-tools.ts";
 import { HELPER_TOOL_DEFINITIONS } from "./agents-helper-tools.ts";
-import { ROOM_REFUSED_WAIT_TOOL_NAMES, WAIT_TOOL_DEFINITIONS } from "./agents-wait-tools.ts";
+import { ROOM_REFUSED_WAIT_TOOL_NAMES, WAIT_TOOL_DEFINITIONS, WAITING_ONLY_TOOL_NAMES } from "./agents-wait-tools.ts";
 import { MAUSBOT_TOOL_DEFINITIONS } from "./agents-mausbot-tools.ts";
 import { PERSON_TOOL_DEFINITIONS, PERSON_TOOL_NAMES } from "./agents-person-tools.ts";
 import { RESEARCH_TOOL_DEFINITIONS, RESEARCH_TOOL_NAMES } from "./agents-research-tools.ts";
@@ -883,6 +883,12 @@ export function availableTools(profile: CatalogProfile) {
   return placed.map((tool) => ({ ...tool, inputSchema: advertisedSchema(tool.inputSchema, tool.description) }));
 }
 
+/** What a turn may call: what it is listed, and list_waits and cancel_wait, left off the list only while the bot has no
+ * wait. A wait made this turn, or a list read before it ended, still reaches them; the waits route scopes each call. */
+export function callableTools(profile: CatalogProfile) {
+  return availableTools({ ...profile, activeWaits: true });
+}
+
 const FULL_INPUT_SCHEMAS = new Map<string, unknown>([...TOOL_DEFINITIONS, ...MAUSBOT_TOOL_DEFINITIONS].map((tool) => [tool.name, tool.inputSchema]));
 
 /** A tool's input schema as the catalog writes it, before tools/list leaves anything out: what every call is held to. */
@@ -897,7 +903,8 @@ function catalogTools(profile: CatalogProfile) {
     (profile.escalations === true || tool.name !== "raise_escalation") &&
     (profile.team === true || !PERSON_TOOL_NAMES.has(tool.name)) &&
     (profile.computerSelection === true || tool.name !== "select_computer") &&
-    (profile.room !== true || !ROOM_REFUSED_TOOL_NAMES.has(tool.name)));
+    (profile.room !== true || !ROOM_REFUSED_TOOL_NAMES.has(tool.name)) &&
+    (profile.activeWaits === true || !WAITING_ONLY_TOOL_NAMES.has(tool.name)));
   const AUTHORING_TOOLS = profile.skillAuthoring
     ? BOT_SCOPED_TOOLS
     : BOT_SCOPED_TOOLS.filter((tool) => !SKILL_TOOL_NAMES.has(tool.name));

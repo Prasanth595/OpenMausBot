@@ -6,6 +6,8 @@ const WAITS = "/api/internal/waits";
 export const WAIT_TOOL_NAMES: ReadonlySet<string> = new Set(["wait_until", "list_waits", "cancel_wait"]);
 /** Refused in a room's thread (routes/waits.ts): a room's turn is not listed them. list_waits answers there. */
 export const ROOM_REFUSED_WAIT_TOOL_NAMES: ReadonlySet<string> = new Set(["wait_until", "cancel_wait"]);
+/** Listed only while the bot has a wait that has not ended (`CatalogProfile.activeWaits`); callable either way. */
+export const WAITING_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set(["list_waits", "cancel_wait"]);
 
 export async function callWaitTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const { ok, body } =
@@ -18,8 +20,10 @@ export async function callWaitTool(name: string, args: Json, context: ToolCallCo
 export const WAIT_TOOL_DEFINITIONS = [
   {
     name: "wait_until",
+    // Short on purpose: it rides every turn. Its result says when the condition already holds, when this computer cannot
+    // check files or programs, and when My Cloud's sleep can delay the message.
     description:
-      `Tell the person when something happens, with no AI running while you wait: plain code checks a web page for some words (every minute), a file or folder (there, gone or changed), a program (running or stopped), or another bot finishing its work. When it happens a message lands in this chat with a notification; with follow_up, you also carry out follow_up here. Use it instead of staying busy or a short-interval routine. If it is already true nothing is set up and the result says so: tell the person at once. Files and programs are those of the computer OpenMausBot runs on, only when you work on it. On My Cloud, checks pause while it sleeps. A wait stops after hours (default ${WAIT_HOURS.default}, at most ${WAIT_HOURS.max}).`,
+      `Tell the person in this chat when something happens. No AI runs while you wait, only plain code checks. Ends after hours (default ${WAIT_HOURS.default}, 1-${WAIT_HOURS.max}).`,
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -28,17 +32,17 @@ export const WAIT_TOOL_DEFINITIONS = [
         kind: {
           type: "string",
           enum: [...WAIT_KINDS],
-          description: "url_* = a page says or no longer says text; file_* = path exists, is gone or changes; process_* = a program runs or stops; bot_idle = another bot finishes its work.",
+          description: "url_*: the page at url has or lacks text. file_*: path exists, is gone or changes. process_*: process (name or pid) runs or stops. bot_idle: bot (name or id) finishes its work.",
         },
-        url: { type: "string", description: "url_*: the http(s) page." },
-        text: { type: "string", description: "url_*: the words to look for, any case." },
-        path: { type: "string", description: "file_*: a full path; ~ is the home folder." },
-        process: { type: "string", description: "process_*: the program's name, any case, or its process id." },
-        bot: { type: "string", description: "bot_idle: the other bot's name or id from list_bots." },
+        url: { type: "string" },
+        text: { type: "string" },
+        path: { type: "string" },
+        process: { type: "string" },
+        bot: { type: "string" },
         follow_up: {
           type: "string",
           maxLength: 2000,
-          description: "Only when the person asked for something to happen then: that request, written for a run that will not see this conversation.",
+          description: "Only if the person asked for something to be done then: that request, for a run that won't see this chat. You carry it out here.",
         },
         hours: { type: "integer", minimum: 1, maximum: WAIT_HOURS.max },
       },
