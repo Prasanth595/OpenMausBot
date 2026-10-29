@@ -165,6 +165,13 @@ it("New organization says plainly why it can't be added: the plan has as many as
   expect(form.querySelector("[data-org-problem]")?.textContent).toBe("Your Team plan has as many organizations as it can have. Email us to add more.");
   await type(form.querySelector("input"), "Client K");
   expect(createButton()?.disabled).toBe(true);
+  // Closed for a reason this app doesn't know: the neutral word, not the limit.
+  await act(async () => root?.unmount()); root = null; document.body.innerHTML = ""; host = document.createElement("div"); document.body.append(host);
+  organizations = { canAdd: false, count: 2, max: 10 };
+  await mount(createElement(PlacesRail));
+  await click(host.querySelector("[data-rail-add]"));
+  await act(async () => { await Promise.resolve(); });
+  expect(document.querySelector('[data-place-add="organization"] [data-org-problem]')?.textContent).toBe("New organizations aren't available right now.");
   await act(async () => root?.unmount()); root = null; document.body.innerHTML = ""; host = document.createElement("div"); document.body.append(host);
   organizations = { canAdd: true, count: 2, max: 10 };
   await mount(createElement(PlacesRail));

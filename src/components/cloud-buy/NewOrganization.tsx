@@ -28,7 +28,8 @@ export function NewOrganization({ onBack, onClose }: { onBack: (() => void) | nu
   const [busy, setBusy] = useState(false), [problem, setProblem] = useState<LocaleKey | null>(null);
   useEffect(() => { void window.ogb?.cloudAdd?.state().then(setView, () => setView(null)); }, []);
   const facts = view?.signedIn ? view.organizations ?? null : null;
-  const blocked = facts && !facts.canAdd ? BLOCKED[facts.blocked ?? "limit"] : null;
+  // Closed for a reason this app doesn't know: the neutral word, never a limit it may not be at.
+  const blocked = facts && !facts.canAdd ? facts.blocked ? BLOCKED[facts.blocked] : "rail.orgOff" : null;
   const shown = name.trim().replace(/\s+/g, " ");
   const create = async () => {
     if (!shown || busy || blocked) return;
