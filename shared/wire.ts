@@ -668,9 +668,8 @@ export interface OptionCardData {
   tool?: string;
   /** why this card is waiting: guard, mode, sandbox or delivery error. */
   held?: string;
-  /** Terminal: this proposal went stale while open (revision mismatch or
-   * a superseding request). Nothing can answer it; a fresh proposal is
-   * needed, and clients must not offer its options. */
+  /** Terminal: no answer came in time, or this proposal went stale while open (revision mismatch or a superseding
+   * request). Nothing can answer it; a fresh proposal is needed, and clients must not offer its options. */
   expired?: boolean;
   /** Stop ended the work that asked: nothing can answer it any more. */
   stopped?: boolean;
