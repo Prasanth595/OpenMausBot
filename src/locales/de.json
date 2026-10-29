@@ -74,6 +74,8 @@
   "voice.engine": "Sprachanbieter",
   "call.voiceSetup.subtitle": "Wähl einen Sprachanbieter, füge seinen Schlüssel hinzu, falls er einen braucht, und wähl dann eine Stimme.",
   "toolStep.useComputer": "Bildschirm benutzen",
+  "toolStep.manageAutomations": "Automatisierungen verwalten",
+  "toolStep.checkAutomations": "Automatisierungen prüfen",
   "teamImport.sharedTeamSafety": "Bots, Bilder, gemeinsame Anweisungen, der Chief of Staff, Gruppenchats, Playbooks und Startnotizen werden hinzugefügt. Skills kommen ausgeschaltet an und Routinen pausiert. Verbindungen kommen ohne ihre Schlüssel an; schließe sie unter Apps → MCP servers ab. Chatverläufe, Schlüssel und Passwörter, Modellwahl und Computer werden nie mitgenommen.",
   "noEngines.title": "Installiere einen Modellanbieter, um loszulegen",
   "noEngines.intro": "{app} bringt kein eigenes Modell mit — deine Bots laufen über eine auf diesem Rechner installierte KI-CLI mit deinem bestehenden Login. Richte eine davon ein und deine Bots erwachen zum Leben.",
@@ -2525,6 +2527,9 @@
   "placeLook.imageFailed": "Das Bild wurde nicht gespeichert. Versuche es noch einmal.",
   "placeLook.imageSaving": "Wird gespeichert…",
   "cloudWelcome.files.foldersLent": "Bots auf {name} nutzen die Dateien auf diesem Computer von selbst, solange er wach und OpenMausBot geöffnet ist. Du musst nichts einrichten.",
+  "secretCard.ref": "OpenMausBot bewahrt es für eine einzige Nutzung durch seine eigenen Werkzeuge auf. Dein Bot sieht es nie, und es landet nie im Chat.",
+  "secretCard.file": "Wird in einer privaten Datei gespeichert, die die Befehle deines Bots 24 Stunden lang lesen können, und danach gelöscht. Es landet nie im Chat.",
+  "secretCard.resumed": "Bot fortgesetzt",
   "notifications.status.notice": "Hinweis",
   "mcp.ownBot": "Nur für {bot}: Die Dateien liegen im eigenen Ordner von {bot}.",
   "mcp.offFor": "Aus für {bots}, weil er dort nicht startet. Er wird von selbst erneut geprüft."
