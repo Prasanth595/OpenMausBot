@@ -1,6 +1,7 @@
 // The v1 live view the phone apps and the companion speak (GET …/browser/live as server-sent events, POST
 // …/browser/action), served from the new browser. Its events and actions are frozen: the same names, fields and limits
 // as the agent-browser engine's, so a phone built against that keeps working unchanged.
+import { v1dbg } from "./core.ts";
 import type { ServerResponse } from "node:http";
 
 import { BROWSER_HELD_ELSEWHERE } from "../../../shared/browser-held.ts";
@@ -122,6 +123,7 @@ export class LiveV1 {
 
   /** One frame at the client at a time: a newer one waits, replacing (and releasing) any it supersedes. */
   #frame(viewer: V1Viewer, frame: Extract<ViewerOutput, { type: "frame" }>): void {
+    v1dbg("v1 frame", { ready: viewer.ready, still: frame.still, bytes: frame.data.length, pending: Boolean(viewer.pending), sent: viewer.sent?.seq ?? null, blocked: viewer.blocked });
     if (!viewer.ready || frame.data.length * 4 / 3 > MAX_FRAME) { frame.ack(); return; }
     if (viewer.pending) viewer.pending.ack();
     viewer.pending = frame;

@@ -1,0 +1,58 @@
+name: diag v1 live view
+
+# Throwaway diagnostic for the v1 live view stall (never merged): the viewers
+# suite on the runner's Google Chrome under Xvfb, repeated, with OMB_V1_DEBUG
+# timing lines from the viewer core, the live view and the session steps.
+on:
+  push:
+    branches: [diag/v1-live-view]
+
+permissions:
+  contents: read
+
+jobs:
+  v1:
+    name: v1 live view, round ${{ matrix.round }}
+    strategy:
+      fail-fast: false
+      matrix:
+        round: [1, 2, 3, 4]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ff378ebe6b225b0680b81c1ad4498ae0d1d3a5e3 # v6.0.10
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Let Chrome build its sandbox on this runner, and give it a display
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          sudo apt-get update && sudo apt-get install -y xvfb
+      - name: The viewers suite, twelve times
+        env:
+          OMB_CDP_E2E: "1"
+          OMB_V1_DEBUG: "1"
+        shell: bash
+        run: |
+          fails=0
+          for i in $(seq 1 12); do
+            if xvfb-run -a pnpm exec vitest run server/browser/viewers/viewers.e2e --reporter=verbose --silent=false > "$RUNNER_TEMP/iter-$i.log" 2>&1; then
+              echo "iteration $i passed: $(grep -o "sends the events and fields the agent-browser engine sent, step for step [0-9]*ms" "$RUNNER_TEMP/iter-$i.log" | tail -1)"
+            else
+              fails=$((fails + 1))
+              echo "ITERATION $i FAILED"
+              grep -E "v1dbg|×|Tests |no jpeg" "$RUNNER_TEMP/iter-$i.log" | tail -600
+            fi
+          done
+          echo "failed iterations: $fails"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: v1-diag-round-${{ matrix.round }}
+          path: ${{ runner.temp }}/iter-*.log
+          retention-days: 3

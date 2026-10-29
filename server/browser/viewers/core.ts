@@ -24,6 +24,7 @@ import type { Tab } from "../tabs.ts";
 import { ACCEPT_OF, chooseOption, cursorAt, editableAt, selectAt, type SelectPopup } from "./popups.ts";
 import { ViewerHold } from "./hold.ts";
 import { fitsScreen, MIN_WINDOW_WIDTH, requestedSize, VIEWPORT_PRESETS, viewportFor, ZOOM_LIMITS, zoomedLayout, type ViewportSetting } from "./viewport.ts";
+export const v1dbg = process.env.OMB_V1_DEBUG ? (...args: unknown[]) => console.error(`[v1dbg ${new Date().toISOString().slice(11, 23)}]`, ...args.map((a) => typeof a === "object" ? JSON.stringify(a) : a)) : () => {};
 
 /** Chromium keeps three frames unacknowledged, so acking 100 ms after arrival caps a viewer near 30 fps. */
 export const ACK_PACE_MS = { hi: 100, lo: 200 } as const;
@@ -193,6 +194,7 @@ export class Viewer {
   }
 
   async #bind(tab: Tab | null): Promise<void> {
+    v1dbg("bind", { tab: tab?.id ?? null, same: this.tab === tab, hidden: this.#hidden, paused: this.#paused });
     if (this.closed || this.tab === tab && this.#session && !this.#session.detached) return;
     await this.#unbind();
     this.tab = tab;
@@ -233,14 +235,17 @@ export class Viewer {
     this.#scale = scale;
     const session = this.#session;
     this.#params = this.#params.then(async () => {
+      v1dbg("start?", { scale, session: Boolean(session), current: session === this.#session, detached: session?.detached, paused: this.#paused, hidden: this.#hidden, closed: this.closed });
       if (!session || session !== this.#session || session.detached || this.#paused > 0 || this.#hidden || this.closed) return;
-      await session.send("Page.stopScreencast").catch(() => {});
+      const t0 = Date.now();
+      await session.send("Page.stopScreencast").catch((e) => v1dbg("stopScreencast failed", String(e)));
       await session.send("Page.startScreencast", {
         format: "jpeg",
         quality: scale < 1 ? Math.min(this.options.quality, MOTION_QUALITY) : this.options.quality,
         maxWidth: Math.max(1, Math.round(this.options.maxWidth * scale)),
         maxHeight: Math.max(1, Math.round(this.options.maxHeight * scale)),
-      }).catch(() => {});
+      }).catch((e) => v1dbg("startScreencast failed", String(e)));
+      v1dbg("started", { scale, ms: Date.now() - t0 });
     });
     return this.#params;
   }
@@ -248,6 +253,7 @@ export class Viewer {
   /** Stops the screencast while a scaled capture renders: it would show up in it. */
   pause(): Promise<void> {
     this.#paused++;
+    v1dbg("pause", { paused: this.#paused });
     const session = this.#session;
     this.#params = this.#params.then(() => session?.send("Page.stopScreencast").then(() => undefined, () => undefined));
     return this.#params;
@@ -255,11 +261,13 @@ export class Viewer {
 
   resume(): Promise<void> {
     this.#paused = Math.max(0, this.#paused - 1);
+    v1dbg("resume", { paused: this.#paused });
     return this.#paused === 0 ? this.#start(this.#scale) : Promise.resolve();
   }
 
   /** Another viewer holds the browser: this one sees no frames until it is released. */
   async hide(hidden: boolean): Promise<void> {
+    if (hidden !== this.#hidden) v1dbg("hide", { hidden });
     if (hidden === this.#hidden) return;
     this.#hidden = hidden;
     if (hidden) {
@@ -278,6 +286,7 @@ export class Viewer {
       return;
     }
     this.#frameSeen = true;
+    v1dbg("cdp frame", { inFlight: this.#framesInFlight, motion: this.#motion, paused: this.#paused, hidden: this.#hidden });
     if (this.#framesInFlight > 0) this.#mayHaveDropped = true;
     this.#framesInFlight++;
     const arrivedAt = Date.now();
@@ -342,7 +351,9 @@ export class Viewer {
   async pushStill(): Promise<void> {
     const tab = this.tab;
     const session = this.#session;
-    if (!tab || !session || session.detached || this.#hidden || this.closed) return;
+    if (!tab || !session || session.detached || this.#hidden || this.closed) { v1dbg("still skipped", { tab: Boolean(tab), session: Boolean(session), hidden: this.#hidden }); return; }
+    const t0 = Date.now();
+    v1dbg("still begin");
     try {
       const metrics = await session.send<{ cssVisualViewport: { pageX: number; pageY: number; clientWidth: number; clientHeight: number; scale?: number } }>("Page.getLayoutMetrics");
       const view = metrics.cssVisualViewport;
@@ -363,7 +374,8 @@ export class Viewer {
         still: true,
         ack: () => {},
       });
-    } catch {}
+      v1dbg("still pushed", { ms: Date.now() - t0 });
+    } catch (e) { v1dbg("still failed", { ms: Date.now() - t0, error: String(e) }); }
   }
 
   /** keyUp and mouseUp for everything this viewer still holds, on the session it pressed them on. */
@@ -766,12 +778,17 @@ export class ViewerHub {
   async #pausing<T>(tab: Tab, work: () => Promise<T>): Promise<T> {
     const watching = [...this.viewers].filter((viewer) => viewer.tab === tab);
     this.#capturing.set(tab, (this.#capturing.get(tab) ?? 0) + 1);
+    const t0 = Date.now();
+    v1dbg("pausing begin", { watching: watching.length });
     await Promise.all(watching.map((viewer) => viewer.pause()));
+    v1dbg("pausing paused", { ms: Date.now() - t0 });
     try {
       return await work();
     } finally {
+      v1dbg("pausing work done", { ms: Date.now() - t0 });
       this.#capturing.set(tab, (this.#capturing.get(tab) ?? 1) - 1);
       await Promise.all(watching.map((viewer) => viewer.resume()));
+      v1dbg("pausing end", { ms: Date.now() - t0 });
     }
   }
 

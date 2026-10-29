@@ -70,11 +70,15 @@ export async function runV1Session(driver: LiveDriver, origin: string, { settleM
   const records: StepRecord[] = [];
   let mark = 0;
   const step = async (name: string, run: () => Promise<unknown>) => {
+    const t0 = Date.now();
+    console.error(`[v1dbg ${new Date().toISOString().slice(11, 23)}] STEP ${name} begin`);
     const answer = await run().catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }));
+    console.error(`[v1dbg ${new Date().toISOString().slice(11, 23)}] STEP ${name} answered after ${Date.now() - t0} ms: ${String(JSON.stringify(answer)).slice(0, 200)}`);
     const record = (): StepRecord => ({ step: name, answer, events: sse.events.slice(mark) });
     await sleep(settleMs);
     for (const until = Date.now() + maxSettleMs; shown && !shown(record()) && Date.now() < until;) await sleep(50);
     records.push(record());
+    console.error(`[v1dbg ${new Date().toISOString().slice(11, 23)}] STEP ${name} end after ${Date.now() - t0} ms: ${records.at(-1)!.events.map((e) => e.type).join(",")}`);
     mark = sse.events.length;
   };
   const act = (body: Record<string, unknown>) => driver.action(viewerId, body);
