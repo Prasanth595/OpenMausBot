@@ -5,6 +5,10 @@ const MASCOT_PX = 28;
 /** Lines of 13 px text at 1.4 that fit the tallest box with its label and padding. */
 const TEXT_LINES = 10;
 const LIGHT = "color-scheme:light;--panel:#f7f7f7f5;--border:#0000001a;--ink:#0d0d0d;--ink2:#444444;--accent:#0b62c4;--warning:#8a5a00;--danger:#c02b3a;--hover:#0000000d";
+export const TALK_BOX_THEME_CSS = `:root{color-scheme:dark light}
+body{color-scheme:dark;--panel:#111111f5;--border:#ffffff16;--ink:#fcfcfc;--ink2:#fcfcfcbf;--accent:#1084fe;--warning:#ff9800;--danger:#ff5667;--hover:#ffffff14}
+body.light{${LIGHT}}
+@media (prefers-color-scheme: light){body:not(.dark){${LIGHT}}}`;
 
 export const TALK_LABELS = Object.freeze({
   listening: "Listening…",
@@ -18,6 +22,10 @@ export const TALK_LABELS = Object.freeze({
 });
 
 const panels = new WeakSet();
+
+export function markTalkPanel(win) {
+  panels.add(win);
+}
 
 export function isTalkPanel(win) {
   return panels.has(win);
@@ -54,10 +62,7 @@ export function replyPreview(text, limit = 400) {
 export function talkPanelHtml(iconBase64) {
   const labels = JSON.stringify(TALK_LABELS);
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>MausBot</title><style>
-:root{color-scheme:dark light}
-body{color-scheme:dark;--panel:#111111f5;--border:#ffffff16;--ink:#fcfcfc;--ink2:#fcfcfcbf;--accent:#1084fe;--warning:#ff9800;--danger:#ff5667;--hover:#ffffff14}
-body.light{${LIGHT}}
-@media (prefers-color-scheme: light){body:not(.dark){${LIGHT}}}
+${TALK_BOX_THEME_CSS}
 *{box-sizing:border-box}html,body{margin:0;background:transparent;overflow:hidden;font:13px/1.4 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:var(--ink);-webkit-user-select:none;user-select:none}
 body{opacity:0;transition:opacity 160ms ease}body.on{opacity:1}
 #card{position:relative;display:flex;gap:12px;align-items:flex-start;min-height:56px;padding:14px 40px 14px 14px;border:1px solid var(--border);border-radius:16px;background:var(--panel);cursor:pointer}
@@ -88,7 +93,7 @@ document.getElementById("close").addEventListener("click",e=>{e.stopPropagation(
 }
 
 /** The mascot as a PNG at twice its CSS size, for Retina displays. */
-function mascotPng(nativeImage, iconPath) {
+export function mascotPng(nativeImage, iconPath) {
   const icon = nativeImage.createFromPath(iconPath);
   if (icon.isEmpty()) throw new Error(`no talk box icon at ${iconPath}`);
   return icon.resize({ width: 2 * MASCOT_PX, height: 2 * MASCOT_PX, quality: "best" }).toPNG().toString("base64");
