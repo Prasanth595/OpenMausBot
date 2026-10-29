@@ -19,11 +19,11 @@ const names = windows => windows.map(win => win?.name ?? null);
 const CLOUD = "https://home.example.test";
 const HOME_HERE = Object.freeze({ kind: "computer" }), HOME_CLOUD = Object.freeze({ kind: "cloud", origin: CLOUD });
 const talkKeys = h => [...h.registered.keys()].filter(key => key.endsWith("Space"));
-const typeKeys = h => [...h.registered.keys()].filter(key => key.endsWith("+T"));
+const typeKeys = h => [...h.registered.keys()].filter(key => key.endsWith("+M"));
 const typeBoxes = h => h.windows.filter(win => isTalkPanel(win) && win.options.focusable === true && !win.destroyed);
 const SETTINGS = Object.freeze({
   "talk-shortcut": { unavailable: TALK_SHORTCUT_UNAVAILABLE, key: "ctrl-opt-space", other: "ctrl-shift-space", accelerator: "Control+Shift+Space", keys: talkKeys },
-  "type-shortcut": { unavailable: TYPE_SHORTCUT_UNAVAILABLE, key: "ctrl-opt-t", other: "ctrl-shift-t", accelerator: "Control+Shift+T", keys: typeKeys },
+  "type-shortcut": { unavailable: TYPE_SHORTCUT_UNAVAILABLE, key: "ctrl-opt-m", other: "ctrl-shift-m", accelerator: "Control+Shift+M", keys: typeKeys },
 });
 
 /** `serve(route, where)`: an answer for this computer's server ("local", "dev") or My Cloud ("cloud"), else none yet. */
@@ -103,7 +103,7 @@ function harness({ packaged = true, appleSpeech = true, remote = false, register
   h.sync = (channel, event) => { h.listeners.get(channel)(event); return event.returnValue; };
   h.where = () => h.requests.map(([where, url]) => [where, url]);
   h.press = () => h.registered.get("Control+Alt+Space")();
-  h.typePress = () => h.registered.get("Control+Alt+T")();
+  h.typePress = () => h.registered.get("Control+Alt+M")();
   h.page = name => new FakeBrowserWindow({ name });
   h.box = () => h.windows.findLast(win => isTalkPanel(win) && win.options.focusable === false);
   h.typeBox = () => h.windows.findLast(win => isTalkPanel(win) && win.options.focusable === true);
@@ -546,10 +546,10 @@ test("quitting while listening logs a failure to stop speech and still lets the 
 test("the type shortcut is offered on macOS without Apple speech, never elsewhere or on a remote client", () => {
   const mac = harness({ appleSpeech: false }); mac.start();
   assert.deepEqual([mac.handle("type-shortcut:state", {}).available, mac.handle("talk-shortcut:state", {}).available], [true, false]);
-  assert.deepEqual([...mac.registered.keys()], ["Control+Alt+T"]);
+  assert.deepEqual([...mac.registered.keys()], ["Control+Alt+M"]);
   for (const options of [{ platform: "win32", appleSpeech: false }, { remote: true }]) {
     const h = harness(options); h.start();
-    assert.deepEqual([h.handle("type-shortcut:state", {}).available, h.registered.has("Control+Alt+T")], [false, false]);
+    assert.deepEqual([h.handle("type-shortcut:state", {}).available, h.registered.has("Control+Alt+M")], [false, false]);
   }
 });
 
@@ -558,15 +558,15 @@ test("before it is set up the type setting says unavailable; afterwards each set
   assert.equal(h.handle("type-shortcut:state", {}), TYPE_SHORTCUT_UNAVAILABLE);
   h.start();
   h.handle("talk-shortcut:set", {}, { enabled: false });
-  assert.deepEqual([...h.registered.keys()], ["Control+Alt+T"]);
-  h.handle("type-shortcut:set", {}, { key: "opt-shift-t", extra: 1 });
-  assert.deepEqual([...h.registered.keys()], ["Alt+Shift+T"]);
+  assert.deepEqual([...h.registered.keys()], ["Control+Alt+M"]);
+  h.handle("type-shortcut:set", {}, { key: "opt-shift-m", extra: 1 });
+  assert.deepEqual([...h.registered.keys()], ["Alt+Shift+M"]);
   assert.equal(h.handle("talk-shortcut:state", {}).key, "ctrl-opt-space");
   h.talk.close();
   assert.deepEqual([...h.registered.keys()], []);
 });
 
-test("⌃⌥T opens the focusable box; Return asks this computer's Quick asks and talk's never-focused box takes over", async () => {
+test("⌃⌥M opens the focusable box; Return asks this computer's Quick asks and talk's never-focused box takes over", async () => {
   const h = harness(); h.start(); h.typePress();
   const typing = h.typeBox();
   typing.webContents.emit("did-finish-load"); await settle();
@@ -575,7 +575,7 @@ test("⌃⌥T opens the focusable box; Return asks this computer's Quick asks an
   assert.equal(typing.destroyed, true);
   assert.deepEqual(h.where()[0], ["local", "/api/bots?messages=0"]);
   assert.deepEqual((await h.painted())[0], { state: "sending", text: "", echo: "what's on" });
-  assert.equal(typeBoxes(h).length, 1, "a fresh hidden type box waits for the next ⌃⌥T");
+  assert.equal(typeBoxes(h).length, 1, "a fresh hidden type box waits for the next ⌃⌥M");
   h.talk.close();
 });
 
@@ -586,12 +586,12 @@ test("the type box opens in the skin the app painted last", async () => {
   h.talk.close();
 });
 
-test("home needing a sign-in lets ⌃⌥T go; My Cloud as home takes it back", () => {
+test("home needing a sign-in lets ⌃⌥M go; My Cloud as home takes it back", () => {
   const h = harness(); h.start();
   h.home = { kind: "signin" }; h.talk.homeChanged();
-  assert.deepEqual([h.registered.has("Control+Alt+T"), h.handle("type-shortcut:state", {}).available], [false, false]);
+  assert.deepEqual([h.registered.has("Control+Alt+M"), h.handle("type-shortcut:state", {}).available], [false, false]);
   h.home = HOME_CLOUD; h.talk.homeChanged();
-  assert.equal(h.registered.has("Control+Alt+T"), true);
+  assert.equal(h.registered.has("Control+Alt+M"), true);
   h.talk.close();
 });
 
@@ -602,7 +602,7 @@ test("quitting closes an open type box, leaves none waiting and lets both keys g
   assert.deepEqual([typing.destroyed, typeBoxes(h), [...h.registered.keys()]], [true, [], []]);
 });
 
-test("one hidden type box waits while ⌃⌥T is on and available, and a press shows it with no new window", () => {
+test("one hidden type box waits while ⌃⌥M is on and available, and a press shows it with no new window", () => {
   const h = harness();
   h.start();
   assert.equal(typeBoxes(h).length, 1);
@@ -632,7 +632,7 @@ test("the type setting reaches My Cloud's own page while it is home, never a tea
   assert.throws(() => h.handle("type-shortcut:set", { remote: true, cloudPage: false, senderFrame: { origin: "https://team.example.test" } }, { enabled: false }), /only available/);
   const page = preloadAt(CLOUD, { home: true, talk: true });
   await assert.rejects(page.bridge.typeShortcut.set({ enabled: true }), /type shortcut/);
-  await assert.rejects(page.bridge.typeShortcut.set({ key: "ctrl-shift-t" }), /type shortcut/);
+  await assert.rejects(page.bridge.typeShortcut.set({ key: "ctrl-shift-m" }), /type shortcut/);
   await page.bridge.typeShortcut.set({ enabled: false });
   assert.deepEqual(plain(page.invoked), [["type-shortcut:set", { enabled: false }]]);
   assert.equal(preloadAt("https://team.example.test", { home: true, talk: false }).bridge.typeShortcut, undefined);
@@ -641,7 +641,7 @@ test("the type setting reaches My Cloud's own page while it is home, never a tea
 
 test("a type shortcut that cannot be set up lets talk's key go too, so no key is left with nothing behind it", () => {
   const h = harness({ register: (accelerator, press) => {
-    if (accelerator === "Control+Alt+T") throw new Error("no hotkeys");
+    if (accelerator === "Control+Alt+M") throw new Error("no hotkeys");
     h.registered.set(accelerator, press);
     return true;
   } });

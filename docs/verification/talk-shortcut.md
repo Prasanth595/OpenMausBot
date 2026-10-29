@@ -1,8 +1,8 @@
-# Talk and type shortcuts (hold ⌃⌥Space to talk, press ⌃⌥T to type, from any app)
+# Talk and type shortcuts (hold ⌃⌥Space to talk, press ⌃⌥M to type, from any app)
 
 Hold ⌃⌥Space from any app, speak, let go. The words go to MausBot's "Quick asks"
 chat and a never-focused box at the bottom of the screen shows the reply.
-Press ⌃⌥T instead and a small focused box takes typing; Return sends the words
+Press ⌃⌥M instead and a small focused box takes typing; Return sends the words
 to the same chat and the reply shows in a box on the same timing.
 
 The real hotkey, the microphone, window focus and Spaces are macOS behavior:
@@ -31,7 +31,7 @@ focus, that it shows over full-screen apps and other Spaces, or the release of
 The `talk-type-*` tests in the same command also prove the type shortcut:
 presets, preferences and independence from talk; the type box's window flags
 (a focusable panel, shown inactive then focused, never `show()`, destroyed at
-once); one loaded, hidden box waiting while ⌃⌥T is registered, shown by a press
+once); one loaded, hidden box waiting while ⌃⌥M is registered, shown by a press
 with no new window, replaced after each close; a blur, a gone renderer, a
 closed window or a failed page reported once; the page's messages checked; the
 ⌘ chord guard; the key rule with an input method, a blank Return, read-only
@@ -203,7 +203,7 @@ Quick asks chat the open one there once).
 23. **Teams stay off.** With a team's Cloud shown, a press still asks My
     Cloud's MausBot, never the team's.
 
-### By hand: Type (⌃⌥T)
+### By hand: Type (⌃⌥M)
 
 Start a background log of the frontmost app, five lines a second, for steps
 25-29 (stop it with `kill %1` when done):
@@ -217,9 +217,9 @@ end repeat' &
 ```
 
 24. **Row.** Settings → General (Simple and Advanced) shows "Type to MausBot
-    from any app" under the talk row, on, "Press ⌃⌥T, type, then press Return…".
+    from any app" under the talk row, on, "Press ⌃⌥M, type, then press Return…".
 25. **Focus (ship gate).** Safari in front, over the MausBot window; press
-    ⌃⌥T: the box shows bottom-centre with a blinking caret and takes the
+    ⌃⌥M: the box shows bottom-centre with a blinking caret and takes the
     keystrokes; the menu bar still says Safari, `front.log` reads `Safari`
     throughout, and the MausBot window never comes forward.
 26. **Send (ship gate).** Type "what can you do", Return: the words show at
@@ -231,11 +231,11 @@ end repeat' &
 27. **Esc and × (ship gate).** The box closes at once, nothing is sent, and the
     next keystroke lands in Safari; then again with MausBot's composer focused
     behind Safari, as in step 26.
-28. **From MausBot itself (ship gate).** Composer focused: ⌃⌥T then Esc puts
-    focus back in the composer; ⌃⌥T then Return leaves MausBot's open chat as
+28. **From MausBot itself (ship gate).** Composer focused: ⌃⌥M then Esc puts
+    focus back in the composer; ⌃⌥M then Return leaves MausBot's open chat as
     it was.
 29. **Type-ahead (ship gate).** TextEdit in front with a document focused;
-    press ⌃⌥T and at once type "abc⏎" without waiting for the box: nothing
+    press ⌃⌥M and at once type "abc⏎" without waiting for the box: nothing
     lands in TextEdit. Repeat a second after a send and a second after Esc
     (the box made at each close).
 30. **Editing while another app is active.** ⌘A, ⌘C, ⌘V, ⌘X and ⌘Z edit the box
@@ -247,29 +247,29 @@ end repeat' &
     field.
 32. **Input method.** Japanese Romaji, "nihon": Return makes 日本 without
     sending; a second Return sends.
-33. **Toggle and repeat.** ⌃⌥T closes an empty box and leaves one with words
-    open, with the caret still in it; holding ⌃⌥T for 2 s leaves one box open.
+33. **Toggle and repeat.** ⌃⌥M closes an empty box and leaves one with words
+    open, with the caret still in it; holding ⌃⌥M for 2 s leaves one box open.
 34. **Clicking away.** With words in the box, a click on Safari's page, ⌘Tab, or
     ⌃→ to another Space each closes it at once (no box stays up without focus);
-    ⌃⌥T within 5 minutes brings the words back with the caret at the end, after
+    ⌃⌥M within 5 minutes brings the words back with the caret at the end, after
     5 minutes it opens empty; Esc and Return drop the words.
 35. **Idle.** An empty box closes after about 60 s.
 36. **Full screen and Spaces.** In a full-screen app and on another Space the
     box shows there and takes typing; the app keeps its focus after Esc.
-37. **Secure input.** Safari's password field focused, ⌃⌥T: note whether
+37. **Secure input.** Safari's password field focused, ⌃⌥M: note whether
     nothing happens or the box opens; keystrokes never land in the password
     field while the box is up.
-38. **Talk against type.** While listening, ⌃⌥T does nothing; over a talk reply
+38. **Talk against type.** While listening, ⌃⌥M does nothing; over a talk reply
     it opens the box; while the box is open, ⌃⌥Space does nothing; over a typed
     reply, ⌃⌥Space listens.
-39. **Independence.** Talk off: ⌃⌥T works; type off: ⌃⌥T is free and talk works;
-    ⌃⇧T and ⌥⇧T work; another app holding ⌃⌥T: "⌃⌥T is used by another app.
+39. **Independence.** Talk off: ⌃⌥M works; type off: ⌃⌥M is free and talk works;
+    ⌃⇧M and ⌥⇧M work; another app holding ⌃⌥M: "⌃⌥M is used by another app.
     Pick another shortcut."
 40. **My Cloud.** Home on My Cloud: the ask goes to its Quick asks; asleep:
     "Waking My Cloud…" under the words, then the reply, sent once; the row is on
     My Cloud's own page, where turning it on or changing the key takes a click,
     and absent on a team's page.
-41. **Starting.** ⌃⌥T and Return right after a relaunch: "MausBot is still
+41. **Starting.** ⌃⌥M and Return right after a relaunch: "MausBot is still
     starting. Try again in a moment."
 42. **Light and dark.** The type box and the echo follow the app's skin;
     compare with the `typed-*` PNGs.

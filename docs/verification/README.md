@@ -113,7 +113,7 @@ creating, switching between and recovering named local environments by hand on
 a packaged desktop install; the control surface cannot drive it, so it is not
 in the map above.
 
-The [talk shortcut recipe](talk-shortcut.md) checks hold-to-talk and ⌃⌥T typing from any
+The [talk shortcut recipe](talk-shortcut.md) checks hold-to-talk and ⌃⌥M typing from any
 app, the reply box and the Quick asks chat by hand on a packaged side-by-side build; the
 control surface cannot drive a global shortcut or the microphone, so it is not
 in the map above.

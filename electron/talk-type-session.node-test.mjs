@@ -56,7 +56,7 @@ test("type timings and the typed server-down line are fixed", () => {
   assert.ok(Object.isFrozen(TYPE_TIMING) && Object.isFrozen(TYPE_TEXT));
 });
 
-test("⌃⌥T opens an empty box; Return sends exactly the typed words to Quick asks, echoed through talk's states", async () => {
+test("⌃⌥M opens an empty box; Return sends exactly the typed words to Quick asks, echoed through talk's states", async () => {
   const h = harness(); const words = "what's on\n today ";
   h.session.typePress();
   assert.deepEqual([h.typed, h.prepares], [[{ text: "" }], 0]);
@@ -106,7 +106,7 @@ test("clicking away closes the box and keeps the words for 5 minutes", () => {
   assert.deepEqual(h.typed.at(-1), { text: "" });
 });
 
-test("⌃⌥T on an open box closes it when blank and gives it focus back when it holds words", () => {
+test("⌃⌥M on an open box closes it when blank and gives it focus back when it holds words", () => {
   const h = harness();
   h.session.typePress(); mock.timers.tick(500); h.session.typeInput("keep"); h.session.typePress();
   assert.deepEqual([h.typeClosed, h.focused], [0, 1]);
@@ -114,7 +114,7 @@ test("⌃⌥T on an open box closes it when blank and gives it focus back when i
   assert.deepEqual([h.typeClosed, h.focused], [1, 1]);
 });
 
-test("a ⌃⌥T within 500 ms of the last one is a key repeat: one box stays open", () => {
+test("a ⌃⌥M within 500 ms of the last one is a key repeat: one box stays open", () => {
   const h = harness();
   h.session.typePress(); mock.timers.tick(300); h.session.typePress(); mock.timers.tick(400); h.session.typePress();
   assert.deepEqual([h.typed.length, h.typeClosed], [1, 0]);
@@ -150,7 +150,7 @@ test("a box that fails to open keeps the draft it would have shown, on the draft
   assert.deepEqual(h.typed.at(-1), { text: "" });
 });
 
-test("one ask at a time: ⌃⌥T waits while talk listens or an ask is on its way, and ⌃⌥Space waits while the box takes words or a typed ask is on its way", async () => {
+test("one ask at a time: ⌃⌥M waits while talk listens or an ask is on its way, and ⌃⌥Space waits while the box takes words or a typed ask is on its way", async () => {
   const { ask } = holdAsk([]);
   const h = harness({ ask });
   h.session.press(); h.session.typePress();
@@ -163,7 +163,7 @@ test("one ask at a time: ⌃⌥T waits while talk listens or an ask is on its wa
   assert.deepEqual([t.starts.length, t.session.busy()], [0, true]);
 });
 
-test("⌃⌥T over a reply opens a fresh box; ⌃⌥Space over a typed reply listens", async () => {
+test("⌃⌥M over a reply opens a fresh box; ⌃⌥Space over a typed reply listens", async () => {
   const h = harness();
   h.session.press(); say(h, "hi"); release(h); await flush();
   h.session.typePress();
@@ -193,7 +193,7 @@ test("a typed ask that wakes My Cloud says so under the echo, then sends once", 
   assert.equal(h.asks.length, 1);
 });
 
-test("the box's words, send, cancel and blur do nothing with no box open; a box that fails to open leaves ⌃⌥T working", () => {
+test("the box's words, send, cancel and blur do nothing with no box open; a box that fails to open leaves ⌃⌥M working", () => {
   const h = harness();
   h.session.typeInput("x"); h.session.typeSend("x"); h.session.typeCancel(); h.session.typeBlurred();
   assert.deepEqual([h.prepares, h.typeClosed, h.views.length], [0, 0, 0]);

@@ -123,8 +123,8 @@ describe("TalkShortcutRow", () => {
 
 describe("TypeShortcutRow", () => {
   const typeBase: TypeShortcutState = {
-    available: true, enabled: true, key: "ctrl-opt-t",
-    keys: [{ id: "ctrl-opt-t", label: "⌃⌥T" }, { id: "ctrl-shift-t", label: "⌃⇧T" }, { id: "opt-shift-t", label: "⌥⇧T" }],
+    available: true, enabled: true, key: "ctrl-opt-m",
+    keys: [{ id: "ctrl-opt-m", label: "⌃⌥M" }, { id: "ctrl-shift-m", label: "⌃⇧M" }, { id: "opt-shift-m", label: "⌥⇧M" }],
     taken: false,
   };
   const valueSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!;
@@ -145,29 +145,29 @@ describe("TypeShortcutRow", () => {
     (window as unknown as { ogb: unknown }).ogb = { talkShortcut: bridge, typeShortcut: typeBridge };
   });
 
-  it("shows its own row, on, with ⌃⌥T, even where talk's row is hidden", async () => {
+  it("shows its own row, on, with ⌃⌥M, even where talk's row is hidden", async () => {
     await showBoth();
     expect(host.textContent).toContain("Type to MausBot from any app");
-    expect(host.textContent).toContain("Press ⌃⌥T, type, then press Return");
+    expect(host.textContent).toContain("Press ⌃⌥M, type, then press Return");
     expect(host.textContent).not.toContain("Talk to MausBot");
   });
 
   it("changes its key and turns off over its own bridge only", async () => {
     await showBoth();
     const select = host.querySelector<HTMLSelectElement>('select[aria-label="Type shortcut"]')!;
-    await act(async () => { valueSetter.call(select, "ctrl-shift-t"); select.dispatchEvent(new Event("change", { bubbles: true })); });
+    await act(async () => { valueSetter.call(select, "ctrl-shift-m"); select.dispatchEvent(new Event("change", { bubbles: true })); });
     await settle();
-    expect(typeBridge.set).toHaveBeenCalledWith({ key: "ctrl-shift-t" });
-    expect(host.textContent).toContain("Press ⌃⇧T");
+    expect(typeBridge.set).toHaveBeenCalledWith({ key: "ctrl-shift-m" });
+    expect(host.textContent).toContain("Press ⌃⇧M");
     await click(host.querySelector<HTMLButtonElement>('button[aria-label="Type to MausBot from any app"]')!);
     expect(typeBridge.set).toHaveBeenLastCalledWith({ enabled: false });
     expect(bridge.set).not.toHaveBeenCalled();
   });
 
-  it("says when another app holds ⌃⌥T", async () => {
+  it("says when another app holds ⌃⌥M", async () => {
     typed = { ...typed, taken: true };
     await showBoth();
-    expect(host.querySelector('[role="alert"]')?.textContent).toBe("⌃⌥T is used by another app. Pick another shortcut.");
+    expect(host.querySelector('[role="alert"]')?.textContent).toBe("⌃⌥M is used by another app. Pick another shortcut.");
   });
 
   it("is hidden without its bridge or when unavailable", async () => {

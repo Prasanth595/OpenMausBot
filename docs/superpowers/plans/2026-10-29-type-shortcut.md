@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** On macOS, press ⌃⌥T in any app, type, press Return. The words go to MausBot's Quick asks chat (this computer or My Cloud) and the answer shows where the talk box shows, while the app the person was in stays the active app.
+**Goal:** On macOS, press ⌃⌥M in any app, type, press Return. The words go to MausBot's Quick asks chat (this computer or My Cloud) and the answer shows where the talk box shows, while the app the person was in stays the active app.
 
-**Architecture:** A second key object (`createTypeShortcut`) sits beside talk's, with its own prefs, IPC and bridge. A new focusable panel window (`electron/talk-type-box.mjs`) takes the typing. One waits loaded and hidden while ⌃⌥T is on and available, so a press only shows it; it is destroyed the moment the words are sent, dropped or left, so key focus leaves with it, and a fresh one waits. From Return on, the ask runs through talk's own session states and talk's never-focused box, which gains a two-line echo of the typed words. All wiring lives in `installTalk` (`electron/talk-main.mjs`), and `electron/main.mjs` does not change.
+**Architecture:** A second key object (`createTypeShortcut`) sits beside talk's, with its own prefs, IPC and bridge. A new focusable panel window (`electron/talk-type-box.mjs`) takes the typing. One waits loaded and hidden while ⌃⌥M is on and available, so a press only shows it; it is destroyed the moment the words are sent, dropped or left, so key focus leaves with it, and a fresh one waits. From Return on, the ask runs through talk's own session states and talk's never-focused box, which gains a two-line echo of the typed words. All wiring lives in `installTalk` (`electron/talk-main.mjs`), and `electron/main.mjs` does not change.
 
 **Tech Stack:** Electron ^43.5.0 main (ESM `.mjs`, sandboxed preload `.cjs`), Node 24 `node:test` for `electron/*.node-test.mjs`, vitest + happy-dom for `src/`, React.
 
@@ -13,14 +13,14 @@
 ## Global Constraints
 
 - Node 24 for every command: prefix `PATH=/Users/omkar/.nvm/versions/node/v24.14.1/bin:$PATH`. Electron tests: `node --test electron/<file>.node-test.mjs`. Vitest: `pnpm exec vitest run <file>`. Then `pnpm typecheck`, `pnpm lint` and `pnpm i18n:check`.
-- macOS only. Elsewhere ⌃⌥T is never registered, `typeShortcut.state().available` is false and the row is hidden. Windows is a later follow-up.
+- macOS only. Elsewhere ⌃⌥M is never registered, `typeShortcut.state().available` is false and the row is hidden. Windows is a later follow-up.
 - Available when `platform === "darwin"`, this desktop is not a remote client, and talk's `reachable()` holds (home is this computer, or the verified My Cloud). Apple speech is not required.
-- Keys, exactly: `ctrl-opt-t` → `Control+Alt+T`, `⌃⌥T` (default); `ctrl-shift-t` → `Control+Shift+T`, `⌃⇧T`; `opt-shift-t` → `Alt+Shift+T`, `⌥⇧T`. None overlaps a talk key.
+- Keys, exactly: `ctrl-opt-m` → `Control+Alt+M`, `⌃⌥M` (default); `ctrl-shift-m` → `Control+Shift+M`, `⌃⇧M`; `opt-shift-m` → `Alt+Shift+M`, `⌥⇧M`. None overlaps a talk key.
 - Independent of talk: `desktop-prefs.json` fields `typeShortcut` (absent = on) and `typeKey`, its own registration object, IPC `type-shortcut:state` / `type-shortcut:set`, bridge `window.ogb.typeShortcut`; talk off or talk's key taken never touches type, and the reverse.
 - Only the typed words are sent, exactly as typed, in talk's body `{ text, threadId, sendId }`; talk marks nothing as spoken, so nothing marks an ask as typed; never an app name, selection or clipboard.
 - The type box is `type: "panel"`, `focusable: true`, shown with `showInactive()` then `focus()`, never `show()`, and destroyed at once (no fade) on Return, Esc, ×, losing focus, idle and quit; talk's box keeps `focusable: false` and shows every typed ask from Return on.
 - The box's page is as safe as talk's: a `data:` page under talk's CSP, text only via `textContent`/`value`, navigation and new windows refused, messages counted only from its own `webContents`, typed text going page → main → session → `server.ask`, never page → server.
-- Timings: an empty box closes after 60 s; a draft lives 5 min, in memory only; a ⌃⌥T within 500 ms of the last is a key repeat; reply, notice and 120 s timings are talk's.
+- Timings: an empty box closes after 60 s; a draft lives 5 min, in memory only; a ⌃⌥M within 500 ms of the last is a key repeat; reply, notice and 120 s timings are talk's.
 - Limit: 4,000 characters, as the textarea's `maxlength` and main's check (the composer has no limit to match).
 - Echo: the typed words are the box's first lines, plain text clamped to 2 lines with an ellipsis; the reply keeps `replyPreview`'s 400 characters and clamps to 8 lines under an echo, so the card stays ≤ 240 px.
 - Copy: the box's strings are English constants in main (`TYPE_BOX_TEXT` in `talk-type-box.mjs`, `TYPE_TEXT` in `talk-session.mjs`); Settings strings go only in `src/locales/en.json`.
@@ -34,8 +34,8 @@
 
 - ⌘ chords typed in the box (⌘Q, ⌘W, ⌘R, ⌘,, ⌘H, ⌘M): nothing happens (no quit, hide, reload, or Settings pulling the window forward), while ⌘A/⌘C/⌘V/⌘X/⌘Z, ⇧⌘Z, ⌘-arrows and ⌘⌫ still edit. Pinned in Task 1.
 - Return while an input method is composing (Japanese, Chinese, Korean): it confirms the composition and sends nothing. Pinned in Task 2.
-- The box's own close also fires `blur`: Return and Esc keep no draft, so the next ⌃⌥T opens empty, never with the words just sent or dropped. Pinned in Tasks 1 and 4.
-- ⌃⌥T held down or double-tapped (hot keys can repeat): one box that stays open, never an open-close flicker. Pinned in Task 4.
+- The box's own close also fires `blur`: Return and Esc keep no draft, so the next ⌃⌥M opens empty, never with the words just sent or dropped. Pinned in Tasks 1 and 4.
+- ⌃⌥M held down or double-tapped (hot keys can repeat): one box that stays open, never an open-close flicker. Pinned in Task 4.
 - A paste over 4,000 characters, or a page message that isn't a string or is longer: the box keeps the first 4,000, exactly what it shows is sent, and anything else is ignored. Pinned in Tasks 1 and 2.
 
 ## Settled here (open or ambiguous in the spec)
@@ -45,8 +45,8 @@
 - **The echo stays above the reply** as the box's first lines; the reply does not replace it.
 - **⌃⌥Space while the type box is open does nothing**, because typing is type's listening. Over a typed reply, ⌃⌥Space listens, as it already does over a talk reply.
 - **"Couldn't reach MausBot".** Talk's server-down line reads "Open MausBot to talk". A typed ask says "Couldn't reach MausBot. Try again in a moment." instead. Every other refusal uses talk's line.
-- **Blank means empty or whitespace-only**, for Return, the ⌃⌥T toggle, the idle close and drafts.
-- **The chat is prepared at Return, not at ⌃⌥T**, so an abandoned box never wakes My Cloud. A wake shows "Waking My Cloud…" under the echo.
+- **Blank means empty or whitespace-only**, for Return, the ⌃⌥M toggle, the idle close and drafts.
+- **The chat is prepared at Return, not at ⌃⌥M**, so an abandoned box never wakes My Cloud. A wake shows "Waking My Cloud…" under the echo.
 - **Return drops the draft even when the ask is then refused**, following "Esc and Enter both drop the draft". Talk drops refused words the same way. × drops the draft, as Esc does.
 - **No `.d.mts` for `talk-type-box.mjs`**, and none for the session: no TypeScript imports them.
 
@@ -339,44 +339,44 @@ git commit -m "feat(type): Return, Shift+Return, Esc, six lines and 4,000 charac
 - Test: `electron/talk-shortcut.node-test.mjs`, `electron/desktop-prefs.node-test.mjs`
 
 **Interfaces:**
-- Produces in `talk-keys.mjs`: `TYPE_KEYS` (frozen `{ [id]: { accelerator, label } }`, the three keys of Global Constraints in that order), `DEFAULT_TYPE_KEY = "ctrl-opt-t"`, `isTypeKey(id): boolean`.
+- Produces in `talk-keys.mjs`: `TYPE_KEYS` (frozen `{ [id]: { accelerator, label } }`, the three keys of Global Constraints in that order), `DEFAULT_TYPE_KEY = "ctrl-opt-m"`, `isTypeKey(id): boolean`.
 - Produces on `DesktopPrefs`: `typeShortcut(): boolean` (true until switched off), `setTypeShortcut(enabled: boolean): void`, `typeKey(): TypeKeyId`, `setTypeKey(id: unknown): boolean` (false, and nothing saved, for anything but a type key).
 - Produces in `talk-shortcut.mjs`: `createTypeShortcut({ globalShortcut, prefs, available, onPress }): { state(): TypeShortcutState; set(change: { enabled?: unknown; key?: unknown }): TypeShortcutState; refresh(): void; close(): void }` and `TYPE_SHORTCUT_UNAVAILABLE`; `createTalkShortcut` keeps its API, `releaseModifiers` included.
-- Produces in `talk-shortcut.d.mts`: `TypeKeyId = "ctrl-opt-t" | "ctrl-shift-t" | "opt-shift-t"`; `ShortcutState<K extends string>` (today's `TalkShortcutState` fields); `TalkShortcutState extends ShortcutState<TalkKeyId>`; `TypeShortcutState extends ShortcutState<TypeKeyId>`; `TypeShortcutChange { enabled?: boolean; key?: TypeKeyId }`; `TypeShortcutBridge { state(): Promise<TypeShortcutState>; set(change: TypeShortcutChange): Promise<TypeShortcutState> }`.
+- Produces in `talk-shortcut.d.mts`: `TypeKeyId = "ctrl-opt-m" | "ctrl-shift-m" | "opt-shift-m"`; `ShortcutState<K extends string>` (today's `TalkShortcutState` fields); `TalkShortcutState extends ShortcutState<TalkKeyId>`; `TypeShortcutState extends ShortcutState<TypeKeyId>`; `TypeShortcutChange { enabled?: boolean; key?: TypeKeyId }`; `TypeShortcutBridge { state(): Promise<TypeShortcutState>; set(change: TypeShortcutChange): Promise<TypeShortcutState> }`.
 
 - [ ] **Step 1: Write the failing tests**
 
 In `desktop-prefs.node-test.mjs`:
 
 ```js
-test("the type shortcut is on with ⌃⌥T until changed, apart from talk's, and survives a restart", () => {
+test("the type shortcut is on with ⌃⌥M until changed, apart from talk's, and survives a restart", () => {
   let saved = null;
   const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
-  assert.deepEqual([prefs.typeShortcut(), prefs.typeKey()], [true, "ctrl-opt-t"]);
+  assert.deepEqual([prefs.typeShortcut(), prefs.typeKey()], [true, "ctrl-opt-m"]);
   prefs.setTalkShortcut(false);
   assert.equal(prefs.typeShortcut(), true);
   prefs.setTypeShortcut(false);
-  assert.equal(prefs.setTypeKey("opt-shift-t"), true);
+  assert.equal(prefs.setTypeKey("opt-shift-m"), true);
   assert.equal(prefs.setTypeKey("ctrl-opt-space"), false, "a talk key is not a type key");
   const restarted = createDesktopPrefs({ read: () => saved, write: () => {} });
-  assert.deepEqual([restarted.typeShortcut(), restarted.typeKey(), restarted.talkShortcut()], [false, "opt-shift-t", false]);
+  assert.deepEqual([restarted.typeShortcut(), restarted.typeKey(), restarted.talkShortcut()], [false, "opt-shift-m", false]);
   const junk = createDesktopPrefs({ read: () => ({ typeShortcut: "off", typeKey: "toString" }), write: () => {} });
-  assert.deepEqual([junk.typeShortcut(), junk.typeKey()], [true, "ctrl-opt-t"]);
+  assert.deepEqual([junk.typeShortcut(), junk.typeKey()], [true, "ctrl-opt-m"]);
 });
 ```
 
 In `talk-shortcut.node-test.mjs`, reusing its `memoryPrefs` and `fakeShortcuts`:
 
 ```js
-const TYPE_KEYS = [{ id: "ctrl-opt-t", label: "⌃⌥T" }, { id: "ctrl-shift-t", label: "⌃⇧T" }, { id: "opt-shift-t", label: "⌥⇧T" }];
+const TYPE_KEYS = [{ id: "ctrl-opt-m", label: "⌃⌥M" }, { id: "ctrl-shift-m", label: "⌃⇧M" }, { id: "opt-shift-m", label: "⌥⇧M" }];
 
-test("the type shortcut registers ⌃⌥T when on, and a press reaches onPress", () => {
+test("the type shortcut registers ⌃⌥M when on, and a press reaches onPress", () => {
   const shortcuts = fakeShortcuts(); let presses = 0;
   const type = createTypeShortcut({ globalShortcut: shortcuts, prefs: memoryPrefs(), available: () => true, onPress: () => { presses += 1; } });
-  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Alt+T"]);
-  shortcuts.registered.get("Control+Alt+T")();
+  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Alt+M"]);
+  shortcuts.registered.get("Control+Alt+M")();
   assert.equal(presses, 1);
-  assert.deepEqual(type.state(), { available: true, enabled: true, key: "ctrl-opt-t", keys: TYPE_KEYS, taken: false });
+  assert.deepEqual(type.state(), { available: true, enabled: true, key: "ctrl-opt-m", keys: TYPE_KEYS, taken: false });
   assert.equal("releaseModifiers" in type, false);
 });
 
@@ -386,10 +386,10 @@ test("talk and type keep their own setting and key: one off, taken or changed le
   const type = createTypeShortcut({ globalShortcut: shortcuts, prefs, available: () => true, onPress: () => {} });
   assert.deepEqual([talk.state().taken, type.state().taken], [true, false]);
   talk.set({ enabled: false });
-  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Alt+T"]);
-  assert.equal(type.set({ key: "ctrl-shift-t" }).key, "ctrl-shift-t");
-  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Shift+T"]);
-  assert.equal(type.set({ key: "ctrl-opt-space" }).key, "ctrl-shift-t");
+  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Alt+M"]);
+  assert.equal(type.set({ key: "ctrl-shift-m" }).key, "ctrl-shift-m");
+  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Shift+M"]);
+  assert.equal(type.set({ key: "ctrl-opt-space" }).key, "ctrl-shift-m");
   assert.equal(prefs.talkKey(), "ctrl-opt-space");
 });
 
@@ -398,10 +398,10 @@ test("an unavailable type shortcut lets its key go, refresh takes it back, and c
   const type = createTypeShortcut({ globalShortcut: shortcuts, prefs: memoryPrefs(), available: () => offered, onPress: () => {} });
   assert.deepEqual([type.state().available, [...shortcuts.registered.keys()]], [false, []]);
   offered = true; type.refresh();
-  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Alt+T"]);
+  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Alt+M"]);
   type.close();
   assert.deepEqual([...shortcuts.registered.keys()], []);
-  assert.deepEqual(TYPE_SHORTCUT_UNAVAILABLE, { available: false, enabled: false, key: "ctrl-opt-t", keys: TYPE_KEYS, taken: false });
+  assert.deepEqual(TYPE_SHORTCUT_UNAVAILABLE, { available: false, enabled: false, key: "ctrl-opt-m", keys: TYPE_KEYS, taken: false });
   assert.ok(Object.isFrozen(TYPE_SHORTCUT_UNAVAILABLE));
 });
 ```
@@ -429,12 +429,12 @@ Expected: PASS. Talk's own tests pass unchanged.
 
 ```bash
 git add electron/talk-keys.mjs electron/desktop-prefs.mjs electron/desktop-prefs.d.mts electron/talk-shortcut.mjs electron/talk-shortcut.d.mts electron/talk-shortcut.node-test.mjs electron/desktop-prefs.node-test.mjs
-git commit -m "feat(type): ⌃⌥T presets, prefs and registration apart from talk's" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(type): ⌃⌥M presets, prefs and registration apart from talk's" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
-### Task 4: A typed ask, from ⌃⌥T to the reply
+### Task 4: A typed ask, from ⌃⌥M to the reply
 
 **Files:**
 - Modify: `electron/talk-session.mjs:44-74,110-115,157-220`, `electron/talk-panel.mjs:54-88,162-178`, `electron/talk-panel.d.mts:3-6`
@@ -483,7 +483,7 @@ test("type timings and the typed server-down line are fixed", () => {
   assert.ok(Object.isFrozen(TYPE_TIMING) && Object.isFrozen(TYPE_TEXT));
 });
 
-test("⌃⌥T opens an empty box; Return sends exactly the typed words to Quick asks, echoed through talk's states", async () => {
+test("⌃⌥M opens an empty box; Return sends exactly the typed words to Quick asks, echoed through talk's states", async () => {
   const h = harness(); const words = "what's on\n today ";
   h.session.typePress();
   assert.deepEqual([h.typed, h.prepares], [[{ text: "" }], 0]);
@@ -524,7 +524,7 @@ test("clicking away closes the box and keeps the words for 5 minutes", () => {
   assert.deepEqual(h.typed.at(-1), { text: "" });
 });
 
-test("⌃⌥T on an open box closes it when blank and does nothing when it holds words", () => {
+test("⌃⌥M on an open box closes it when blank and does nothing when it holds words", () => {
   const h = harness();
   h.session.typePress(); mock.timers.tick(500); h.session.typeInput("keep"); h.session.typePress();
   assert.equal(h.typeClosed, 0);
@@ -532,7 +532,7 @@ test("⌃⌥T on an open box closes it when blank and does nothing when it holds
   assert.equal(h.typeClosed, 1);
 });
 
-test("a ⌃⌥T within 500 ms of the last one is a key repeat: one box stays open", () => {
+test("a ⌃⌥M within 500 ms of the last one is a key repeat: one box stays open", () => {
   const h = harness();
   h.session.typePress(); mock.timers.tick(300); h.session.typePress(); mock.timers.tick(400); h.session.typePress();
   assert.deepEqual([h.typed.length, h.typeClosed], [1, 0]);
@@ -549,7 +549,7 @@ test("a blank box closes itself after 60 s; words stop the clock and clearing th
   h.session.typeInput(""); mock.timers.tick(60_000); assert.equal(h.typeClosed, 2);
 });
 
-test("one ask at a time: ⌃⌥T waits while talk listens or an ask is on its way, and ⌃⌥Space waits while the box takes words or a typed ask is on its way", async () => {
+test("one ask at a time: ⌃⌥M waits while talk listens or an ask is on its way, and ⌃⌥Space waits while the box takes words or a typed ask is on its way", async () => {
   const { ask } = holdAsk([]);
   const h = harness({ ask });
   h.session.press(); h.session.typePress();
@@ -562,7 +562,7 @@ test("one ask at a time: ⌃⌥T waits while talk listens or an ask is on its wa
   assert.deepEqual([t.starts.length, t.session.busy()], [0, true]);
 });
 
-test("⌃⌥T over a reply opens a fresh box; ⌃⌥Space over a typed reply listens", async () => {
+test("⌃⌥M over a reply opens a fresh box; ⌃⌥Space over a typed reply listens", async () => {
   const h = harness();
   h.session.press(); say(h, "hi"); release(h); await flush();
   h.session.typePress();
@@ -592,7 +592,7 @@ test("a typed ask that wakes My Cloud says so under the echo, then sends once", 
   assert.equal(h.asks.length, 1);
 });
 
-test("the box's words, send, cancel and blur do nothing with no box open; a box that fails to open leaves ⌃⌥T working", () => {
+test("the box's words, send, cancel and blur do nothing with no box open; a box that fails to open leaves ⌃⌥M working", () => {
   const h = harness();
   h.session.typeInput("x"); h.session.typeSend("x"); h.session.typeCancel(); h.session.typeBlurred();
   assert.deepEqual([h.prepares, h.typeClosed, h.views.length], [0, 0, 0]);
@@ -657,7 +657,7 @@ git commit -m "feat(type): typed asks through talk's states, with the words echo
 
 ---
 
-### Task 5: Wire ⌃⌥T into the app
+### Task 5: Wire ⌃⌥M into the app
 
 **Files:**
 - Modify: `electron/talk-main.mjs:6,22-29,62-67,72-75,83-124`, `electron/preload.cjs:67-68,252-259`, `src/types/ogb.d.ts:290-291`
@@ -670,7 +670,7 @@ git commit -m "feat(type): typed asks through talk's states, with the words echo
 
 - [ ] **Step 1: Update the harness and the assertions talk's tests make about the whole app**
 
-In `talk-main.node-test.mjs`, `harness()` gains `platform = "darwin"` (passed to `installTalk`), `FakeBrowserWindow` gains `focus() {}`, and add `h.typePress = () => h.registered.get("Control+Alt+T")()`, `h.typeBox = () => h.windows.findLast(win => isTalkPanel(win) && win.options.focusable === true)` and `const talkKeys = h => [...h.registered.keys()].filter(key => key.endsWith("Space"))`. Then update these existing assertions:
+In `talk-main.node-test.mjs`, `harness()` gains `platform = "darwin"` (passed to `installTalk`), `FakeBrowserWindow` gains `focus() {}`, and add `h.typePress = () => h.registered.get("Control+Alt+M")()`, `h.typeBox = () => h.windows.findLast(win => isTalkPanel(win) && win.options.focusable === true)` and `const talkKeys = h => [...h.registered.keys()].filter(key => key.endsWith("Space"))`. Then update these existing assertions:
 - Whole-list key assertions that prove talk (lines 258, 263, 274, 276, 374 and 377) compare `talkKeys(h)`. Those that expect quitting or sign-in to free every key stay whole-list.
 - The handler list becomes `["speech:start", "speech:stop", "speech:finish", "talk-shortcut:state", "talk-shortcut:set", "type-shortcut:state", "type-shortcut:set", "call:active"]`, and the guard filter also skips `type-shortcut:`.
 - `MY_CLOUD_PAGE` is `"talkShortcut", "typeShortcut"`. `REMOTE_SAFE` and `HOME_PAGE` never match `typeShortcut`.
@@ -682,10 +682,10 @@ In `talk-main.node-test.mjs`, `harness()` gains `platform = "darwin"` (passed to
 test("the type shortcut is offered on macOS without Apple speech, never elsewhere or on a remote client", () => {
   const mac = harness({ appleSpeech: false }); mac.start();
   assert.deepEqual([mac.handle("type-shortcut:state", {}).available, mac.handle("talk-shortcut:state", {}).available], [true, false]);
-  assert.deepEqual([...mac.registered.keys()], ["Control+Alt+T"]);
+  assert.deepEqual([...mac.registered.keys()], ["Control+Alt+M"]);
   for (const options of [{ platform: "win32", appleSpeech: false }, { remote: true }]) {
     const h = harness(options); h.start();
-    assert.deepEqual([h.handle("type-shortcut:state", {}).available, h.registered.has("Control+Alt+T")], [false, false]);
+    assert.deepEqual([h.handle("type-shortcut:state", {}).available, h.registered.has("Control+Alt+M")], [false, false]);
   }
 });
 
@@ -694,15 +694,15 @@ test("before it is set up the type setting says unavailable; afterwards each set
   assert.equal(h.handle("type-shortcut:state", {}), TYPE_SHORTCUT_UNAVAILABLE);
   h.start();
   h.handle("talk-shortcut:set", {}, { enabled: false });
-  assert.deepEqual([...h.registered.keys()], ["Control+Alt+T"]);
-  h.handle("type-shortcut:set", {}, { key: "opt-shift-t", extra: 1 });
-  assert.deepEqual([...h.registered.keys()], ["Alt+Shift+T"]);
+  assert.deepEqual([...h.registered.keys()], ["Control+Alt+M"]);
+  h.handle("type-shortcut:set", {}, { key: "opt-shift-m", extra: 1 });
+  assert.deepEqual([...h.registered.keys()], ["Alt+Shift+M"]);
   assert.equal(h.handle("talk-shortcut:state", {}).key, "ctrl-opt-space");
   h.talk.close();
   assert.deepEqual([...h.registered.keys()], []);
 });
 
-test("⌃⌥T opens the focusable box; Return asks this computer's Quick asks and talk's never-focused box takes over", async () => {
+test("⌃⌥M opens the focusable box; Return asks this computer's Quick asks and talk's never-focused box takes over", async () => {
   const h = harness(); h.start(); h.typePress();
   const typing = h.typeBox();
   typing.webContents.emit("did-finish-load"); await settle();
@@ -721,12 +721,12 @@ test("the type box opens in the skin the app painted last", async () => {
   h.talk.close();
 });
 
-test("home needing a sign-in lets ⌃⌥T go; My Cloud as home takes it back", () => {
+test("home needing a sign-in lets ⌃⌥M go; My Cloud as home takes it back", () => {
   const h = harness(); h.start();
   h.home = { kind: "signin" }; h.talk.homeChanged();
-  assert.deepEqual([h.registered.has("Control+Alt+T"), h.handle("type-shortcut:state", {}).available], [false, false]);
+  assert.deepEqual([h.registered.has("Control+Alt+M"), h.handle("type-shortcut:state", {}).available], [false, false]);
   h.home = HOME_CLOUD; h.talk.homeChanged();
-  assert.equal(h.registered.has("Control+Alt+T"), true);
+  assert.equal(h.registered.has("Control+Alt+M"), true);
   h.talk.close();
 });
 
@@ -743,7 +743,7 @@ test("the type setting reaches My Cloud's own page while it is home, never a tea
   assert.throws(() => h.handle("type-shortcut:set", { remote: true, cloudPage: false, senderFrame: { origin: "https://team.example.test" } }, { enabled: false }), /only available/);
   const page = preloadAt(CLOUD, { home: true, talk: true });
   await assert.rejects(page.bridge.typeShortcut.set({ enabled: true }), /type shortcut/);
-  await assert.rejects(page.bridge.typeShortcut.set({ key: "ctrl-shift-t" }), /type shortcut/);
+  await assert.rejects(page.bridge.typeShortcut.set({ key: "ctrl-shift-m" }), /type shortcut/);
   await page.bridge.typeShortcut.set({ enabled: false });
   assert.deepEqual(plain(page.invoked), [["type-shortcut:set", { enabled: false }]]);
   assert.equal(preloadAt("https://team.example.test", { home: true, talk: false }).bridge.typeShortcut, undefined);
@@ -757,8 +757,8 @@ In `preload.node-test.mjs`:
 test("the type bridge asks main over its own channels with only what it understands", async () => {
   const before = invocations.length;
   await exposed.api.typeShortcut.state();
-  await exposed.api.typeShortcut.set({ enabled: false, key: "ctrl-shift-t", extra: "x" });
-  assert.deepEqual(invocations.slice(before), [["type-shortcut:state"], ["type-shortcut:set", { enabled: false, key: "ctrl-shift-t" }]]);
+  await exposed.api.typeShortcut.set({ enabled: false, key: "ctrl-shift-m", extra: "x" });
+  assert.deepEqual(invocations.slice(before), [["type-shortcut:state"], ["type-shortcut:set", { enabled: false, key: "ctrl-shift-m" }]]);
 });
 ```
 
@@ -782,7 +782,7 @@ Expected: PASS, and the diff is empty.
 
 ```bash
 git add electron/talk-main.mjs electron/preload.cjs src/types/ogb.d.ts electron/talk-main.node-test.mjs electron/preload.node-test.mjs
-git commit -m "feat(type): wire ⌃⌥T into the app and give its setting a bridge" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git commit -m "feat(type): wire ⌃⌥M into the app and give its setting a bridge" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 Checkpoint for Omkar: from here the feature works end to end. Task 7's by-hand steps 25–28 can run now on a side-by-side build, to settle the focus risk before Tasks 6–7.
@@ -802,30 +802,30 @@ Checkpoint for Omkar: from here the feature works end to end. Task 7's by-hand s
 
 - [ ] **Step 1: Write the failing tests** as a `describe("TypeShortcutRow")` block in the same file
 
-Its `beforeEach` sets talk's state to `{ ...base, available: false }` and `window.ogb = { talkShortcut: bridge, typeShortcut: typeBridge }`, where `typeBridge` mirrors `bridge` over `typed = { available: true, enabled: true, key: "ctrl-opt-t", keys: [{ id: "ctrl-opt-t", label: "⌃⌥T" }, { id: "ctrl-shift-t", label: "⌃⇧T" }, { id: "opt-shift-t", label: "⌥⇧T" }], taken: false }`. `showBoth()` renders `TalkShortcutRow` and `TypeShortcutRow` side by side.
+Its `beforeEach` sets talk's state to `{ ...base, available: false }` and `window.ogb = { talkShortcut: bridge, typeShortcut: typeBridge }`, where `typeBridge` mirrors `bridge` over `typed = { available: true, enabled: true, key: "ctrl-opt-m", keys: [{ id: "ctrl-opt-m", label: "⌃⌥M" }, { id: "ctrl-shift-m", label: "⌃⇧M" }, { id: "opt-shift-m", label: "⌥⇧M" }], taken: false }`. `showBoth()` renders `TalkShortcutRow` and `TypeShortcutRow` side by side.
 
 ```ts
-it("shows its own row, on, with ⌃⌥T, even where talk's row is hidden", async () => {
+it("shows its own row, on, with ⌃⌥M, even where talk's row is hidden", async () => {
   await showBoth();
   expect(host.textContent).toContain("Type to MausBot from any app");
-  expect(host.textContent).toContain("Press ⌃⌥T, type, then press Return");
+  expect(host.textContent).toContain("Press ⌃⌥M, type, then press Return");
   expect(host.textContent).not.toContain("Talk to MausBot");
 });
 it("changes its key and turns off over its own bridge only", async () => {
   await showBoth();
   const select = host.querySelector<HTMLSelectElement>('select[aria-label="Type shortcut"]')!;
-  await act(async () => { valueSetter.call(select, "ctrl-shift-t"); select.dispatchEvent(new Event("change", { bubbles: true })); });
+  await act(async () => { valueSetter.call(select, "ctrl-shift-m"); select.dispatchEvent(new Event("change", { bubbles: true })); });
   await settle();
-  expect(typeBridge.set).toHaveBeenCalledWith({ key: "ctrl-shift-t" });
-  expect(host.textContent).toContain("Press ⌃⇧T");
+  expect(typeBridge.set).toHaveBeenCalledWith({ key: "ctrl-shift-m" });
+  expect(host.textContent).toContain("Press ⌃⇧M");
   await click(host.querySelector<HTMLButtonElement>('button[aria-label="Type to MausBot from any app"]')!);
   expect(typeBridge.set).toHaveBeenLastCalledWith({ enabled: false });
   expect(bridge.set).not.toHaveBeenCalled();
 });
-it("says when another app holds ⌃⌥T", async () => {
+it("says when another app holds ⌃⌥M", async () => {
   typed = { ...typed, taken: true };
   await showBoth();
-  expect(host.querySelector('[role="alert"]')?.textContent).toBe("⌃⌥T is used by another app. Pick another shortcut.");
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("⌃⌥M is used by another app. Pick another shortcut.");
 });
 it("is hidden without its bridge or when unavailable", async () => {
   typed = { ...typed, available: false };
@@ -887,29 +887,29 @@ Expected: it prints `light-typed-reply-long.png  card N px, box N px` with N ≤
 
 - [ ] **Step 2: Write the recipe**
 
-In `talk-shortcut.md`, the title and intro name ⌃⌥T too. The Floor's commands already pick up the `talk-type-*` tests; add what they prove (presets, prefs and independence from talk; the box's window flags, shown inactive then focused, never `show()`, destroyed at once; a blur or failed page reported once; the page's messages checked; the ⌘ chord guard; the key rule with an input method, blank Return, read-only after send, six lines, 4,000 characters; the typing state, draft, idle close and repeat guard; one ask at a time; refusals; the echo; availability and My Cloud's page) and what they don't (the real key, the box becoming key without activating MausBot, focus going back to the app underneath, Spaces and full screen, a real input method, secure input, the Edit menu's shortcuts in the box).
+In `talk-shortcut.md`, the title and intro name ⌃⌥M too. The Floor's commands already pick up the `talk-type-*` tests; add what they prove (presets, prefs and independence from talk; the box's window flags, shown inactive then focused, never `show()`, destroyed at once; a blur or failed page reported once; the page's messages checked; the ⌘ chord guard; the key rule with an input method, blank Return, read-only after send, six lines, 4,000 characters; the typing state, draft, idle close and repeat guard; one ask at a time; refusals; the echo; availability and My Cloud's page) and what they don't (the real key, the box becoming key without activating MausBot, focus going back to the app underneath, Spaces and full screen, a real input method, secure input, the Edit menu's shortcuts in the box).
 
-Add `### By hand: Type (⌃⌥T)`, numbered on from 23, with a background `osascript` frontmost-app log (one line a second to `~/front.log`) for steps 25–28:
+Add `### By hand: Type (⌃⌥M)`, numbered on from 23, with a background `osascript` frontmost-app log (one line a second to `~/front.log`) for steps 25–28:
 
-- **24. Row.** Settings → General (Simple and Advanced) shows "Type to MausBot from any app" under the talk row, on, "Press ⌃⌥T, type, then press Return…".
-- **25. Focus (ship gate).** Safari in front, over the MausBot window; ⌃⌥T: the box shows bottom-centre with a blinking caret and takes the keystrokes; the menu bar still says Safari, `front.log` reads `Safari` throughout, and the MausBot window never comes forward.
+- **24. Row.** Settings → General (Simple and Advanced) shows "Type to MausBot from any app" under the talk row, on, "Press ⌃⌥M, type, then press Return…".
+- **25. Focus (ship gate).** Safari in front, over the MausBot window; ⌃⌥M: the box shows bottom-centre with a blinking caret and takes the keystrokes; the menu bar still says Safari, `front.log` reads `Safari` throughout, and the MausBot window never comes forward.
 - **26. Send (ship gate).** Type "what can you do", Return: the words show at once as the first line over "Sending to MausBot…", then the reply; a key pressed right after Return lands in Safari; `front.log` still only `Safari`; clicking the box opens MausBot on Quick asks.
 - **27. Esc and × (ship gate).** The box closes at once, nothing is sent, and the next keystroke lands in Safari.
-- **28. From MausBot itself (ship gate).** Composer focused: ⌃⌥T then Esc puts focus back in the composer; ⌃⌥T then Return leaves MausBot's open chat as it was.
+- **28. From MausBot itself (ship gate).** Composer focused: ⌃⌥M then Esc puts focus back in the composer; ⌃⌥M then Return leaves MausBot's open chat as it was.
 - **29. Keys.** Shift+Return makes a line; six lines, then it scrolls; a blank Return does nothing; a 5,000-character paste keeps 4,000; ⌘A/⌘C/⌘V/⌘X/⌘Z work; ⌘Q, ⌘W, ⌘R, ⌘,, ⌘H and ⌘M do nothing.
 - **30. Input method.** Japanese Romaji, "nihon": Return makes 日本 without sending; a second Return sends.
-- **31. Toggle and repeat.** ⌃⌥T closes an empty box and leaves one with words; holding ⌃⌥T for 2 s leaves one box open.
-- **32. Clicking away.** With words in the box, a click on Safari's page, ⌘Tab, or ⌃→ to another Space each closes it (no box stays up without focus); ⌃⌥T within 5 minutes brings the words back with the caret at the end, after 5 minutes it opens empty; Esc and Return drop the words.
+- **31. Toggle and repeat.** ⌃⌥M closes an empty box and leaves one with words; holding ⌃⌥M for 2 s leaves one box open.
+- **32. Clicking away.** With words in the box, a click on Safari's page, ⌘Tab, or ⌃→ to another Space each closes it (no box stays up without focus); ⌃⌥M within 5 minutes brings the words back with the caret at the end, after 5 minutes it opens empty; Esc and Return drop the words.
 - **33. Idle.** An empty box closes after about 60 s.
 - **34. Full screen and Spaces.** In a full-screen app and on another Space the box shows there and takes typing; the app keeps its focus after Esc.
-- **35. Secure input.** Safari's password field focused, ⌃⌥T: note whether nothing happens or the box opens; keystrokes never land in the password field while the box is up.
-- **36. Talk against type.** While listening, ⌃⌥T does nothing; over a talk reply it opens the box; while the box is open, ⌃⌥Space does nothing; over a typed reply, ⌃⌥Space listens.
-- **37. Independence.** Talk off: ⌃⌥T works; type off: ⌃⌥T is free and talk works; ⌃⇧T and ⌥⇧T work; another app holding ⌃⌥T: "⌃⌥T is used by another app. Pick another shortcut."
+- **35. Secure input.** Safari's password field focused, ⌃⌥M: note whether nothing happens or the box opens; keystrokes never land in the password field while the box is up.
+- **36. Talk against type.** While listening, ⌃⌥M does nothing; over a talk reply it opens the box; while the box is open, ⌃⌥Space does nothing; over a typed reply, ⌃⌥Space listens.
+- **37. Independence.** Talk off: ⌃⌥M works; type off: ⌃⌥M is free and talk works; ⌃⇧M and ⌥⇧M work; another app holding ⌃⌥M: "⌃⌥M is used by another app. Pick another shortcut."
 - **38. My Cloud.** Home on My Cloud: the ask goes to its Quick asks; asleep: "Waking My Cloud…" under the words, then the reply, sent once; the row is on My Cloud's own page, where turning it on or changing the key takes a click, and absent on a team's page.
-- **39. Starting.** ⌃⌥T and Return right after a relaunch: "MausBot is still starting. Try again in a moment."
+- **39. Starting.** ⌃⌥M and Return right after a relaunch: "MausBot is still starting. Try again in a moment."
 - **40. Light and dark.** The type box and the echo follow the app's skin; compare with the `typed-*` PNGs.
 
-The `README.md` paragraph says the recipe checks hold-to-talk and ⌃⌥T typing from any app.
+The `README.md` paragraph says the recipe checks hold-to-talk and ⌃⌥M typing from any app.
 
 - [ ] **Step 3: Run the whole check**
 
@@ -931,7 +931,7 @@ Run steps 24–40 and note each result for the PR description. Steps 25–28 are
 
 ## Self-review
 
-- **Spec coverage.** ⌃⌥T anywhere, bottom-centre, every Space and full screen, focused (1, 5, 7); Return to the same Quick asks chat here or on My Cloud with its wake (4, 5); the reply in the box on talk's timing (4); the app underneath keeps focus (1, 7); not a mini chat (1, 4); only the words, no label (4, constraints); macOS only and availability (3, 5); Shift+Return, blank Return, Esc (2, 4); six lines and the limit (2); echo, typing stopped, focus given up (1, 2, 4); draft on click-away with the caret at the end (1, 2, 4); ⌃⌥T on an open box, idle close, one ask at a time, refusals (4); row, presets, taken, independence, My Cloud's page, clicks on server pages (3, 5, 6); anti-goals and page safety (1, 4, 5, 7); `main.mjs` untouched (5, 7); the spec's Testing list (every task, 7).
+- **Spec coverage.** ⌃⌥M anywhere, bottom-centre, every Space and full screen, focused (1, 5, 7); Return to the same Quick asks chat here or on My Cloud with its wake (4, 5); the reply in the box on talk's timing (4); the app underneath keeps focus (1, 7); not a mini chat (1, 4); only the words, no label (4, constraints); macOS only and availability (3, 5); Shift+Return, blank Return, Esc (2, 4); six lines and the limit (2); echo, typing stopped, focus given up (1, 2, 4); draft on click-away with the caret at the end (1, 2, 4); ⌃⌥M on an open box, idle close, one ask at a time, refusals (4); row, presets, taken, independence, My Cloud's page, clicks on server pages (3, 5, 6); anti-goals and page safety (1, 4, 5, 7); `main.mjs` untouched (5, 7); the spec's Testing list (every task, 7).
 - **Deviations, on purpose,** all under "Settled here": focus given up at Return; two windows; a typed server-down line; the chat prepared at Return.
 - **Types.** `createTypeBox`, `typeBoxHtml`, `typeBoxKey`, `blockedChord`, `TYPE_LIMIT`, `TYPE_BOX_TEXT`, `markTalkPanel`, `mascotPng`, `TALK_BOX_THEME_CSS`, `createTypeShortcut`, `TYPE_SHORTCUT_UNAVAILABLE`, `TypeKeyId`, `TypeShortcutState`, `TypeShortcutBridge`, `typePress`/`typeInput`/`typeSend`/`typeCancel`/`typeBlurred`, `TYPE_TIMING`, `TYPE_TEXT`, `echo`, `platform`, `type-box:*` and `type-shortcut:*` are spelled the same in every Interfaces block and test.
 - **Left to the implementer:** the type page's CSS within talk's tokens, and `ShortcutRow`'s exact props.

@@ -1,7 +1,7 @@
 import type { DesktopPrefs } from "./desktop-prefs.mjs";
 
 export type TalkKeyId = "ctrl-opt-space" | "ctrl-shift-space" | "opt-shift-space";
-export type TypeKeyId = "ctrl-opt-t" | "ctrl-shift-t" | "opt-shift-t";
+export type TypeKeyId = "ctrl-opt-m" | "ctrl-shift-m" | "opt-shift-m";
 export interface ShortcutState<K extends string> {
   /** False hides the setting and lets the key go: not macOS (talk also needs Apple speech), this desktop is a remote
    * client, or home is neither this computer nor My Cloud (this computer's copy is frozen and its home needs a sign-in). */
