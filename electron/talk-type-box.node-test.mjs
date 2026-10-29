@@ -115,6 +115,18 @@ test("a box that loses focus, or can't start its page, says so once; a second op
   assert.deepEqual([failing.made[0].destroyed, failing.events, shown(failing.made[0])], [true, [["blur"]], []]);
 });
 
+test("a box that loses focus, whose renderer goes or whose window closes is destroyed at once and says so once", async () => {
+  const ends = { blur: win => win.events.emit("blur"), "render-process-gone": win => win.webContents.emit("render-process-gone"), closed: win => win.events.emit("closed") };
+  for (const [what, end] of Object.entries(ends)) {
+    const { box, made, events } = harness();
+    box.open({ text: "words" }); made[0].webContents.emit("did-finish-load"); await flush();
+    end(made[0]);
+    assert.deepEqual([made[0].destroyed, events], [true, [["blur"]]], what);
+    for (const again of Object.values(ends)) again(made[0]);
+    assert.deepEqual(events, [["blur"]], what);
+  }
+});
+
 test("the page's messages count only from this box, and only when well formed", () => {
   const { box, made, events } = harness();
   box.open({ text: "" });

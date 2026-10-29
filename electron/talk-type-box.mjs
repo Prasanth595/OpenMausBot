@@ -113,15 +113,10 @@ export function createTypeBox({ BrowserWindow, screen, nativeImage, iconPath, th
     // Electron/macOS: skipTransformProcessType keeps the Dock icon.
     target.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
 
-    let reported = false;
-    const lost = ({ destroy }) => {
+    const lost = () => {
       if (win !== target) return;
-      if (destroy) {
-        win = null;
-        if (live(target)) target.destroy();
-      }
-      if (reported) return;
-      reported = true;
+      win = null;
+      if (live(target)) target.destroy();
       onBlur();
     };
 
@@ -143,7 +138,7 @@ export function createTypeBox({ BrowserWindow, screen, nativeImage, iconPath, th
       if (blockedChord(input)) event.preventDefault();
     });
     target.webContents.on("did-finish-load", () => {
-      if (win === target) begin().catch(() => lost({ destroy: true }));
+      if (win === target) begin().catch(lost);
     });
     // Security: only this window's own page speaks for the box, and only with words within the limit.
     target.webContents.on("ipc-message", (_event, channel, text, height) => {
@@ -158,10 +153,10 @@ export function createTypeBox({ BrowserWindow, screen, nativeImage, iconPath, th
         onCancel();
       }
     });
-    target.webContents.on("render-process-gone", () => lost({ destroy: true }));
-    target.on("blur", () => lost({ destroy: false }));
-    target.on("closed", () => lost({ destroy: true }));
-    target.loadURL(page).catch(() => lost({ destroy: true }));
+    target.webContents.on("render-process-gone", lost);
+    target.on("blur", lost);
+    target.on("closed", lost);
+    target.loadURL(page).catch(lost);
     return target;
   }
 
