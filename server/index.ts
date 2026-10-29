@@ -2367,8 +2367,15 @@ async function interruptDirectThread(botId: string, threadId: string, cause?: st
   cancelDirectTurnDispatch(botId, threadId);
   revokeInternalCapabilitiesForThread(threadId);
   // Keep the generation fence so a replacement turn's approvals are never closed here.
-  await (owner ? runningTurnInstance(owner, threadId) : null)?.adapter.interruptTurn(threadId);
-  if (directTurnGenerationByThread.get(threadId) === generation) closeOpenApprovals(threadId);
+  if (directTurnGenerationByThread.get(threadId) === generation) {
+    // Stop is a user-visible state transition: do not keep the thread busy while a provider
+    // takes its time to acknowledge the interrupt. The generation fence above prevents the
+    // late provider completion from touching a replacement turn.
+    store.setTaskActivity(botId, threadId, "idle");
+    closeOpenApprovals(threadId);
+    drainQueuedSends();
+  }
+  await (owner ? runningTurnInstance(owner, threadId) : null)?.adapter.interruptTurn(threadId).catch(() => {});
 }
 
 async function interruptParkedTurn(botId: string, threadId: string): Promise<void> {
@@ -4955,8 +4962,9 @@ async function answerRequest(
   const remembered = rememberCommand ? pendingCommandRules.get(`${threadId}:${requestId}`) : undefined;
   // The live turn owns this question, as it owns Stop and steer.
   const instance = runningTurnEngines.get(threadId) ?? registry.get(instanceId);
+  const stopped = directRequestOwners.get(threadId)?.stopped === true;
   let outcome: RequestOutcome = "unavailable";
-  if (instance) {
+  if (instance && !stopped) {
     try {
       // Only a card that offered "Always allow this session" can keep one: never a guest's turn, a sandbox widening or the person's own computer.
       outcome = await instance.adapter.respondToRequest(threadId, requestId, { behavior, message, always: always && behavior === "allow" && card?.allowSession === true });
