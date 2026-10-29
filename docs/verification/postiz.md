@@ -2,8 +2,8 @@
 
 The Postiz card in Apps (the Social category) connects the social media
 scheduler [Postiz](https://postiz.com) as one MCP server named `postiz`, so the
-MCP gate, each bot's server selection, a Team Cloud's scopes and the move to My
-Cloud treat it like any other server. OpenMausBot only calls Postiz's public
+MCP gate, each bot's server selection and a Team Cloud's scopes treat it like
+any other server. OpenMausBot only calls Postiz's public
 MCP and OAuth endpoints; Postiz is AGPL-3.0 and none of its code is copied.
 
 - **Sign in with Postiz** (the default) uses Postiz Cloud's

@@ -1,5 +1,5 @@
 // The Postiz connection as the Apps card and Settings → API keys see it. It is one `postiz` MCP server entry, so the
-// MCP gate, each bot's server selection, a Team Cloud's scopes and the move to My Cloud treat it like any other.
+// MCP gate, each bot's server selection and a Team Cloud's scopes treat it like any other.
 // Security: a key is checked before it is saved and only ever sent to the address it was saved for; no answer carries a
 // key or a token.
 import { POSTIZ_SERVER, type PostizStatus } from "../../shared/postiz.ts";
