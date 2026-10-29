@@ -80,7 +80,9 @@ describe("which wait tools a turn is listed", () => {
       .toEqual([["wait_until", false], ["list_waits", true], ["cancel_wait", false]]);
   });
 
-  it("lists a room's turn list_waits alone, and only when the bot has a wait", () => {
+  // OMB_ACTIVE_WAITS counts the chat's own waits (WaitManager.count), and no wait is made in a room, so a room's turn
+  // is never listed list_waits in practice; the catalog would list it alone.
+  it("lists a room's turn list_waits alone, and only with OMB_ACTIVE_WAITS", () => {
     expect(waitNames({ OMB_ROOM: "1" })).toEqual([]);
     expect(waitNames({ OMB_ROOM: "1", OMB_ACTIVE_WAITS: "1" })).toEqual(["list_waits"]);
   });

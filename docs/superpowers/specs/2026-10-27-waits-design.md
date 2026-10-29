@@ -84,12 +84,14 @@ created and expiry.
 Listing (after #3773 and #3786, which made the agents tool list smaller): every
 turn outside a room lists `wait_until`, with a short description (the kinds,
 no AI while waiting, `follow_up`, 1 to 168 hours) and compact schema; its
-result explains the rest. `list_waits` and `cancel_wait` are listed only while
-the bot has a wait that has not ended (`OMB_ACTIVE_WAITS`, from
-`WaitManager.count`), so the turn after one is set sees them. Without a wait
-they still answer a call, directly or through `use_tool`. A room's turn is
-never listed `wait_until` or `cancel_wait`, which rooms refuse; it lists
-`list_waits` while the bot has a wait.
+result explains the rest. `list_waits` and `cancel_wait` act only on the
+chat's own waits, so they are listed only while the bot has a wait in this
+chat that has not ended (`OMB_ACTIVE_WAITS`, from
+`WaitManager.count(botId, threadId)`): the next turn in that chat sees them,
+and a wait in another chat lists nothing here. Without one they still answer
+a call, directly or through `use_tool`. A room's turn is never listed
+`wait_until` or `cancel_wait`, which rooms refuse; since no wait is made in a
+room, it is not listed `list_waits` either.
 
 The handler takes bot and chat from the internal capability token (never from
 arguments) and stores those, never the token. Waits can be made only from a

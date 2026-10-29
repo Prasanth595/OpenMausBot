@@ -884,7 +884,7 @@ export function availableTools(profile: CatalogProfile) {
 }
 
 /** What a turn may call: what it is listed, and list_waits and cancel_wait, left off the list only while the bot has no
- * wait. A wait made this turn, or a list read before it ended, still reaches them; the waits route scopes each call. */
+ * wait in this chat. A wait made this turn, or a list read before it ended, still reaches them; the route scopes each call. */
 export function callableTools(profile: CatalogProfile) {
   return availableTools({ ...profile, activeWaits: true });
 }

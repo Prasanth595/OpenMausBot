@@ -6,7 +6,7 @@ const WAITS = "/api/internal/waits";
 export const WAIT_TOOL_NAMES: ReadonlySet<string> = new Set(["wait_until", "list_waits", "cancel_wait"]);
 /** Refused in a room's thread (routes/waits.ts): a room's turn is not listed them. list_waits answers there. */
 export const ROOM_REFUSED_WAIT_TOOL_NAMES: ReadonlySet<string> = new Set(["wait_until", "cancel_wait"]);
-/** Listed only while the bot has a wait that has not ended (`CatalogProfile.activeWaits`); callable either way. */
+/** Listed only while the bot has a wait in this chat that has not ended (`CatalogProfile.activeWaits`); callable either way. */
 export const WAITING_ONLY_TOOL_NAMES: ReadonlySet<string> = new Set(["list_waits", "cancel_wait"]);
 
 export async function callWaitTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {

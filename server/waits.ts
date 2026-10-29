@@ -234,9 +234,9 @@ export class WaitManager {
     return this.waits.filter((w) => w.botId === botId && !w.ending).map(cloneWait);
   }
 
-  /** How many of the bot's waits have not ended: what `list` would return, without copying them. */
-  count(botId: string): number {
-    return this.waits.reduce((count, w) => count + (w.botId === botId && !w.ending ? 1 : 0), 0);
+  /** How many of the bot's waits in this chat have not ended, without copying them: what list_waits would name there. */
+  count(botId: string, threadId: string): number {
+    return this.waits.reduce((count, w) => count + (w.botId === botId && w.threadId === threadId && !w.ending ? 1 : 0), 0);
   }
 
   /** Every wait, those ended but not yet posted too. */

@@ -24,8 +24,8 @@ export interface CatalogProfile {
   computerSelection?: boolean;
   /** A room's turn: the widget and page tools and wait_until and cancel_wait, which rooms refuse, are not mounted. */
   room?: boolean;
-  /** The bot has a wait that has not ended: list_waits and cancel_wait are mounted. Without one they still answer a
-   * call (agents-catalog.ts callableTools), but are not listed. */
+  /** The bot has a wait in this chat that has not ended: list_waits and cancel_wait, which act only on this chat's
+   * waits, are mounted. Without one they still answer a call (agents-catalog.ts callableTools), but are not listed. */
   activeWaits?: boolean;
 }
 
