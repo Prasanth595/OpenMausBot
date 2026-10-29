@@ -401,7 +401,7 @@ export function tregAuthHeaders(credential: ServiceCredential): Record<string, s
 
 /** `url` and `token` are the relay's (OMB_CLOUD_X_URL, or a desktop's from its Cloud sign-in), or, with `own`, treg's
  * own base URL and the person's treg key. */
-export function createXRelayClient(options: { url: string; token: string; own?: boolean; fetcher?: typeof fetch; timeoutMs?: number }): XResearchClient {
+export function createXRelayClient(options: { url: string; token: string; own?: boolean; fetcher?: typeof fetch; timeoutMs?: number; assertAllowed?: () => void }): XResearchClient {
   const fetcher = options.fetcher ?? fetch;
   const base = options.url.replace(/\/+$/, "");
   const timeoutMs = options.timeoutMs ?? X_CLIENT_TIMEOUT_MS;
@@ -412,6 +412,7 @@ export function createXRelayClient(options: { url: string; token: string; own?: 
     let ok: boolean;
     let raw: string;
     let headers: Headers;
+    options.assertAllowed?.();
     try {
       const response = await fetcher(`${base}${path}`, {
         method: "POST",
@@ -550,6 +551,6 @@ export async function readIncludedXUsage(credential: ServiceCredential, options:
 }
 
 /** The X client for a research credential: straight to treg with the person's own key, else through the plan's relay. */
-export function createXClient(credential: ServiceCredential, options: { fetcher?: typeof fetch; timeoutMs?: number } = {}): XResearchClient {
+export function createXClient(credential: ServiceCredential, options: { fetcher?: typeof fetch; timeoutMs?: number; assertAllowed?: () => void } = {}): XResearchClient {
   return createXRelayClient({ url: credential.api, token: credential.token, own: !credential.included, ...options });
 }
