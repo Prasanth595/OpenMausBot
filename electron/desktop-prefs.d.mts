@@ -49,6 +49,12 @@ export interface DesktopPrefs {
   talkKey(): import("./talk-shortcut.mjs").TalkKeyId;
   /** False, and nothing saved, for anything but a key id in talk-keys.mjs. */
   setTalkKey(id: unknown): boolean;
+  /** True until switched off. */
+  typeShortcut(): boolean;
+  setTypeShortcut(enabled: boolean): void;
+  typeKey(): import("./talk-shortcut.mjs").TypeKeyId;
+  /** False, and nothing saved, for anything but a type key id in talk-keys.mjs. */
+  setTypeKey(id: unknown): boolean;
   /** The Quick asks chat made on this server (keyed by its data folder), null until one is saved. */
   quickAsksChat(server: string): { botId: string; threadId: string } | null;
   setQuickAsksChat(server: string, chat: { botId: string; threadId: string }): void;

@@ -6,3 +6,11 @@ export const TALK_KEYS = Object.freeze({
 export const DEFAULT_TALK_KEY = "ctrl-opt-space";
 export const isTalkKey = id => typeof id === "string" && Object.hasOwn(TALK_KEYS, id);
 export const talkKey = id => TALK_KEYS[isTalkKey(id) ? id : DEFAULT_TALK_KEY];
+
+export const TYPE_KEYS = Object.freeze({
+  "ctrl-opt-t": Object.freeze({ accelerator: "Control+Alt+T", label: "⌃⌥T" }),
+  "ctrl-shift-t": Object.freeze({ accelerator: "Control+Shift+T", label: "⌃⇧T" }),
+  "opt-shift-t": Object.freeze({ accelerator: "Alt+Shift+T", label: "⌥⇧T" }),
+});
+export const DEFAULT_TYPE_KEY = "ctrl-opt-t";
+export const isTypeKey = id => typeof id === "string" && Object.hasOwn(TYPE_KEYS, id);

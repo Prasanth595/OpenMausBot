@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 import { createDesktopPrefs } from "./desktop-prefs.mjs";
-import { createCallPresence, createTalkShortcut, TALK_SHORTCUT_UNAVAILABLE } from "./talk-shortcut.mjs";
+import { createCallPresence, createTalkShortcut, createTypeShortcut, TALK_SHORTCUT_UNAVAILABLE, TYPE_SHORTCUT_UNAVAILABLE } from "./talk-shortcut.mjs";
 
 const memoryPrefs = () => {
   let saved = null;
@@ -109,4 +109,41 @@ test("a reported call blocks until it ends, its page navigates, or its renderer 
   }
   for (let i = 0; i < 5; i += 1) presence.set(page, true);
   for (const event of ["did-navigate", "render-process-gone", "destroyed"]) assert.equal(page.listenerCount(event), 1, event);
+});
+
+const TYPE_KEYS = [{ id: "ctrl-opt-t", label: "⌃⌥T" }, { id: "ctrl-shift-t", label: "⌃⇧T" }, { id: "opt-shift-t", label: "⌥⇧T" }];
+
+test("the type shortcut registers ⌃⌥T when on, and a press reaches onPress", () => {
+  const shortcuts = fakeShortcuts(); let presses = 0;
+  const type = createTypeShortcut({ globalShortcut: shortcuts, prefs: memoryPrefs(), available: () => true, onPress: () => { presses += 1; } });
+  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Alt+T"]);
+  shortcuts.registered.get("Control+Alt+T")();
+  assert.equal(presses, 1);
+  assert.deepEqual(type.state(), { available: true, enabled: true, key: "ctrl-opt-t", keys: TYPE_KEYS, taken: false });
+  assert.equal("releaseModifiers" in type, false);
+});
+
+test("talk and type keep their own setting and key: one off, taken or changed leaves the other", () => {
+  const shortcuts = fakeShortcuts(["Control+Alt+Space"]); const prefs = memoryPrefs();
+  const talk = createTalkShortcut({ globalShortcut: shortcuts, prefs, available: () => true, onPress: () => {} });
+  const type = createTypeShortcut({ globalShortcut: shortcuts, prefs, available: () => true, onPress: () => {} });
+  assert.deepEqual([talk.state().taken, type.state().taken], [true, false]);
+  talk.set({ enabled: false });
+  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Alt+T"]);
+  assert.equal(type.set({ key: "ctrl-shift-t" }).key, "ctrl-shift-t");
+  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Shift+T"]);
+  assert.equal(type.set({ key: "ctrl-opt-space" }).key, "ctrl-shift-t");
+  assert.equal(prefs.talkKey(), "ctrl-opt-space");
+});
+
+test("an unavailable type shortcut lets its key go, refresh takes it back, and close lets it go", () => {
+  const shortcuts = fakeShortcuts(); let offered = false;
+  const type = createTypeShortcut({ globalShortcut: shortcuts, prefs: memoryPrefs(), available: () => offered, onPress: () => {} });
+  assert.deepEqual([type.state().available, [...shortcuts.registered.keys()]], [false, []]);
+  offered = true; type.refresh();
+  assert.deepEqual([...shortcuts.registered.keys()], ["Control+Alt+T"]);
+  type.close();
+  assert.deepEqual([...shortcuts.registered.keys()], []);
+  assert.deepEqual(TYPE_SHORTCUT_UNAVAILABLE, { available: false, enabled: false, key: "ctrl-opt-t", keys: TYPE_KEYS, taken: false });
+  assert.ok(Object.isFrozen(TYPE_SHORTCUT_UNAVAILABLE));
 });
