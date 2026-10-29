@@ -3037,8 +3037,7 @@ app.whenReady().then(async () => {
       chromeRail.send("desktop-language:changed", language);
     },
     page: event => senderIsLocal(event) ? "local" : cloudPageAsking(event) ?? (workspaceSenderAllowed(event, mainWindow?.webContents, environmentsState, rendererOrigin()) ? "server" : null) });
-  talk.start({ globalShortcut, screen, prefs: desktopPrefs, remote: () => Boolean(desktopRemoteAccess), home: () => homeWindow.current(), starting: () => !serverReady, localRequest: localServerRequest, dataDir: () => runningDataDir,
-    myCloud: { mine: myCloud, fetch: (...args) => session.defaultSession.fetch(...args), reconnect: reconnectCloud, power: cloudPower, account: () => cloudAccount } });
+  talk.start({ globalShortcut, screen, prefs: desktopPrefs, remote: () => Boolean(desktopRemoteAccess), home: () => homeWindow.current(), starting: () => !serverReady, localRequest: localServerRequest, dataDir: () => runningDataDir, myCloud: { mine: myCloud, fetch: (...args) => session.defaultSession.fetch(...args), reconnect: reconnectCloud, power: cloudPower, account: () => cloudAccount } });
   // Before the window, so the harness has the CUA descriptor on first render.
   cuaReady =
     !desktopRemoteAccess && (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32")
