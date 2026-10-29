@@ -5,6 +5,14 @@
 import module from "node:module";
 import { lstatSync, readdirSync, rmSync, utimesSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { createSystemProxyApplier } from "./node-system-proxy.mjs";
+
+const applySystemProxy = createSystemProxyApplier();
+try { applySystemProxy(JSON.parse(process.env.OMB_SYSTEM_PROXY || "null")); } catch {}
+delete process.env.OMB_SYSTEM_PROXY;
+process.parentPort?.on("message", ({ data }) => {
+  if (data?.type === "openmausbot:system-proxy") applySystemProxy(data.proxy);
+});
 
 const cacheRoot = process.env.OMB_SERVER_COMPILE_CACHE;
 // Engine CLIs, MCP servers and terminals the server spawns must not inherit

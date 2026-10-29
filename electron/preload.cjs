@@ -275,6 +275,7 @@ const bridge = {
   permStatus: () => ipcRenderer.invoke("perm:status"),
   permRequestMic: () => ipcRenderer.invoke("perm:request-mic"),
   permOpenSettings: (pane) => ipcRenderer.invoke("perm:open-settings", pane),
+  desktopProxy: { read: () => ipcRenderer.invoke("desktop-proxy:read"), save: value => ipcRenderer.invoke("desktop-proxy:save", value) },
   relaunch: () => ipcRenderer.invoke("desktop:relaunch"),
 
   openInstallTerminal: (command) => ipcRenderer.invoke("engine:open-terminal", command),

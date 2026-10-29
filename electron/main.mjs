@@ -34,6 +34,7 @@ import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLi
 import { windowBackground, windowChromeOptions } from "./window-chrome.mjs";
 import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
 import { createStartupScreen } from "./startup-screen.mjs";
+import { createDesktopProxy } from "./desktop-proxy.mjs";
 import { createSystemTray } from "./system-tray.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
 import { createLendingDialogs } from "./lending-dialogs.mjs";
@@ -1128,7 +1129,6 @@ function receivePhoneSecretSave(proc, rawMessage) {
   });
   return true;
 }
-
 async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmentDir(environmentsState, desktopDataDir())) {
   if (desktopShutdownStarted) return { proc: null, abort: true };
   const { entry, compileCacheDir } = serverChildLaunch({
@@ -1155,6 +1155,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     OMB_CREDENTIAL_STORE: credentialStoreUnavailable ? "unavailable" : "ok",
     ...workspaceCredentialEnv(secureCredentials),
   });
+  const systemProxy = await desktopProxy.prepareChild(childEnv);
   delete childEnv.OMB_BROWSER_CONNECTION;
   delete childEnv.OMB_SERVER_COMPILE_CACHE;
   if (compileCacheDir) childEnv.OMB_SERVER_COMPILE_CACHE = compileCacheDir;
@@ -1163,6 +1164,7 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  desktopProxy.monitor(proc, systemProxy);
   let resolveServerExit;
   utilityServerExits.set(proc, new Promise((resolve) => {
     resolveServerExit = resolve;
@@ -2429,16 +2431,14 @@ ipcMain.handle("perm:status", (event) => ({
 ipcMain.handle("perm:request-mic", localOnly("perm:request-mic", () => askForMicrophone({ available: nativeActions.appleMediaPermissions, systemPreferences })));
 const privacySettings = pane => openPrivacySettings(pane, { available: nativeActions.applePrivacySettings, openExternal: url => shell.openExternal(url) });
 ipcMain.handle("perm:open-settings", localOnly("perm:open-settings", (_event, pane) => privacySettings(pane)));
-
+const desktopProxy = createDesktopProxy({ app, session, ipcMain, localOnly, jsonFile, log: slog });
 ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
   requireMainWindowSender(event);
   relaunchAfterDesktopRemoteChange();
   return true;
 }));
-
 const talk = installTalk({ ipcMain, localOnly, localOrHome, BrowserWindow, appleSpeech: nativeActions.appleSpeech,
   speech: { start: startSpeech, stop: stopSpeech, finish: finishSpeech, busy: speechBusy }, packaged: app.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog });
-
 ipcMain.handle("companion:state", localOnly("companion:state", () => desktopCompanionState()));
 function managedRemoteAccessRefusal() {
   const policy = managedDesktop?.policy?.();
@@ -2887,8 +2887,8 @@ setCuaStateListener((connection) => {
     console.error("[desktop] capability broadcast failed:", error);
   });
 });
-
 app.whenReady().then(async () => {
+  await desktopProxy.configure();
   await evictStartupCacheOnce({
     userData: app.getPath("userData"),
     currentVersion: app.getVersion(),
