@@ -41,3 +41,19 @@ export function parseAutonomyPolicy(value: unknown): AutonomyPolicy | undefined 
   const parsed = autonomyPolicySchema.safeParse(value);
   return parsed.success ? parsed.data : undefined;
 }
+
+
+export type AutonomyLane = "observe" | "reversible" | "consequential" | "unknown";
+
+const OBSERVE_ACTIONS = new Set(["navigate", "read", "search", "inspect", "screenshot", "download_non_executable"]);
+const REVERSIBLE_ACTIONS = new Set(["draft", "local_edit", "local_test", "create_checkpoint", "create_evidence"]);
+const CONSEQUENTIAL_ACTIONS = new Set(["send", "publish", "deploy", "merge", "payment", "dns", "delete", "permission_change", "credential_change"]);
+
+/** Classify by the runtime action name; unknown actions fail closed. */
+export function autonomyLaneForAction(action: string): AutonomyLane {
+  const normalized = action.trim().toLowerCase();
+  if (OBSERVE_ACTIONS.has(normalized)) return "observe";
+  if (REVERSIBLE_ACTIONS.has(normalized)) return "reversible";
+  if (CONSEQUENTIAL_ACTIONS.has(normalized)) return "consequential";
+  return "unknown";
+}
