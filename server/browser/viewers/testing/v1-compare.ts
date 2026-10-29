@@ -42,12 +42,17 @@ export function v1Differences(actual: Array<Record<string, unknown>>): string[] 
   for (const expected of V1_GOLDEN) {
     const got = (actual as unknown as Step[]).find((step) => step.step === expected.step);
     if (!got) { problems.push(`no step ${expected.step}`); continue; }
+    if (failedInGolden(expected)) continue;
     const answer = expected.answer as Record<string, unknown> | string;
-    if (typeof answer === "object" && "error" in answer) continue;
     if (JSON.stringify(answer) !== JSON.stringify(got.answer)) problems.push(`${expected.step}: answered ${JSON.stringify(got.answer)}, the contract ${JSON.stringify(answer)}`);
     problems.push(...shownDifferences(expected, got));
   }
   return problems;
+}
+
+/** A step the old engine failed when the golden was recorded holds nothing to the contract. */
+function failedInGolden(step: Step): boolean {
+  return typeof step.answer === "object" && step.answer !== null && "error" in step.answer;
 }
 
 /** What a phone acts on after one step: who controls, the tabs, the address, and that a picture came. */
@@ -67,5 +72,5 @@ function shownDifferences(expected: Step, got: Step): string[] {
 /** True once a normalized step shows a phone everything the golden's same step showed it. */
 export function v1StepShown(step: Record<string, unknown>): boolean {
   const expected = V1_GOLDEN.find((candidate) => candidate.step === step.step);
-  return !expected || shownDifferences(expected, step as unknown as Step).length === 0;
+  return !expected || failedInGolden(expected) || shownDifferences(expected, step as unknown as Step).length === 0;
 }
