@@ -31,6 +31,10 @@ registerHooks({
         if (status.container === 'running') await stop();
         return rescueFirefoxProfile(status.runtime, target);
       }
+      export async function keepInstalledAppsBeforeRemove(_target, status, _stop) {
+        if (!status.runtime || status.container === 'missing' || !status.managed || status.imageMatches) return 'none';
+        return 'none';
+      }
     ` };
     if (url === mock) return { format: 'module', shortCircuit: true, source: `
       export * from ${JSON.stringify(actual)};
