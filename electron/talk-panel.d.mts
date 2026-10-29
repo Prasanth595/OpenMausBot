@@ -15,7 +15,6 @@ export declare function markTalkPanel(win: unknown): void;
 export declare const TALK_BOX_THEME_CSS: string;
 export type TalkTheme = "light" | "dark";
 export type TalkNativeImage = { createFromPath(path: string): { isEmpty(): boolean; resize(options: { width: number; height: number; quality?: string }): { toPNG(): Buffer } } };
-/** The mascot as base64 PNG at 56 px, twice its 28 px size in the boxes. */
 export declare function mascotPng(nativeImage: TalkNativeImage, iconPath: string): string;
 export declare function createTalkPanel(deps: {
   BrowserWindow: new (options: Record<string, unknown>) => any;

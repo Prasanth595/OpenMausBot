@@ -288,7 +288,6 @@ export function createTalkSession({ speech, server, panel, typeBox, voiceInUse, 
       const ask = typing();
       if (ask) closeBox(ask);
     },
-    /** The box lost key focus: it closes, and words left in it come back with the next ⌃⌥T within 5 minutes. */
     typeBlurred() {
       const ask = typing();
       if (!ask) return;

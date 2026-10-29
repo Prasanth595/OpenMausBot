@@ -30,7 +30,7 @@ The talk shortcut (hold ⌃⌥Space, speak, let go) reaches MausBot from any app
 - **Clicking away keeps the draft** (Omkar). If the box loses focus before Enter or Esc, it closes so nothing is left floating. The person might click another app, switch with ⌘Tab, or change Space.
   - The text is kept as a draft, and the next ⌃⌥T within about 5 minutes brings the box back with that text and the cursor at its end.
   - Esc and Enter both drop the draft.
-- **⌃⌥T on an open box:** it closes the box if it's empty and does nothing if it holds text. The box already has focus while it's open, since losing focus closes it.
+- **⌃⌥T on an open box:** it closes the box if it's empty and gives it focus back if it holds text. The box already has focus while it's open, since losing focus closes it, so that press normally changes nothing.
 - **Idle:** a box left open with nothing typed closes itself after about 60 s.
 - **The echo after Enter:** the typed text appears as a clamp of about 2 lines with an ellipsis, not talk's 400-character reply preview. The reply keeps talk's preview rule, and clicking opens the chat to read everything.
 - **One ask at a time across talk and type:**
