@@ -282,7 +282,7 @@ describe("agents proxy tools/list golden", () => {
       }
       expect(chiefTools.find((tool) => tool.name === "propose_profile")!.description).toContain(CHIEF_PROFILE_TARGET);
       expect(JSON.stringify(CHIEF_TARGET_TOOLS.map((tool) => tools.get(tool)))).not.toContain("for_bot_id");
-      for (const trigger of ["trigger_info", "trigger"]) {
+      for (const trigger of ["trigger_info", "trigger", "delete_trigger"]) {
         expect(tools.get(trigger)!.inputSchema.properties, `${name}: ${trigger}`).toHaveProperty("for_bot_id");
       }
     }
