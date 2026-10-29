@@ -56,6 +56,17 @@ function takeover(overrides: Partial<LimitTakeoverDeps> = {}) {
 }
 
 describe("which AI carries on while one is limited", () => {
+  it("never picks an AI that bills each use by itself, only as a backup the person chose", () => {
+    const apiClaude = engine("claude-api", "claudeAgent", ["claude-opus-5-5"], { access: "api" });
+    const keyedClaude = engine("claude-key", "claudeAgent", ["claude-opus-5-5"]);
+    const keyed = { "claude-key": { environment: { ANTHROPIC_API_KEY: "sk-ant-fixture" } } } as unknown as InstanceConfigMap;
+    expect(takeover({ engines: () => [CODEX, apiClaude] }).instance.backups("kai", on("codex", "gpt-6"))).toEqual([]);
+    expect(takeover({ engines: () => [CODEX, keyedClaude], configs: () => keyed }).instance.backups("kai", on("codex", "gpt-6"))).toEqual([]);
+    expect(takeover({ engines: () => [CODEX, apiClaude, GO] }).instance.backups("kai", on("codex", "gpt-6"))).toEqual([on("opencode", "go-default")]);
+    expect(takeover({ engines: () => [CODEX, apiClaude], chosen: () => [on("claude-api", "claude-opus-5-5")] }).instance.backups("kai", on("codex", "gpt-6")))
+      .toEqual([on("claude-api", "claude-opus-5-5")]);
+  });
+
   it("takes the backups the person chose first, then the AI a new bot would get, and never the limited AI", () => {
     const { instance } = takeover({ chosen: () => [on("opencode", "go-default"), on("codex", "gpt-6-mini")] });
     expect(instance.backups("kai", on("codex", "gpt-6"))).toEqual([on("opencode", "go-default"), on("claude", "claude-opus-5-5")]);
@@ -79,8 +90,8 @@ describe("which AI carries on while one is limited", () => {
     expect(takeover({ engines: () => [CODEX, secondCodex], chosen: () => [on("codex-2", "gpt-6")] }).instance.backups("kai", on("codex", "gpt-6")),
       "never another sign-in to the same plan").toEqual([]);
     const keyed = { "codex-2": { environment: { OPENAI_API_KEY: "sk-test" } } } as unknown as InstanceConfigMap;
-    expect(takeover({ engines: () => [CODEX, secondCodex], configs: () => keyed }).instance.backups("kai", on("codex", "gpt-6")),
-      "a pay-per-use key on the same AI is fine").toEqual([on("codex-2", "gpt-6")]);
+    expect(takeover({ engines: () => [CODEX, secondCodex], configs: () => keyed, chosen: () => [on("codex-2", "gpt-6")] }).instance.backups("kai", on("codex", "gpt-6")),
+      "a pay-per-use key on the same AI is fine as a backup the person chose").toEqual([on("codex-2", "gpt-6")]);
   });
 
   it("has none for an AI it doesn't know", () => {
