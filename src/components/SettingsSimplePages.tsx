@@ -12,6 +12,7 @@ import { TalkShortcutRow } from "./TalkShortcutRow";
 import { DiagnosticsRow } from "./DiagnosticsRow";
 import { EnginesSettings } from "./EnginesSettings";
 import { LocalComputerSection } from "./LocalComputerSection";
+import { ProxySettings } from "./ProxySettings";
 import { PeopleSection } from "./PeopleSection";
 import { ActivitySection } from "./ActivitySection";
 import { BuiltInBrowserRow } from "./BrowserSettingsRows";
@@ -121,6 +122,7 @@ export type RemoteAccessCards = Record<"client" | "domain" | "pairing" | "compan
 export function SimpleComputerPage({ has, remoteAccess, servers, disclose }: { has: Has; remoteAccess: RemoteAccessCards; servers: ReactNode; disclose: Disclose }) {
   return (
     <>
+      {has("computer") && <ProxySettings />}
       {has("computer") && <SettingsGroup label={t("settings.simple.computer.bots")} block="computer"><LocalComputerSection /></SettingsGroup>}
       {has("companion") && (
         <SettingsGroup label={t("settings.simple.computer.devices")} block="companion">

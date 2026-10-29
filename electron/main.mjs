@@ -34,6 +34,9 @@ import { createOrganizationEntry, isOrganizationDeepLink, takeOrganizationDeepLi
 import { windowBackground, windowChromeOptions } from "./window-chrome.mjs";
 import { createAllWindowsClosedQuit } from "./window-all-closed.mjs";
 import { createStartupScreen } from "./startup-screen.mjs";
+import { resolveSystemProxy, validateProxySettings, chromiumProxySettings } from "./system-proxy.mjs";
+import { createSystemProxyApplier } from "./node-system-proxy.mjs";
+const applyNodeSystemProxy = createSystemProxyApplier();
 import { createSystemTray } from "./system-tray.mjs";
 import { createLendingIndicator } from "./lending-indicator.mjs";
 import { createLendingDialogs } from "./lending-dialogs.mjs";
@@ -1155,6 +1158,10 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     OMB_CREDENTIAL_STORE: credentialStoreUnavailable ? "unavailable" : "ok",
     ...workspaceCredentialEnv(secureCredentials),
   });
+  const systemProxy = await resolveSystemProxy(url => session.defaultSession.resolveProxy(url));
+  applyNodeSystemProxy(systemProxy);
+  for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "ALL_PROXY", "all_proxy", "NODE_USE_ENV_PROXY"]) delete childEnv[key];
+  childEnv.OMB_SYSTEM_PROXY = JSON.stringify(systemProxy);
   delete childEnv.OMB_BROWSER_CONNECTION;
   delete childEnv.OMB_SERVER_COMPILE_CACHE;
   if (compileCacheDir) childEnv.OMB_SERVER_COMPILE_CACHE = compileCacheDir;
@@ -1163,6 +1170,20 @@ async function startServerOn(port, dataDir = runningDataDir ?? startupEnvironmen
     env: childEnv,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  let proxyState = JSON.stringify(systemProxy);
+  const proxyMonitor = setInterval(async () => {
+    try {
+      const next = await resolveSystemProxy(url => session.defaultSession.resolveProxy(url));
+      const encoded = JSON.stringify(next);
+      if (encoded !== proxyState) {
+        applyNodeSystemProxy(next);
+        proc.postMessage({ type: "openmausbot:system-proxy", proxy: next });
+        proxyState = encoded;
+      }
+    } catch (error) { slog(`system proxy refresh failed: ${error?.message ?? error}`); }
+  }, 10_000);
+  proxyMonitor.unref?.();
+  proc.once("exit", () => clearInterval(proxyMonitor));
   let resolveServerExit;
   utilityServerExits.set(proc, new Promise((resolve) => {
     resolveServerExit = resolve;
@@ -2430,6 +2451,18 @@ ipcMain.handle("perm:request-mic", localOnly("perm:request-mic", () => askForMic
 const privacySettings = pane => openPrivacySettings(pane, { available: nativeActions.applePrivacySettings, openExternal: url => shell.openExternal(url) });
 ipcMain.handle("perm:open-settings", localOnly("perm:open-settings", (_event, pane) => privacySettings(pane)));
 
+const proxySettingsStore = () => jsonFile(path.join(app.getPath("userData"), "proxy-settings.json"));
+function readProxySettings() {
+  try { return validateProxySettings(proxySettingsStore().read()); }
+  catch { return { mode: "direct", url: "" }; }
+}
+ipcMain.handle("desktop-proxy:read", localOnly("desktop-proxy:read", () => readProxySettings()));
+ipcMain.handle("desktop-proxy:save", localOnly("desktop-proxy:save", (_event, input) => {
+  const settings = validateProxySettings(input);
+  proxySettingsStore().write(settings);
+  return settings;
+}));
+
 ipcMain.handle("desktop:relaunch", localOnly("desktop:relaunch", (event) => {
   requireMainWindowSender(event);
   relaunchAfterDesktopRemoteChange();
@@ -2889,6 +2922,7 @@ setCuaStateListener((connection) => {
 });
 
 app.whenReady().then(async () => {
+  await session.defaultSession.setProxy(chromiumProxySettings(readProxySettings()));
   await evictStartupCacheOnce({
     userData: app.getPath("userData"),
     currentVersion: app.getVersion(),

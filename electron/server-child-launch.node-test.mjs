@@ -72,6 +72,7 @@ function stage(t, indexSource = REPORTING_INDEX) {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(path.join(dir, "server"));
   copyFileSync(bootstrapSource, path.join(dir, "server", "desktop-entry.mjs"));
+  copyFileSync(fileURLToPath(new URL("./node-system-proxy.mjs", import.meta.url)), path.join(dir, "server", "node-system-proxy.mjs"));
   writeFileSync(path.join(dir, "server", "index.js"), indexSource);
   return dir;
 }
