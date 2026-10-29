@@ -1430,7 +1430,7 @@ const mcpOAuth = new McpOAuthManager({
 const teamConnections = createTeamConnectionsHost({ team: CLOUD_TEAM, dataDir: DATA_DIR, cfg: () => cfg, adminOrigin: CLOUD_HOME?.adminOrigin ?? null, harnessUrl: `http://127.0.0.1:${PORT}`, audienceOf: teamHost.audienceOf,
   requester: (threadId, generation) => { const owner = directRequestOwners.get(threadId); return provenRequestPerson(owner, generation ?? owner?.generation ?? "", (id) => linePersonKey(store.messagesFor(threadId).find((message) => message.id === id))); },
   mint: (capability) => mintInternalCapability({ ...capability, depth: 0, kind: "connectors", skillAuthoring: false, createdBots: 0, openedThreads: 0 }), mcpOAuth, isSessionLive: (id) => sessions.isLive(id),
-  botMcp: (bot) => managedPolicy.filterMcp(customMcpServers(cfg, bot.mcpServers)), brokerUrl: () => (CLOUD_TEAM ? cloudConnectedAppsBrokerUrl() || null : null), composio });
+  botMcp: (bot) => managedPolicy.filterMcp(customMcpServers(cfg, bot.mcpServers)), brokerUrl: () => (CLOUD_TEAM ? cloudConnectedAppsBrokerUrl() || null : null), composio }); teamConnections.primeApps();
 // OpenCode reads provider keys (ANTHROPIC_API_KEY, OPENAI_API_KEY, …) from its environment. Wired before the first catalog probe below.
 let openCodeOrganisationManaged = (): boolean => false;
 const openCodeKeysAllowed = (): boolean => openCodeProviderKeysAllowed({
@@ -1898,14 +1898,14 @@ function agentsIntegration(
       OMB_MEMORY_ENABLED: store.bot(botId)?.memoryEnabled === false ? "0" : "1",
       // Only advertises the tools; the routes behind them refuse regardless.
       OMB_SHARED_COMPUTERS_ENABLED: lendingEnabled() ? "1" : "0",
-      OMB_CLOUD_HOME: CLOUD_HOME ? "1" : "0", OMB_TEAM_PEOPLE: CLOUD_TEAM ? "1" : "0",
+      OMB_CLOUD_HOME: CLOUD_HOME ? "1" : "0", OMB_TEAM_PEOPLE: CLOUD_TEAM ? "1" : "0", OMB_ROOM: store.groupByThread(threadId) ? "1" : "0",
       OMB_VOICE_NOTES: (() => {
         const speaking = botForThread(botId, threadId) ?? store.bot(botId);
         return tts.voiceReady(cfg, speaking?.voice) && speaking?.voiceNotes !== false ? "1" : "0";
       })(),
       OMB_X_RESEARCH: researchCredential(cfg.treg?.key) && store.bot(botId)?.xResearch !== false ? "1" : "0",
       ...roleToolEnv(store.bot(botId)),
-      OMB_ESCALATIONS: chiefEscalationsEnabled(cfg) ? "1" : "0",
+      OMB_ESCALATIONS: chiefEscalationsEnabled(cfg) ? "1" : "0", OMB_COMPUTER_SELECTION: computerSelectionTurns.get(threadId)?.generation === generation ? "1" : "0",
     },
   };
 }
@@ -13988,7 +13988,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         }
         return json(res, 200, { hits, memoryHits, teamHits: scope === "conversations" ? [] : teamMemory.search(from.section, q, limit, range) });
       }
-      // session_read: a message id from another bot's thread reads as missing, not forbidden, so the id space leaks nothing.
+      // Reading one message: an id from another bot's thread reads as missing, not forbidden, so the id space leaks nothing.
       if (method === "GET" && path === "/api/internal/session-read") {
         const fromBotId = String(url.searchParams.get("fromBotId") ?? "");
         const from = store.bot(fromBotId);
