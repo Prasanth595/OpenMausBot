@@ -1,7 +1,9 @@
-# Talk shortcut (hold to talk from any app)
+# Talk and type shortcuts (hold ⌃⌥Space to talk, press ⌃⌥M to type, from any app)
 
 Hold ⌃⌥Space from any app, speak, let go. The words go to MausBot's "Quick asks"
 chat and a never-focused box at the bottom of the screen shows the reply.
+Press ⌃⌥M instead and a small focused box takes typing; Return sends the words
+to the same chat and the reply shows in a box on the same timing.
 
 The real hotkey, the microphone, window focus and Spaces are macOS behavior:
 the control surface cannot drive them, so this is not in the map in
@@ -15,8 +17,8 @@ pnpm exec vitest run electron/speech.test.mjs electron/skin-overlay.test.mjs ser
 pnpm typecheck && pnpm lint && pnpm i18n:check
 ```
 
-They prove key parsing and registration, the key let go while home is My Cloud
-and taken back when home is this computer again, the press/release state machine
+They prove key parsing and registration, the key let go while home needs a
+sign-in and taken back on My Cloud or this computer, the press/release state machine
 with injected clocks and speech, the box's window flags, states, skin theme and
 pinned display, the local-server ask (thread, owner header, send id, SSE follow,
 needs-you, timeout, a 409 `moved`, a server still starting), preference storage,
@@ -25,6 +27,53 @@ update waiting for a talk ask.
 They do not prove the real hotkey, the microphone, that the box never takes
 focus, that it shows over full-screen apps and other Spaces, or the release of
 ⌃⌥ after speech (no unit test covers that release path).
+
+The `talk-type-*` tests in the same command also prove the type shortcut:
+presets, preferences and independence from talk; the type box's window flags
+(a focusable panel, shown inactive then focused, never `show()`, destroyed at
+once); one loaded, hidden box waiting while ⌃⌥M is registered, shown by a press
+with no new window, replaced after each close; a blur, a gone renderer, a
+closed window or a failed page reported once; the page's messages checked; the
+⌘ chord guard; the key rule with an input method, a blank Return, read-only
+after send, six lines and 4,000 characters; the typing state, the draft, the
+idle close and the repeat guard; one ask at a time; refusals; the echo;
+availability and My Cloud's page. They do not prove the real key, the box
+becoming key without activating MausBot, focus going back to the app
+underneath, Spaces and full screen, a real input method, secure input, or the
+Edit menu's shortcuts in the box.
+
+### My Cloud
+
+```sh
+node --test electron/talk-cloud.node-test.mjs electron/talk-server.node-test.mjs electron/talk-session.node-test.mjs electron/talk-main.node-test.mjs electron/talk-panel.node-test.mjs
+pnpm exec vitest run server/talk-cloud.e2e.test.ts --maxWorkers=1
+```
+
+With fakes for My Cloud, the Admin and the window's session, they prove: asks go
+to My Cloud's verified origin over the window's own sign-in there (`credentials:
+include`, an `origin` header, no background header, no token of its own) and
+never to this computer's frozen server; no verified origin asks nothing; an
+ended session signs the window in again once, a failed sign-in says so; an
+asleep My Cloud is woken at the press through the Admin (`openSleepingCloud`),
+two presses share one wake, My Cloud's own asleep answer to a read wakes it
+and reads once more (no other failure is retried, and the chat's creation is
+never repeated), a wake that fails or passes 45 s says so and asks nothing;
+home moving during a re-sign-in asks nothing more; the message goes once after
+hello (a 401 repeat keeps its send id); the reply's 120 s start at the send,
+and words never sent say so; a server that refuses
+`select` makes the chat without it; "Waking My Cloud…" shows after the words
+are let go and presses are ignored meanwhile; an ask stays with the server that
+found its chat when home changes; the box link keeps its escaped ids; the
+Settings bridge and its channels reach My Cloud's own page only while it is
+home at the verified origin and from a frame with that real origin (an opaque
+origin is refused), never a team's or another server's page, and on that page
+only turning it off goes without a click. The e2e test asks a real server over
+a cookie redeemed from a one-time owner code: answered,
+Quick asks not opened, another origin refused, an ended session renewed once,
+one that can't be renewed says sign in.
+They do not prove Electron's cookie jar, a real My Cloud behind its proxy, its
+sleep, the Admin's wake or how long a real wake takes: check those by hand
+below.
 
 `docs/verification/evidence/talk-shortcut/` holds the box page rendered in
 headless Chrome for every state in the app's light and dark skins
@@ -40,7 +89,9 @@ does) at 2x, with the 56 px mascot, reduced motion (a still listening ring) and
 a grey desktop behind the transparent page. Each skin is rendered with macOS's
 appearance emulated the other way round, so a light card on a dark macOS shows
 the box following the app's skin (`render({state, text, theme})`), not the
-media query. `reply-long` is a 400-character reply cut with an ellipsis;
+media query. `typed-sending` and `typed-reply-long` show the typed words as the
+box's first lines (two at most, with an ellipsis) over the label and the reply,
+at most 240 px. `reply-long` is a 400-character reply cut with an ellipsis;
 `reply-wide` is a reply of wide characters cut at ten lines, the tallest box.
 
 Rendering by hand instead: pass `theme`, or the page falls back to the media
@@ -57,6 +108,9 @@ or taller than the card shows a box the app never draws.
   bots. Only one running app may hold the key: quit any other MausBot first.
 - Use composer dictation once first so Microphone and Speech Recognition are
   granted.
+- For the type steps' frontmost-app log, Terminal needs System Settings →
+  Privacy & Security → Automation (System Events) and Accessibility; without
+  them `osascript` prints an error instead of the app's name.
 
 ## By hand
 
@@ -102,13 +156,128 @@ or taller than the card shows a box the app never draws.
     Long replies stop at 400 characters with an ellipsis, and the card grows to
     at most 240 px with its bottom edge showing (a Japanese reply is cut at ten
     lines).
-15. **My Cloud home.** After moving this computer's bots to My Cloud (window on
-    My Cloud's page): ⌃⌥Space does nothing in MausBot and another app can take
-    it (`talk-shortcut:state` says unavailable, so no Settings row). Come home
-    to this computer again: the key works without a restart. A box still up
-    when the move froze this computer says "MausBot lives on My Cloud now —
-    talk to it there". A Quick asks chat link sent while My Cloud's page is
-    shown does reach it as `chat:open`, and My Cloud has no such chat; with the
-    key off there, no box makes one.
+15. **Home needs a sign-in.** With this computer's bots on My Cloud and the
+    MausBot Cloud sign-in ended (Settings → MausBot Cloud → sign out): ⌃⌥Space
+    does nothing in MausBot and another app can take it. Sign in again: the key
+    works without a restart. A box still up when the move froze this computer
+    says "MausBot lives on My Cloud now. Try again in a moment."
 16. **Server starting.** Quit, relaunch and press at once, before the window
     loads: "MausBot is still starting. Try again in a moment."
+
+### By hand: My Cloud
+
+Needs a test account whose bots were moved to a test My Cloud, on a packaged
+build of the branch beside the installed app (never Omkar's real My Cloud, never
+a data folder that was ever opened against real data). My Cloud must run this
+branch's server for the Settings row (an older one has no row, and makes the
+Quick asks chat the open one there once).
+
+17. **Ask My Cloud.** Window on My Cloud's page, Safari in front: hold ⌃⌥Space,
+    say "what can you do", let go. The reply shows in the box; My Cloud's
+    MausBot has a "Quick asks" chat with the ask, and MausBot's open chat there
+    did not change. This computer's frozen server got no request (its log shows
+    none).
+18. **Click.** Click the box: the window comes forward on My Cloud's Quick asks
+    chat. With a team's Cloud shown in the window, the click brings My Cloud
+    back first, then the chat.
+19. **Asleep.** Let My Cloud sleep (its plan sleeps when idle; the Cloud
+    settings say asleep). Hold, speak for a few seconds, let go: "Waking My
+    Cloud…" with the words, then the reply, sent once (one user message in the
+    chat). Pressing again while it wakes does nothing.
+20. **Wake fails.** With the network off after letting go, or a Cloud that
+    can't start: "My Cloud didn't wake up. Try again in a moment." within about
+    45 s, nothing in the chat. Network off while awake: "Couldn't reach My
+    Cloud. Try again in a moment."
+21. **Session ended.** Sign this app out on My Cloud's page only (its own
+    sign-out), then press: the window's session there is renewed by itself and
+    the ask goes through. "Sign in to My Cloud again, then try again." shows only
+    when that renewal fails while this app is still signed in to MausBot Cloud
+    (the Admin refuses or can't give a new code); signing out of MausBot Cloud
+    instead makes home need a sign-in and lets the key go (step 15). The
+    automated tests cover the failed renewal; there is no by-hand step for it.
+22. **Settings row.** On My Cloud's page, Settings → General shows "Talk to
+    MausBot from any app"; turning it off frees the key and this app's own
+    Settings shows it off too. On a team's Cloud page and on another own
+    Cloud's page the row is absent (`window.ogb.talkShortcut` is undefined in
+    the page's devtools).
+23. **Teams stay off.** With a team's Cloud shown, a press still asks My
+    Cloud's MausBot, never the team's.
+
+### By hand: Type (⌃⌥M)
+
+Start a background log of the frontmost app, five lines a second, for steps
+25-29 (stop it with `kill %1` when done):
+
+```sh
+osascript -e 'repeat
+  tell application "System Events" to set n to name of first application process whose frontmost is true
+  do shell script "echo " & quoted form of n & " >> ~/front.log"
+  delay 0.2
+end repeat' &
+```
+
+24. **Row.** Settings → General (Simple and Advanced) shows "Type to MausBot
+    from any app" under the talk row, on, "Press ⌃⌥M, type, then press Return…".
+25. **Focus (ship gate).** Safari in front, over the MausBot window; press
+    ⌃⌥M: the box shows bottom-centre with a blinking caret and takes the
+    keystrokes; the menu bar still says Safari, `front.log` reads `Safari`
+    throughout, and the MausBot window never comes forward.
+26. **Send (ship gate).** Type "what can you do", Return: the words show at
+    once as the first line over "Sending to MausBot…", then the reply; a key
+    pressed right after Return lands in Safari; `front.log` still only
+    `Safari`; clicking the box opens MausBot on Quick asks. Then again with
+    MausBot's composer focused before Safari came to the front: the composer
+    gets no keystroke and the MausBot window stays behind.
+27. **Esc and × (ship gate).** The box closes at once, nothing is sent, and the
+    next keystroke lands in Safari; then again with MausBot's composer focused
+    behind Safari, as in step 26.
+28. **From MausBot itself (ship gate).** Composer focused: ⌃⌥M then Esc puts
+    focus back in the composer; ⌃⌥M then Return leaves MausBot's open chat as
+    it was.
+29. **Type-ahead (ship gate).** TextEdit in front with a document focused;
+    press ⌃⌥M and at once type "abc⏎" without waiting for the box: nothing
+    lands in TextEdit. Repeat a second after a send and a second after Esc
+    (the box made at each close).
+30. **Editing while another app is active.** ⌘A, ⌘C, ⌘V, ⌘X and ⌘Z edit the box
+    while Safari, not MausBot, is the active app.
+31. **Keys.** Shift+Return makes a line; six lines, then it scrolls; a blank
+    Return does nothing; a 5,000-character paste keeps 4,000;
+    ⌘A/⌘C/⌘V/⌘X/⌘Z work; ⌘Q, ⌘W, ⌘R, ⌘,, ⌘H and ⌘M do nothing; ⌃⌘Space opens
+    the emoji picker; clicking the card or the mascot leaves the caret in the
+    field.
+32. **Input method.** Japanese Romaji, "nihon": Return makes 日本 without
+    sending; a second Return sends.
+33. **Toggle and repeat.** ⌃⌥M closes an empty box and leaves one with words
+    open, with the caret still in it; holding ⌃⌥M for 2 s leaves one box open.
+34. **Clicking away.** With words in the box, a click on Safari's page, ⌘Tab, or
+    ⌃→ to another Space each closes it at once (no box stays up without focus);
+    ⌃⌥M within 5 minutes brings the words back with the caret at the end, after
+    5 minutes it opens empty; Esc and Return drop the words.
+35. **Idle.** An empty box closes after about 60 s.
+36. **Full screen and Spaces.** In a full-screen app and on another Space the
+    box shows there and takes typing; the app keeps its focus after Esc.
+37. **Secure input.** Safari's password field focused, ⌃⌥M: note whether
+    nothing happens or the box opens; keystrokes never land in the password
+    field while the box is up.
+38. **Talk against type.** While listening, ⌃⌥M does nothing; over a talk reply
+    it opens the box; while the box is open, ⌃⌥Space does nothing; over a typed
+    reply, ⌃⌥Space listens.
+39. **Independence.** Talk off: ⌃⌥M works; type off: ⌃⌥M is free and talk works;
+    ⌃⇧M and ⌥⇧M work; another app holding ⌃⌥M: "⌃⌥M is used by another app.
+    Pick another shortcut."
+40. **My Cloud.** Home on My Cloud: the ask goes to its Quick asks; asleep:
+    "Waking My Cloud…" under the words, then the reply, sent once; the row is on
+    My Cloud's own page, where turning it on or changing the key takes a click,
+    and absent on a team's page.
+41. **Starting.** ⌃⌥M and Return right after a relaunch: "MausBot is still
+    starting. Try again in a moment."
+42. **Light and dark.** The type box and the echo follow the app's skin;
+    compare with the `typed-*` PNGs.
+43. **Keyboard layouts.** With a Russian or Greek layout, ⌘C, ⌘V, ⌘X, ⌘A and ⌘Z
+    edit the text in the box; ⌘Q and ⌘W do nothing, and ⌥⌘I does not open
+    Developer Tools. With French AZERTY, ⌘Q does nothing and the key labelled A
+    selects all.
+44. **Keys on open.** The box takes typing the moment it shows, also when it
+    reopens with a kept draft.
+45. **Size.** The echo plus a long reply stays within the box, which is at most
+    240 px high; check by eye.

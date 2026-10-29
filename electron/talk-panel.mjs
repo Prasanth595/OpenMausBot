@@ -5,9 +5,14 @@ const MASCOT_PX = 28;
 /** Lines of 13 px text at 1.4 that fit the tallest box with its label and padding. */
 const TEXT_LINES = 10;
 const LIGHT = "color-scheme:light;--panel:#f7f7f7f5;--border:#0000001a;--ink:#0d0d0d;--ink2:#444444;--accent:#0b62c4;--warning:#8a5a00;--danger:#c02b3a;--hover:#0000000d";
+export const TALK_BOX_THEME_CSS = `:root{color-scheme:dark light}
+body{color-scheme:dark;--panel:#111111f5;--border:#ffffff16;--ink:#fcfcfc;--ink2:#fcfcfcbf;--accent:#1084fe;--warning:#ff9800;--danger:#ff5667;--hover:#ffffff14}
+body.light{${LIGHT}}
+@media (prefers-color-scheme: light){body:not(.dark){${LIGHT}}}`;
 
 export const TALK_LABELS = Object.freeze({
   listening: "Listening…",
+  waking: "Waking My Cloud…",
   sending: "Sending to MausBot…",
   thinking: "MausBot is thinking…",
   reply: "MausBot",
@@ -17,6 +22,10 @@ export const TALK_LABELS = Object.freeze({
 });
 
 const panels = new WeakSet();
+
+export function markTalkPanel(win) {
+  panels.add(win);
+}
 
 export function isTalkPanel(win) {
   return panels.has(win);
@@ -53,10 +62,7 @@ export function replyPreview(text, limit = 400) {
 export function talkPanelHtml(iconBase64) {
   const labels = JSON.stringify(TALK_LABELS);
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>MausBot</title><style>
-:root{color-scheme:dark light}
-body{color-scheme:dark;--panel:#111111f5;--border:#ffffff16;--ink:#fcfcfc;--ink2:#fcfcfcbf;--accent:#1084fe;--warning:#ff9800;--danger:#ff5667;--hover:#ffffff14}
-body.light{${LIGHT}}
-@media (prefers-color-scheme: light){body:not(.dark){${LIGHT}}}
+${TALK_BOX_THEME_CSS}
 *{box-sizing:border-box}html,body{margin:0;background:transparent;overflow:hidden;font:13px/1.4 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:var(--ink);-webkit-user-select:none;user-select:none}
 body{opacity:0;transition:opacity 160ms ease}body.on{opacity:1}
 #card{position:relative;display:flex;gap:12px;align-items:flex-start;min-height:56px;padding:14px 40px 14px 14px;border:1px solid var(--border);border-radius:16px;background:var(--panel);cursor:pointer}
@@ -67,15 +73,18 @@ body.listening #mascot::after{animation:pulse 1.4s ease-out infinite}
 #label{font-weight:600}#label:empty{display:none}
 body.needs-you #label,body.still-working #label{color:var(--warning)}body.error #text{color:var(--danger)}
 #text{color:var(--ink2);overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${TEXT_LINES};overflow:hidden}#text:empty{display:none}#label:not(:empty)+#text{margin-top:2px}
+#echo{color:var(--ink);overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin-bottom:4px}#echo:empty{display:none}body.echoed #text{-webkit-line-clamp:8}
 #close{position:absolute;top:8px;right:8px;width:24px;height:24px;display:grid;place-items:center;padding:0;border:0;border-radius:6px;background:transparent;color:var(--ink2);cursor:pointer}
 #close:hover{background:var(--hover);color:var(--ink)}#close svg{pointer-events:none}
 @keyframes pulse{from{transform:scale(.9);opacity:.8}to{transform:scale(1.35);opacity:0}}
 @media (prefers-reduced-motion: reduce){body{transition:none}body.listening #mascot::after{animation:none;opacity:.7}}
-</style></head><body><div id="card"><div id="mascot"><img src="data:image/png;base64,${iconBase64}" alt=""></div><div id="body"><div id="label"></div><div id="text" role="status"></div></div><button id="close" type="button" aria-label="Dismiss"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><script>
+</style></head><body><div id="card"><div id="mascot"><img src="data:image/png;base64,${iconBase64}" alt=""></div><div id="body"><div id="echo"></div><div id="label"></div><div id="text" role="status"></div></div><button id="close" type="button" aria-label="Dismiss"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><script>
 const LABELS=${labels};
-const card=document.getElementById("card"),label=document.getElementById("label"),text=document.getElementById("text");
+const card=document.getElementById("card"),echo=document.getElementById("echo"),label=document.getElementById("label"),text=document.getElementById("text");
 function render(view){
   document.body.className=["on",view.state,view.theme].filter(Boolean).join(" ");
+  document.body.classList.toggle("echoed",Boolean(view.echo));
+  echo.textContent=view.echo||"";
   label.textContent=LABELS[view.state]||"";
   text.textContent=view.text||(view.state==="listening"?"Let go to send":"");
   return Math.ceil(card.getBoundingClientRect().height);
@@ -87,7 +96,7 @@ document.getElementById("close").addEventListener("click",e=>{e.stopPropagation(
 }
 
 /** The mascot as a PNG at twice its CSS size, for Retina displays. */
-function mascotPng(nativeImage, iconPath) {
+export function mascotPng(nativeImage, iconPath) {
   const icon = nativeImage.createFromPath(iconPath);
   if (icon.isEmpty()) throw new Error(`no talk box icon at ${iconPath}`);
   return icon.resize({ width: 2 * MASCOT_PX, height: 2 * MASCOT_PX, quality: "best" }).toPNG().toString("base64");
@@ -161,7 +170,7 @@ export function createTalkPanel({ BrowserWindow, screen, nativeImage, iconPath, 
   async function paint() {
     const target = win;
     const ticket = ++latest;
-    const payload = JSON.stringify({ state: view.state, text: replyPreview(view.text), ...(theme ? { theme } : {}) });
+    const payload = JSON.stringify({ state: view.state, text: replyPreview(view.text), ...(view.echo ? { echo: view.echo } : {}), ...(theme ? { theme } : {}) });
     let height;
     try {
       height = await target.webContents.executeJavaScript(`render(${payload})`);

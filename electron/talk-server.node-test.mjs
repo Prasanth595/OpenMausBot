@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createReplyTracker, createTalkServer, findMausBot, readFrames } from "./talk-server.mjs";
+import { TalkServerError, createReplyTracker, createTalkServer, findMausBot, readFrames } from "./talk-server.mjs";
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const turn = turnId => (turnId ? { turnId } : {});
@@ -16,17 +16,23 @@ const CHAT = { botId: "m", threadId: "t1" };
 
 const MOVED = { error: "This bot lives on My Cloud now.", code: "moved" };
 
-function fakeServer({ bots, saved = null, sendStatus = 202, sendBody = { ok: true }, made = null, starting }) {
+function fakeServer({ bots, saved = null, sendStatus = 202, sendBody = { ok: true }, made = null, starting, unreachable, throws = {} }) {
   const encoder = new TextEncoder();
   const server = { calls: [], saves: [], events: null, listing: { down: false, status: 200 } };
+  const answers = Array.isArray(made) ? [...made] : null;
   const request = async (route, init = {}) => {
     const method = init.method ?? "GET";
     server.calls.push([method, route, init.body === undefined ? undefined : JSON.parse(init.body)]);
+    const thrown = throws[`${method} ${route.replace(/\/api\/bots\/[\w-]+\//, "/api/bots/:id/")}`];
+    if (thrown) throw thrown;
     if (method === "GET" && route === "/api/bots?messages=0") {
       if (server.listing.down) throw new TypeError("fetch failed");
       return Response.json({ bots }, { status: server.listing.status });
     }
-    if (method === "POST" && /^\/api\/bots\/[\w-]+\/tasks$/.test(route)) return made ? Response.json(made.body, { status: made.status }) : Response.json({ task: { threadId: "t-new", title: "Quick asks" } }, { status: 201 });
+    if (method === "POST" && /^\/api\/bots\/[\w-]+\/tasks$/.test(route)) {
+      const answer = answers ? answers.shift() : made;
+      return answer ? Response.json(answer.body, { status: answer.status }) : Response.json({ task: { threadId: "t-new", title: "Quick asks" } }, { status: 201 });
+    }
     if (method === "GET" && route === "/api/events?screens=off") {
       let stream;
       const body = new ReadableStream({ start: controller => { stream = controller; }, cancel: () => { server.events.cancelled = true; } });
@@ -36,7 +42,7 @@ function fakeServer({ bots, saved = null, sendStatus = 202, sendBody = { ok: tru
     if (method === "POST" && /^\/api\/bots\/[\w-]+\/messages$/.test(route)) return Response.json(sendBody, { status: sendStatus });
     return new Response(null, { status: 404 });
   };
-  server.talk = createTalkServer({ request, serverKey: () => "server-a", starting, prefs: { quickAsksChat: () => saved, setQuickAsksChat: (key, chat) => server.saves.push([key, chat]) } });
+  server.talk = createTalkServer({ request, serverKey: () => "server-a", starting, unreachable, prefs: { quickAsksChat: () => saved, setQuickAsksChat: (key, chat) => server.saves.push([key, chat]) } });
   return server;
 }
 
@@ -96,6 +102,43 @@ test("a server still on its way up says starting, not down", async () => {
   await assert.rejects(server.talk.prepare(), { code: "starting" });
   starting = false;
   await assert.rejects(server.talk.prepare(), { code: "server-down" });
+});
+
+test("a server from before select makes the chat without it after a 400, never twice, and a second refusal is refused", async () => {
+  const older = fakeServer({ bots: [{ id: "m", defaultBot: {}, tasks: [] }], made: [{ status: 400, body: { error: "unknown field" } }, { status: 201, body: { task: { threadId: "t-old" } } }] });
+  assert.deepEqual(await older.talk.prepare(), { botId: "m", threadId: "t-old" });
+  assert.deepEqual(older.calls.filter(([method]) => method === "POST").map(([, , body]) => body), [{ title: "Quick asks", select: false }, { title: "Quick asks" }]);
+  assert.deepEqual(older.saves, [["server-a", { botId: "m", threadId: "t-old" }]]);
+
+  const refusing = fakeServer({ bots: [{ id: "m", defaultBot: {}, tasks: [] }], made: [{ status: 400, body: {} }, { status: 400, body: {} }] });
+  await assert.rejects(refusing.talk.prepare(), { code: "refused" });
+  assert.equal(refusing.calls.filter(([method]) => method === "POST").length, 2);
+});
+
+test("a request's own reason passes through: listing, making the chat, listening and sending", async () => {
+  const signIn = new TalkServerError("cloud-signin");
+  const bots = [{ id: "m", defaultBot: {}, tasks: [] }];
+  await assert.rejects(fakeServer({ bots, throws: { "GET /api/bots?messages=0": signIn } }).talk.prepare(), { code: "cloud-signin" });
+  await assert.rejects(fakeServer({ bots, throws: { "POST /api/bots/:id/tasks": signIn } }).talk.prepare(), { code: "cloud-signin" });
+  await assert.rejects(asking(fakeServer({ bots, throws: { "GET /api/events?screens=off": signIn } })), { code: "cloud-signin" });
+
+  const sending = fakeServer({ bots, throws: { "POST /api/bots/:id/messages": signIn } });
+  const refusing = asking(sending);
+  await flush();
+  sending.events.push(HELLO);
+  await assert.rejects(refusing, { code: "cloud-signin" });
+  assert.equal(sending.events.cancelled, true);
+});
+
+test("a server can name its own reason for not answering", async () => {
+  const server = fakeServer({ bots: [{ id: "m", defaultBot: {}, tasks: [] }], unreachable: () => new TalkServerError("cloud-down") });
+  server.listing.down = true;
+  await assert.rejects(server.talk.prepare(), { code: "cloud-down" });
+  const quiet = fakeServer({ bots: [], unreachable: () => new TalkServerError("cloud-waking") });
+  const ending = asking(quiet);
+  await flush();
+  quiet.events.end();
+  await assert.rejects(ending, { code: "cloud-waking" });
 });
 
 test("a computer whose bots moved to My Cloud says so, on making the chat and on sending", async () => {

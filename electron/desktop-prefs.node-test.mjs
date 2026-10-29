@@ -348,3 +348,18 @@ test("registerDesktopPrefs works on the store main hands it", async () => {
   await handlers.get("desktop-analytics:set")({}, false);
   assert.equal(prefs.analytics(), false);
 });
+
+test("the type shortcut is on with ⌃⌥M until changed, apart from talk's, and survives a restart", () => {
+  let saved = null;
+  const prefs = createDesktopPrefs({ read: () => saved, write: value => { saved = structuredClone(value); } });
+  assert.deepEqual([prefs.typeShortcut(), prefs.typeKey()], [true, "ctrl-opt-m"]);
+  prefs.setTalkShortcut(false);
+  assert.equal(prefs.typeShortcut(), true);
+  prefs.setTypeShortcut(false);
+  assert.equal(prefs.setTypeKey("opt-shift-m"), true);
+  assert.equal(prefs.setTypeKey("ctrl-opt-space"), false, "a talk key is not a type key");
+  const restarted = createDesktopPrefs({ read: () => saved, write: () => {} });
+  assert.deepEqual([restarted.typeShortcut(), restarted.typeKey(), restarted.talkShortcut()], [false, "opt-shift-m", false]);
+  const junk = createDesktopPrefs({ read: () => ({ typeShortcut: "off", typeKey: "toString" }), write: () => {} });
+  assert.deepEqual([junk.typeShortcut(), junk.typeKey()], [true, "ctrl-opt-m"]);
+});

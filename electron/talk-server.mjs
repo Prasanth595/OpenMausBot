@@ -102,12 +102,19 @@ async function refusal(response) {
   return new TalkServerError(body?.code === "moved" ? "moved" : "refused");
 }
 
-export function createTalkServer({ request, prefs, serverKey, starting = () => false }) {
+/** `unreachable`: the reason a server that did not answer gives (this computer's: still starting, else down). */
+export function createTalkServer({ request, prefs, serverKey, starting = () => false, unreachable }) {
   let preparing = null;
-  const down = () => new TalkServerError(starting() ? "starting" : "server-down");
+  const down = unreachable ?? (() => new TalkServerError(starting() ? "starting" : "server-down"));
+  /** A request that says why it failed (My Cloud's sign-in, its sleep) keeps that reason. */
+  const failure = error => (error instanceof TalkServerError ? error : down());
+
+  const makeChat = (botId, body) => request(`/api/bots/${encodeURIComponent(botId)}/tasks`, {
+    method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body),
+  }).catch(error => { throw failure(error); });
 
   const quickAsksChat = async () => {
-    const listing = await request("/api/bots?messages=0").catch(() => null);
+    const listing = await request("/api/bots?messages=0").catch(error => { if (error instanceof TalkServerError) throw error; return null; });
     const bots = listing?.ok ? (await listing.json().catch(() => null))?.bots : null;
     if (!Array.isArray(bots)) throw down();
     const bot = findMausBot(bots);
@@ -115,9 +122,12 @@ export function createTalkServer({ request, prefs, serverKey, starting = () => f
     const server = serverKey();
     const saved = prefs.quickAsksChat(server);
     if (saved?.botId === bot.id && bot.tasks?.some(task => task.threadId === saved.threadId)) return saved;
-    const made = await request(`/api/bots/${encodeURIComponent(bot.id)}/tasks`, {
-      method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ title: QUICK_ASKS_TITLE, select: false }),
-    }).catch(() => { throw down(); });
+    let made = await makeChat(bot.id, { title: QUICK_ASKS_TITLE, select: false });
+    // A server from before `select` ignores it; one that refuses it made nothing, so it is asked again without it.
+    if (made.status === 400) {
+      void made.body?.cancel().catch(() => {});
+      made = await makeChat(bot.id, { title: QUICK_ASKS_TITLE });
+    }
     if (!made.ok) throw await refusal(made);
     const threadId = (await made.json().catch(() => null))?.task?.threadId;
     if (typeof threadId !== "string") throw new TalkServerError("refused");
@@ -148,7 +158,7 @@ export function createTalkServer({ request, prefs, serverKey, starting = () => f
         if (response.ok) void response.body?.cancel().catch(() => {});
         else settle(reject, await refusal(response));
       },
-      () => settle(reject, down()),
+      error => settle(reject, failure(error)),
     );
     const onFrame = frame => {
       if (settled) return;
@@ -164,7 +174,7 @@ export function createTalkServer({ request, prefs, serverKey, starting = () => f
       if (update.kind === "done") settle(resolve, !update.ok && !update.text ? "failed" : "done");
       else if (update.kind === "needs-you") settle(resolve, "needs-you");
     };
-    const ended = () => settle(reject, sent ? new TalkServerError("lost") : down());
+    const ended = error => settle(reject, sent ? new TalkServerError("lost") : failure(error));
     request("/api/events?screens=off", { signal: reading.signal })
       .then(response => {
         if (response.ok && response.body) return readFrames(response.body, onFrame, reading.signal);
