@@ -118,14 +118,22 @@ export interface PersonInboxDeps {
 
 export function loadPersonInboxState(dataDir: string): Pick<z.infer<typeof fileSchema>, "homes" | "items"> {
   const file = join(dataDir, PERSON_INBOX_FILE);
+  let raw: string;
   try {
-    const parsed = fileSchema.safeParse(JSON.parse(readFileSync(file, "utf8")));
-    if (parsed.success) return parsed.data;
-    console.warn(`person inbox: ${file} is not an inbox file; starting fresh`);
+    raw = readFileSync(file, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn(`person inbox: ${file} is unreadable; starting fresh`);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { homes: {}, items: [] };
+    throw new Error(`person inbox: ${file} is unreadable; refusing to classify threads without it`, { cause: error });
   }
-  return { homes: {}, items: [] };
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`person inbox: ${file} is not valid JSON; refusing to classify threads without it`, { cause: error });
+  }
+  const parsed = fileSchema.safeParse(json);
+  if (parsed.success) return parsed.data;
+  throw new Error(`person inbox: ${file} is not an inbox file; refusing to classify threads without it`);
 }
 
 export function createPersonInbox(deps: PersonInboxDeps) {
@@ -137,9 +145,9 @@ export function createPersonInbox(deps: PersonInboxDeps) {
   let savePending = false;
   const save = () => {
     savePending = true;
+    items = items.filter((item) => now() - item.at < KEEP_MS).slice(-MAX_ITEMS);
     // Keep the durable classification evidence until the registry has saved the private flags.
     if (!store.privateTasksSaved) return;
-    items = items.filter((item) => now() - item.at < KEEP_MS).slice(-MAX_ITEMS);
     try {
       writeFileAtomic(file, `${JSON.stringify({ version: 1, homes, items })}\n`, { mode: 0o600 });
       savePending = false;

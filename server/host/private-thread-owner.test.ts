@@ -131,6 +131,12 @@ describe("private message ownership", () => {
     expect(save.mock.calls.filter(([file]) => file === f.botsFile)).toHaveLength(1);
   });
 
+  it.each(["{not json", "[]"])("refuses to start the team host over an unreadable inbox file instead of classifying without its evidence (%s)", (contents) => {
+    const f = legacyFixture();
+    writeFileSync(join(DATA_DIR, "person-inbox.json"), contents);
+    expect(() => f.open()).toThrow(/person-inbox\.json/);
+  });
+
   it("keeps every legacy destination denied in memory and logs a failed registry save", () => {
     const f = legacyFixture();
     const write = atomic.writeFileAtomicIfChanged;
