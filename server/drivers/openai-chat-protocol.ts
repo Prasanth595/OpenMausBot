@@ -9,11 +9,29 @@ export interface ChatToolCall {
 const MAX_REPLY_TOOL_CALLS = 32;
 const MAX_ARGUMENT_CHARS = 256_000;
 
+/** Reasoning a single reply may carry before the turn is refused. Counted on each block's own text.
+ * OpenAI-compatible gateways repeat a fixed JSON envelope on every streamed delta: measured against
+ * openrouter/glm-5.3-flash, JSON.stringify of the deltas cost 8.9x the reasoning itself, so counting the
+ * envelope capped a turn at ~30 KB of real reasoning and killed it mid-stream. */
+const MAX_REASONING_CHARS = 400_000;
+/** Blocks one reply may carry: reasoning arrives a block per delta, so this is the other half of the bound. */
+const MAX_REASONING_BLOCKS = 20_000;
+
 export class ChatProtocolError extends Error {}
 
 export function object(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : undefined;
+}
+
+/** The reasoning itself: `text` blocks carry prose, `encrypted` blocks carry opaque data, and only their own
+ * bytes are the turn's cost. Another block shape is measured as the JSON it arrived as. */
+function reasoningPayloadLength(block: Record<string, unknown>): number {
+  for (const field of ["text", "data"]) {
+    const value = block[field];
+    if (typeof value === "string") return value.length;
+  }
+  return JSON.stringify(block).length;
 }
 
 /** Opaque provider reasoning blocks must keep their original order/signatures.
@@ -27,8 +45,10 @@ export class ChatReasoningDetails {
     if (!Array.isArray(value) || value.some((block) => !object(block))) {
       throw new ChatProtocolError("provider returned invalid reasoning details");
     }
-    this.chars += JSON.stringify(value).length;
-    if (this.chars > 256_000) throw new ChatProtocolError("provider reasoning details exceeded the size limit");
+    for (const block of value) this.chars += reasoningPayloadLength(block);
+    if (this.chars > MAX_REASONING_CHARS || this.blocks.length + value.length > MAX_REASONING_BLOCKS) {
+      throw new ChatProtocolError("provider reasoning details exceeded the size limit");
+    }
     this.blocks.push(...value);
   }
 }

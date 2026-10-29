@@ -184,7 +184,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         if (!downloadName) {
           return json(res, 403, { error: "that message does not share this file" });
         }
-        roots = [ATTACHMENTS_DIR];
+        // A person's attachment is mirrored into the bot's workspace, so the tag may name a path under it.
+        roots = [...new Set([ATTACHMENTS_DIR, ...(directBot ? messageFileRootsForThread(directBot.id, threadId) : [])])];
       } else if (botAttachment) {
         downloadName = botAttachment.kind === "file" ? botAttachment.name : undefined;
         roots = [ATTACHMENTS_DIR];

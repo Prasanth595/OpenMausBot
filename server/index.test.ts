@@ -2082,6 +2082,49 @@ describe("harness HTTP API", () => {
     }
   });
 
+  it("mirrors a person's attachment into the bot's workspace and names that path in the turn", async () => {
+    const created = await api("POST", "/api/bots", {
+      modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
+      requireAvailableModel: true,
+    });
+    expect(created.status).toBe(201);
+    const bot = created.body.bot;
+    const pdf = Buffer.from("%PDF-1.4\\n1 0 obj<</Type/Catalog>>endobj\\ntrailer<</Root 1 0 R>>\\n%%EOF\\n");
+    const uploaded = await fetch(`${BASE}/api/files?name=${encodeURIComponent("Regras do pivo.pdf")}`, {
+      method: "POST",
+      headers: { "content-type": "application/pdf" },
+      body: new Uint8Array(pdf),
+    });
+    expect(uploaded.status).toBe(201);
+    const stored = await uploaded.json() as { path: string; name: string };
+    const attachmentsDir = join(home, ".openmausbot", "attachments");
+    expect(dirname(stored.path)).toBe(attachmentsDir);
+    const mirror = join(home, ".openmausbot", "workspaces", bot.id, "anexos", stored.path.slice(attachmentsDir.length + 1));
+    try {
+      const sent = await api("POST", `/api/bots/${bot.id}/messages`, {
+        text: `Open the rules.\n\n<attached-file path="${stored.path}" name="${stored.name}" />`,
+      });
+      expect(sent.status).toBe(202);
+      // A bot thread names a path inside the bot's own folder, never the store its tools cannot open.
+      expect(sent.body.message.text).toBe(`Open the rules.\n\n<attached-file path="${mirror}" name="${stored.name}" />`);
+      await expect.poll(() => existsSync(mirror), { timeout: 5_000 }).toBe(true);
+      expect(readFileSync(mirror)).toEqual(pdf);
+      // The engine receives that same path.
+      await expect.poll(() => claudePrompts().some((line) => line.includes(mirror)), { timeout: 10_000 }).toBe(true);
+      // And the person still downloads what they attached, now that the message names the mirror.
+      const download = await fetch(`${BASE}/api/threads/${bot.threadId}/messages/${sent.body.message.id}/file`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: mirror }),
+      });
+      expect(download.status).toBe(200);
+      expect(await download.text()).toBe(pdf.toString());
+    } finally {
+      await api("POST", `/api/bots/${bot.id}/interrupt`).catch(() => undefined);
+      await api("DELETE", `/api/bots/${bot.id}`).catch(() => undefined);
+    }
+  });
+
   it("returns the canonical stored user message for direct and channel sends", async () => {
     const created = await api("POST", "/api/bots", {
       modelSelection: { instanceId: "claude", model: "claude-sonnet-5" },
