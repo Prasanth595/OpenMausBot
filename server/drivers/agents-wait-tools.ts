@@ -4,6 +4,8 @@ import type { Json } from "./agents-client.ts";
 
 const WAITS = "/api/internal/waits";
 export const WAIT_TOOL_NAMES: ReadonlySet<string> = new Set(["wait_until", "list_waits", "cancel_wait"]);
+/** Refused in a room's thread (routes/waits.ts): a room's turn is not listed them. list_waits answers there. */
+export const ROOM_REFUSED_WAIT_TOOL_NAMES: ReadonlySet<string> = new Set(["wait_until", "cancel_wait"]);
 
 export async function callWaitTool(name: string, args: Json, context: ToolCallContext): Promise<ToolCallResult> {
   const { ok, body } =

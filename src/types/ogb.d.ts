@@ -184,6 +184,9 @@ const __APP_VERSION__: string;
         interest(): Promise<void>;
         /** The sheet is open on this page (main then says "ready" here, not with a notification). */
         sheet(open: boolean): Promise<void>;
+        /** A new organization on the Team plan this account pays for, of this name and swatch: no checkout; only from the person's click. */
+        organization?(name: string, color: import("../../electron/cloud-list.mjs").CloudSwatch | null): Promise<{ outcome: "added" | "taken" | "unsupported" | "failed" }
+          | { outcome: "blocked"; blocked: import("../../electron/cloud-list.mjs").OrganizationBlock }>;
       };
       /** Saved servers and the active one (desktop Server menu). Present on
        * the local server's UI; a remote server's page sees a reduced bridge. */
@@ -287,6 +290,10 @@ const __APP_VERSION__: string;
       speechStop(): Promise<void>;
       /** Finish capture and emit the recognizer's final transcript. */
       speechFinish?(): Promise<void>;
+      /** This computer's page only: Settings → General's talk shortcut. */
+      talkShortcut?: import("../../electron/talk-shortcut.mjs").TalkShortcutBridge;
+      /** A call holds the microphone, so the talk shortcut waits. */
+      callActive?(active: boolean): Promise<void>;
       onSpeechTranscript(
         cb: (line: { partial?: boolean; text?: string; error?: string }) => void,
       ): () => void;
