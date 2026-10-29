@@ -72,6 +72,7 @@ import {
   messageAttachmentName,
   messageFileRoots,
 } from "./message-file.ts";
+import { linkTurnAttachments } from "./attachment-workspace.ts";
 import {
   avatarGenerationRequestSchema,
   generateAvatarImage,
@@ -7815,7 +7816,12 @@ async function startTurn(
   }
   const resolvedImages = extractTurnImages(text);
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
-  let providerText = promptWithDataContext(usesNativeImageInput ? resolvedImages.text : text, opts?.dataContext);
+  // The upload store is not a folder the bot's own tools can open: mirror this turn's attachments into the bot's
+  // workspace and name those paths instead. A native image is already extracted, so its store path stays its own.
+  const turnText = linkTurnAttachments(usesNativeImageInput ? resolvedImages.text : text, {
+    workspace: workspaceDir(bot.id),
+  }).text;
+  let providerText = promptWithDataContext(turnText, opts?.dataContext);
   const turnImages = usesNativeImageInput ? resolvedImages.images : [];
   const commsDepth = opts?.commsDepth ?? 0;
   if (commsDepth > 0) markInternalTurn(threadId);
@@ -7823,10 +7829,10 @@ async function startTurn(
   if (answer.quiet) quietTurnThreads.add(threadId);
   else quietTurnThreads.delete(threadId);
   if (resolvedImages.text.trim() && !opts?.cardContinuation && !opts?.replyTo?.reactedWith) {
-    const titled = store.titleTaskFromFirstMessage(bot.id, resolvedImages.text, threadId);
+    const titled = store.titleTaskFromFirstMessage(bot.id, turnText, threadId);
     const snippet = titled?.title;
     if (titled && snippet && !titled.openedBy?.botId && llmThreadTitlesEnabled(cfg) && instance.generateText) {
-      void generateThreadTitle(instance, resolvedImages.text)
+      void generateThreadTitle(instance, turnText)
         .then((title) => {
           if (title) store.retitleTask(bot.id, threadId, snippet, title);
         })
@@ -7839,7 +7845,7 @@ async function startTurn(
   const spoken = opts?.via === "call" || opts?.userMessage?.via === "call" ||
     (turnLineIds.size > 0 && store.messagesFor(threadId).some((message) => turnLineIds.has(message.id) && message.via === "call"));
   console.log(turnStartLogLine({
-    botId, text: resolvedImages.text, images: turnImages.length, depth: commsDepth, card: Boolean(opts?.cardContinuation), spoken,
+    botId, text: turnText, images: turnImages.length, depth: commsDepth, card: Boolean(opts?.cardContinuation), spoken,
   }));
   const instanceId = instance.instanceId;
   const automated = commsDepth > 0 || opts?.automationSource !== undefined
@@ -7856,18 +7862,18 @@ async function startTurn(
 
   let userMessage = opts?.userMessage;
   if (opts?.editedMessageId) {
-    const edited = store.branchMessage(threadId, opts.editedMessageId, text, opts.sendId, opts.sender, opts.dataContext);
+    const edited = store.branchMessage(threadId, opts.editedMessageId, turnText, opts.sendId, opts.sender, opts.dataContext);
     if (!edited) throw Object.assign(new Error("only a user text message can be edited"), { status: 400 });
     store.patchTask(bot.id, threadId, { rewound: true });
     userMessage = edited;
   }
   if (!userMessage) {
     userMessage = opts?.cardContinuation
-      ? { id: `card-${randomUUID()}`, at: Date.now(), role: "user", kind: "text", text }
+      ? { id: `card-${randomUUID()}`, at: Date.now(), role: "user", kind: "text", text: turnText }
       : store.appendMessage(threadId, {
           role: "user",
           kind: "text",
-          text,
+          text: turnText,
           replyToId: opts?.replyTo?.id,
           reaction: opts?.replyTo?.reactedWith,
           sendId: opts?.sendId,
@@ -7880,7 +7886,7 @@ async function startTurn(
   }
   const personLine = !opts?.coordination && !opts?.cardContinuation && !opts?.automationSource && !opts?.compactOnly
     && !opts?.computerSelectionContinuation && !opts?.editedMessageId && !commsDepth && !opts?.peerAsk && !userMessage.peerAsk;
-  if (personLine && coordinator.answer(threadId, text)) {
+  if (personLine && coordinator.answer(threadId, turnText)) {
     store.appendMessage(threadId, { role: "bot", kind: "activity", tool: { name: "Answer passed to the waiting work", ok: true } });
     opts?.onTurnSettled?.();
     queueMicrotask(drainQueuedSends);
