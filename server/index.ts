@@ -53,7 +53,7 @@ import { isPendingSignInRequest, normalizeSignInSite, signInFallbackText, signIn
 import { createRoomTurnLevels } from "./room-turn-level.ts";
 import { createSignInSettle } from "./host/sign-in-settle.ts";
 import { RoomMemberLock } from "./room-member-lock.ts";
-import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts";
+import { approvalHeldNote, approvalHeldReason, approvalModeForOrigin, autoVerdict, deliverFullAccessApproval, undeliveredApprovalTool } from "./auto-approve.ts"; import { autonomyShadowDecisionForTool } from "./autonomy-shadow.ts";
 import { bindSafetyFloor, denyAtSafetyFloor, heldAtSafetyFloor, safetyFloorOn } from "./safety-floor-gate.ts";
 import { CommandAllowlistStore, commandAllowlistCandidate } from "./command-allowlist.ts";
 import { providerMcpTool, providerToolAllowKey } from "./provider-tool-allow.ts";
@@ -6647,7 +6647,7 @@ bus.subscribe((event: RuntimeEvent) => {
           commandAllowed: Boolean(command && commandAllowlist.matches(asker.id, command)),
           toolAllowed: Boolean(toolAllowKey && asker.alwaysAllow?.includes(toolAllowKey)),
         }))
-        : null;
+        : null; const shadowAutonomy = permission && event.requestId ? autonomyShadowDecisionForTool(event.tool) : undefined; if (shadowAutonomy) console.debug("[autonomy-shadow]", { action: shadowAutonomy.action, lane: shadowAutonomy.decision.lane, approval: shadowAutonomy.decision.approval });
       // Claude accepts --permission-mode auto for any model but silently starts in Manual where auto is unavailable (Haiku 4.5, Sonnet 4.5, an org that disabled it).
       if (
         permission &&
