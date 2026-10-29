@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { cloudMachine, cloudSetupProgress, listedColors, MAX_CLOUDS, olderRelease, otherOwnClouds, ownCloudPlaces, parseCloudList, releaseVersion, signedInServers, swatchColor } from "./cloud-list.mjs";
+import { cloudMachine, cloudSetupProgress, listedColors, MAX_CLOUDS, olderRelease, otherOwnClouds, ownCloudPlaces, parseCloudList, parseCloudRenewal, parseOrganizations, releaseVersion, signedInServers, swatchColor } from "./cloud-list.mjs";
 import environments from "./environments.cjs";
 import { createHomePlaces } from "./home-places.mjs";
 
@@ -151,4 +151,32 @@ test("a release older than the newest one, compared number by number; nothing is
   assert.deepEqual([["0.1.118", "0.1.130"], ["0.1.130", "0.1.130"], ["0.2.0", "0.1.130"], ["0.1", "0.1.1"], ["0.1.9", "0.1.10"]].map(([a, b]) => olderRelease(a, b)), [true, false, false, true, true]);
   for (const [a, b] of [["0.1.118-dev", "0.1.130"], ["0.1.118", null], [null, "0.1.130"], ["main", "0.1.130"], ["0.1.118", "latest"]]) assert.equal(olderRelease(a, b), false, `${a} ${b}`);
   assert.deepEqual(["0.1.130", null, "", "<b>", 7].map(releaseVersion), ["0.1.130", null, null, null, null]);
+});
+
+test("the plan's renewal is the account's own primary Cloud's, only as the Admin says it; anything malformed is none", () => {
+  const id = "3f1c2b4a-5d6e-4f70-8a9b-0c1d2e3f4a5b", own = { id, name: "My Cloud", role: "owner", teamId: null, primary: true, renewsAt: 1_900_000_000_000,
+    cancelAtPeriodEnd: false, renewal: { trial: false, endsAt: null, keptDays: 1 } };
+  const member = { id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d", name: "Acme", role: "member", teamId: "t", primary: false, renewsAt: null, cancelAtPeriodEnd: false };
+  assert.deepEqual(parseCloudRenewal([member, own]), { cloudId: id, trial: false, cancelled: false, renewsAt: 1_900_000_000_000, endsAt: null, keptDays: 1 });
+  assert.deepEqual(parseCloudRenewal([{ ...own, cancelAtPeriodEnd: true, renewsAt: null, renewal: { trial: true, endsAt: 1_900_000_000_000, keptDays: 0.5 } }]),
+    { cloudId: id, trial: true, cancelled: true, renewsAt: null, endsAt: 1_900_000_000_000, keptDays: 0.5 });
+  // A Team Cloud the account pays for names its team, which stops with it.
+  assert.equal(parseCloudRenewal([{ ...own, name: " Acme   Studio ", teamId: "t" }]).team, "Acme Studio");
+  assert.equal(parseCloudRenewal([{ ...own, renewal: { ...own.renewal, keptDays: null } }]).keptDays, null);
+  for (const clouds of [undefined, null, "clouds", {}, [], [member], [{ ...own, primary: false }], [{ ...own, renewal: undefined }], [{ ...own, renewal: null }],
+    [{ ...own, id: "../not-a-cloud" }], [{ ...own, id: 7 }], [{ ...own, renewal: { ...own.renewal, trial: "yes" } }], [{ ...own, renewal: { ...own.renewal, endsAt: -1 } }],
+    [{ ...own, renewal: { ...own.renewal, keptDays: 61 } }], [{ ...own, renewal: { ...own.renewal, keptDays: "1" } }]]) {
+    assert.equal(parseCloudRenewal(clouds), null, JSON.stringify(clouds)?.slice(0, 80));
+  }
+});
+
+test("the session's organizations: the Team plan this account runs them for, whether ＋ may add one now and why not; anything else is none", () => {
+  const plan = { planCloudId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", canAdd: true, count: 3, max: 10, seats: { used: 9, limit: 20 } };
+  assert.equal(parseOrganizations(undefined), null, "an older Admin, or no Team plan of this account's: no New organization");
+  assert.deepEqual(parseOrganizations(plan), { planCloudId: plan.planCloudId, canAdd: true, count: 3, max: 10 }, "its seats are the Cloud page's, not the app's");
+  assert.deepEqual(parseOrganizations({ ...plan, canAdd: false, addBlocked: "limit", count: 10 }), { planCloudId: plan.planCloudId, canAdd: false, blocked: "limit", count: 10, max: 10 });
+  assert.deepEqual(parseOrganizations({ ...plan, canAdd: false, addBlocked: "mystery" }), { planCloudId: plan.planCloudId, canAdd: false, count: 3, max: 10 }, "a reason this app doesn't know is none");
+  assert.deepEqual(parseOrganizations({ ...plan, addBlocked: "limit" }), { planCloudId: plan.planCloudId, canAdd: true, count: 3, max: 10 }, "a reason only counts while adding is closed");
+  for (const bad of [null, "x", [], { ...plan, planCloudId: "../x" }, { ...plan, planCloudId: 7 }, { ...plan, canAdd: "yes" }, { ...plan, count: -1 }, { ...plan, count: 1.5 },
+    { ...plan, max: 0 }, { ...plan, max: "10" }]) assert.equal(parseOrganizations(bad), null, JSON.stringify(bad));
 });

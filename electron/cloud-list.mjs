@@ -99,6 +99,38 @@ export function parseCloudList(input) {
   return clouds;
 }
 
+/** Why the Admin can't add an organization to a Team plan now: none of the account's runs, the plan has as many as it can,
+ * too many were added in the last hour, or adding them was turned off. */
+export const ORGANIZATION_BLOCKS = Object.freeze(["no_team_plan", "limit", "rate", "off"]);
+/**
+ * The session's `organizations` (contract v1, additive): the Team plan this account pays for whose organizations it runs,
+ * whether one may be added now (else why), and how many it has of how many. Null without one, or from an older Admin.
+ */
+export function parseOrganizations(input) {
+  if (!record(input) || typeof input.planCloudId !== "string" || !CLOUD_ID.test(input.planCloudId) || typeof input.canAdd !== "boolean") return null;
+  if (!Number.isSafeInteger(input.count) || input.count < 0 || !Number.isSafeInteger(input.max) || input.max < 1) return null;
+  const blocked = ORGANIZATION_BLOCKS.includes(input.addBlocked) ? input.addBlocked : null;
+  return { planCloudId: input.planCloudId, canAdd: input.canAdd, ...(blocked && !input.canAdd ? { blocked } : {}), count: input.count, max: input.max };
+}
+
+/** OMB_CLOUD_STOPPED_HOLD_DAYS allows parts of a day, and at most 60. */
+const keptDays = value => value === null ? null : typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 60 ? value : undefined;
+/**
+ * The account's own plan's renewal, from the verified session's raw `clouds`: its primary Cloud, only while the Admin says
+ * this account pays for it and its plan runs (`renewal`), so never a team's Cloud someone else pays for. Null without one,
+ * or from an Admin that doesn't say yet. `cloudId` is for main: Cancel and Keep name the Cloud from here, never from a page.
+ */
+export function parseCloudRenewal(clouds) {
+  if (!Array.isArray(clouds)) return null;
+  const own = clouds.slice(0, MAX_CLOUDS).find(entry => record(entry) && entry.primary === true && record(entry.renewal));
+  if (!own || typeof own.id !== "string" || !CLOUD_ID.test(own.id) || typeof own.renewal.trial !== "boolean") return null;
+  const endsAt = own.renewal.endsAt === null ? null : Number.isSafeInteger(own.renewal.endsAt) && own.renewal.endsAt > 0 ? own.renewal.endsAt : undefined;
+  const kept = keptDays(own.renewal.keptDays), team = typeof own.teamId === "string" ? cleanCloudListName(own.name) : null;
+  if (endsAt === undefined || kept === undefined) return null;
+  return { cloudId: own.id, trial: own.renewal.trial, cancelled: own.cancelAtPeriodEnd === true,
+    renewsAt: Number.isSafeInteger(own.renewsAt) && own.renewsAt > 0 ? own.renewsAt : null, endsAt, keptDays: kept, ...(team ? { team } : {}) };
+}
+
 /** Every Cloud of the person's own besides the primary (My Cloud): each a place of its own, as a team's Cloud is. */
 export function otherOwnClouds(clouds) {
   return Array.isArray(clouds) ? clouds.filter(cloud => ownCloud(cloud) && !cloud.primary) : [];
