@@ -83,9 +83,8 @@ export interface AcpConfig {
   workspace?: string;
 }
 
-/** Per-CLI specifics plugged into the shared ACP runtime. */
+/** Per-CLI specifics plugged into the shared ACP runtime; `askTool` is the native tool `questionRequests` come from. */
 export interface AcpSupport {
-  /** `askTool`: the native tool whose requests these are. */
   questionRequests?: Readonly<Record<string, AcpQuestionRequest>>; askTool?: string;
   /** Verified native catalog parameters, applied before both new and restored sessions. */
   toolScopeSessionParams?(turn: SendTurnInput, initializeResult: unknown, hasMcp: boolean,

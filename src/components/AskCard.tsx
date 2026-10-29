@@ -102,7 +102,7 @@ export function AskDetail({ text, mono = false, label }: { text: string; mono?: 
         dir="auto"
         aria-label={label}
         className={cn("rounded-xl bg-ink/[0.045] px-3 py-2 text-ink-secondary [overflow-wrap:anywhere]",
-          mono ? "font-mono text-[12.5px] leading-[19px] whitespace-pre-wrap" : "whitespace-pre-wrap text-[13px] leading-5",
+          mono ? "font-mono text-[12px] leading-[18px] whitespace-pre-wrap" : "whitespace-pre-wrap text-[13px] leading-5",
           long && !open && "line-clamp-3")}
       >
         {text}
