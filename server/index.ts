@@ -68,6 +68,9 @@ import {
   saveAudio,
   saveImage,
 } from "./attachments.ts";
+import { bucketReferenceBlock } from "./attachment-bucket.ts";
+import { describeImages, imageReaderConfig, modelReadsImages, readerBlock } from "./image-reader.ts";
+import { fileBlock, inlineFiles } from "./file-reader.ts";
 import {
   messageAttachmentName,
   messageFileRoots,
@@ -7816,7 +7819,19 @@ async function startTurn(
   const resolvedImages = extractTurnImages(text);
   const usesNativeImageInput = instance.adapter.capabilities.nativeImageInput === true;
   let providerText = promptWithDataContext(usesNativeImageInput ? resolvedImages.text : text, opts?.dataContext);
-  const turnImages = usesNativeImageInput ? resolvedImages.images : [];
+  // A bot on another computer cannot open an attachments/ path; a bucket URL it can always fetch.
+  const bucketBlock = bucketReferenceBlock(text);
+  // A model that cannot see gets the picture read for it, instead of a path it cannot use.
+  const imageReader = resolvedImages.images.length ? imageReaderConfig() : null;
+  const readerNotes = imageReader && !modelReadsImages(imageReader, bot.modelSelection.model)
+    ? await describeImages(resolvedImages.images, imageReader)
+    : [];
+  // A bot without a computer cannot open a text file's path; its content rides in the turn.
+  const fileNotes = inlineFiles(text);
+  if (bucketBlock || readerNotes.length || fileNotes.length) {
+    providerText = [providerText, bucketBlock, readerBlock(readerNotes), fileBlock(fileNotes)].filter(Boolean).join("\n\n");
+  }
+  const turnImages = usesNativeImageInput && !readerNotes.length ? resolvedImages.images : [];
   const commsDepth = opts?.commsDepth ?? 0;
   if (commsDepth > 0) markInternalTurn(threadId);
   else clearInternalTurn(threadId);

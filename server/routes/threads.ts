@@ -3,6 +3,7 @@ import {
   ATTACHMENTS_DIR, extensionForMime, FILE_MAX_BYTES, IMAGE_MAX_BYTES, parseAudioRange, readAttachment, saveFile, saveImageUpload,
   validateAttachmentUploadId, type SavedAttachment,
 } from "../attachments.ts";
+import { archiveAttachment } from "../attachment-bucket.ts";
 import { deliveredCopy } from "../bot-attachment.ts";
 import { memberBot, memberGroup, type Viewer, type VisibleSet } from "../bot-visibility.ts";
 import type { ComputerControl } from "../computer-control.ts";
@@ -316,6 +317,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         });
         req.on("error", (e) => fail(400, e instanceof Error ? e.message : String(e)));
       });
+      // Archived before the 201 so the turn that follows the upload already has a fetchable URL.
+      await archiveAttachment(saved.path);
       return json(res, 201, saved);
     }
 
@@ -352,6 +355,8 @@ export function createThreadRoutes(deps: ThreadRouteDeps): RouteHandler {
         // Returning must not destroy the socket: the caller still sends the 4xx when the byte count crosses the limit.
         const chunks = req.iterator({ destroyOnReturn: false }) as AsyncIterable<Buffer>;
         const saved = await saveFile(chunks, name, rawType ?? "", { uploadId, expectedBytes: declaredLength });
+        // Archived before the 201 so the turn that follows the upload already has a fetchable URL.
+        await archiveAttachment(saved.path);
         return json(res, 201, saved);
       } catch (error) {
         req.resume();
