@@ -4,7 +4,7 @@
 
 **Goal:** On macOS, press ⌃⌥T in any app, type, press Return. The words go to MausBot's Quick asks chat (this computer or My Cloud) and the answer shows where the talk box shows, while the app the person was in stays the active app.
 
-**Architecture:** A second key object (`createTypeShortcut`) sits beside talk's, with its own prefs, IPC and bridge. A new focusable panel window (`electron/talk-type-box.mjs`) takes the typing. It is destroyed the moment the words are sent, dropped or left, so key focus leaves with it. From Return on, the ask runs through talk's own session states and talk's never-focused box, which gains a two-line echo of the typed words. All wiring lives in `installTalk` (`electron/talk-main.mjs`), and `electron/main.mjs` does not change.
+**Architecture:** A second key object (`createTypeShortcut`) sits beside talk's, with its own prefs, IPC and bridge. A new focusable panel window (`electron/talk-type-box.mjs`) takes the typing. One waits loaded and hidden while ⌃⌥T is on and available, so a press only shows it; it is destroyed the moment the words are sent, dropped or left, so key focus leaves with it, and a fresh one waits. From Return on, the ask runs through talk's own session states and talk's never-focused box, which gains a two-line echo of the typed words. All wiring lives in `installTalk` (`electron/talk-main.mjs`), and `electron/main.mjs` does not change.
 
 **Tech Stack:** Electron ^43.5.0 main (ESM `.mjs`, sandboxed preload `.cjs`), Node 24 `node:test` for `electron/*.node-test.mjs`, vitest + happy-dom for `src/`, React.
 

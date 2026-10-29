@@ -50,7 +50,7 @@ function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width:
     isDestroyed() { return this.destroyed; }
     destroy() { this.destroyed = true; }
   }
-  const screen = { getCursorScreenPoint: () => cursor, getDisplayNearestPoint: () => ({ workArea }) };
+  const screen = { workArea, getCursorScreenPoint: () => cursor, getDisplayNearestPoint() { return { workArea: this.workArea }; } };
   const events = [];
   const box = createTypeBox({
     BrowserWindow: FakeBrowserWindow,
@@ -63,7 +63,7 @@ function harness({ cursor = { x: 100, y: 100 }, workArea = { x: 0, y: 25, width:
     onCancel: () => events.push(["cancel"]),
     onBlur: () => events.push(["blur"]),
   });
-  return { box, made, events };
+  return { box, made, events, screen };
 }
 
 const SHOWING = ["show", "showInactive", "focus", "moveTop"];
@@ -217,6 +217,83 @@ test("a page that never loads says so once and is destroyed, with no unhandled r
   } finally {
     process.off("unhandledRejection", record);
   }
+});
+
+test("while kept ready one hidden box waits, loaded, and only then; it is never shown or made key until a press", () => {
+  const { box, made, events } = harness();
+  box.keepReady(true); box.keepReady(true);
+  assert.equal(made.length, 1);
+  made[0].webContents.emit("did-finish-load");
+  assert.deepEqual([made[0].url.startsWith("data:text/html"), made[0].options.show, made[0].webContents.scripts, shown(made[0])], [true, false, [], []]);
+  box.keepReady(false);
+  assert.equal(made[0].destroyed, true);
+  box.keepReady(false); box.close();
+  assert.deepEqual([made.length, events], [1, []]);
+});
+
+test("a press shows the waiting box, made no new window, on the display under the pointer and in the skin of the moment", async () => {
+  const { box, made, screen } = harness({ cursor: { x: 2000, y: 500 } });
+  box.keepReady(true); made[0].webContents.emit("did-finish-load");
+  screen.workArea = { x: 1440, y: 25, width: 1440, height: 875 };
+  box.setTheme("dark");
+  const before = made[0].calls.length;
+  box.open({ text: "half" });
+  assert.equal(made.length, 1);
+  await flush();
+  assert.deepEqual(made[0].webContents.scripts, ['start({"text":"half","theme":"dark"})']);
+  assert.deepEqual(made[0].calls.slice(before).map(call => call[0]), ["setBounds", "showInactive", "focus"]);
+  assert.deepEqual(made[0].bounds, { x: 1960, y: 780, width: 400, height: 96 });
+});
+
+test("a press before the waiting box has loaded shows it once it loads", async () => {
+  const { box, made } = harness();
+  box.keepReady(true); box.open({ text: "" }); await flush();
+  assert.deepEqual([made.length, shown(made[0])], [1, []]);
+  made[0].webContents.emit("did-finish-load"); await flush();
+  assert.deepEqual(shown(made[0]), ["showInactive", "focus"]);
+});
+
+test("every close leaves a fresh hidden box waiting, whose messages and blur are never the session's", async () => {
+  const { box, made, events } = harness();
+  box.keepReady(true); made[0].webContents.emit("did-finish-load");
+  box.open({ text: "" }); await flush();
+  box.close();
+  assert.deepEqual([made[0].destroyed, made.length, made[1].destroyed, shown(made[1])], [true, 2, false, []]);
+  made[1].webContents.emit("did-finish-load");
+  made[1].webContents.emit("ipc-message", {}, "type-box:send", "not from the open box");
+  made[1].webContents.emit("ipc-message", {}, "type-box:input", "x", 120);
+  made[1].webContents.emit("ipc-message", {}, "type-box:cancel");
+  made[1].events.emit("blur");
+  assert.deepEqual([events, made[1].destroyed, made.length], [[], false, 2]);
+  box.open({ text: "" }); await flush();
+  made[1].events.emit("blur");
+  assert.deepEqual([made[1].destroyed, events, made.length, made[2].destroyed, shown(made[2])], [true, [["blur"]], 3, false, []]);
+});
+
+test("a hidden box whose renderer goes is replaced quietly; one that never loaded is not, so a failing page cannot loop", async () => {
+  const { box, made, events } = harness();
+  box.keepReady(true); made[0].webContents.emit("did-finish-load");
+  made[0].webContents.emit("render-process-gone");
+  assert.deepEqual([made[0].destroyed, made.length, made[1].destroyed, events], [true, 2, false, []]);
+  made[1].webContents.emit("render-process-gone");
+  assert.deepEqual([made[1].destroyed, made.length, events], [true, 2, []]);
+  box.open({ text: "" });
+  assert.equal(made.length, 3, "the next press opens a box of its own");
+  const failing = harness({ loadFails: true });
+  failing.box.keepReady(true); await flush();
+  assert.deepEqual([failing.made.length, failing.made[0].destroyed, failing.events], [1, true, []]);
+});
+
+test("a window Electron closes itself, as on quit, is never replaced until the box is kept ready again", async () => {
+  const { box, made, events } = harness();
+  box.keepReady(true); made[0].events.emit("closed");
+  assert.deepEqual([made.length, events], [1, []]);
+  box.open({ text: "" }); made[1].webContents.emit("did-finish-load"); await flush();
+  made[1].events.emit("closed");
+  box.close();
+  assert.deepEqual([made.length, events], [2, [["blur"]]]);
+  box.keepReady(true);
+  assert.equal(made.length, 3);
 });
 
 function runPage(html) {

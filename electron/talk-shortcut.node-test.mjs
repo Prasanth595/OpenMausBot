@@ -136,6 +136,15 @@ test("talk and type keep their own setting and key: one off, taken or changed le
   assert.equal(prefs.talkKey(), "ctrl-opt-space");
 });
 
+test("the type shortcut says whether its key can be pressed each time the key is set up", () => {
+  const shortcuts = fakeShortcuts(["Control+Shift+T"]); let offered = true; const usable = [];
+  const type = createTypeShortcut({ globalShortcut: shortcuts, prefs: memoryPrefs(), available: () => offered, onPress: () => {}, onUsable: value => usable.push(value) });
+  type.set({ enabled: false }); type.set({ enabled: true }); type.set({ key: "ctrl-shift-t" }); type.set({ key: "ctrl-opt-t" });
+  offered = false; type.refresh(); type.refresh();
+  offered = true; type.refresh();
+  assert.deepEqual(usable, [true, false, true, false, true, false, true], "on, off, on, taken, free again, unavailable, available");
+});
+
 test("an unavailable type shortcut lets its key go, refresh takes it back, and close lets it go", () => {
   const shortcuts = fakeShortcuts(); let offered = false;
   const type = createTypeShortcut({ globalShortcut: shortcuts, prefs: memoryPrefs(), available: () => offered, onPress: () => {} });

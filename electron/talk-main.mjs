@@ -113,7 +113,8 @@ export function installTalk({ ipcMain, localOnly, localOrHome, cloudPage = () =>
         // Teams and other Clouds are places the window shows, never home; a home that needs a sign-in takes no asks.
         const reachable = () => kind() === "computer" || (Boolean(there) && kind() === "cloud");
         shortcut = createTalkShortcut({ globalShortcut, prefs, available: () => appleSpeech && !remote() && reachable(), onPress: logged("press", () => session.press()) });
-        typeShortcut = createTypeShortcut({ globalShortcut, prefs, available: () => platform === "darwin" && !remote() && reachable(), onPress: logged("type press", () => session.typePress()) });
+        typeShortcut = createTypeShortcut({ globalShortcut, prefs, available: () => platform === "darwin" && !remote() && reachable(),
+          onPress: logged("type press", () => session.typePress()), onUsable: logged("type box", usable => typeBox.keepReady(usable)) });
       } catch (error) {
         logged("close", () => shortcut?.close())();
         session = shortcut = null;
@@ -135,6 +136,7 @@ export function installTalk({ ipcMain, localOnly, localOrHome, cloudPage = () =>
     /** Listening, taking typed words, or an ask on its way that has not been answered yet. */
     busy: () => session?.busy() ?? false,
     close() {
+      logged("close", () => typeBox?.keepReady(false))();
       logged("close", () => session?.close())();
       logged("close", () => shortcut?.close())();
       logged("close", () => typeShortcut?.close())();

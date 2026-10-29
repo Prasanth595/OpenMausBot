@@ -46,6 +46,8 @@ export declare function createTypeShortcut(options: {
   prefs: Pick<DesktopPrefs, "typeShortcut" | "setTypeShortcut" | "typeKey" | "setTypeKey">;
   available(): boolean;
   onPress(): void;
+  /** Whether a press can come now (on, available and the key not taken), each time the key is set up. */
+  onUsable?(usable: boolean): void;
 }): {
   state(): TypeShortcutState;
   set(change: { enabled?: unknown; key?: unknown }): TypeShortcutState;

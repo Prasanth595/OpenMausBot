@@ -6,7 +6,7 @@ const TALK_KEY_LIST = keyList(TALK_KEYS), TYPE_KEY_LIST = keyList(TYPE_KEYS);
 export const TALK_SHORTCUT_UNAVAILABLE = Object.freeze({ available: false, enabled: false, key: DEFAULT_TALK_KEY, keys: TALK_KEY_LIST, taken: false });
 export const TYPE_SHORTCUT_UNAVAILABLE = Object.freeze({ available: false, enabled: false, key: DEFAULT_TYPE_KEY, keys: TYPE_KEY_LIST, taken: false });
 
-function createKeyShortcut({ globalShortcut, keys, keyList: list, enabled, setEnabled, key, setKey, available, onPress }) {
+function createKeyShortcut({ globalShortcut, keys, keyList: list, enabled, setEnabled, key, setKey, available, onPress, onUsable = () => {} }) {
   let registered = null, taken = false, offered = false;
   const release = () => {
     if (registered) globalShortcut.unregister(registered);
@@ -16,10 +16,12 @@ function createKeyShortcut({ globalShortcut, keys, keyList: list, enabled, setEn
   const apply = () => {
     release();
     offered = available();
-    if (!offered || !enabled()) return;
-    const { accelerator } = keys[key()];
-    if (globalShortcut.register(accelerator, onPress)) registered = accelerator;
-    else taken = true;
+    if (offered && enabled()) {
+      const { accelerator } = keys[key()];
+      if (globalShortcut.register(accelerator, onPress)) registered = accelerator;
+      else taken = true;
+    }
+    onUsable(Boolean(registered));
   };
   apply();
   const state = () => ({ available: available(), enabled: enabled(), key: key(), keys: list, taken });
@@ -47,9 +49,9 @@ export function createTalkShortcut({ globalShortcut, prefs, available, onPress }
   };
 }
 
-export function createTypeShortcut({ globalShortcut, prefs, available, onPress }) {
+export function createTypeShortcut({ globalShortcut, prefs, available, onPress, onUsable }) {
   return createKeyShortcut({ globalShortcut, keys: TYPE_KEYS, keyList: TYPE_KEY_LIST, enabled: () => prefs.typeShortcut(),
-    setEnabled: value => prefs.setTypeShortcut(value), key: () => prefs.typeKey(), setKey: value => prefs.setTypeKey(value), available, onPress });
+    setEnabled: value => prefs.setTypeShortcut(value), key: () => prefs.typeKey(), setKey: value => prefs.setTypeKey(value), available, onPress, onUsable });
 }
 
 const GONE = ["destroyed", "render-process-gone", "did-navigate"];

@@ -67,25 +67,37 @@ const wellFormed = text => typeof text === "string" && text.length <= TYPE_LIMIT
 
 export function createTypeBox({ BrowserWindow, screen, nativeImage, iconPath, theme: initialTheme = null, onInput, onSend, onCancel, onBlur }) {
   let win = null;
-  let shown = null;
+  let spare = null;
+  let keep = false;
   let page = null;
   let theme = initialTheme;
 
   const live = target => target && !target.isDestroyed();
+  const workArea = () => screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
+  const destroy = box => {
+    if (live(box.target)) box.target.destroy();
+  };
 
-  function close() {
-    const target = win;
-    if (!target) return;
-    win = null;
-    if (live(target)) target.destroy();
+  function warm() {
+    if (!keep || win || spare) return;
+    try {
+      spare = create();
+    } catch {}
   }
 
-  function create(view) {
-    const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea;
-    const payload = JSON.stringify({ text: view.text, ...(theme ? { theme } : {}) });
+  function close() {
+    const box = win;
+    if (!box) return;
+    win = null;
+    destroy(box);
+    warm();
+  }
+
+  function create() {
+    page ??= `data:text/html;charset=utf-8,${encodeURIComponent(typeBoxHtml(mascotPng(nativeImage, iconPath)))}`;
     const target = new BrowserWindow({
       type: "panel",
-      ...talkPanelBounds(area, TALK_PANEL.minHeight),
+      ...talkPanelBounds(workArea(), TALK_PANEL.minHeight),
       frame: false,
       transparent: true,
       backgroundColor: "#00000000",
@@ -115,23 +127,37 @@ export function createTypeBox({ BrowserWindow, screen, nativeImage, iconPath, th
     // Electron/macOS: skipTransformProcessType keeps the Dock icon.
     target.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true });
 
-    const lost = () => {
-      if (win !== target) return;
-      win = null;
-      if (live(target)) target.destroy();
-      onBlur();
+    const box = { target, loaded: false, shown: false, area: null, start: "" };
+
+    // Electron: quitting (and quitAndInstall, before before-quit) closes every window itself, and a window made
+    // meanwhile stays open so the app never quits; a close Electron makes therefore stops the waiting box.
+    const gone = ({ quitting = false } = {}) => {
+      const open = box === win;
+      if (!open && box !== spare) return;
+      if (quitting) keep = false;
+      if (open) win = null;
+      else spare = null;
+      destroy(box);
+      if (open || box.loaded) warm();
+      if (open) onBlur();
     };
 
     async function begin() {
-      const height = await target.webContents.executeJavaScript(`start(${payload})`);
-      if (win !== target) return;
-      target.setBounds(talkPanelBounds(area, height));
+      const height = await target.webContents.executeJavaScript(box.start);
+      if (win !== box) return;
+      target.setBounds(talkPanelBounds(box.area, height));
       target.showInactive();
-      shown = target;
+      box.shown = true;
       // Electron/macOS: focus() on a "panel" window makes it key without activating the app, so the app the person
       // was in stays active. Unit tests can't prove it.
       target.focus();
     }
+
+    box.show = view => {
+      box.area = workArea();
+      box.start = `start(${JSON.stringify({ text: view.text, ...(theme ? { theme } : {}) })})`;
+      if (box.loaded) begin().catch(() => gone());
+    };
 
     target.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
     target.webContents.on("will-navigate", event => event.preventDefault());
@@ -141,14 +167,15 @@ export function createTypeBox({ BrowserWindow, screen, nativeImage, iconPath, th
       if (blockedChord(input)) event.preventDefault();
     });
     target.webContents.on("did-finish-load", () => {
-      if (win === target) begin().catch(lost);
+      box.loaded = true;
+      if (win === box) begin().catch(() => gone());
     });
-    // Security: only this window's own page speaks for the box, and only with words within the limit.
+    // Security: only the open box's own page speaks for it, and only with words within the limit.
     target.webContents.on("ipc-message", (_event, channel, text, height) => {
-      if (win !== target) return;
+      if (win !== box) return;
       if (channel === "type-box:input") {
         if (!wellFormed(text) || !Number.isFinite(height)) return;
-        target.setBounds(talkPanelBounds(area, height));
+        target.setBounds(talkPanelBounds(box.area, height));
         onInput(text);
       } else if (channel === "type-box:send") {
         if (wellFormed(text)) onSend(text);
@@ -156,22 +183,38 @@ export function createTypeBox({ BrowserWindow, screen, nativeImage, iconPath, th
         onCancel();
       }
     });
-    target.webContents.on("render-process-gone", lost);
-    target.on("blur", lost);
-    target.on("closed", lost);
-    target.loadURL(page).catch(lost);
-    return target;
+    target.webContents.on("render-process-gone", () => gone());
+    target.on("blur", () => {
+      if (box === win) gone();
+    });
+    target.on("closed", () => gone({ quitting: true }));
+    target.loadURL(page).catch(() => gone());
+    return box;
   }
 
   return {
     open(view) {
       close();
-      page ??= `data:text/html;charset=utf-8,${encodeURIComponent(typeBoxHtml(mascotPng(nativeImage, iconPath)))}`;
-      win = create(view);
+      const box = spare ?? create();
+      spare = null;
+      win = box;
+      box.show(view);
     },
     close,
     focus() {
-      if (win && win === shown && live(win) && !win.isFocused()) win.focus();
+      if (win?.shown && live(win.target) && !win.target.isFocused()) win.target.focus();
+    },
+    /** While on, one loaded, hidden box waits for the next open, so keys typed right after the press never go to
+     * the app underneath while a page loads. */
+    keepReady(on) {
+      keep = on;
+      if (on) {
+        warm();
+      } else if (spare) {
+        const box = spare;
+        spare = null;
+        destroy(box);
+      }
     },
     /** The app's skin for the next open; null follows macOS's appearance. */
     setTheme(next) {

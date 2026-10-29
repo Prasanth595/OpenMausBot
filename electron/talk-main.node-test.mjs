@@ -20,6 +20,7 @@ const CLOUD = "https://home.example.test";
 const HOME_HERE = Object.freeze({ kind: "computer" }), HOME_CLOUD = Object.freeze({ kind: "cloud", origin: CLOUD });
 const talkKeys = h => [...h.registered.keys()].filter(key => key.endsWith("Space"));
 const typeKeys = h => [...h.registered.keys()].filter(key => key.endsWith("+T"));
+const typeBoxes = h => h.windows.filter(win => isTalkPanel(win) && win.options.focusable === true && !win.destroyed);
 const SETTINGS = Object.freeze({
   "talk-shortcut": { unavailable: TALK_SHORTCUT_UNAVAILABLE, key: "ctrl-opt-space", other: "ctrl-shift-space", accelerator: "Control+Shift+Space", keys: talkKeys },
   "type-shortcut": { unavailable: TYPE_SHORTCUT_UNAVAILABLE, key: "ctrl-opt-t", other: "ctrl-shift-t", accelerator: "Control+Shift+T", keys: typeKeys },
@@ -104,7 +105,7 @@ function harness({ packaged = true, appleSpeech = true, remote = false, register
   h.press = () => h.registered.get("Control+Alt+Space")();
   h.typePress = () => h.registered.get("Control+Alt+T")();
   h.page = name => new FakeBrowserWindow({ name });
-  h.box = () => h.windows.findLast(win => isTalkPanel(win));
+  h.box = () => h.windows.findLast(win => isTalkPanel(win) && win.options.focusable === false);
   h.typeBox = () => h.windows.findLast(win => isTalkPanel(win) && win.options.focusable === true);
   h.click = what => h.box().webContents.emit("ipc-message", {}, `talk-panel:${what}`);
   h.painted = async () => { h.box().webContents.emit("did-finish-load"); await settle(); return h.box().webContents.scripts.filter(script => script.startsWith("render(")).map(script => JSON.parse(script.slice(7, -1))); };
@@ -574,7 +575,7 @@ test("⌃⌥T opens the focusable box; Return asks this computer's Quick asks an
   assert.equal(typing.destroyed, true);
   assert.deepEqual(h.where()[0], ["local", "/api/bots?messages=0"]);
   assert.deepEqual((await h.painted())[0], { state: "sending", text: "", echo: "what's on" });
-  assert.equal(h.box().options.focusable, false);
+  assert.equal(typeBoxes(h).length, 1, "a fresh hidden type box waits for the next ⌃⌥T");
   h.talk.close();
 });
 
@@ -594,11 +595,35 @@ test("home needing a sign-in lets ⌃⌥T go; My Cloud as home takes it back", (
   h.talk.close();
 });
 
-test("quitting closes an open type box and lets both keys go", () => {
+test("quitting closes an open type box, leaves none waiting and lets both keys go", () => {
   const h = harness(); h.start(); h.typePress();
   const typing = h.typeBox();
   h.talk.close();
-  assert.deepEqual([typing.destroyed, [...h.registered.keys()]], [true, []]);
+  assert.deepEqual([typing.destroyed, typeBoxes(h), [...h.registered.keys()]], [true, [], []]);
+});
+
+test("one hidden type box waits while ⌃⌥T is on and available, and a press shows it with no new window", () => {
+  const h = harness();
+  h.start();
+  assert.equal(typeBoxes(h).length, 1);
+  h.handle("type-shortcut:set", {}, { enabled: false });
+  assert.equal(typeBoxes(h).length, 0);
+  h.handle("type-shortcut:set", {}, { enabled: true });
+  assert.equal(typeBoxes(h).length, 1);
+  h.home = { kind: "signin" }; h.talk.homeChanged();
+  assert.equal(typeBoxes(h).length, 0);
+  h.home = HOME_HERE; h.talk.homeChanged();
+  const waiting = typeBoxes(h);
+  const made = h.windows.length;
+  h.typePress();
+  assert.deepEqual([typeBoxes(h), h.windows.length], [waiting, made]);
+  h.talk.close();
+  assert.deepEqual(typeBoxes(h), []);
+  for (const options of [{ platform: "win32" }, { remote: true }]) {
+    const other = harness(options); other.start();
+    assert.deepEqual(typeBoxes(other), [], JSON.stringify(options));
+    other.talk.close();
+  }
 });
 
 test("the type setting reaches My Cloud's own page while it is home, never a team's, and needs a click there to turn on", async () => {
@@ -621,6 +646,6 @@ test("a type shortcut that cannot be set up lets talk's key go too, so no key is
     return true;
   } });
   assert.doesNotThrow(() => h.start());
-  assert.deepEqual([h.log, [...h.registered.keys()]], [["talk shortcut unavailable: no hotkeys"], []]);
+  assert.deepEqual([h.log, [...h.registered.keys()], typeBoxes(h)], [["talk shortcut unavailable: no hotkeys"], [], []]);
   assert.deepEqual([h.handle("talk-shortcut:state", {}), h.handle("type-shortcut:state", {})], [TALK_SHORTCUT_UNAVAILABLE, TYPE_SHORTCUT_UNAVAILABLE]);
 });

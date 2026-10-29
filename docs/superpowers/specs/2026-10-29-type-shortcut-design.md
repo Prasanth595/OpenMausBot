@@ -88,7 +88,7 @@ The talk shortcut (hold ⌃⌥Space, speak, let go) reaches MausBot from any app
 
 ## Left to the builder
 
-- **The panel.** How to make it take key focus without activating the app (Electron's macOS `panel` type with `focusable: true`, or another way), proved by a by-hand check.
+- **The panel.** How to make it take key focus without activating the app (Electron's macOS `panel` type with `focusable: true`, or another way), proved by a by-hand check. One loaded, hidden box waits while ⌃⌥T is on and available, so a press only shows it and no keystroke typed right after it reaches the app underneath while a page loads.
 - **The details:**
   - exact layout and styling, matching the talk box;
   - the timing constants;
