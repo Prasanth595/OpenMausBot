@@ -148,6 +148,20 @@ test("⌘ chords other than editing ones never reach the page or the app's menu"
   assert.deepEqual([stopped(cmd("q")), stopped(cmd("v"))], [true, false]);
 });
 
+test("on a non-Latin layout the physical key names the chord, so ⌘C copies on Russian and ⌥⌘I's dead key is still caught", () => {
+  const cmd = (key, code, more = {}) => ({ type: "keyDown", key, code, meta: true, ...more });
+  assert.equal(blockedChord(cmd("с", "KeyC")), false);
+  assert.equal(blockedChord(cmd("й", "KeyQ")), true);
+  assert.equal(blockedChord(cmd("Dead", "KeyI", { alt: true })), true);
+  assert.equal(blockedChord(cmd("Z", "KeyZ", { shift: true })), false);
+  assert.equal(blockedChord(cmd("ArrowLeft", "ArrowLeft")), false);
+  assert.equal(blockedChord(cmd("Backspace", "Backspace")), false);
+  assert.equal(blockedChord(cmd("Dead", "BracketLeft", { alt: true })), true);
+  assert.equal(blockedChord(cmd("q", "KeyA")), true, "AZERTY's ⌘Q is the key at A, and macOS quits on the character");
+  assert.equal(blockedChord(cmd("a", "KeyQ")), false, "AZERTY's ⌘A is the key at Q");
+  assert.deepEqual(["q", "c", "ˆ", "ArrowLeft"].map(key => blockedChord({ type: "keyDown", key, meta: true })), [true, false, true, false], "with no code, the key decides");
+});
+
 test("navigation and new windows are refused; the page is plain text under talk's policy and colours", () => {
   const { box, made } = harness();
   box.open({ text: "" });

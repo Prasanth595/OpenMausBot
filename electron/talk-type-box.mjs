@@ -3,9 +3,15 @@ import { TALK_BOX_THEME_CSS, TALK_PANEL, markTalkPanel, mascotPng, talkPanelBoun
 
 export const TYPE_LIMIT = 4000;
 
-/** ⌘ with a printable key, except the Edit menu's ⌘A, ⌘C, ⌘V, ⌘X and ⌘Z. */
+const EDIT_CODES = ["KeyA", "KeyC", "KeyV", "KeyX", "KeyZ"];
+const CHARACTER_CODE = /^(?:Key[A-Z]|Digit\d|Comma|Period|Slash|Semicolon|Quote|BracketLeft|BracketRight|Backslash|Minus|Equal|Backquote|IntlBackslash)$/;
+
+/** ⌘ on a character key, except ⌘A/⌘C/⌘V/⌘X/⌘Z named by an ASCII `key`, else by `code`: macOS matches menu keys by character on Latin layouts, by place on others. */
 export function blockedChord(input) {
-  return input.type === "keyDown" && input.meta === true && [...input.key].length === 1 && !"acvxz".includes(input.key.toLowerCase());
+  if (input.type !== "keyDown" || input.meta !== true) return false;
+  if (/^[ -~]$/.test(input.key)) return !"acvxz".includes(input.key.toLowerCase());
+  if (EDIT_CODES.includes(input.code)) return false;
+  return CHARACTER_CODE.test(input.code ?? "") || [...input.key].length === 1;
 }
 
 export function typeBoxHtml(iconBase64) {
