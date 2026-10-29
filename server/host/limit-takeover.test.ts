@@ -140,6 +140,19 @@ describe("what the person hears", () => {
     ]);
   });
 
+  it("files one incident per bot for each stretch of a limit, apart from the person's notice", () => {
+    const { instance, told } = takeover();
+    const resetsAt = NOW + 4 * HOUR;
+    instance.tell(KAI, on("codex", "gpt-6"), { resetsAt });
+    expect(instance.firstIncident("kai", on("codex", "gpt-6"), "engine", resetsAt), "the notice is not the incident").toBe(true);
+    expect(instance.firstIncident("kai", on("codex", "gpt-6"), "engine", resetsAt)).toBe(false);
+    expect(instance.firstIncident("rosa", on("codex", "gpt-6"), "engine", resetsAt)).toBe(true);
+    expect(instance.firstIncident("kai", on("claude", "claude-opus-5-5"), "model"), "another limit is another stretch").toBe(true);
+    instance.worked("kai", on("codex", "gpt-6"));
+    expect(instance.firstIncident("kai", on("codex", "gpt-6"), "engine", resetsAt), "a new stretch once it worked").toBe(true);
+    expect(told).toHaveLength(1);
+  });
+
   it("records a conversation that moved, so it goes back once the limit resets", () => {
     const { instance, record } = takeover();
     instance.moved("kai", "t1", on("codex", "gpt-6"), on("claude", "claude-opus-5-5"), NOW + HOUR);

@@ -43,6 +43,7 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
   const notices = new LimitNotices(deps.file, now);
   const heldModels = new Map<string, ModelHold>();
   const modelKey = (selection: ModelSelection) => `${selection.instanceId}\u0000${selection.model}`;
+  const incidentKey = (botId: string) => `incident\u0000${botId}`;
 
   const modelHeld = (selection: ModelSelection): ModelHold | null => {
     const held = heldModels.get(modelKey(selection));
@@ -116,10 +117,16 @@ export function createLimitTakeover(deps: LimitTakeoverDeps) {
     moved(botId: string, threadId: string, from: ModelSelection, to: ModelSelection, resetsAt?: number): void {
       deps.record({ botId, threadId, from, to, resetsAt: resetsAt ?? null, at: now() });
     },
+    /** True once per bot for each stretch of this limit: the one incident its Chief is told about, not one per refused turn. */
+    firstIncident(botId: string, from: ModelSelection, scope: LimitScope = "engine", resetsAt?: number): boolean {
+      return notices.first(incidentKey(botId), scope === "engine" ? from.instanceId : modelKey(from), resetsAt);
+    },
     /** A turn on `selection` worked for this bot: its engine's next limit is a new stretch, with a notice of its own. */
     worked(botId: string, selection: ModelSelection): void {
-      notices.ended(botId, selection.instanceId);
-      notices.ended(botId, modelKey(selection));
+      for (const who of [botId, incidentKey(botId)]) {
+        notices.ended(who, selection.instanceId);
+        notices.ended(who, modelKey(selection));
+      }
       heldModels.delete(modelKey(selection));
     },
   };

@@ -141,16 +141,18 @@ it("carries the request on with another AI by itself: the exact message once mor
     expect(bots.tasks.find((task: any) => task.threadId === sibling.threadId).modelSelection?.instanceId ?? bots.modelSelection.instanceId).toBe("claude");
     // No job twice: the failed turn's root stayed settled, and the resend is one new root that completed.
     expect(readHandoffs(dataDir).filter((node) => node.threadId === threadId).map((node) => [node.status, node.executions])).toEqual([["failed", 1], ["completed", 1]]);
-    const notices = (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice");
+    // One notice for this bot; the Chief, told of the incident, hears its own if its own turn meets the limit too.
+    const notices = (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice" && entry.botId === bot.id);
     expect(notices.map((entry: any) => entry.body)).toEqual([expect.stringMatching(/^Limited Claude reached its limit.*, so Out of quota is using Codex meanwhile\.$/)]);
   });
 }, 240_000);
 
 it("never moves to another sign-in of the same AI: it says once that the bot waits, and sends nothing again", async () => {
   await withQuotaFixture({ otherSignInOnly: true }, async ({ api, control, backupPrompts }) => {
-    const { threadId, messages, state } = await meetTheLimit(api, control, "LEAVE_THIS_WHERE_IT_IS_7M");
-    await expect.poll(async () => (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice").length, { timeout: 20_000 }).toBe(1);
-    const notice = (await api("GET", "/api/notifications")).notifications.find((entry: any) => entry.kind === "notice");
+    const { bot, threadId, messages, state } = await meetTheLimit(api, control, "LEAVE_THIS_WHERE_IT_IS_7M");
+    const mine = async () => (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice" && entry.botId === bot.id);
+    await expect.poll(async () => (await mine()).length, { timeout: 20_000 }).toBe(1);
+    const [notice] = await mine();
     expect(notice.body).toMatch(/^Limited Claude reached its limit.*, so Out of quota waits.*: no other AI you have set up can take over\.$/);
     expect((await messages()).filter((entry) => entry.role === "user")).toHaveLength(1);
     expect((await state()).tasks.find((task: any) => task.threadId === threadId).modelSelection?.instanceId ?? "claude").toBe("claude");
@@ -160,9 +162,10 @@ it("never moves to another sign-in of the same AI: it says once that the bot wai
 
 it("moves nothing when OMB_QUOTA_SWITCH=0 switches it off", async () => {
   await withQuotaFixture({ env: { OMB_QUOTA_SWITCH: "0" } }, async ({ api, control, backupPrompts }) => {
-    const { threadId, messages, state } = await meetTheLimit(api, control, "NO_MOVE_WHEN_OFF_2B");
-    await expect.poll(async () => (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice").length, { timeout: 20_000 }).toBe(1);
-    expect((await api("GET", "/api/notifications")).notifications.find((entry: any) => entry.kind === "notice").body).toMatch(/, so Out of quota waits.*: no other AI you have set up can take over\.$/);
+    const { bot, threadId, messages, state } = await meetTheLimit(api, control, "NO_MOVE_WHEN_OFF_2B");
+    const mine = async () => (await api("GET", "/api/notifications")).notifications.filter((entry: any) => entry.kind === "notice" && entry.botId === bot.id);
+    await expect.poll(async () => (await mine()).length, { timeout: 20_000 }).toBe(1);
+    expect((await mine())[0].body).toMatch(/, so Out of quota waits.*: no other AI you have set up can take over\.$/);
     expect((await messages()).filter((message) => message.role === "user")).toHaveLength(1);
     expect((await state()).tasks.find((task: any) => task.threadId === threadId).modelSelection?.instanceId ?? "claude").toBe("claude");
     expect(backupPrompts()).toHaveLength(0);
