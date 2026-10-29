@@ -64,8 +64,8 @@ if (typeof window !== "undefined") {
 const REMOTE_SAFE = new Set(["platform", "app", "getCapabilities", "onCapabilitiesChanged", "applySkin", "setUnreadCount", "permStatus", "workspaces", "cloudAdd", "cloudPlan", "cloudSendPage", "desktopNotices", "desktopAnalytics", "desktopLanguage", "updatesConsent", "windowControls"]);
 /** My Cloud's own page once it is the person's home (main checks the sender again): it is this app's page then. */
 const HOME_PAGE = ["home", "onChatLink", "onPackageInstall", "onOpenAppSettings", "exportDiagnostics", "openLogsFolder", "openAtLogin", "callActive"];
-/** My Cloud's own page while it is home, and never a team's (main checks again): the talk shortcut's setting. */
-const MY_CLOUD_PAGE = ["talkShortcut"];
+/** My Cloud's own page while it is home, and never a team's (main checks again): the talk and type shortcuts' settings. */
+const MY_CLOUD_PAGE = ["talkShortcut", "typeShortcut"];
 function updaterOffered() {
   try { return ipcRenderer.sendSync("update:offered") === true; } catch { return false; }
 }
@@ -74,6 +74,17 @@ function homePage() {
 }
 function talkShortcutPage() {
   try { return ipcRenderer.sendSync("talk-shortcut:page") === true; } catch { return false; }
+}
+function shortcutBridge(channel, name) {
+  return {
+    state: () => ipcRenderer.invoke(`${channel}:state`),
+    // On a server's page, only turning it off goes without the person's click.
+    set: (change) => {
+      const next = { ...(typeof change?.enabled === "boolean" ? { enabled: change.enabled } : {}), ...(typeof change?.key === "string" ? { key: change.key } : {}) };
+      return (next.enabled === false && next.key === undefined) || isLocalPage || navigator.userActivation?.isActive === true
+        ? ipcRenderer.invoke(`${channel}:set`, next) : Promise.reject(new Error(`Use the switch to change the ${name} shortcut.`));
+    },
+  };
 }
 function reloadedForUpdate() {
   try { return ipcRenderer.sendSync("home:updating") === true; } catch { return false; }
@@ -249,15 +260,8 @@ const bridge = {
     ipcRenderer.on("speech:end", handler);
     return () => ipcRenderer.removeListener("speech:end", handler);
   },
-  talkShortcut: {
-    state: () => ipcRenderer.invoke("talk-shortcut:state"),
-    // On a server's page, only turning it off goes without the person's click.
-    set: (change) => {
-      const next = { ...(typeof change?.enabled === "boolean" ? { enabled: change.enabled } : {}), ...(typeof change?.key === "string" ? { key: change.key } : {}) };
-      return (next.enabled === false && next.key === undefined) || isLocalPage || navigator.userActivation?.isActive === true
-        ? ipcRenderer.invoke("talk-shortcut:set", next) : Promise.reject(new Error("Use the switch to change the talk shortcut."));
-    },
-  },
+  talkShortcut: shortcutBridge("talk-shortcut", "talk"),
+  typeShortcut: shortcutBridge("type-shortcut", "type"),
   callActive: (active) => ipcRenderer.invoke("call:active", active === true).then(() => undefined),
   onOpenAppSettings: (cb) => {
     appSettingsListeners.add(cb);

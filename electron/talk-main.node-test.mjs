@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { createCloudPowerGate } from "./cloud-power.mjs";
 import { createDesktopPrefs } from "./desktop-prefs.mjs";
 import { installTalk, isTalkPanel } from "./talk-main.mjs";
-import { TALK_SHORTCUT_UNAVAILABLE } from "./talk-shortcut.mjs";
+import { TALK_SHORTCUT_UNAVAILABLE, TYPE_SHORTCUT_UNAVAILABLE } from "./talk-shortcut.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const main = readFileSync(join(here, "main.mjs"), "utf8").replace(/\r\n/g, "\n");
@@ -18,9 +18,10 @@ const json = body => Promise.resolve(new Response(JSON.stringify(body), { status
 const names = windows => windows.map(win => win?.name ?? null);
 const CLOUD = "https://home.example.test";
 const HOME_HERE = Object.freeze({ kind: "computer" }), HOME_CLOUD = Object.freeze({ kind: "cloud", origin: CLOUD });
+const talkKeys = h => [...h.registered.keys()].filter(key => key.endsWith("Space"));
 
 /** `serve(route, where)`: an answer for this computer's server ("local", "dev") or My Cloud ("cloud"), else none yet. */
-function harness({ packaged = true, appleSpeech = true, remote = false, register, serve = () => undefined, myCloud = true } = {}) {
+function harness({ packaged = true, appleSpeech = true, remote = false, register, serve = () => undefined, myCloud = true, platform = "darwin" } = {}) {
   const h = { handlers: new Map(), listeners: new Map(), guards: new Map(), started: [], stopped: [], finished: [], requests: [], links: [], reveals: 0, log: [],
     registered: new Map(), windows: [], busy: false, fail: {}, home: HOME_HERE, mine: CLOUD, cloudPower: null, wakes: 0, reconnects: [], starting: false };
   const owners = new Map();
@@ -40,6 +41,7 @@ function harness({ packaged = true, appleSpeech = true, remote = false, register
     setBounds() {}
     getBounds() { return { x: 0, y: 0, width: 0, height: 0 }; }
     showInactive() {}
+    focus() {}
     loadURL() { return Promise.resolve(); }
     isDestroyed() { return this.destroyed; }
     destroy() { this.destroyed = true; }
@@ -68,7 +70,7 @@ function harness({ packaged = true, appleSpeech = true, remote = false, register
     },
     packaged, devUrl: "http://127.0.0.1:5199", iconPath: join(here, "resources", "app-icon.png"),
     nativeImage: { createFromPath: () => ({ isEmpty: () => false, resize: () => ({ toPNG: () => Buffer.from("png") }) }) },
-    openLink: link => { h.links.push(link); }, reveal: failing("reveal", () => { h.reveals += 1; }), log: line => { h.log.push(line); },
+    openLink: link => { h.links.push(link); }, reveal: failing("reveal", () => { h.reveals += 1; }), log: line => { h.log.push(line); }, platform,
     fetch: url => { h.requests.push(["dev", String(url)]); return answer(`${url.pathname}${url.search}`, "dev"); },
   });
   h.power = createCloudPowerGate({ power: () => h.cloudPower });
@@ -95,8 +97,10 @@ function harness({ packaged = true, appleSpeech = true, remote = false, register
   h.sync = (channel, event) => { h.listeners.get(channel)(event); return event.returnValue; };
   h.where = () => h.requests.map(([where, url]) => [where, url]);
   h.press = () => h.registered.get("Control+Alt+Space")();
+  h.typePress = () => h.registered.get("Control+Alt+T")();
   h.page = name => new FakeBrowserWindow({ name });
   h.box = () => h.windows.findLast(win => isTalkPanel(win));
+  h.typeBox = () => h.windows.findLast(win => isTalkPanel(win) && win.options.focusable === true);
   h.click = what => h.box().webContents.emit("ipc-message", {}, `talk-panel:${what}`);
   h.painted = async () => { h.box().webContents.emit("did-finish-load"); await settle(); return h.box().webContents.scripts.filter(script => script.startsWith("render(")).map(script => JSON.parse(script.slice(7, -1))); };
   return h;
@@ -114,7 +118,7 @@ test("main hands the talk wiring its speech sinks, this computer's own server an
   assert.match(main, /packaged: app\.isPackaged, devUrl: DEV_URL, nativeImage, iconPath: APP_ICON, openLink: queueChatLink, reveal: revealForLink, log: slog \}\);/);
   assert.match(main, /talk\.start\(\{ globalShortcut, screen, prefs: desktopPrefs, remote: \(\) => Boolean\(desktopRemoteAccess\), home: \(\) => homeWindow\.current\(\), starting: \(\) => !serverReady, localRequest: localServerRequest, dataDir: \(\) => runningDataDir,\s*myCloud: \{ mine: myCloud, fetch: \(\.\.\.args\) => session\.defaultSession\.fetch\(\.\.\.args\), reconnect: reconnectCloud, power: cloudPower, account: \(\) => cloudAccount \} \}\);/);
   assert.match(main, /app\.on\("before-quit", \(e\) => \{\s*talk\.close\(\);/);
-  assert.doesNotMatch(main, /ipcMain\.handle\("(?:speech|talk-shortcut|call):/);
+  assert.doesNotMatch(main, /ipcMain\.handle\("(?:speech|talk-shortcut|type-shortcut|call):/);
 });
 
 test("main tells the talk wiring when home changes and which skin the app painted, and counts a talk ask as busy for a quiet update", () => {
@@ -125,10 +129,10 @@ test("main tells the talk wiring when home changes and which skin the app painte
 
 test("the talk bridge keys stay off other servers' pages; a call can be reported from My Cloud's page", () => {
   const list = name => preload.match(new RegExp(`const ${name} = (?:new Set\\()?\\[([^\\]]*)\\]`))[1];
-  assert.doesNotMatch(list("REMOTE_SAFE"), /talkShortcut|callActive/);
+  assert.doesNotMatch(list("REMOTE_SAFE"), /talkShortcut|typeShortcut|callActive/);
   assert.match(list("HOME_PAGE"), /"callActive"/);
-  assert.doesNotMatch(list("HOME_PAGE"), /talkShortcut/, "a team's page is a home page too");
-  assert.deepEqual(list("MY_CLOUD_PAGE"), `"talkShortcut"`);
+  assert.doesNotMatch(list("HOME_PAGE"), /talkShortcut|typeShortcut/, "a team's page is a home page too");
+  assert.deepEqual(list("MY_CLOUD_PAGE"), `"talkShortcut", "typeShortcut"`);
 });
 
 /** The real preload as `origin`'s page: `home` answers home:page, `talk` answers talk-shortcut:page. */
@@ -221,10 +225,10 @@ test("a page whose own origin is opaque never counts as My Cloud's, whatever its
 test("every microphone channel answers only this computer's page; a call can be reported from My Cloud's page too", () => {
   const { guards, handlers, listeners } = harness();
   // The talk setting's own guard (this app's page, or My Cloud's while home) is proven by the tests about My Cloud's page.
-  assert.deepEqual(Object.fromEntries([...guards].filter(([channel]) => !channel.startsWith("talk-shortcut:"))), {
+  assert.deepEqual(Object.fromEntries([...guards].filter(([channel]) => !channel.startsWith("talk-shortcut:") && !channel.startsWith("type-shortcut:"))), {
     "speech:start": "localOnly", "speech:stop": "localOnly", "speech:finish": "localOnly", "call:active": "localOrHome",
   });
-  assert.deepEqual([...handlers.keys()], ["speech:start", "speech:stop", "speech:finish", "talk-shortcut:state", "talk-shortcut:set", "call:active"]);
+  assert.deepEqual([...handlers.keys()], ["speech:start", "speech:stop", "speech:finish", "talk-shortcut:state", "talk-shortcut:set", "type-shortcut:state", "type-shortcut:set", "call:active"]);
   assert.deepEqual([...listeners.keys()], ["talk-shortcut:page"]);
 });
 
@@ -255,12 +259,12 @@ test("the shortcut is offered only with Apple speech, on a desktop that is not a
     const h = harness(options);
     h.start();
     assert.equal(h.handle("talk-shortcut:state", {}).available, false);
-    assert.deepEqual([...h.registered.keys()], []);
+    assert.deepEqual(talkKeys(h), []);
   }
   const h = harness();
   h.start();
   assert.equal(h.handle("talk-shortcut:state", {}).available, true);
-  assert.deepEqual([...h.registered.keys()], ["Control+Alt+Space"]);
+  assert.deepEqual(talkKeys(h), ["Control+Alt+Space"]);
 });
 
 test("before the shortcut is set up its setting says unavailable; afterwards a change passes on only what it understands", () => {
@@ -271,9 +275,9 @@ test("before the shortcut is set up its setting says unavailable; afterwards a c
   const shown = state => ({ enabled: state.enabled, key: state.key, taken: state.taken });
   assert.deepEqual(shown(h.handle("talk-shortcut:set", {}, { enabled: "no", key: 7, extra: 1 })), { enabled: true, key: "ctrl-opt-space", taken: false });
   assert.deepEqual(shown(h.handle("talk-shortcut:set", {}, { enabled: false })), { enabled: false, key: "ctrl-opt-space", taken: false });
-  assert.deepEqual([...h.registered.keys()], []);
+  assert.deepEqual(talkKeys(h), []);
   h.handle("talk-shortcut:set", {}, { enabled: true, key: "ctrl-shift-space" });
-  assert.deepEqual([...h.registered.keys()], ["Control+Shift+Space"]);
+  assert.deepEqual(talkKeys(h), ["Control+Shift+Space"]);
   h.talk.close();
   assert.deepEqual([...h.registered.keys()], [], "quitting lets the key go");
 });
@@ -371,10 +375,10 @@ test("while home needs a sign-in the shortcut is unavailable and the key free; h
   h.home = HOME_CLOUD;
   h.talk.homeChanged();
   assert.equal(h.handle("talk-shortcut:state", {}).available, true);
-  assert.deepEqual([...h.registered.keys()], ["Control+Alt+Space"]);
+  assert.deepEqual(talkKeys(h), ["Control+Alt+Space"]);
   h.home = HOME_HERE;
   h.talk.homeChanged();
-  assert.deepEqual([...h.registered.keys()], ["Control+Alt+Space"], "kept from My Cloud to this computer");
+  assert.deepEqual(talkKeys(h), ["Control+Alt+Space"], "kept from My Cloud to this computer");
   h.home = { kind: "signin", other: true };
   h.talk.homeChanged();
   assert.deepEqual([...h.registered.keys()], []);
@@ -526,4 +530,87 @@ test("quitting while listening logs a failure to stop speech and still lets the 
   assert.doesNotThrow(() => h.talk.close());
   assert.deepEqual(h.log, ["talk close failed: stop broke"]);
   assert.deepEqual([...h.registered.keys()], []);
+});
+
+test("the type shortcut is offered on macOS without Apple speech, never elsewhere or on a remote client", () => {
+  const mac = harness({ appleSpeech: false }); mac.start();
+  assert.deepEqual([mac.handle("type-shortcut:state", {}).available, mac.handle("talk-shortcut:state", {}).available], [true, false]);
+  assert.deepEqual([...mac.registered.keys()], ["Control+Alt+T"]);
+  for (const options of [{ platform: "win32", appleSpeech: false }, { remote: true }]) {
+    const h = harness(options); h.start();
+    assert.deepEqual([h.handle("type-shortcut:state", {}).available, h.registered.has("Control+Alt+T")], [false, false]);
+  }
+});
+
+test("before it is set up the type setting says unavailable; afterwards each setting moves only its own key", () => {
+  const h = harness();
+  assert.equal(h.handle("type-shortcut:state", {}), TYPE_SHORTCUT_UNAVAILABLE);
+  h.start();
+  h.handle("talk-shortcut:set", {}, { enabled: false });
+  assert.deepEqual([...h.registered.keys()], ["Control+Alt+T"]);
+  h.handle("type-shortcut:set", {}, { key: "opt-shift-t", extra: 1 });
+  assert.deepEqual([...h.registered.keys()], ["Alt+Shift+T"]);
+  assert.equal(h.handle("talk-shortcut:state", {}).key, "ctrl-opt-space");
+  h.talk.close();
+  assert.deepEqual([...h.registered.keys()], []);
+});
+
+test("⌃⌥T opens the focusable box; Return asks this computer's Quick asks and talk's never-focused box takes over", async () => {
+  const h = harness(); h.start(); h.typePress();
+  const typing = h.typeBox();
+  typing.webContents.emit("did-finish-load"); await settle();
+  typing.webContents.emit("ipc-message", {}, "type-box:send", "what's on");
+  await settle();
+  assert.equal(typing.destroyed, true);
+  assert.deepEqual(h.where()[0], ["local", "/api/bots?messages=0"]);
+  assert.deepEqual((await h.painted())[0], { state: "sending", text: "", echo: "what's on" });
+  assert.equal(h.box().options.focusable, false);
+  h.talk.close();
+});
+
+test("the type box opens in the skin the app painted last", async () => {
+  const h = harness(); h.talk.skin("meadow"); h.start(); h.talk.skin("midnight"); h.typePress();
+  h.typeBox().webContents.emit("did-finish-load"); await settle();
+  assert.equal(h.typeBox().webContents.scripts[0], 'start({"text":"","theme":"dark"})');
+  h.talk.close();
+});
+
+test("home needing a sign-in lets ⌃⌥T go; My Cloud as home takes it back", () => {
+  const h = harness(); h.start();
+  h.home = { kind: "signin" }; h.talk.homeChanged();
+  assert.deepEqual([h.registered.has("Control+Alt+T"), h.handle("type-shortcut:state", {}).available], [false, false]);
+  h.home = HOME_CLOUD; h.talk.homeChanged();
+  assert.equal(h.registered.has("Control+Alt+T"), true);
+  h.talk.close();
+});
+
+test("quitting closes an open type box and lets both keys go", () => {
+  const h = harness(); h.start(); h.typePress();
+  const typing = h.typeBox();
+  h.talk.close();
+  assert.deepEqual([typing.destroyed, [...h.registered.keys()]], [true, []]);
+});
+
+test("the type setting reaches My Cloud's own page while it is home, never a team's, and needs a click there to turn on", async () => {
+  const h = harness(); h.home = HOME_CLOUD; h.start();
+  assert.equal(h.handle("type-shortcut:state", { remote: true, cloudPage: true, senderFrame: { origin: CLOUD } }).available, true);
+  assert.throws(() => h.handle("type-shortcut:set", { remote: true, cloudPage: false, senderFrame: { origin: "https://team.example.test" } }, { enabled: false }), /only available/);
+  const page = preloadAt(CLOUD, { home: true, talk: true });
+  await assert.rejects(page.bridge.typeShortcut.set({ enabled: true }), /type shortcut/);
+  await assert.rejects(page.bridge.typeShortcut.set({ key: "ctrl-shift-t" }), /type shortcut/);
+  await page.bridge.typeShortcut.set({ enabled: false });
+  assert.deepEqual(plain(page.invoked), [["type-shortcut:set", { enabled: false }]]);
+  assert.equal(preloadAt("https://team.example.test", { home: true, talk: false }).bridge.typeShortcut, undefined);
+  h.talk.close();
+});
+
+test("a type shortcut that cannot be set up lets talk's key go too, so no key is left with nothing behind it", () => {
+  const h = harness({ register: (accelerator, press) => {
+    if (accelerator === "Control+Alt+T") throw new Error("no hotkeys");
+    h.registered.set(accelerator, press);
+    return true;
+  } });
+  assert.doesNotThrow(() => h.start());
+  assert.deepEqual([h.log, [...h.registered.keys()]], [["talk shortcut unavailable: no hotkeys"], []]);
+  assert.deepEqual([h.handle("talk-shortcut:state", {}), h.handle("type-shortcut:state", {})], [TALK_SHORTCUT_UNAVAILABLE, TYPE_SHORTCUT_UNAVAILABLE]);
 });

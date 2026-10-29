@@ -289,6 +289,8 @@ const __APP_VERSION__: string;
       speechFinish?(): Promise<void>;
       /** This computer's page, or My Cloud's own page while it is home: Settings → General's talk shortcut. */
       talkShortcut?: import("../../electron/talk-shortcut.mjs").TalkShortcutBridge;
+      /** This computer's page, or My Cloud's own page while it is home: Settings → General's type shortcut. */
+      typeShortcut?: import("../../electron/talk-shortcut.mjs").TypeShortcutBridge;
       /** A call holds the microphone, so the talk shortcut waits. */
       callActive?(active: boolean): Promise<void>;
       onSpeechTranscript(

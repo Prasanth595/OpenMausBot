@@ -83,6 +83,13 @@ test("the talk bridge asks main over its own channels with only what it understa
   assert.deepEqual(invocations.slice(before), [["talk-shortcut:state"], ["talk-shortcut:set", { enabled: false, key: "ctrl-shift-space" }], ["call:active", true], ["call:active", false]]);
 });
 
+test("the type bridge asks main over its own channels with only what it understands", async () => {
+  const before = invocations.length;
+  await exposed.api.typeShortcut.state();
+  await exposed.api.typeShortcut.set({ enabled: false, key: "ctrl-shift-t", extra: "x" });
+  assert.deepEqual(invocations.slice(before), [["type-shortcut:state"], ["type-shortcut:set", { enabled: false, key: "ctrl-shift-t" }]]);
+});
+
 test("account prepare asks for the secure address over its own channel and sends nothing from the page", async () => {
   const before = invocations.length;
   await exposed.api.companionAccount.prepare({ endpoint: "https://evil.example.test" });
