@@ -152,6 +152,10 @@ export function verificationServerEnvironment(parentEnv: NodeJS.ProcessEnv, data
     OMB_DATA_DIR: dataDir,
     OMB_PORT: String(port),
     OMB_WEBHOOK_PORT: String(port + 1),
+    // The launcher already picked a free pair above; a verification server
+    // must fail fast on a stolen port, not drift to one this process never
+    // polls.
+    OMB_PORT_PINNED: "1",
     // A caller's FAKE_CLAUDE_MODE overrides this below to drive failure paths.
     FAKE_CLAUDE_MODE: parentEnv.FAKE_CLAUDE_MODE || "happy",
     FAKE_CLAUDE_DUMP: join(dataDir, "fake-claude-dump.json"),
