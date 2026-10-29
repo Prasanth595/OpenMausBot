@@ -4,7 +4,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import { localDay } from "./cloud-trial-notice.mjs";
 import { ONBOARDING_CLOUD_HINT, onboardingHints } from "./onboarding-record.mjs";
-import { DEFAULT_TALK_KEY, isTalkKey } from "./talk-keys.mjs";
+import { DEFAULT_TALK_KEY, DEFAULT_TYPE_KEY, isTalkKey, isTypeKey } from "./talk-keys.mjs";
 import { createUpdatesConsent, parseUpdatesConsent, registerUpdatesConsent } from "./updates-consent.mjs";
 import { accountFullName } from "./system-name.mjs";
 
@@ -57,6 +57,8 @@ function parse(raw) {
     ...(updatesConsent ? { updatesConsent } : {}),
     ...(typeof record.talkShortcut === "boolean" ? { talkShortcut: record.talkShortcut } : {}),
     ...(isTalkKey(record.talkKey) ? { talkKey: record.talkKey } : {}),
+    ...(typeof record.typeShortcut === "boolean" ? { typeShortcut: record.typeShortcut } : {}),
+    ...(isTypeKey(record.typeKey) ? { typeKey: record.typeKey } : {}),
     ...(Object.keys(quickAsks).length ? { quickAsks } : {}) };
 }
 
@@ -114,6 +116,14 @@ export function createDesktopPrefs({ read, write, now = Date.now }) {
     setTalkKey(id) {
       if (!isTalkKey(id)) return false;
       if (current().talkKey !== id) save({ ...current(), talkKey: id });
+      return true;
+    },
+    typeShortcut: () => current().typeShortcut ?? true,
+    setTypeShortcut(enabled) { save({ ...current(), typeShortcut: enabled === true }); },
+    typeKey: () => current().typeKey ?? DEFAULT_TYPE_KEY,
+    setTypeKey(id) {
+      if (!isTypeKey(id)) return false;
+      if (current().typeKey !== id) save({ ...current(), typeKey: id });
       return true;
     },
     quickAsksChat(server) {
