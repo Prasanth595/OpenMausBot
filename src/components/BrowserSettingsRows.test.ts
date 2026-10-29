@@ -71,3 +71,17 @@ describe("New browser setting", () => {
     expect(toggle().getAttribute("aria-checked")).toBe("true");
   });
 });
+
+
+it("saves Brave with the CDP engine and explains the pending restart", async () => {
+  const saved = { browserEngine: { kind: "engine", engine: "chrome", browser: "brave", restartRequired: true } };
+  fixture.api.mockResolvedValue(saved);
+  render();
+  const select = host.querySelector<HTMLSelectElement>('select[aria-label="Bot browser"]')!;
+  flushSync(() => { select.value = "brave"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  await vi.waitFor(() => expect(fixture.dispatch).toHaveBeenCalledWith({ type: "configStatus", config: saved }));
+  expect(fixture.api).toHaveBeenCalledWith("/api/config", { method: "PATCH", body: JSON.stringify({ browserEngine: { browser: "brave", engine: "chrome" } }) });
+  render();
+  expect(host.querySelector('[role="status"]')?.textContent).toContain("Restart");
+  expect(toggle().disabled).toBe(true);
+});

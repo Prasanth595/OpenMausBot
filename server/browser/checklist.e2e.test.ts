@@ -112,12 +112,14 @@ suite("the bots' browser service on real Chrome", () => {
     expect(existsSync(folder)).toBe(false);
   }, hostTimeout(90_000));
 
-  it("tells sites the person's languages as Chrome does: a list in navigator.languages, q-values only in the header", async () => {
+  it("tells sites the configured languages, respecting Brave language reduction", async () => {
     const target = bot();
     let header: string | undefined;
     const url = fx.route("/languages", (request) => { header = request.headers["accept-language"]; return { body: "<!doctype html><title>languages</title><p>hi</p>" }; });
     await real.call(target, "agent_browser_open", { url });
-    expect(await real.read<string[]>(target, "[...navigator.languages]")).toEqual(["en-US", "en"]);
+    // Brave 1.98 reduces navigator.languages even with a configured Accept-Language header.
+    const brave = await real.read<boolean>(target, "Boolean(navigator.brave)");
+    expect(await real.read<string[]>(target, "[...navigator.languages]")).toEqual(brave ? ["en-US"] : ["en-US", "en"]);
     expect(header).toBe("en-US,en;q=0.9");
   }, hostTimeout(90_000));
 

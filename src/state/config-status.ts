@@ -168,6 +168,8 @@ export interface BrowserEngineSummary {
   myChromeLendable?: true;
   /** browserEngine.engine: "chrome" when the bots' browsers run on OpenMausBot's own Chrome driver. */
   engine?: "agent-browser" | "chrome";
+  browser?: "auto" | "brave";
+  restartRequired?: boolean;
 }
 
 export interface BrowserProfile {

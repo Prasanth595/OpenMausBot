@@ -79,7 +79,7 @@ describe("added OpenAI-compatible servers", () => {
     expect(id).toMatch(/^openai-compat-/);
     expect(cfg.instances?.[id]).toEqual({
       driver: "openai-compat", displayName: "Zhipu", access: "api",
-      config: { key: SECRET, url: "https://open.bigmodel.cn/api/paas/v4", managedModels: ["glm-4.6", "glm-5"] },
+      config: { key: SECRET, url: "https://open.bigmodel.cn/api/paas/v4", provider: "", model: "", managedModels: ["glm-4.6", "glm-5"] },
     });
     expect(persisted).toHaveLength(1);
     expect(created.text).not.toContain(SECRET);
@@ -87,6 +87,13 @@ describe("added OpenAI-compatible servers", () => {
     expect(listed.text).not.toContain(SECRET);
     expect(listed.body.instances.find((row: any) => row.instanceId === id)).toMatchObject({ displayName: "Zhipu", url: "https://open.bigmodel.cn/api/paas/v4" });
     expect(listed.body.instances.find((row: any) => row.instanceId === "openaiCompat")).not.toHaveProperty("url");
+  });
+
+  it.each(["openai", "lmstudio"])("persists the %s catalog without inheriting a model", async (catalog) => {
+    const { cfg, call } = await serve();
+    const response = await call("POST", "/api/instances/openai-compat", { ...add, models: [], catalog });
+    expect(response.status).toBe(201);
+    expect(cfg.instances?.[response.body.instanceId]?.config).toMatchObject({ catalog, model: "" });
   });
 
   it("refuses base URLs carrying credentials or query strings, and keys that are URLs", async () => {

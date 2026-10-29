@@ -42,6 +42,7 @@ const SWEEP_MS = 60_000;
 
 export interface ChromeEngineOptions {
   dataDir: string;
+  browser?: "auto" | "brave";
   host: HostKind;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
@@ -69,7 +70,7 @@ export class ChromeEngine {
     const env = options.env ?? process.env;
     const platform = options.platform ?? process.platform;
     const sandbox = !sandboxDisabled(env);
-    this.launcher = new ChromeLauncher({ dataDir: options.dataDir, env, platform, engine: () => ({ managed: true }), wrapper: false, sandbox, ...(options.log ? { log: options.log } : {}) });
+    this.launcher = new ChromeLauncher({ dataDir: options.dataDir, browser: options.browser, env, platform, engine: () => ({ managed: true }), wrapper: false, sandbox, ...(options.log ? { log: options.log } : {}) });
     this.#registry = new ProcessRegistry(browserRoot(options.dataDir));
     let screen: ReturnType<typeof displayScreen> | null = null;
     const locale = browserLanguage(env) ?? null;

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recordEvents } from "../testing/events.ts";
 import { buildTurnContext, replaysNatively } from "../turn-context.ts";
 import { instanceConfigs } from "../config.ts";
+import { addEndpoint } from "../openai-compat-endpoints.ts";
+import type { InstanceConfigMap } from "../contracts.ts";
 import { OpenAICompatDriver } from "./openai-compat.ts";
 
 describe("OpenAICompatDriver", () => {
@@ -1169,4 +1171,41 @@ it("openai-compat preserves an explicit tools-off connection and rejects ambiguo
   expect(OpenAICompatDriver.decodeConfig({ tools: false })).toMatchObject({ tools: false });
   expect(OpenAICompatDriver.decodeConfig({ tools: true })).toMatchObject({ tools: true });
   expect(() => OpenAICompatDriver.decodeConfig({ tools: "false" })).toThrow("tools must be a boolean");
+});
+
+
+it("honors an empty model override while preserving the absent-model environment fallback", () => {
+  vi.stubEnv("OPENAI_COMPAT_MODEL", "workspace-only");
+  try {
+    expect(OpenAICompatDriver.decodeConfig({ model: "" }).model).toBeUndefined();
+    expect(OpenAICompatDriver.decodeConfig({}).model).toBe("workspace-only");
+    expect(OpenAICompatDriver.decodeConfig({ model: "My/Exact Model" }).model).toBe("My/Exact Model");
+  } finally { vi.unstubAllEnvs(); }
+});
+
+it("discovers an added OpenAI endpoint's chat models without a workspace or environment model", async () => {
+  vi.stubEnv("OPENAI_COMPAT_MODEL", "environment-only");
+  const fetchMock = vi.fn(async () => new Response(JSON.stringify({ data: [
+    { id: "text-embedding-3-small", created: 30 }, { id: "gpt-4.1", created: 20 }, { id: "gpt-4o", created: 10 },
+  ] }), { headers: { "content-type": "application/json" } }));
+  vi.stubGlobal("fetch", fetchMock);
+  let inst: Awaited<ReturnType<typeof OpenAICompatDriver.create>> | undefined;
+  try {
+    const instances: InstanceConfigMap = {};
+    const added = addEndpoint(instances, { displayName: "OpenAI", url: "https://api.openai.com/v1", key: "synthetic-own-key", catalog: "openai" });
+    if ("error" in added) throw new Error(added.error);
+    const merged = instanceConfigs({ instances, openaiCompat: { model: "workspace-only", provider: "workspace-pin" } })[added.instanceId]!;
+    const config = OpenAICompatDriver.decodeConfig(merged.config);
+    expect(config.model).toBeUndefined();
+    expect(config.provider).toBeUndefined();
+    inst = await OpenAICompatDriver.create({ instanceId: added.instanceId, displayName: "OpenAI", enabled: true, config, environment: merged.environment ?? {} });
+    await inst.refreshModels?.();
+    expect(inst.models.default).toBe("gpt-4.1");
+    expect(inst.models.options.map((model) => model.id)).toEqual(["gpt-4.1", "gpt-4o"]);
+    expect(fetchMock).toHaveBeenCalledWith("https://api.openai.com/v1/models", expect.objectContaining({ headers: { authorization: "Bearer synthetic-own-key" } }));
+  } finally {
+    await inst?.dispose();
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  }
 });

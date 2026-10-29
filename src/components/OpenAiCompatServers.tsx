@@ -8,7 +8,7 @@ import { cn } from "@/lib/cn";
 import { KEY_FIELD } from "./keys/KeyRow";
 
 export function modelIds(text: string): string[] {
-  return [...new Set(text.split(/[,，、\s]+/).map((id) => id.trim()).filter(Boolean))];
+  return [...new Set(text.split(/[,，、\r\n]+/).map((id) => id.trim()).filter(Boolean))];
 }
 
 const INPUT = cn(KEY_FIELD, "font-sans");
@@ -47,7 +47,7 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
     "add",
     () => api("/api/instances/openai-compat", {
       method: "POST",
-      body: JSON.stringify({ displayName: name.trim(), url: url.trim(), key: key.trim(), ...(modelIds(models).length ? { models: modelIds(models) } : {}) }),
+      body: JSON.stringify({ displayName: name.trim(), url: url.trim(), key: key.trim(), ...(url.trim() === "https://api.openai.com/v1" ? { catalog: "openai" } : {}), ...(modelIds(models).length ? { models: modelIds(models) } : {}) }),
     }).then(
       (added) => { keySaved("custom_endpoint", "settings", "unverified"); return added; },
       (cause: unknown) => { keySaved("custom_endpoint", "settings", "error"); throw cause; },
@@ -89,15 +89,28 @@ function AddedServers({ servers }: { servers: Array<InstanceInfo & { url?: strin
         </div>
       ))}
       <div className="mt-2 flex flex-col gap-1.5">
+        <select aria-label={t("apiInstances.preset")} className={INPUT} disabled={busy !== null}
+          value={url === "https://openrouter.ai/api/v1" ? "openrouter" : url === "https://api.openai.com/v1" ? "openai" : "custom"}
+          onChange={(event) => {
+            const preset = event.target.value;
+            setKey("");
+            setModels("");
+            setUrl(preset === "openrouter" ? "https://openrouter.ai/api/v1" : preset === "openai" ? "https://api.openai.com/v1" : "");
+            setName(preset === "openrouter" ? "OpenRouter" : preset === "openai" ? "OpenAI" : "");
+          }}>
+          <option value="custom">{t("apiInstances.custom")}</option>
+          <option value="openrouter">OpenRouter</option>
+          <option value="openai">OpenAI</option>
+        </select>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t("apiInstances.name")} aria-label={t("apiInstances.name")}
           spellCheck={false} disabled={busy !== null} className={INPUT} />
         <input type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://api.example.com/v1" aria-label={t("apiInstances.url")}
           spellCheck={false} disabled={busy !== null} className={cn(INPUT, "font-mono")} />
         <input type="password" value={key} onChange={(e) => setKey(e.target.value)} placeholder={t("apiInstances.key")} aria-label={t("apiInstances.key")}
           autoComplete="off" disabled={busy !== null} className={cn(INPUT, "font-mono")} />
-        <input value={models} onChange={(e) => setModels(e.target.value)} placeholder={t("apiInstances.models")} aria-label={t("apiInstances.models")}
+        <textarea value={models} onChange={(e) => setModels(e.target.value)} placeholder={t("apiInstances.exactModels")} aria-label={t("apiInstances.exactModels")}
           spellCheck={false} disabled={busy !== null} className={cn(INPUT, "font-mono")} />
-        <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.modelsHint")}</p>
+        <p className="text-[12px] leading-4 text-ink-secondary">{t("apiInstances.exactModelsHint")}</p>
         <button
           type="button"
           onClick={add}

@@ -26,6 +26,8 @@ export const browserEngineConfigSchema = z.object({
   egress: browserEgressConfigSchema.optional(),
   /** "chrome" runs the bots' browsers on OpenMausBot's own Chrome driver, an early test; agent-browser is the default. */
   engine: z.enum(["agent-browser", "chrome"]).optional(),
+  /** The bot browser executable; changing it requires a server restart. */
+  browser: z.enum(["auto", "brave"]).optional(),
 });
 
 export interface BrowserEngineConfig {
@@ -33,8 +35,9 @@ export interface BrowserEngineConfig {
   idleTimeoutMinutes?: number;
   egress?: BrowserEgressConfig;
   engine?: BrowserEngineKind;
+  browser?: "auto" | "brave";
 }
 
 export function browserEngineKind(cfg: { browserEngine?: BrowserEngineConfig }): BrowserEngineKind {
-  return cfg.browserEngine?.engine === "chrome" ? "chrome" : "agent-browser";
+  return cfg.browserEngine?.browser === "brave" || cfg.browserEngine?.engine === "chrome" ? "chrome" : "agent-browser";
 }

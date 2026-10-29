@@ -8,7 +8,7 @@ import { posix, resolve, win32 } from "node:path";
 
 import { chromeForTestingExecutable, chromeForTestingPin, type ChromeForTestingPin } from "./install.ts";
 
-export type ChromeSource = "installed" | "downloaded" | "named" | "agent-browser";
+export type ChromeSource = "installed" | "downloaded" | "named" | "agent-browser" | "brave";
 
 export interface FoundChrome { path: string; source: ChromeSource }
 
@@ -100,7 +100,37 @@ export function agentBrowserChrome(host: ChromeHost): string | null {
   return versions.map((version) => join(browsers, version, layout)).find((candidate) => host.exists(candidate)) ?? null;
 }
 
-export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null): ChromePlan {
+export function installedBrave(host: ChromeHost): string | null {
+  const { join } = paths(host.platform);
+  const named = host.env.OMB_BRAVE_PATH?.trim();
+  if (named) return host.exists(named) ? named : null;
+  const candidates: string[] = [];
+  if (host.platform === "darwin") {
+    const registered = host.appForBundleId("com.brave.Browser");
+    for (const app of [registered, "/Applications/Brave Browser.app", join(host.home, "Applications/Brave Browser.app")]) {
+      if (app) candidates.push(join(app, "Contents/MacOS/Brave Browser"));
+    }
+  } else if (host.platform === "win32") {
+    for (const hive of ["HKLM", "HKCU"]) {
+      const registered = host.registryValue(`${hive}\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\brave.exe`);
+      if (registered) candidates.push(registered.replace(/^"|"$/gu, ""));
+    }
+    for (const root of [host.env.ProgramFiles, host.env["ProgramFiles(x86)"], host.env.LOCALAPPDATA]) {
+      if (root) candidates.push(join(root, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"));
+    }
+  } else if (host.platform === "linux") {
+    candidates.push("/opt/brave.com/brave/brave", "/usr/bin/brave-browser", "/usr/bin/brave");
+  }
+  return candidates.find((candidate) => host.exists(candidate)) ?? null;
+}
+
+export function resolveChromePlan(host: ChromeHost, engine: ChromeEngine | null, browser: "auto" | "brave" = "auto"): ChromePlan {
+  if (browser === "brave") {
+    const path = installedBrave(host);
+    return path
+      ? { kind: "chrome", chrome: { path, source: "brave" }, fallback: null }
+      : { kind: "legacy", reason: "Brave is selected but not installed. Install Brave on the server, or set OMB_BRAVE_PATH, then restart the server." };
+  }
   const { env, platform } = host;
   if (env.OMB_BROWSER_LEGACY_SHELL?.trim() === "1") return { kind: "legacy", reason: "OMB_BROWSER_LEGACY_SHELL=1" };
   const named = env.OMB_CHROME_PATH?.trim() || env.AGENT_BROWSER_EXECUTABLE_PATH?.trim();

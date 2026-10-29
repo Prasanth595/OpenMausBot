@@ -102,3 +102,21 @@ entry:
   as plaintext in that file. Prefer keys scoped to the one engine.
 - A typo'd `driver` or invalid `config` never breaks the app: the instance
   shows as unavailable with the reason, and the rest of the fleet loads.
+
+### Router-specific model IDs
+
+In **Settings → API keys → Other**, choose **OpenRouter**, **OpenAI**, or
+**Custom router**. Enter that router's base URL and its own API key. The URL
+must be the API base (for example `https://router.example/v1`), rather than
+its `/chat/completions` endpoint.
+
+Enter your router's exact model IDs, one per line or separated by commas.
+Case, internal spaces, slashes and prefixes are preserved. For example,
+`Acme/My Model:v2` is sent as that exact `model` value. A manual list takes
+precedence over discovery, so a router without `/models` works too. Leave
+this field empty to discover models. Select the added server and model in
+the bot's model picker. Each added server retains its own key and model list;
+it does not inherit the workspace's OpenRouter upstream pin.
+
+These connections use the OpenAI Chat Completions API, including its streaming
+format. A Responses-only endpoint requires a different adapter.

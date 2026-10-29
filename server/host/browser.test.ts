@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BUILT_IN_BROWSER_SYSTEM_PROMPT, browserEngineStatus, clearBrowserSessionState, closeBrowserSession, runningBrowserSessionNames } from "../browser-engine.ts";
 import { CHROME_BROWSER_SYSTEM_PROMPT } from "../browser/prompt.ts";
+import { ensureProfile } from "../browser/chrome/profile.ts";
+import { ChromeEngine } from "../browser/engines.ts";
 import { TOOL_LIST } from "../browser/tools.ts";
 import { browserEgress } from "../browser/egress/registry.ts";
 import { REDDIT_REFUSAL } from "../browser/egress/reddit.ts";
@@ -43,14 +45,14 @@ afterEach(async () => { await Promise.all(hosts.splice(0).map((host) => host.bro
 
 const turn = { threadId: "thread-1", generation: "gen-1" };
 
-function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, device, lendRefusal, holder, audienceOf, bots: botIds = ["scout"], browserBox, lentChrome, turnResources }: {
-  cloudHome?: boolean; device?: BrowserHostDeps["device"]; lendRefusal?: BrowserHostDeps["lendRefusal"]; holder?: (resource: string) => TurnOwner | undefined;
+function setup(engine: "chrome" | "agent-browser" | undefined, { cloudHome = false, device, lendRefusal, holder, audienceOf, bots: botIds = ["scout"], browser = "auto", browserBox, lentChrome, turnResources }: {
+  browser?: "auto" | "brave"; cloudHome?: boolean; device?: BrowserHostDeps["device"]; lendRefusal?: BrowserHostDeps["lendRefusal"]; holder?: (resource: string) => TurnOwner | undefined;
   audienceOf?: BrowserHostDeps["audienceOf"]; bots?: string[]; browserBox?: BrowserHostDeps["browserBox"];
   lentChrome?: BrowserHostDeps["lentChrome"]; turnResources?: BrowserHostDeps["turnResources"];
 } = {}) {
   const cfg = {
     features: { browser: true },
-    ...(engine ? { browserEngine: { engine } } : {}),
+    browserEngine: { engine, browser },
     browserProfiles: [
       { id: "work", name: "Work", partitionId: "p-work" },
       { id: "mine", name: "Mine", browser: "chrome", partitionId: "p-mine" },
@@ -129,11 +131,49 @@ describe("the bots' browser host with browserEngine.engine set to chrome", () =>
     expect(host.signedInSitesRefusal("work")).toContain("does not list signed-in sites yet");
   });
 
+  it("reports a pending restart when the saved browser changes", () => {
+    const { cfg, host } = setup("chrome");
+    cfg.browserEngine = { engine: "chrome", browser: "brave" };
+    expect(host.engineSummary({ kind: "engine", myChrome: true })).toMatchObject({ browser: "brave", restartRequired: true });
+    cfg.browserEngine.browser = "auto";
+    expect(host.engineSummary({ kind: "engine", myChrome: true })).toMatchObject({ browser: "auto", restartRequired: false });
+  });
+
+  it.each(["agent-browser", "chrome"] as const)("keeps %s routing and sessions while Brave waits for a restart", async (engine) => {
+    const { cfg, host } = setup(engine);
+    const before = await host.currentBrowserSpec("scout", undefined);
+    const live = engine === "chrome" ? await host.browserIntegration("scout", undefined, turn) : null;
+    const prompt = host.browserSystemPrompt(undefined);
+    cfg.browserEngine = { engine: "chrome", browser: "brave" };
+    host.browserEngineSwitched();
+    expect(await host.currentBrowserSpec("scout", undefined)).toEqual(before);
+    expect(host.browserSystemPrompt(undefined)).toBe(prompt);
+    if (live) expect(host.usedBrowserSessions.get(live.session)).toEqual(live.spec);
+    expect(host.engineSummary({ kind: "engine", myChrome: true })).toMatchObject({ engine, browser: "brave", restartRequired: true });
+  });
+
+  it("keeps the latest live engine selection when a later browser change needs a restart", () => {
+    const { cfg, host } = setup("agent-browser");
+    cfg.browserEngine = { engine: "chrome" };
+    host.browserEngineSwitched();
+    cfg.browserEngine = { engine: "chrome", browser: "brave" };
+    host.browserEngineSwitched();
+    expect(host.engineSummary({ kind: "engine", myChrome: true })).toMatchObject({ engine: "chrome", restartRequired: true });
+  });
+
+  it("keeps Brave routing until restart when Automatic is saved", () => {
+    const { cfg, host } = setup("chrome", { browser: "brave" });
+    cfg.browserEngine = { engine: "agent-browser", browser: "auto" };
+    host.browserEngineSwitched();
+    expect(host.browserSystemPrompt(undefined)).toBe(CHROME_BROWSER_SYSTEM_PROMPT);
+    expect(host.engineSummary({ kind: "engine", myChrome: true })).toMatchObject({ engine: "chrome", browser: "auto", restartRequired: true });
+  });
+
   it("says in the status which engine runs the bots' browsers", () => {
     const { cfg, host } = setup("chrome");
     expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toMatchObject({ engine: "chrome", myChrome: true });
     cfg.browserEngine = { engine: "agent-browser" };
-    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toEqual({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true, engine: "agent-browser" });
+    expect(host.engineSummary({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true })).toEqual({ kind: "unavailable", reason: "agent-browser is not installed", myChrome: true, engine: "agent-browser", browser: "auto", restartRequired: false });
   });
 
   it("forgets the new engine's sessions when the engine is switched back", async () => {
@@ -451,7 +491,7 @@ describe("the bots' browser host by default", () => {
     const { host } = setup(undefined);
     expect(host.browserSystemPrompt(undefined)).toBe(BUILT_IN_BROWSER_SYSTEM_PROMPT);
     expect(host.signedInSitesRefusal("work")).toBeNull();
-    expect(host.engineSummary({ kind: "engine", version: "0.37.0", myChrome: true })).toEqual({ kind: "engine", version: "0.37.0", myChrome: true, engine: "agent-browser" });
+    expect(host.engineSummary({ kind: "engine", version: "0.37.0", myChrome: true })).toEqual({ kind: "engine", version: "0.37.0", myChrome: true, engine: "agent-browser", browser: "auto", restartRequired: false });
   });
 });
 
@@ -683,5 +723,30 @@ describe("a Team Cloud's boxed browsers and the files a turn uploads", () => {
     const plain = setup(undefined, { cloudHome: true }).host;
     expect(await plain.uploadPaths([{ file, name: null }], session, { command: "agent-browser", env: {} }), "unboxed, the file is given as it is").toEqual([file]);
     rmSync(work, { recursive: true, force: true });
+  });
+});
+
+
+describe("browser deletion across saved browser choices", () => {
+  it.each(["auto", "brave"] as const)("erases bot and shared-profile sign-ins from both roots with %s active", async (browser) => {
+    const { host } = setup("chrome", { browser });
+    for (const [kind, id, key] of [["bot", "review-bot", "bot:review-bot"], ["profile", "review-shared", "shared:review-shared"]] as const) {
+      const profiles = [DATA_DIR, join(DATA_DIR, "brave")].map((dir) => ensureProfile(dir, key).dir);
+      for (const dir of profiles) writeFileSync(join(dir, "Cookies"), "synthetic sign-in");
+      const request = kind === "bot"
+        ? { type: "openmausbot:browser-bot-deleted" as const, requestId: "review", botId: id }
+        : { type: "openmausbot:browser-profile-deleted" as const, requestId: "review", partitionId: id };
+      expect(await host.eraseDeletedBrowser(request)).toBe(true);
+      expect(profiles.map((dir) => existsSync(dir))).toEqual([false, false]);
+    }
+  });
+
+  it("does not acknowledge cleanup when either browser root refuses deletion", async () => {
+    const { host } = setup("chrome");
+    const erase = vi.spyOn(ChromeEngine.prototype, "erase").mockResolvedValue(true).mockResolvedValueOnce(false);
+    try {
+      expect(await host.eraseDeletedBrowser({ type: "openmausbot:browser-bot-deleted", requestId: "review", botId: "review-failure" })).toBe(false);
+      expect(erase.mock.calls.length).toBeGreaterThanOrEqual(2);
+    } finally { erase.mockRestore(); }
   });
 });

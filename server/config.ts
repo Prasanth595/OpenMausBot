@@ -1259,8 +1259,7 @@ export function instanceConfigs(cfg: AppConfig): InstanceConfigMap {
           typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
         const merged = { ...current };
         for (const [k, v] of Object.entries(defaults)) {
-          // An empty provider means "no upstream pin"; never fill it from the workspace.
-          if (k === "provider" && typeof merged[k] === "string") continue;
+          if ((k === "provider" || k === "model") && typeof merged[k] === "string") continue;
           if (typeof merged[k] !== "string" || !(merged[k] as string).trim()) merged[k] = v;
         }
         entry.config = merged;

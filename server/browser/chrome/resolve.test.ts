@@ -131,3 +131,26 @@ describe("which Chrome the bots' browser runs", () => {
     expect(spawnSync.mock.calls.map((call) => call[0])).toEqual(["reg", "reg"]);
   });
 });
+
+
+describe("Brave selection", () => {
+  it.each([
+    ["darwin", "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"],
+    ["linux", "/opt/brave.com/brave/brave"],
+    ["win32", "C:/Brave/brave.exe"],
+  ] as const)("finds Brave on %s without falling back to Google Chrome", (platform, path) => {
+    const machine = host(platform, [path, MAC_CHROME], { registryValue: () => path });
+    expect(resolveChromePlan(machine, managed, "brave")).toEqual({ kind: "chrome", chrome: { path, source: "brave" }, fallback: null });
+  });
+
+  it("reports missing Brave even when Chrome is installed", () => {
+    expect(resolveChromePlan(host("darwin", [MAC_CHROME]), managed, "brave")).toMatchObject({ kind: "legacy", reason: expect.stringContaining("Brave is selected but not installed") });
+  });
+
+  it("honors only the Brave override for an explicit Brave selection", () => {
+    const machine = host("linux", ["/custom/brave", "/custom/chrome"], { env: { OMB_BRAVE_PATH: "/custom/brave", OMB_CHROME_PATH: "/custom/chrome" } });
+    expect(resolveChromePlan(machine, managed, "brave")).toMatchObject({ chrome: { path: "/custom/brave" }, fallback: null });
+    machine.env.OMB_BRAVE_PATH = "/missing";
+    expect(resolveChromePlan(machine, managed, "brave").kind).toBe("legacy");
+  });
+});

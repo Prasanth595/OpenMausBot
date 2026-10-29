@@ -58,9 +58,10 @@ describe("other OpenAI-compatible servers", () => {
     expect(html).toContain("No other servers yet.");
   });
 
-  it("reads model IDs separated by commas, CJK commas or spaces", () => {
-    expect(modelIds("glm-4.6, glm-5，glm-4.6、qwen3 ")).toEqual(["glm-4.6", "glm-5", "qwen3"]);
+  it("reads model IDs separated by commas, CJK commas or newlines, preserving spaces", () => {
+    expect(modelIds("glm-4.6, glm-5，glm-4.6、qwen3\n")).toEqual(["glm-4.6", "glm-5", "qwen3"]);
     expect(modelIds("  ")).toEqual([]);
+    expect(modelIds("Acme/My Model:v2,Case-Sensitive\nAcme/My Model:v2")).toEqual(["Acme/My Model:v2", "Case-Sensitive"]);
   });
 });
 
@@ -84,13 +85,36 @@ describe("adding another OpenAI-compatible server", () => {
       fixture.counting = false;
     }
   }
-  async function add() {
+  async function add(models?: string) {
     for (const [label, value] of [["Display name", "Ada's lab box"], ["Base URL", "https://ada.example.com/v1"], ["API key", KEY]] as const) {
       form().find((node) => node.props["aria-label"] === label)!.props.onChange!({ target: { value } });
     }
+    if (models) form().find((node) => node.type === "textarea")!.props.onChange!({ target: { value: models } });
     form().find((node) => node.type === "button" && node.props.children && JSON.stringify(node.props.children).includes("Add server"))!.props.onClick!();
     await flush();
   }
+
+  it("submits exact custom model IDs with that router's address and key", async () => {
+    fixture.values = [];
+    fixture.api.mockReset().mockResolvedValueOnce({ instances: [] });
+    await add("Acme/My Model:v2\nCase-Sensitive/Model");
+    const body = JSON.parse(fixture.api.mock.calls[0]![1].body);
+    expect(body).toEqual({ displayName: "Ada's lab box", url: "https://ada.example.com/v1", key: KEY, models: ["Acme/My Model:v2", "Case-Sensitive/Model"] });
+  });
+
+  it("submits the OpenAI catalog only for the OpenAI preset", async () => {
+    fixture.values = ["OpenAI", "https://api.openai.com/v1", KEY, ""];
+    fixture.api.mockReset().mockResolvedValueOnce({ instances: [] });
+    form().find((node) => node.type === "button" && JSON.stringify(node.props.children).includes("Add server"))!.props.onClick!();
+    await flush();
+    expect(JSON.parse(fixture.api.mock.calls[0]![1].body)).toEqual({ displayName: "OpenAI", url: "https://api.openai.com/v1", key: KEY, catalog: "openai" });
+  });
+
+  it("prefills OpenRouter and clears another router's pending key and models", () => {
+    fixture.values = ["My router", "https://router.example/v1", KEY, "private-model"];
+    form().find((node) => node.type === "select")!.props.onChange!({ target: { value: "openrouter" } });
+    expect(fixture.values.slice(0, 4)).toEqual(["OpenRouter", "https://openrouter.ai/api/v1", "", ""]);
+  });
 
   it.each([
     ["unverified", () => fixture.api.mockResolvedValueOnce({ instances: [] })],

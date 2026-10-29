@@ -117,14 +117,22 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   } });
   const host: HostKind = DESKTOP_MANAGED ? "desktop" : CLOUD_HOME || existsSync("/.dockerenv") ? "container" : "server";
   const idleMs = () => browserIdleMs(cfg, { cloudHome: Boolean(CLOUD_HOME) });
-  const chromeEngine = new ChromeEngine({
-    dataDir: DATA_DIR,
+  const activeBrowser = cfg.browserEngine?.browser ?? "auto";
+  let activeEngine = browserEngineKind(cfg);
+  function runningEngineKind(): BrowserEngineKind {
+    if ((cfg.browserEngine?.browser ?? "auto") === activeBrowser) activeEngine = browserEngineKind(cfg);
+    return activeEngine;
+  }
+  const chromeEngines = (["auto", "brave"] as const).map((browser) => new ChromeEngine({
+    dataDir: browser === "brave" ? join(DATA_DIR, "brave") : DATA_DIR,
+    browser,
     host,
     egressPort: (key) => browserEgress.open(key),
     egressNotice: (key) => browserEgress.takeNotice(key),
     idleMs,
     log: (line) => console.warn(line),
-  });
+  }));
+  const chromeEngine = chromeEngines[activeBrowser === "brave" ? 1 : 0]!;
   const lendRefusal = deps.lendRefusal ?? ((): LendRefusal => "unproven");
   const mayLend = (turn: TurnOwner) => lendRefusal(turn) === null;
   const lentChrome = deps.lentChrome;
@@ -220,7 +228,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   const browserSweep = {
     start() {
       agentBrowserSweep.start();
-      chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
+      chromeEngine.start({ inUse: runningEngineKind() === "chrome", prepare: builtInBrowserEnabled(cfg) });
       return browserSweep;
     },
     closeAll: () => {
@@ -317,7 +325,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   }
   /** The new engine runs a bot's browser when the flag is on, except in the person's own Chrome. */
   function onChrome(profile: string | undefined): boolean {
-    return browserEngineKind(cfg) === "chrome" && !usesMyChrome(browserProfileIdOf(profile));
+    return runningEngineKind() === "chrome" && !usesMyChrome(browserProfileIdOf(profile));
   }
   function chromeSpec(botId: string, profile: string | undefined, audience: Audience): { session: string; spec: ReturnType<ChromeEngine["spec"]> } {
     const suffix = noted(audience);
@@ -400,6 +408,7 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   }
   /** After browserEngine.engine changed: viewers reconnect and each bot's next call starts its browser on the engine now chosen. */
   function browserEngineSwitched(): void {
+    if ((cfg.browserEngine?.browser ?? "auto") !== activeBrowser) return;
     browserLive.closeAll();
     for (const [session, spec] of usedBrowserSessions) {
       if (attachesToChrome(spec.env)) continue;
@@ -408,8 +417,8 @@ export function createBrowserHost(deps: BrowserHostDeps) {
         if (!closed) console.warn(`browser ${session}: could not close it after the browser engine changed`);
       });
     }
-    if (browserEngineKind(cfg) !== "chrome") void chromeEngine.service.closeAll().catch(() => undefined);
-    chromeEngine.start({ inUse: browserEngineKind(cfg) === "chrome", prepare: builtInBrowserEnabled(cfg) });
+    if (runningEngineKind() !== "chrome") void chromeEngine.service.closeAll().catch(() => undefined);
+    chromeEngine.start({ inUse: runningEngineKind() === "chrome", prepare: builtInBrowserEnabled(cfg) });
   }
   function browserRunning(session: string, spec: Spec | undefined): boolean {
     if (chromeTarget(session, spec)) return chromeEngine.service.runs(session);
@@ -445,10 +454,13 @@ export function createBrowserHost(deps: BrowserHostDeps) {
   };
   deps.engineMemory?.useBrowsers(engineBrowsers);
   /** A deleted bot's or profile's browser on the new engine, whatever the flag says now. */
-  function eraseChromeBrowser(request: { type: string; botId?: string; partitionId?: string }): Promise<boolean> {
-    if (request.type === "openmausbot:browser-bot-deleted" && request.botId) return chromeEngine.erase({ kind: "bot", id: request.botId, partitionId: "" });
-    if (request.partitionId) return chromeEngine.erase({ kind: "profile", id: request.partitionId, partitionId: request.partitionId });
-    return Promise.resolve(true);
+  async function eraseChromeBrowser(request: { type: string; botId?: string; partitionId?: string }): Promise<boolean> {
+    const target = request.type === "openmausbot:browser-bot-deleted" && request.botId
+      ? { kind: "bot" as const, id: request.botId, partitionId: "" }
+      : request.partitionId ? { kind: "profile" as const, id: request.partitionId, partitionId: request.partitionId } : null;
+    if (!target) return true;
+    const results = await Promise.all(chromeEngines.map((engine) => engine.erase(target)));
+    return results.every(Boolean);
   }
   /**
    * The agent-browser whose saved sessions a deletion erases: the one OpenMausBot installed, or on a Cloud home the
@@ -527,9 +539,10 @@ export function createBrowserHost(deps: BrowserHostDeps) {
     return { binaryPath: engine.binaryPath, session, env: browserSessionSpec(engine.binaryPath, session, profile, await browserEgress.open(session)).env, encryptionKey: browserEngineEncryptionKey() };
   }
   /** What Settings shows of the engine that runs bots' browsers here; My Chrome stays on agent-browser. */
-  function engineSummary<T extends { myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind } {
-    if (browserEngineKind(cfg) !== "chrome") return { ...agentBrowser, engine: "agent-browser" };
-    return { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), engine: "chrome" };
+  function engineSummary<T extends { myChrome: boolean }>(agentBrowser: T): (T | (ReturnType<ChromeEngine["summary"]> & { myChrome: boolean })) & { engine: BrowserEngineKind; browser: "auto" | "brave"; restartRequired: boolean } {
+    const selection = { browser: cfg.browserEngine?.browser ?? "auto", restartRequired: (cfg.browserEngine?.browser ?? "auto") !== activeBrowser };
+    if (runningEngineKind() !== "chrome") return { ...agentBrowser, engine: "agent-browser", ...selection };
+    return { ...chromeEngine.summary(), myChrome: agentBrowser.myChrome, ...lentChromeSummary(), engine: "chrome", ...selection };
   }
 
   return {

@@ -27,6 +27,7 @@ type LaunchSpec = { command: string; env?: Record<string, string | undefined> };
 
 const SOURCES: Record<FoundChrome["source"], string> = {
   installed: "installed",
+  brave: "installed Brave",
   downloaded: "downloaded",
   named: "named by OMB_CHROME_PATH or AGENT_BROWSER_EXECUTABLE_PATH",
   "agent-browser": "installed by agent-browser",
@@ -52,6 +53,7 @@ export function runsLauncher(path: string, env: NodeJS.ProcessEnv, timeoutMs = 1
 
 export interface ChromeLauncherOptions {
   dataDir: string;
+  browser?: "auto" | "brave";
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   arch?: string;
@@ -106,7 +108,7 @@ export class ChromeLauncher implements BrowserLaunch {
   }
 
   plan(): ChromePlan {
-    return resolveChromePlan(this.host, this.options.engine ? this.options.engine() : this.managedEngine());
+    return resolveChromePlan(this.host, this.options.engine ? this.options.engine() : this.managedEngine(), this.options.browser);
   }
 
   /** What agent-browser's environment gains: nothing while the engine keeps its own browser. */
@@ -301,6 +303,7 @@ export class ChromeLauncher implements BrowserLaunch {
 }
 
 function product(chrome: FoundChrome, identity?: ChromeIdentity): string {
+  if (chrome.source === "brave") return "Brave";
   if (identity?.userAgentMetadata.brands.some(({ brand }) => brand === "Google Chrome")) return "Google Chrome";
   if (chrome.source === "installed") return "Google Chrome";
   return chrome.source === "downloaded" || /for Testing|chrome-(?:linux|mac|win)/iu.test(chrome.path) ? "Chrome for Testing" : "Chromium";

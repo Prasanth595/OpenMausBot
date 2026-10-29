@@ -61,6 +61,18 @@ export function NewBrowserSettings() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  const saveBrowser = async (browser: "auto" | "brave") => {
+    if (saving) return;
+    setSaving(true);
+    setError("");
+    try {
+      const config: ConfigStatus = await api("/api/config", { method: "PATCH", body: JSON.stringify({ browserEngine: { browser, engine: "chrome" } }) });
+      dispatch({ type: "configStatus", config });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : t("settings.experimental.error"));
+    } finally { setSaving(false); }
+  };
+
   const toggle = async () => {
     if (saving) return;
     setSaving(true);
@@ -88,11 +100,22 @@ export function NewBrowserSettings() {
         <Switch
           checked={on}
           aria-label={t("settings.experimental.newBrowserAria")}
-          disabled={saving}
+          disabled={saving || state.config?.browserEngine?.browser === "brave"}
           onClick={() => void toggle()}
           className="disabled:cursor-wait disabled:opacity-50"
         />
       </div>
+      <label className="mt-3 flex flex-col gap-1 text-[12px] text-ink-secondary">
+        {t("settings.browser.application")}
+        <select aria-label={t("settings.browser.application")} value={state.config?.browserEngine?.browser ?? "auto"}
+          disabled={saving} onChange={(event) => void saveBrowser(event.target.value as "auto" | "brave")}
+          className="rounded-lg border border-hairline bg-inset px-2 py-1 text-ink">
+          <option value="auto">{t("settings.browser.auto")}</option>
+          <option value="brave">Brave</option>
+        </select>
+      </label>
+      <p className="mt-1 text-[12px] text-ink-secondary">{t("settings.browser.detail")}</p>
+      {state.config?.browserEngine?.restartRequired && <p role="status" className="mt-1 text-[12px] text-ink-secondary">{t("settings.browser.restart")}</p>}
       {error ? <p role="alert" className="mt-2 text-[12px] text-danger">{error}</p> : null}
     </div>
   );

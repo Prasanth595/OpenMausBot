@@ -107,8 +107,8 @@ function decodeConfig(raw: unknown): OpenAICompatConfig {
       : DEFAULT_KEY_ENV,
     ...(config.catalog === "openai" || config.catalog === "lmstudio" ? { catalog: config.catalog } : {}),
     key: typeof config.key === "string" && config.key ? config.key : undefined,
-    model: typeof config.model === "string" && config.model
-      ? config.model
+    model: typeof config.model === "string"
+      ? config.model || undefined
       : ownKey ? undefined : process.env.OPENAI_COMPAT_MODEL || undefined,
     // An explicit empty override disables inherited routing; absent still inherits the global pin.
     provider: typeof config.provider === "string"
