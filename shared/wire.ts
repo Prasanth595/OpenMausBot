@@ -9,7 +9,7 @@ import type { TurnDigest } from "./digest.ts";
 import type { BotAvatarCrop, MascotFaceColor } from "./bot-avatar.ts";
 import type { BotBodyId } from "./bot-body.ts";
 import type { ReplyStyle } from "./reply-style.ts";
-import type { CredentialTargetId } from "./credential-request.ts";
+import type { CredentialTargetId, CUSTOM_SECRET_TARGET, SecretDelivery } from "./credential-request.ts";
 import type { TeamSetupRequest } from "./team-setup.ts"; import type { DefaultBotFields, HelperIntroField } from "./default-bot.ts";
 import type { SetupCardFields } from "./setup-card.ts";
 import type { RoutineRequestCardData } from "./routine-request.ts";
@@ -668,10 +668,11 @@ export interface OptionCardData {
   tool?: string;
   /** why this card is waiting: guard, mode, sandbox or delivery error. */
   held?: string;
-  /** Terminal: this proposal went stale while open (revision mismatch or
-   * a superseding request). Nothing can answer it; a fresh proposal is
-   * needed, and clients must not offer its options. */
+  /** Terminal: no answer came in time, or this proposal went stale while open (revision mismatch or a superseding
+   * request). Nothing can answer it; a fresh proposal is needed, and clients must not offer its options. */
   expired?: boolean;
+  /** Stop ended the work that asked: nothing can answer it any more. */
+  stopped?: boolean;
   /** Catalog key for held when it is one of the fixed notes. */
   heldCode?: string;
   /** the narrow grant "always allow" remembers for a harness-native card. */
@@ -737,12 +738,20 @@ export interface ConnectorCardData {
 }
 
 export interface SecretRequestCardData {
-  /** Fixed allowlisted credential id; never an arbitrary config path. */
-  target: CredentialTargetId;
+  /** Fixed allowlisted credential id, never a config path; CUSTOM_SECRET_TARGET: a secret the bot names, kept off Settings. */
+  target: CredentialTargetId | typeof CUSTOM_SECRET_TARGET;
   label: string;
   description: string;
   placeholder: string;
   helpUrl: string;
+  /** A custom secret's use the person agrees to: "ref", OpenMausBot's own tools only; "file", the bot's commands. */
+  delivery?: SecretDelivery;
+  /** A custom secret: the bot's own words on why; `description` adds what the bot may do with it, and helpUrl is empty. */
+  reason?: string;
+  /** A file secret's Local VM target key, when the asking turn ran in one. */
+  vm?: string;
+  /** When a custom secret was saved; its file goes a day later. */
+  savedAt?: number;
   requestKey: string;
   phoneOperationId?: string;
   provided?: boolean;
