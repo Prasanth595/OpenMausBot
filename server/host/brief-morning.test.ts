@@ -135,6 +135,13 @@ describe("the morning brief", () => {
     expect(s.brief.nextWakeAt()).toBe(Date.parse("2026-10-25T06:50:00Z"));
   });
 
+  it("wakes on the minute whatever second it is asked at", () => {
+    // 06:55:55.175 in New York, as a Cloud asked it on 29 October 2026.
+    const s = setup({ zone: "America/New_York", start: "2026-10-29T10:55:55.175Z" });
+    void s.brief.active("desktop", "America/New_York", "en");
+    expect(s.brief.nextWakeAt()).toBe(Date.parse("2026-10-29T11:50:00Z"));
+  });
+
   it("is never pushed where no morning time is set", async () => {
     const s = setup({ zone: "UTC", start: "2026-10-22T08:05:00Z", morning: "" });
     await s.brief.active("desktop", "UTC", "en");
