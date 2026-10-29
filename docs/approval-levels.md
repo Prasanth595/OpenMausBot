@@ -284,7 +284,7 @@ The level set follows the provider-boundary approach in
 [T3 Code's permission modes](https://github.com/pingdotgg/t3code/blob/e16b8b059c9f5ff6dfed1addecffb831c6aee043/docs/user/permission-modes.md):
 Supervised, Auto-accept edits, Auto, and Full access, each a provider mode
 rather than an app rule, with a remembered approval that belongs to the
-provider's session. Its default is Ask, and so is OpenMausBot's
+provider's session. Its default is Full access, and so is OpenMausBot's
 (`DEFAULT_APPROVAL_MODE` in `shared/approval-mode.ts`).
 
 ## Verification for contributors
