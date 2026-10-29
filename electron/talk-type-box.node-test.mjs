@@ -3,8 +3,9 @@ import { EventEmitter } from "node:events";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { TALK_BOX_THEME_CSS, isTalkPanel } from "./talk-panel.mjs";
-import { blockedChord, createTypeBox, typeBoxHtml } from "./talk-type-box.mjs";
+import { runInNewContext } from "node:vm";
+import { TALK_BOX_THEME_CSS, TALK_PANEL, isTalkPanel } from "./talk-panel.mjs";
+import { TYPE_BOX_TEXT, blockedChord, createTypeBox, typeBoxHtml, typeBoxKey } from "./talk-type-box.mjs";
 
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const pick = (object, keys) => Object.fromEntries(keys.map(key => [key, object[key]]));
@@ -189,4 +190,81 @@ test("a page that never loads says so once and is destroyed, with no unhandled r
   } finally {
     process.off("unhandledRejection", record);
   }
+});
+
+function runPage(html) {
+  const script = /<script>([\s\S]*)<\/script>/.exec(html)[1];
+  const calls = [];
+  const listeners = {};
+  const element = id => ({
+    id, value: "", readOnly: false, style: {}, scrollHeight: 18, selection: null,
+    addEventListener(type, handler) { (listeners[`${id}:${type}`] ??= []).push(handler); },
+    focus() {},
+    setSelectionRange(a, b) { this.selection = [a, b]; },
+    getBoundingClientRect: () => ({ height: 56 }),
+  });
+  const elements = { card: element("card"), field: element("field"), close: element("close") };
+  const body = { className: "" };
+  const context = {
+    document: { getElementById: id => elements[id], body },
+    window: { typeBox: {
+      input: (text, height) => calls.push(["input", text, height]),
+      send: text => calls.push(["send", text]),
+      cancel: () => calls.push(["cancel"]),
+    } },
+  };
+  context.window.window = context.window;
+  runInNewContext(script, context);
+  const fire = (id, type, init = {}) => {
+    const event = { ...init, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; } };
+    for (const handler of listeners[`${id}:${type}`] ?? []) handler(event);
+    return event;
+  };
+  return { start: context.start, field: elements.field, body, calls, fire, key: init => fire("field", "keydown", init) };
+}
+
+test("Return sends, Shift+Return makes a line, Esc closes; while an input method composes, both only finish the composition", () => {
+  assert.equal(typeBoxKey({ key: "Enter" }), "send");
+  assert.equal(typeBoxKey({ key: "Enter", shiftKey: true }), null);
+  assert.equal(typeBoxKey({ key: "Escape" }), "cancel");
+  assert.equal(typeBoxKey({ key: "Enter", isComposing: true }), null);
+  assert.equal(typeBoxKey({ key: "Enter", keyCode: 229 }), null);
+  assert.equal(typeBoxKey({ key: "Escape", isComposing: true }), null);
+  assert.equal(typeBoxKey({ key: "a" }), null);
+  assert.ok(typeBoxHtml("AAAA").includes(String(typeBoxKey)), "the page runs this rule, not a copy of it");
+});
+
+test("the page sends only words, once, then stops taking typing", () => {
+  const page = runPage(typeBoxHtml("AAAA"));
+  assert.equal(typeof page.start({ text: "half", theme: "dark" }), "number");
+  assert.deepEqual([page.field.value, page.field.selection, page.body.className], ["half", [4, 4], "on dark"]);
+  page.field.value = "  \n ";
+  assert.equal(page.key({ key: "Enter" }).defaultPrevented, true, "a blank Return types no line either");
+  assert.equal(page.key({ key: "Enter", shiftKey: true }).defaultPrevented, false);
+  page.field.value = "日本";
+  assert.equal(page.key({ key: "Enter", isComposing: true }).defaultPrevented, false);
+  assert.deepEqual(page.calls, []);
+  page.field.value = "what's on\ntoday";
+  page.key({ key: "Enter" }); page.key({ key: "Enter" });
+  assert.deepEqual(page.calls, [["send", "what's on\ntoday"]]);
+  assert.equal(page.field.readOnly, true);
+});
+
+test("Esc and × close; every change reports the words and the card's height", () => {
+  const page = runPage(typeBoxHtml("AAAA"));
+  page.start({ text: "" });
+  page.field.value = "abc"; page.fire("field", "input");
+  page.key({ key: "Escape" }); page.fire("close", "click");
+  assert.deepEqual(page.calls, [["input", "abc", 56], ["cancel"], ["cancel"]]);
+});
+
+test("the field grows to six lines, then scrolls, inside the tallest box, and says what it is for", () => {
+  const html = typeBoxHtml("AAAA");
+  assert.match(html, /<textarea id="field"[^>]*rows="1"[^>]*maxlength="4000"/);
+  assert.match(html, /#field\{[^}]*max-height:calc\(6 \* 1\.4em\)[^}]*overflow-y:auto/);
+  assert.match(html, /placeholder="Type to MausBot, then press Return"/);
+  assert.match(html, /aria-label="Ask MausBot"/);
+  assert.match(html, /<button id="close" type="button" aria-label="Dismiss"/);
+  assert.ok(28 + 2 + 6 * 18.2 <= TALK_PANEL.maxHeight);
+  assert.deepEqual(TYPE_BOX_TEXT, { placeholder: "Type to MausBot, then press Return", label: "Ask MausBot", dismiss: "Dismiss" });
 });

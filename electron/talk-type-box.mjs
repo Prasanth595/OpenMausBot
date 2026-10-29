@@ -14,6 +14,15 @@ export function blockedChord(input) {
   return CHARACTER_CODE.test(input.code ?? "") || [...input.key].length === 1;
 }
 
+export const TYPE_BOX_TEXT = Object.freeze({ placeholder: "Type to MausBot, then press Return", label: "Ask MausBot", dismiss: "Dismiss" });
+
+/** Embedded in the page as source, so it must stay self-contained. keyCode 229 is a key an input method is handling. */
+export function typeBoxKey(event) {
+  if (event.isComposing || event.keyCode === 229) return null;
+  if (event.key === "Enter") return event.shiftKey ? null : "send";
+  return event.key === "Escape" ? "cancel" : null;
+}
+
 export function typeBoxHtml(iconBase64) {
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"><title>MausBot</title><style>
 ${TALK_BOX_THEME_CSS}
@@ -21,16 +30,34 @@ ${TALK_BOX_THEME_CSS}
 body{opacity:0;transition:opacity 160ms ease}body.on{opacity:1}
 #card{position:relative;display:flex;gap:12px;align-items:flex-start;min-height:56px;padding:14px 40px 14px 14px;border:1px solid var(--border);border-radius:16px;background:var(--panel)}
 #mascot{flex:none;width:28px;height:28px;object-fit:contain;display:block;-webkit-user-drag:none}
-#field{flex:1;min-width:0;align-self:center;margin:0;padding:0;border:0;outline:none;resize:none;background:transparent;color:var(--ink);font:inherit;-webkit-user-select:text;user-select:text}
+#field{flex:1;min-width:0;align-self:center;margin:0;padding:0;border:0;outline:none;resize:none;background:transparent;color:var(--ink);font:inherit;max-height:calc(6 * 1.4em);overflow-y:auto;-webkit-user-select:text;user-select:text}
+#field::placeholder{color:var(--ink2)}
+#close{position:absolute;top:10px;right:10px;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--ink2);font:inherit;font-size:16px;line-height:24px;cursor:default}
+#close:hover{background:var(--hover)}
 @media (prefers-reduced-motion: reduce){body{transition:none}}
-</style></head><body><div id="card"><img id="mascot" src="data:image/png;base64,${iconBase64}" alt=""><textarea id="field" rows="1" maxlength="${TYPE_LIMIT}"></textarea></div><script>
-const card=document.getElementById("card"),field=document.getElementById("field");
+</style></head><body><div id="card"><img id="mascot" src="data:image/png;base64,${iconBase64}" alt=""><textarea id="field" rows="1" maxlength="${TYPE_LIMIT}" placeholder="${TYPE_BOX_TEXT.placeholder}" aria-label="${TYPE_BOX_TEXT.label}"></textarea><button id="close" type="button" aria-label="${TYPE_BOX_TEXT.dismiss}">&times;</button></div><script>
+const card=document.getElementById("card"),field=document.getElementById("field"),close=document.getElementById("close");
+${typeBoxKey}
+function grow(){
+  field.style.height="auto";
+  field.style.height=field.scrollHeight+"px";
+  return Math.ceil(card.getBoundingClientRect().height);
+}
+field.addEventListener("keydown",event=>{
+  const action=typeBoxKey(event);
+  if(!action)return;
+  event.preventDefault();
+  if(action==="cancel")window.typeBox.cancel();
+  else if(!field.readOnly&&field.value.trim()){field.readOnly=true;window.typeBox.send(field.value);}
+});
+field.addEventListener("input",()=>window.typeBox.input(field.value,grow()));
+close.addEventListener("click",()=>window.typeBox.cancel());
 function start(view){
   document.body.className=["on",view.theme].filter(Boolean).join(" ");
   field.value=view.text||"";
   field.focus();
   field.setSelectionRange(field.value.length,field.value.length);
-  return Math.ceil(card.getBoundingClientRect().height);
+  return grow();
 }
 </script></body></html>`;
 }
