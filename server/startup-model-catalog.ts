@@ -67,18 +67,23 @@ function catalogFrom(value: unknown): ModelCatalog | null {
   return { default: raw.default, options };
 }
 
-export function readStartupModelCache(instanceId: string): ModelCatalog | null {
+/** `standIn`: the engine's own stand-in list. A saved copy of it, which builds before `placeholder` wrote after a failed
+ * read, is no catalog: it reads as nothing, so the stand-in comes back marked. */
+export function readStartupModelCache(instanceId: string, standIn?: ModelCatalog): ModelCatalog | null {
   const path = startupModelCachePath(instanceId);
   if (!path) return null;
   try {
-    return catalogFrom(JSON.parse(readFileSync(path, "utf8")) as unknown);
+    const cached = catalogFrom(JSON.parse(readFileSync(path, "utf8")) as unknown);
+    const ids = (catalog: ModelCatalog) => catalog.options.map((option) => option.id).join("\0");
+    return cached && standIn?.placeholder && ids(cached) === ids(standIn) ? null : cached;
   } catch {
     return null;
   }
 }
 
+/** A stand-in list (`placeholder`) is never saved: it would come back unmarked at the next start. */
 export function writeStartupModelCache(instanceId: string, catalog: ModelCatalog): void {
-  if (!catalog.options.length) return;
+  if (!catalog.options.length || catalog.placeholder) return;
   const path = startupModelCachePath(instanceId);
   if (!path) return;
   const stored = catalogFrom(catalog);
