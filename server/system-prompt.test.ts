@@ -298,7 +298,7 @@ describe("shared sentences", () => {
     }
     expect(LEARN_PROMPT).toContain("only when the user explicitly asks to revise that exact name");
     // Triggers have no pending state: the bot sets them up in the same turn and the person undoes from the card.
-    expect(TRIGGER_PROMPT).toContain("set it up with create_trigger in this turn");
+    expect(TRIGGER_PROMPT).toContain("set it up with trigger action=create in this turn");
     expect(TRIGGER_PROMPT).toContain("Do not ask for confirmation");
     expect(TRIGGER_PROMPT).toContain("Edit, Pause and Undo");
     expect(TRIGGER_PROMPT).not.toMatch(/pending|explicitly asks/);
@@ -308,8 +308,14 @@ describe("shared sentences", () => {
 });
 
 describe("composioSystemPrompt", () => {
-  it("keeps the generic all-tools sentence for legacy bots", () => {
-    expect(composioSystemPrompt(undefined)).toBe(COMPOSIO_PROMPT);
+  it("keeps the generic all-tools sentence for legacy bots, with the app tools every engine offers by name", () => {
+    expect(composioSystemPrompt(undefined)).toBe(`${COMPOSIO_PROMPT} Gmail and Google Calendar, when connected, have tools of their own: call gmail.search_emails, gmail.read_email and gmail.read_email_thread, and googlecalendar.list_events and googlecalendar.list_calendars directly (your engine may show them behind its own prefix, with _ for the dot), and use the composio tools for everything else.`);
+  });
+
+  it("names the app tools of only the apps a bot was granted", () => {
+    expect(composioSystemPrompt({ gmail: { tools: "*" } })).toContain("Gmail, when connected, has tools of its own: call gmail.search_emails, gmail.read_email and gmail.read_email_thread directly");
+    expect(composioSystemPrompt({ github: { tools: "*" } })).not.toContain("gmail.");
+    expect(composioSystemPrompt({})).not.toContain("gmail.");
   });
 
   it("offers only a connection card when no tools are granted", () => {
