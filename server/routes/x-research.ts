@@ -119,6 +119,8 @@ async function research(action: string, body: unknown, client: ResearchClient): 
   return { result: answer.result, ...(cost ? { cost } : {}), ...(answer.callId ? { callId: answer.callId } : {}), ...(answer.upstreamFailed ? { upstreamFailed: answer.upstreamFailed } : {}) };
 }
 
+const sameCredential = (a: ServiceCredential, b: ServiceCredential) => a.token === b.token && a.api === b.api && a.included === b.included;
+
 export function createXResearchInternalRoutes(deps: XResearchDeps) {
   const xClientFor = deps.client ?? ((credential, assertAllowed) => createXClient(credential, { assertAllowed }));
   const researchClientFor = deps.research ?? ((credential, assertAllowed) => createResearchClient(credential, { assertAllowed }));
@@ -132,7 +134,9 @@ export function createXResearchInternalRoutes(deps: XResearchDeps) {
     if (!deps.botEnabled(ctx.botId)) return void ctx.json(ctx.res, 403, { error: X_MESSAGES.botOff });
     const body = await ctx.readBody();
     const assertAllowed = () => {
-      if (!deps.credential()) throw new ResearchAccessRefused(X_MESSAGES.noKey);
+      const current = deps.credential();
+      if (!current) throw new ResearchAccessRefused(X_MESSAGES.noKey);
+      if (!sameCredential(current, credential)) throw new ResearchAccessRefused(X_MESSAGES.keyChanged);
       if (!deps.botEnabled(ctx.botId)) throw new ResearchAccessRefused(X_MESSAGES.botOff);
     };
     try {

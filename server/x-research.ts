@@ -48,6 +48,7 @@ export const TREG_TOP_UP_URL = "https://treg.to";
 export const X_MESSAGES = {
   noKey: "Research isn't set up on this server. Add a treg key in Settings → API keys, or use a paid MausBot Cloud plan.",
   botOff: "Research is off for this bot. Turn it on in this bot's settings under Access.",
+  keyChanged: "The research key changed while this request ran, so it stopped before using the old one. Try again.",
   badKey: "Sign in to MausBot Cloud again in Settings to use X research.",
   ownBadKey: "treg rejected your key. Check it in Settings → API keys.",
   /** A Cloud home's relay token is the Admin's to replace; the person has no sign-in to redo there. */

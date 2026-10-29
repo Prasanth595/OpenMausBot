@@ -271,3 +271,68 @@ describe("research internal routes", () => {
   });
 });
 
+
+describe("research credential replaced mid-operation", () => {
+  const own: ServiceCredential = { token: "treg_own_fixture", api: "https://synthetic-own.invalid", included: false };
+  const plan: ServiceCredential = { token: "omb_xd_plan_fixture", api: "https://synthetic-plan.invalid", included: true };
+  const endpoint = { id: "fixture.lookup", method: "POST" };
+  const page = { output: { data: { items: [{ id: "50", text: "Fixture", authorUsername: "fixture" }], nextCursor: "page2" } } };
+
+  function routes(fetcher: typeof fetch) {
+    let current = own;
+    return {
+      removeOwnKey: () => { current = plan; },
+      handler: createXResearchInternalRoutes({
+        credential: () => current, botEnabled: () => true,
+        client: (c, assertAllowed) => createXClient(c, { fetcher, assertAllowed }),
+        research: (c, assertAllowed) => createResearchClient(c, { fetcher, assertAllowed, retryDelayMs: 0 }),
+      }),
+    };
+  }
+
+  const usedOwnKey = (init: RequestInit | undefined) => JSON.stringify(init?.headers ?? {}).includes(own.token);
+
+  it("refuses when the own key is removed during the body read, and sends nothing with it", async () => {
+    const fetcher = vi.fn<typeof fetch>(async () => Response.json({ endpoint }));
+    const h = routes(fetcher);
+    const reading = deferred(), release = deferred();
+    const pending = callInternal(h.handler, { path: "/api/internal/research/call", body: { id: "fixture.lookup" }, readBody: async () => {
+      reading.resolve();
+      await release.promise;
+      return { id: "fixture.lookup" };
+    } });
+    await reading.promise;
+    h.removeOwnKey();
+    release.resolve();
+    expect(await pending).toMatchObject({ status: 403, body: { error: X_MESSAGES.keyChanged } });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(["catalog", "page"])("stops a %s continuation once the own key is removed, without another request on it", async (kind) => {
+    const sent = deferred(), release = deferred();
+    const after: Array<RequestInit | undefined> = [];
+    let removed = false;
+    let calls = 0;
+    const fetcher: typeof fetch = async (_url, init) => {
+      calls++;
+      if (removed) after.push(init);
+      if (calls === 1) {
+        sent.resolve();
+        await release.promise;
+        return kind === "catalog" ? Response.json({ endpoint }) : Response.json(page);
+      }
+      return Response.json({ result: "unexpected continuation", output: { data: { items: [] } } });
+    };
+    const h = routes(fetcher);
+    const input = kind === "catalog" ? { path: "/api/internal/research/call", body: { id: "fixture.lookup" } }
+      : { path: "/api/internal/x/search", body: { query: "fixture" } };
+    const pending = callInternal(h.handler, input);
+    await sent.promise;
+    h.removeOwnKey();
+    removed = true;
+    release.resolve();
+    expect(await pending).toMatchObject({ status: 403, body: { error: X_MESSAGES.keyChanged } });
+    expect(after.filter(usedOwnKey)).toEqual([]);
+    expect(calls).toBe(1);
+  });
+});
