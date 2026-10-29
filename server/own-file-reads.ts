@@ -3,7 +3,6 @@
 // read them only stalls. Only plain reads count: one of the reading commands below made of plain words alone, or a read
 // tool's own paths, with every path inside the bot's own folders once every link is followed.
 import { realpathSync } from "node:fs";
-import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 /** Commands that only read the files they name, with the flags that keep them that way: none that follows links out
@@ -33,6 +32,9 @@ function words(command: string): string[] | null {
     WORD.lastIndex = index;
     const found = WORD.exec(text);
     if (!found) return null;
+    // A bare ~ word is the shell's to expand (its own HOME, another account's home, the folder it was in before), which
+    // can't be seen from here.
+    if (found[3]?.startsWith("~")) return null;
     out.push(found[1] ?? found[2] ?? found[3]!);
     index = WORD.lastIndex;
   }
@@ -101,11 +103,11 @@ export function ownReadRoots(dataDir: string, botId: string): string[] {
     .flatMap((root) => real(root) ?? []);
 }
 
-/** Every path exists and is inside one of `roots` once its links are followed. `~` is the server's home. */
+/** Every path exists and is inside one of `roots` once its links are followed. */
 export function readsOnly(paths: readonly string[], cwd: string, roots: readonly string[]): boolean {
   if (!paths.length || !roots.length) return false;
   return paths.every((path) => {
-    const full = real(resolve(cwd, /^~(?=$|\/)/.test(path) ? homedir() + path.slice(1) : path));
+    const full = real(resolve(cwd, path));
     return full !== null && roots.some((root) => inside(full, root));
   });
 }
