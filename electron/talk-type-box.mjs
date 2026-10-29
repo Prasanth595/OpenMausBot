@@ -6,9 +6,9 @@ export const TYPE_LIMIT = 4000;
 const EDIT_CODES = ["KeyA", "KeyC", "KeyV", "KeyX", "KeyZ"];
 const CHARACTER_CODE = /^(?:Key[A-Z]|Digit\d|Comma|Period|Slash|Semicolon|Quote|BracketLeft|BracketRight|Backslash|Minus|Equal|Backquote|IntlBackslash)$/;
 
-/** ⌘ on a character key, except ⌘A/⌘C/⌘V/⌘X/⌘Z named by an ASCII `key`, else by `code`: macOS matches menu keys by character on Latin layouts, by place on others. */
+/** ⌘ on a character key, except Space (⌃⌘Space is macOS's emoji picker) and ⌘A/⌘C/⌘V/⌘X/⌘Z named by an ASCII `key`, else by `code`: macOS matches menu keys by character on Latin layouts, by place on others. */
 export function blockedChord(input) {
-  if (input.type !== "keyDown" || input.meta !== true) return false;
+  if (input.type !== "keyDown" || input.meta !== true || input.key === " ") return false;
   if (/^[ -~]$/.test(input.key)) return !"acvxz".includes(input.key.toLowerCase());
   if (EDIT_CODES.includes(input.code)) return false;
   return CHARACTER_CODE.test(input.code ?? "") || [...input.key].length === 1;
@@ -35,7 +35,7 @@ body{opacity:0;transition:opacity 160ms ease}body.on{opacity:1}
 #close{position:absolute;top:10px;right:10px;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--ink2);font:inherit;font-size:16px;line-height:24px;cursor:default}
 #close:hover{background:var(--hover)}
 @media (prefers-reduced-motion: reduce){body{transition:none}}
-</style></head><body><div id="card"><img id="mascot" src="data:image/png;base64,${iconBase64}" alt=""><textarea id="field" rows="1" maxlength="${TYPE_LIMIT}" placeholder="${TYPE_BOX_TEXT.placeholder}" aria-label="${TYPE_BOX_TEXT.label}"></textarea><button id="close" type="button" aria-label="${TYPE_BOX_TEXT.dismiss}">&times;</button></div><script>
+</style></head><body><div id="card"><img id="mascot" src="data:image/png;base64,${iconBase64}" alt=""><textarea id="field" rows="1" maxlength="${TYPE_LIMIT}" placeholder="${TYPE_BOX_TEXT.placeholder}" aria-label="${TYPE_BOX_TEXT.label}"></textarea><button id="close" type="button" tabindex="-1" aria-label="${TYPE_BOX_TEXT.dismiss}">&times;</button></div><script>
 const card=document.getElementById("card"),field=document.getElementById("field"),close=document.getElementById("close");
 ${typeBoxKey}
 function grow(){
@@ -52,6 +52,7 @@ field.addEventListener("keydown",event=>{
 });
 field.addEventListener("input",()=>window.typeBox.input(field.value,grow()));
 close.addEventListener("click",()=>window.typeBox.cancel());
+card.addEventListener("mousedown",event=>{if(event.target!==field)event.preventDefault();});
 function start(view){
   document.body.className=["on",view.theme].filter(Boolean).join(" ");
   field.value=view.text||"";

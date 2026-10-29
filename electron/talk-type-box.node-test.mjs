@@ -169,6 +169,7 @@ test("⌘ chords other than editing ones never reach the page or the app's menu"
     { type: "keyDown", key: "q" }, { type: "keyDown", key: "a", control: true }, { type: "keyUp", key: "q", meta: true }]) {
     assert.equal(blockedChord(input), false, JSON.stringify(input));
   }
+  assert.equal(blockedChord({ type: "keyDown", key: " ", code: "Space", meta: true, control: true }), false, "⌃⌘Space opens macOS's emoji picker");
   const { box, made } = harness();
   box.open({ text: "" });
   const stopped = input => { const event = prevent(); made[0].webContents.emit("before-input-event", event, input); return event.defaultPrevented; };
@@ -246,7 +247,7 @@ function runPage(html) {
     for (const handler of listeners[`${id}:${type}`] ?? []) handler(event);
     return event;
   };
-  return { start: context.start, field: elements.field, body, calls, fire, key: init => fire("field", "keydown", init) };
+  return { start: context.start, field: elements.field, close: elements.close, body, calls, fire, key: init => fire("field", "keydown", init) };
 }
 
 test("Return sends, Shift+Return makes a line, Esc closes; while an input method composes, both only finish the composition", () => {
@@ -276,6 +277,15 @@ test("the page sends only words, once, then stops taking typing", () => {
   assert.equal(page.field.readOnly, true);
 });
 
+test("the × and the card never take focus from the field: the caret stays where the person types", () => {
+  assert.match(typeBoxHtml("AAAA"), /<button id="close" type="button" tabindex="-1" aria-label="Dismiss"/);
+  const page = runPage(typeBoxHtml("AAAA"));
+  page.start({ text: "" });
+  const press = target => page.fire("card", "mousedown", { target }).defaultPrevented;
+  assert.deepEqual([press(page.close), press({ id: "mascot" }), press({ id: "card" })], [true, true, true]);
+  assert.equal(press(page.field), false, "a press in the field places the caret");
+});
+
 test("Esc and × close; every change reports the words and the card's height", () => {
   const page = runPage(typeBoxHtml("AAAA"));
   page.start({ text: "" });
@@ -290,7 +300,7 @@ test("the field grows to six lines, then scrolls, inside the tallest box, and sa
   assert.match(html, /#field\{[^}]*max-height:calc\(6 \* 1\.4em\)[^}]*overflow-y:auto/);
   assert.match(html, /placeholder="Type to MausBot, then press Return"/);
   assert.match(html, /aria-label="Ask MausBot"/);
-  assert.match(html, /<button id="close" type="button" aria-label="Dismiss"/);
+  assert.match(html, /<button id="close" type="button" tabindex="-1" aria-label="Dismiss"/);
   assert.ok(28 + 2 + 6 * 18.2 <= TALK_PANEL.maxHeight);
   assert.deepEqual(TYPE_BOX_TEXT, { placeholder: "Type to MausBot, then press Return", label: "Ask MausBot", dismiss: "Dismiss" });
 });
