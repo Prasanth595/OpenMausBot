@@ -161,6 +161,38 @@ it("starts no OAuth refresh when access is revoked before a 401 arrives", async 
   expect(h.writes).toEqual([]);
 });
 
+it.each(["apps", "scope", "grant"].flatMap((revoked) => [200, 400, 503].map((status) => ({ revoked, status }))))(
+  "preserves a completed $status write outcome after $revoked access is revoked", async ({ revoked, status }) => {
+    const received = deferred<void>();
+    const respond = deferred<void>();
+    const h = harness({ refresh: null, fetch: async (...args) => {
+      const response = await fetch(...args);
+      received.resolve();
+      await respond.promise;
+      return response;
+    } });
+    if (status !== 200) hl.overrides.push({ status, body: { message: "Fixture rejection" } });
+    const pending = highlevelRpc(note, h.deps);
+    await received.promise;
+    if (revoked === "apps") h.bot.composio = false;
+    if (revoked === "scope") h.bot.connectorScopes = { apps: { highlevel: "read" } };
+    if (revoked === "grant") h.bot.connectorTools = { highlevel: { tools: ["HIGHLEVEL_LIST_NOTES"] } };
+    respond.resolve();
+    const result = await pending;
+    if (status === 200) {
+      expect(result).not.toHaveProperty("isError", true);
+      expect(result).toHaveProperty("structuredContent.note.id", "note_new");
+      expect(h.writes).toEqual([{ tool: "HIGHLEVEL_ADD_NOTE", kind: "note", recordId: "note_new", fields: ["body"] }]);
+    } else {
+      expect(result).toMatchObject({ isError: true, structuredContent: { status } });
+      expect(result).not.toHaveProperty("structuredContent.code", "refused");
+      expect(h.writes).toEqual([]);
+    }
+    expect(await highlevelRpc(note, h.deps)).toMatchObject({ isError: true, structuredContent: { code: "refused" } });
+    expect(hl.calls).toHaveLength(1);
+  },
+);
+
 it("rechecks access after a shared OAuth refresh without blocking an authorized call", async () => {
   const refreshing = deferred<void>();
   const resume = deferred<void>();

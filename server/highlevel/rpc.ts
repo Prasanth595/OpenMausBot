@@ -41,7 +41,7 @@ export async function highlevelRpc(
   try {
     assertAllowed();
     const { result, write } = await deps.client.withActiveCall(assertAllowed, () => runHighLevelTool(deps.client, name, args as Record<string, unknown>));
-    assertAllowed();
+    deps.assertActive();
     if (write && !result.isError) deps.onWrite?.(write);
     return result;
   } catch (error) {
