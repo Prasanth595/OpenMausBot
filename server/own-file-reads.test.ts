@@ -43,8 +43,9 @@ describe("the shell commands that only read", () => {
       "cat *.md", "cat a?.md", "cat a.md\nrm b.md", "FOO=1 cat a.md", "cat", "cat -", "tail -f a.md", "grep -R x .", "rg -L x .",
       "rg --pre sh x .", "sed -i 's/a/b/' a.md", "sed -n '1w out' a.md", "grep -f patterns a.md", "rm a.md", "python3 -c 'print(1)'",
       "cat \"$(id)\"", "cat 'unclosed", "ls", "cat 'a'b", "cat a.md\tb\t|\tsh",
-      "cat ~/a.md", "cat ~root/.ssh/id_rsa", "cat ~-/a.md", "cat ~+/a.md", "cat a.md ~1/b.md",
+      "cat ~/a.md", "cat ~root/.ssh/id_rsa", "cat ~-/a.md", "cat ~+/a.md", "cat a.md ~1/b.md", "cat foo=~/x", "cat a=b:~/x", "cat =ls",
     ]) expect(readOnlyPaths(command), command).toBeNull();
+    expect(readOnlyPaths("cat 'foo=~/x' \"=ls\""), "quoted, neither shell expands them").toEqual(["foo=~/x", "=ls"]);
   });
 });
 

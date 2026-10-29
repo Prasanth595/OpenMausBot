@@ -32,9 +32,9 @@ function words(command: string): string[] | null {
     WORD.lastIndex = index;
     const found = WORD.exec(text);
     if (!found) return null;
-    // A bare ~ word is the shell's to expand (its own HOME, another account's home, the folder it was in before), which
-    // can't be seen from here.
-    if (found[3]?.startsWith("~")) return null;
+    // A bare word with a ~ anywhere (bash expands one after an =, as in foo=~/x) or starting with = (zsh's =cmd) is the
+    // shell's to expand, to a home, the folder it was in before or a command's own path, none of which is checked here.
+    if (found[3] !== undefined && (found[3].includes("~") || found[3].startsWith("="))) return null;
     out.push(found[1] ?? found[2] ?? found[3]!);
     index = WORD.lastIndex;
   }
