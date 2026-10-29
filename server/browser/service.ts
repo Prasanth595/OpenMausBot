@@ -301,10 +301,13 @@ export class BrowserService {
         if (profile.run === run) profile.run = null;
         profile.tabs.clear();
         if (reopened) profile.reopened = reopened;
-        if (erase) this.#erase(profile);
-        else if (profile.temporary) this.#eraseFiles(profile.key);
-        profile.control.closing = false;
-        profile.control.settle();
+        try {
+          if (erase) this.#erase(profile);
+          else if (profile.temporary) this.#eraseFiles(profile.key);
+        } finally {
+          profile.control.closing = false;
+          profile.control.settle();
+        }
       }
     })());
   }

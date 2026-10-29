@@ -530,6 +530,26 @@ describe("browsers on one computer", () => {
     expect(dataDir).toBeTruthy();
   });
 
+  it.skipIf(process.platform === "win32")("a failed erase reaches the caller and leaves the profile restartable, not stuck closing", async () => {
+    const { service, call } = setup();
+    await call("agent_browser_open", { url: "https://example.com/form" });
+    const profile = service.profiles()[0]!;
+    const { chmodSync, existsSync, writeFileSync } = await import("node:fs");
+    const dir = profile.downloadDir;
+    expect(existsSync(dir)).toBe(true);
+    writeFileSync(join(dir, "keep.bin"), "x");
+    chmodSync(dir, 0o500);
+    try {
+      await expect(service.erase("bot:a")).rejects.toThrow();
+      expect(service.profiles()).toHaveLength(1);
+      expect(profile.control.closing).toBe(false);
+    } finally {
+      chmodSync(dir, 0o755);
+    }
+    await service.erase("bot:a");
+    expect(service.profiles()).toHaveLength(0);
+  });
+
   it("erases the profile's files when the erase joins a close already in progress, and starts nothing queued behind it", async () => {
     const { service, call, target, backend } = setup();
     await call("agent_browser_open", { url: "https://example.com/form" });
