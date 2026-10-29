@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseAutonomyPolicy } from "./autonomy-policy.ts";
+import { autonomyLaneForAction, parseAutonomyPolicy } from "./autonomy-policy.ts";
 
 const validPolicy = {
   schema: "openmaus.autonomy-control-plane.v1",
@@ -39,4 +39,11 @@ describe("autonomy policy validation", () => {
     expect(parseAutonomyPolicy({ ...validPolicy, recovery: { ...validPolicy.recovery, on_policy_error: "continue" } })).toBeUndefined();
     expect(parseAutonomyPolicy({ ...validPolicy, unexpected: true })).toBeUndefined();
   });
+  it("classifies known actions and fails closed for unknown actions", () => {
+    expect(autonomyLaneForAction("read")).toBe("observe");
+    expect(autonomyLaneForAction("local_test")).toBe("reversible");
+    expect(autonomyLaneForAction("deploy")).toBe("consequential");
+    expect(autonomyLaneForAction("new_unlisted_action")).toBe("unknown");
+  });
+
 });
