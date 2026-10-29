@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { t } from "@/lib/i18n";
 import { Card } from "./SettingsPrimitives";
+import { Select } from "./Select";
 
 type Mode = "direct" | "system" | "manual";
 type ProxySettings = { mode: Mode; url: string };
@@ -21,11 +22,11 @@ export function ProxySettings() {
     {settings && <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end gap-3">
       <label className="flex min-w-40 flex-1 flex-col gap-1 text-sm">{t("proxy.mode")}
-        <select className="rounded-md border border-hairline bg-app p-2 text-ink" value={settings.mode} onChange={event => { setSettings({ ...settings, mode: event.target.value as Mode }); setSaved(false); }}>
+        <Select className="w-full" value={settings.mode} onChange={event => { setSettings({ ...settings, mode: event.target.value as Mode }); setSaved(false); }}>
           <option value="direct">{t("proxy.direct")}</option>
           <option value="system">{t("proxy.system")}</option>
           <option value="manual">{t("proxy.manual")}</option>
-        </select>
+        </Select>
       </label>
       {settings.mode === "manual" && <label className="flex min-w-48 flex-[2] flex-col gap-1 text-sm">{t("proxy.address")}
         <input className="rounded-md border border-hairline bg-app p-2 text-ink" type="url" placeholder="http://127.0.0.1:7897" value={settings.url} onChange={event => { setSettings({ ...settings, url: event.target.value }); setSaved(false); }} />
