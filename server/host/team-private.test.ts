@@ -2,7 +2,6 @@ import { createServer, request, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, expect, it } from "vitest";
 
-import { notFoundFor, pathSubject } from "../bot-visibility.ts";
 import { json, readBody } from "../harness/http.ts";
 import { createReactions } from "../reactions.ts";
 import type { RequestAuth } from "../request-auth.ts";
@@ -51,8 +50,7 @@ async function fixture(path: string, team = true) {
   const server = createServer((req, res) => { void (async () => {
     const url = new URL(req.url!, "http://localhost");
     const visible = visibility.visibleTo(visibility.viewerFor(auth));
-    const subject = pathSubject(url.pathname);
-    const refusal = (current: typeof visible) => subject && !visibility.subjectVisible(subject, current) ? notFoundFor(subject) : null;
+    const refusal = (current: typeof visible) => visibility.hiddenPath(url.pathname, current);
     const hidden = refusal(visible) ?? hiddenThreadRefusal(req, url.pathname, url.searchParams, visible, () => bot.threadId,
       () => { const current = visibility.visibleTo(visibility.viewerFor(auth)); return { visible: current, hidden: refusal(current) }; });
     if (hidden) return json(res, 404, { error: hidden });

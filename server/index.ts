@@ -554,8 +554,6 @@ import {
   frameForMember,
   memberBody, memberFramePayload,
   noteSeen,
-  notFoundFor,
-  pathSubject,
   routineRunVisible, routineVisible,
   sameAudience,
   VisibleSet,
@@ -1175,7 +1173,7 @@ async function answeringCardAs(auth: RequestAuth, threadId: string, requestId: s
   }
 }
 
-const { viewerFor, threadOwner, visibleTo, forgetVisibility, threadShown, subjectVisible, hiddenRoutineTarget, roomFeedsBot, settleRoomFloor } = createVisibilityHost({ store: () => store, routines: () => routines,
+const { viewerFor, threadOwner, visibleTo, forgetVisibility, threadShown, hiddenPath, hiddenRoutineTarget, roomFeedsBot, settleRoomFloor } = createVisibilityHost({ store: () => store, routines: () => routines,
   team: Boolean(CLOUD_TEAM), audiencesFor: (viewer) => teamHost.audiencesFor(viewer), threadsReferencing }); if (CLOUD_TEAM) hideOthersSyncFolders(() => store.bots, threadShown);
 
 function recentWorkFilter(threadId: string): { include?: (threadId: string) => boolean } { return CLOUD_TEAM ? { include: teamHost.readableFrom(threadId) } : CLOUD_HOME ? { include: cloudOwnerOnlyThread } : {}; }
@@ -12911,8 +12909,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     }
     // A member reaches a restricted bot, its threads, rooms, routines and files exactly as an id that does not exist.
     const viewer = viewerFor(auth), visible = visibleTo(viewer);
-    const subject = visible.everything ? null : pathSubject(path);
-    const hidden = subject && !subjectVisible(subject, visible) ? notFoundFor(subject) : hiddenThreadRefusal(req, path, url.searchParams, visible, (botId) => store.bot(botId)?.threadId, () => { const visible = visibleTo(viewerFor(auth)); return { visible, hidden: subject && !subjectVisible(subject, visible) ? notFoundFor(subject) : null }; });
+    const hidden = hiddenPath(path, visible) ?? hiddenThreadRefusal(req, path, url.searchParams, visible, (botId) => store.bot(botId)?.threadId, () => { const visible = visibleTo(viewerFor(auth)); return { visible, hidden: hiddenPath(path, visible) }; });
     if (hidden) return json(res, 404, { error: hidden });
     // Every bot a member is sent (on a Team Cloud an admin's too) comes narrowed to what they may see (memberBot).
     if (viewer.kind === "member" || visible.filtersThreads) onJsonBody(res, (body) => memberBody(body, visibleTo(viewerFor(auth))));
@@ -14893,7 +14890,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
         ? cloudThreadRefusal(auth, (body as { resultsThreadId: string }).resultsThreadId) : null;
     if (path === "/api/routines" && method === "POST") {
       const body = await readBody(req);
-      const hidden = hiddenRoutineTarget(body, visible);
+      const hidden = hiddenRoutineTarget(body, auth);
       if (hidden) return json(res, 404, { error: hidden });
       const notYours = routineResultsRefusal(body);
       if (notYours) return json(res, 403, { error: notYours });
@@ -14916,7 +14913,7 @@ const handleRequest = async (req: IncomingMessage, res: ServerResponse) => {
     routineMatch = path.match(/^\/api\/routines\/([\w-]+)$/);
     if (routineMatch && method === "PATCH") {
       const body = await readBody(req);
-      const hidden = hiddenRoutineTarget(body, visible);
+      const hidden = hiddenRoutineTarget(body, auth);
       if (hidden) return json(res, 404, { error: hidden });
       const notYours = routineResultsRefusal(body);
       if (notYours) return json(res, 403, { error: notYours });
