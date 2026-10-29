@@ -316,8 +316,9 @@ default branch):
    before merging** stays off: the queue brings each PR up to date itself.
 2. Add **Require merge queue** with:
    - **Merge method:** Squash.
-   - **Build concurrency:** 5 (at most five groups build at once; each takes
-     one of the account's five macOS runners for about three minutes).
+   - **Build concurrency:** 3. Each group's run is 17 jobs, one of them on
+     macOS; an organization on the Team plan runs 60 jobs and 5 macOS jobs at
+     once, shared with every PR's run.
    - **Minimum group size:** 1, **maximum group size:** 5, **wait time to meet
      the minimum group size:** 0 minutes, so a PR alone starts at once.
    - **Require all queue entries to pass required checks** (Only merge
@@ -336,7 +337,7 @@ gh api -X PUT repos/<org>/OpenMausBot/rulesets/<main-ci-gate id> --input - <<'JS
 {"rules": [
   {"type": "required_status_checks", "parameters": {"required_status_checks": [{"context": "CI", "integration_id": 15368}],
     "strict_required_status_checks_policy": false, "do_not_enforce_on_create": false}},
-  {"type": "merge_queue", "parameters": {"merge_method": "SQUASH", "max_entries_to_build": 5, "min_entries_to_merge": 1,
+  {"type": "merge_queue", "parameters": {"merge_method": "SQUASH", "max_entries_to_build": 3, "min_entries_to_merge": 1,
     "max_entries_to_merge": 5, "min_entries_to_merge_wait_minutes": 0, "grouping_strategy": "ALLGREEN",
     "check_response_timeout_minutes": 60}}
 ]}
