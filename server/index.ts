@@ -78,6 +78,7 @@ import {
 } from "./attachments.ts";
 import { bucketReferenceBlock } from "./attachment-bucket.ts";
 import { describeImages, imageReaderConfig, modelReadsImages, readerBlock } from "./image-reader.ts";
+import { fileBlock, inlineFiles } from "./file-reader.ts";
 import {
   messageAttachmentName,
   messageFileRoots,
@@ -7854,8 +7855,10 @@ async function startTurn(
   const readerNotes = imageReader && !modelReadsImages(imageReader, bot.modelSelection.model)
     ? await describeImages(resolvedImages.images, imageReader)
     : [];
-  if (bucketBlock || readerNotes.length) {
-    providerText = [providerText, bucketBlock, readerBlock(readerNotes)].filter(Boolean).join("\n\n");
+  // A bot without a computer cannot open a text file's path; its content rides in the turn.
+  const fileNotes = inlineFiles(text);
+  if (bucketBlock || readerNotes.length || fileNotes.length) {
+    providerText = [providerText, bucketBlock, readerBlock(readerNotes), fileBlock(fileNotes)].filter(Boolean).join("\n\n");
   }
   const turnImages = usesNativeImageInput && !readerNotes.length ? resolvedImages.images : [];
   const commsDepth = opts?.commsDepth ?? 0;

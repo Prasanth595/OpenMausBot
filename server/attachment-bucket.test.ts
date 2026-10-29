@@ -56,7 +56,7 @@ describe("attachmentBucketConfig", () => {
     expect(config.bucket).toBe("bucket-test");
     expect(config.prefix).toBe("anexos");
     expect(config.credentials.client_email).toContain("anexos@");
-    expect(attachmentBucketConfig({ ...ENV, OMB_ATTACHMENTS_BUCKET_PREFIX: "/clientes/x/" }).prefix).toBe("clientes/x");
+    expect(attachmentBucketConfig({ ...ENV, OMB_ATTACHMENTS_BUCKET_PREFIX: "/clientes/x/" })!.prefix).toBe("clientes/x");
   });
 });
 
